@@ -80,6 +80,77 @@ def message_list(request, pk):
     )
 
 
+@api_view(["GET", "PATCH"])
+def contact_detail(request, pk):
+    """The person behind a chat, and everything we know about them.
+
+    Reached through the conversation rather than by contact id, so an agent can
+    only open the profile of somebody who has written to a number they cover.
+    """
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+    contact = conversation.contact
+
+    if request.method == "PATCH":
+        if "display_name" in request.data:
+            contact.display_name = str(request.data["display_name"]).strip()[:255]
+        if "notes" in request.data:
+            contact.notes = str(request.data["notes"])
+        contact.save(update_fields=["display_name", "notes"])
+        publish_conversation(conversation)
+
+    messages = conversation.messages
+    first = messages.order_by("created_at").first()
+
+    # The same customer may also be talking to other numbers we run. Only the
+    # ones this agent covers are listed — the profile must not become a way to
+    # see chats they cannot open.
+    others = (
+        _visible_conversations(request.user)
+        .filter(contact=contact)
+        .exclude(pk=conversation.pk)
+    )
+
+    gallery = (
+        messages.filter(media__isnull=False, media__downloaded=True)
+        .select_related("media")
+        .order_by("-created_at")[:24]
+    )
+
+    return Response(
+        {
+            "wa_id": contact.wa_id,
+            "name": str(contact),
+            "profile_name": contact.profile_name,
+            "display_name": contact.display_name,
+            "notes": contact.notes,
+            "first_seen_at": contact.created_at.isoformat(),
+            "conversation": serialize_conversation(conversation),
+            "stats": {
+                "total": messages.count(),
+                "inbound": messages.filter(direction=Message.Direction.INBOUND).count(),
+                "outbound": messages.filter(direction=Message.Direction.OUTBOUND).count(),
+                "failed": messages.filter(status=Message.Status.FAILED).count(),
+                "first_message_at": first.created_at.isoformat() if first else None,
+            },
+            "other_conversations": [serialize_conversation(c) for c in others],
+            "media": [
+                {
+                    "message_id": m.pk,
+                    "kind": m.kind,
+                    "url": request.build_absolute_uri(
+                        reverse("inbox:media-download", args=[m.media_id])
+                    ),
+                    "name": m.media.file_name,
+                    "mime": m.media.mime_type,
+                    "size": m.media.size_bytes,
+                    "created_at": m.created_at.isoformat(),
+                }
+                for m in gallery
+            ],
+        }
+    )
+
+
 @api_view(["POST"])
 def mark_read(request, pk):
     conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)

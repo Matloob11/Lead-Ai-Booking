@@ -15,6 +15,11 @@ class Contact(models.Model):
     wa_id = models.CharField(max_length=32, unique=True, db_index=True)
     profile_name = models.CharField(max_length=255, blank=True)
     display_name = models.CharField(max_length=255, blank=True, help_text="Name an agent set manually")
+
+    # Internal only. The customer never sees this; it is where an agent records
+    # what the chat itself does not say — budget, which property, when to call.
+    notes = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
