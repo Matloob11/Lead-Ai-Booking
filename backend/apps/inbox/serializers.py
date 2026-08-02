@@ -34,7 +34,10 @@ def serialize_number(number):
         "phone_number": number.phone_number,
         "phone_number_id": number.phone_number_id,
         "waba_business_id": number.waba_business_id,
+        "label": number.label,
         "display_name": number.display_name,
+        # What the panel should print. Falls back through what we know.
+        "title": number.label or number.display_name or number.phone_number,
         "quality_rating": number.quality_rating,
         "verification_status": number.verification_status,
         "webhook_configured": number.webhook_configured,

@@ -159,6 +159,26 @@ def number_agents(request, pk):
     return Response(serialize_number_with_agents(number))
 
 
+@api_view(["PATCH", "POST"])
+def update_number(request, pk):
+    """Rename a number.
+
+    The gateway's channel API returns no name at all, so without this the panel
+    can only show digits. Admins normally set it to whoever works the number.
+    """
+    denied = _require_admin(request)
+    if denied:
+        return denied
+
+    number = get_object_or_404(WabaNumber, pk=pk)
+
+    if "label" in request.data:
+        number.label = str(request.data["label"]).strip()[:255]
+        number.save(update_fields=["label"])
+
+    return Response(serialize_number_with_agents(number))
+
+
 @api_view(["POST"])
 def sync_now(request):
     """Pull templates (and optionally channels) from the gateway on demand.

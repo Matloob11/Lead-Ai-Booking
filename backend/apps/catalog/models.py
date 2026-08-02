@@ -20,7 +20,13 @@ class WabaNumber(models.Model):
     phone_number_id = models.CharField(max_length=64, unique=True, db_index=True)
     waba_business_id = models.CharField(max_length=64, db_index=True)
 
+    # What the gateway calls it. Its channel API does not actually return this,
+    # so it is usually empty.
     display_name = models.CharField(max_length=255, blank=True)
+
+    # What we call it. Admins set this themselves — normally the agent who works
+    # the number — and it is what the panel shows, so a sync can never wipe it.
+    label = models.CharField(max_length=255, blank=True)
     quality_rating = models.CharField(max_length=16, choices=Quality.choices, default=Quality.UNKNOWN)
     verification_status = models.CharField(max_length=32, blank=True)
     messaging_limit = models.CharField(max_length=32, blank=True)
@@ -34,7 +40,7 @@ class WabaNumber(models.Model):
         ordering = ["phone_number"]
 
     def __str__(self):
-        return f"{self.phone_number} ({self.display_name or 'unnamed'})"
+        return f"{self.phone_number} ({self.label or self.display_name or 'unnamed'})"
 
     @property
     def templates(self):

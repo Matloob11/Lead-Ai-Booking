@@ -12,9 +12,10 @@ class AssignmentInline(admin.TabularInline):
 
 @admin.register(WabaNumber)
 class WabaNumberAdmin(admin.ModelAdmin):
-    list_display = ["phone_number", "display_name", "quality_rating", "verification_status", "is_active", "webhook_configured"]
+    list_display = ["phone_number", "label", "quality_rating", "verification_status", "is_active", "webhook_configured"]
+    list_editable = ["label"]
     list_filter = ["is_active", "quality_rating", "webhook_configured"]
-    search_fields = ["phone_number", "phone_number_id", "waba_business_id", "display_name"]
+    search_fields = ["phone_number", "phone_number_id", "waba_business_id", "label", "display_name"]
     inlines = [AssignmentInline]
 
 
