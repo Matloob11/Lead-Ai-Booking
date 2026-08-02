@@ -13,8 +13,20 @@ export const auth = {
 };
 
 export const catalog = {
+  // For an admin this also carries each number's assigned agents.
   numbers: () => apiFetch("/api/catalog/numbers/"),
   templates: (numberId) => apiFetch(`/api/catalog/numbers/${numberId}/templates/`),
+
+  /** Admin only. */
+  agents: () => apiFetch("/api/catalog/agents/"),
+
+  /** Renames a number. An empty label clears it and `title` falls back. */
+  renameNumber: (numberId, label) =>
+    apiFetch(`/api/catalog/numbers/${numberId}/`, { method: "PATCH", body: { label } }),
+
+  /** Replaces the whole roster for a number — send the state you want. */
+  setNumberAgents: (numberId, agents) =>
+    apiFetch(`/api/catalog/numbers/${numberId}/agents/`, { method: "PUT", body: { agents } }),
 };
 
 export const inbox = {

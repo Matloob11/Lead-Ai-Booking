@@ -17,6 +17,7 @@ import { catalog, inbox, asList } from "./api.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
+import { openNumbersAdmin } from "./numbers-admin.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
 import { bindEmojiPicker } from "./emoji.js";
@@ -75,7 +76,10 @@ export function mountInbox(root, { me }) {
     el("aside.sidebar", {}, [
       el("div.sidebar__top", {}, [
         el("div.sidebar__title", {}, ["WhatsApp"]),
-        el("button.btn.btn--primary", { onclick: openNewContact, type: "button" }, ["+ New Contact"]),
+        me.is_wa_admin
+          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Numbers ke naam aur agents" }, ["Numbers"])
+          : null,
+        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button" }, ["+ New"]),
       ]),
       el("div.filter", {}, [ui.numberSelect, ui.search]),
       // List and status share one scroll box so the empty-state message sits
@@ -188,7 +192,7 @@ export function mountInbox(root, { me }) {
     ui.numberSelect.hidden = false;
     ui.numberSelect.append(el("option", { value: "" }, ["Saare numbers"]));
     for (const number of state.numbers) {
-      ui.numberSelect.append(el("option", { value: number.id }, [numberLabel(number)]));
+      ui.numberSelect.append(el("option", { value: number.id }, [numberTitle(number)]));
     }
   }
 
@@ -197,9 +201,12 @@ export function mountInbox(root, { me }) {
     loadConversations({ keepActive: false });
   }
 
-  /** display_name is the human label; phone_number is the fallback agents know. */
-  const numberLabel = (number) =>
-    number?.display_name || number?.phone_number || number?.phone_number_id || "—";
+  /**
+   * `title` is the server's own answer to "what should this number be called"
+   * (admin label → gateway name → digits). Everything the agent sees goes
+   * through it, so a rename shows up in one place.
+   */
+  const numberTitle = (number) => number?.title || number?.phone_number || "—";
 
   function renderConversations() {
     clear(ui.list);
@@ -230,7 +237,7 @@ export function mountInbox(root, { me }) {
               ]),
               el("div.conv__meta", {}, [
                 el("span.dot", { class: open ? "dot--open" : "dot--closed", title: open ? "Session khuli" : "Session band" }),
-                el("span.conv__number", {}, [numberLabel(numberById(conversation.number_id))]),
+                el("span.conv__number", {}, [numberTitle(numberById(conversation.number_id))]),
               ]),
             ]),
           ]
@@ -275,7 +282,7 @@ export function mountInbox(root, { me }) {
           el("div.thread__sub", {}, [
             conversation.contact?.wa_id || "",
             " · ",
-            numberLabel(numberById(conversation.number_id)),
+            numberTitle(numberById(conversation.number_id)),
           ]),
         ]),
       ]),
@@ -755,11 +762,25 @@ export function mountInbox(root, { me }) {
     }
   }
 
+  function openNumbers() {
+    openNumbersAdmin({
+      onSaved: (numbers) => {
+        // A rename has to reach the list, the thread header and the filter,
+        // all of which read from state.numbers.
+        state.numbers = asList(numbers, "numbers");
+        renderNumberFilter();
+        renderConversations();
+        const active = findConversation(state.activeId);
+        if (active) renderThreadHeader(active);
+      },
+    });
+  }
+
   function openNewContact() {
     const numberSelect = el(
       "select.field",
       {},
-      state.numbers.map((number) => el("option", { value: number.id }, [numberLabel(number)]))
+      state.numbers.map((number) => el("option", { value: number.id }, [numberTitle(number)]))
     );
     const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
     const templateSelect = el("select.field", {}, [el("option", { value: "" }, ["Template load ho rahe hain…"])]);
