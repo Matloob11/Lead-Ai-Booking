@@ -15,6 +15,7 @@
 
 import { catalog, inbox, asList } from "./api.js";
 import { ensureSession } from "./bitrix-sso.js";
+import { keepFrameSized } from "./frame.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, debounce, stamp, untilText, initials } from "./dom.js";
 
@@ -97,9 +98,9 @@ export function mountInbox(root, { me }) {
     clear(root).append(layout);
     connectSocket();
 
-    // Bitrix sizes the placement iframe to its content, so a full-height app
-    // has to ask for the room it needs after it is actually in the document.
-    window.BX24?.fitWindow?.();
+    // Claim the portal's remaining height so the panel scrolls internally
+    // instead of pushing the Bitrix page into a scrollbar.
+    keepFrameSized();
   }
 
   async function loadConversations({ keepActive = true } = {}) {
@@ -264,10 +265,30 @@ export function mountInbox(root, { me }) {
     );
   }
 
+  /** Within this many pixels of the end counts as "watching the live edge". */
+  const STICK_THRESHOLD = 80;
+
+  const isAtBottom = () =>
+    ui.messages.scrollHeight - ui.messages.scrollTop - ui.messages.clientHeight <= STICK_THRESHOLD;
+
+  const scrollToBottom = () => {
+    ui.messages.scrollTop = ui.messages.scrollHeight;
+  };
+
+  /**
+   * Follows new messages only when the agent is already at the bottom. Yanking
+   * the view down while they are reading older history is worse than missing a
+   * bubble they can scroll to.
+   */
+  function appendMessageNode(node, { wasAtBottom = isAtBottom() } = {}) {
+    ui.messages.append(node);
+    if (wasAtBottom) scrollToBottom();
+  }
+
   function renderMessages() {
     clear(ui.messages);
     for (const message of state.messages) ui.messages.append(messageBubble(message));
-    ui.messages.scrollTop = ui.messages.scrollHeight;
+    scrollToBottom();
   }
 
   function messageBubble(message) {
@@ -396,8 +417,8 @@ export function mountInbox(root, { me }) {
       ...patch,
     };
     state.messages.push(draft);
-    ui.messages.append(messageBubble(draft));
-    ui.messages.scrollTop = ui.messages.scrollHeight;
+    // The agent just hit send, so following their own message is always right.
+    appendMessageNode(messageBubble(draft), { wasAtBottom: true });
     return draft;
   }
 
@@ -757,8 +778,7 @@ export function mountInbox(root, { me }) {
       // Ignore the echo of a send we already painted optimistically.
       if (!state.messages.some((m) => String(m.id) === String(message.id))) {
         state.messages.push(message);
-        ui.messages.append(messageBubble(message));
-        ui.messages.scrollTop = ui.messages.scrollHeight;
+        appendMessageNode(messageBubble(message));
       }
       // An open thread is being read, so it must not accrue an unread badge.
       if (message.direction === "in") {
