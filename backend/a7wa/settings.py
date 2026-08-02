@@ -164,6 +164,17 @@ ALOTS_WEBHOOK_TOKEN = env("ALOTS_WEBHOOK_TOKEN", "")
 # Meta closes the free-form window 24h after the customer's last inbound message.
 SESSION_WINDOW_HOURS = int(env("SESSION_WINDOW_HOURS", "24"))
 
+# Hosts the media downloader may fetch from. The URL it follows arrives inside a
+# webhook body, so it is third-party input: without this list a crafted payload
+# would turn the worker into a proxy for anything reachable from the box — and
+# this box also runs Frappe, n8n and their databases. The gateway's own host is
+# added automatically.
+MEDIA_ALLOWED_HOSTS = env_list("MEDIA_ALLOWED_HOSTS", "gsauth.com,lookaside.fbsbx.com")
+
+# Of those, the only host that may ever see our bearer token. The gateway's CDN
+# serves media unauthenticated and has no need for it.
+MEDIA_AUTHENTICATED_HOSTS = env_list("MEDIA_AUTHENTICATED_HOSTS", "lookaside.fbsbx.com")
+
 # Bitrix24
 # ---------------------------------------------------------------------------
 BITRIX_CLIENT_ID = env("BITRIX_CLIENT_ID", "")

@@ -9,14 +9,23 @@ on their side.
 What does work is the link the webhook already carries. Each inbound media
 object arrives with a ``filelink`` pointing at the gateway's own hosted copy,
 which needs no credentials, alongside Meta's ``url``, which is authenticated and
-expires within minutes. So the URL is captured when the message is stored and
-used directly here, with the id-resolution route kept only as a fallback in case
-they fix it or stop sending the link.
+expires within minutes.
+
+That link is third-party input, so it is not fetched blindly. The worker sits on
+a host that also runs Frappe, n8n and their databases, and it holds a bearer
+token for the gateway — a crafted payload could otherwise reach internal
+services or collect the token. Every URL is therefore checked against a host
+allowlist and resolved to a public address before a request goes out, redirects
+are followed by hand under the same rules, and the token is only ever offered to
+Meta's own CDN.
 """
 
 import hashlib
+import ipaddress
 import logging
 import mimetypes
+import socket
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from celery import shared_task
@@ -28,6 +37,11 @@ from apps.inbox.models import MediaAsset
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 64 * 1024 * 1024
+MAX_REDIRECTS = 3
+
+
+class MediaRejected(Exception):
+    """The URL is not one we are willing to fetch."""
 
 
 def _auth_headers():
@@ -35,6 +49,72 @@ def _auth_headers():
         "Authorization": f"Bearer {settings.ALOTS_API_KEY}",
         "Version": settings.ALOTS_VERSION,
     }
+
+
+def _allowed_hosts():
+    hosts = {h.lower().rstrip(".") for h in settings.MEDIA_ALLOWED_HOSTS}
+    gateway = urlparse(settings.ALOTS_BASE_URL).hostname
+    if gateway:
+        hosts.add(gateway.lower().rstrip("."))
+    return hosts
+
+
+def _check_url(url):
+    """Return the validated host, or refuse the URL.
+
+    Both halves matter. The allowlist stops the worker being pointed at an
+    arbitrary service; resolving the name and rejecting non-public addresses
+    stops an allowed name whose DNS answers with 127.0.0.1 or a LAN address
+    from reaching past it.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise MediaRejected(f"Refusing non-HTTPS media URL ({parsed.scheme or 'no scheme'})")
+
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if host not in _allowed_hosts():
+        raise MediaRejected(f"Media host '{host}' is not allowed")
+
+    try:
+        resolved = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise MediaRejected(f"Could not resolve media host '{host}': {exc}") from exc
+
+    for entry in resolved:
+        address = ipaddress.ip_address(entry[4][0])
+        if not address.is_global:
+            raise MediaRejected(f"Media host '{host}' resolves to non-public address {address}")
+
+    return host
+
+
+def _fetch(client, url):
+    """Download a media URL, validating every hop.
+
+    Redirects are handled here rather than by httpx so each new location passes
+    the same checks — otherwise an allowed host could bounce the worker
+    anywhere, token in hand.
+    """
+    for _ in range(MAX_REDIRECTS + 1):
+        host = _check_url(url)
+
+        headers = {}
+        if host in {h.lower().rstrip(".") for h in settings.MEDIA_AUTHENTICATED_HOSTS}:
+            headers = _auth_headers()
+
+        response = client.get(url, headers=headers, follow_redirects=False)
+
+        if response.is_redirect:
+            location = response.headers.get("Location")
+            if not location:
+                raise MediaRejected("Redirect without a Location header")
+            url = urljoin(url, location)
+            continue
+
+        response.raise_for_status()
+        return response.content
+
+    raise MediaRejected("Too many redirects while fetching media")
 
 
 def _resolve_via_api(client, media_id, phone_number_id):
@@ -48,20 +128,6 @@ def _resolve_via_api(client, media_id, phone_number_id):
     return response.json().get("url")
 
 
-def _fetch(client, url):
-    """Download a media URL, trying it unauthenticated first.
-
-    The gateway's hosted copy rejects nothing, but Meta's lookaside link needs
-    the bearer token — and sending the token to the gateway's own CDN would leak
-    it to a host that does not need it.
-    """
-    response = client.get(url)
-    if response.status_code in (401, 403):
-        response = client.get(url, headers=_auth_headers())
-    response.raise_for_status()
-    return response.content
-
-
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def download_media(self, asset_id, phone_number_id):
     asset = MediaAsset.objects.filter(pk=asset_id).first()
@@ -69,7 +135,7 @@ def download_media(self, asset_id, phone_number_id):
         return
 
     try:
-        with httpx.Client(timeout=settings.ALOTS_TIMEOUT, follow_redirects=True) as client:
+        with httpx.Client(timeout=settings.ALOTS_TIMEOUT) as client:
             url = asset.source_url
             if not url and asset.alots_media_id:
                 url = _resolve_via_api(client, asset.alots_media_id, phone_number_id)
@@ -79,6 +145,12 @@ def download_media(self, asset_id, phone_number_id):
                 return
 
             content = _fetch(client, url)
+    except MediaRejected as exc:
+        # A refused URL will never become acceptable, so do not retry it.
+        logger.warning("Rejected media URL for asset %s: %s", asset_id, exc)
+        asset.download_error = str(exc)[:1000]
+        asset.save(update_fields=["download_error"])
+        return
     except httpx.HTTPError as exc:
         message = str(exc)[:1000]
         logger.warning("Media download failed for asset %s: %s", asset_id, message)
