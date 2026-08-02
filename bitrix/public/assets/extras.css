@@ -1,5 +1,5 @@
 /* ==========================================================================
-   A7 WhatsApp Inbox — Extras (Search, Reminders, Reply Buttons)
+   A7 WhatsApp Inbox — Extras (Search, Reminders, Reply Buttons, Theme System)
    All selectors strictly prefixed with .wa-x- to isolate from inbox.css
    ========================================================================== */
 
@@ -423,7 +423,6 @@
 .wa-x-reminder-time {
   font-size: 11px;
   color: #b45309;
-
   margin-top: 2px;
   font-weight: 500;
 }
@@ -682,4 +681,577 @@
   .wa-x-buttons-split {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   THEME SYSTEM: Liquid Glass (Dark), Liquid Glass (Light), Classic
+   Exact matches for wa-ui-mockups/1-dark.html & wa-ui-mockups/2-light.html
+   ========================================================================== */
+
+/* Background Blobs */
+.wa-x-glass-bg {
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  filter: saturate(130%);
+  display: none;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-glass-bg,
+body[data-wa-theme="glass-light"] .wa-x-glass-bg {
+  display: block;
+}
+
+/* Glass Dark Blobs */
+body[data-wa-theme="glass-dark"] .wa-x-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.85;
+}
+body[data-wa-theme="glass-dark"] .wa-x-b1 {
+  width: 780px; height: 780px; left: -6%; top: -12%;
+  background: radial-gradient(circle at 30% 30%, #1d6f7a, #0e3550 65%, transparent 72%);
+}
+body[data-wa-theme="glass-dark"] .wa-x-b2 {
+  width: 900px; height: 900px; right: -12%; top: -22%;
+  background: radial-gradient(circle at 60% 40%, #c8a34a, #6b4f16 60%, transparent 70%);
+  opacity: 0.55;
+}
+body[data-wa-theme="glass-dark"] .wa-x-b3 {
+  width: 820px; height: 820px; left: 24%; bottom: -34%;
+  background: radial-gradient(circle at 50% 50%, #2a4f9c, #16265a 60%, transparent 70%);
+  opacity: 0.8;
+}
+body[data-wa-theme="glass-dark"] .wa-x-b4 {
+  width: 520px; height: 520px; right: 12%; bottom: -16%;
+  background: radial-gradient(circle at 50% 50%, #14806a, #0b3b36 60%, transparent 70%);
+  opacity: 0.6;
+}
+
+/* Glass Light Blobs */
+body[data-wa-theme="glass-light"] .wa-x-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+}
+body[data-wa-theme="glass-light"] .wa-x-b1 {
+  width: 800px; height: 800px; left: -8%; top: -14%;
+  background: radial-gradient(circle at 30% 30%, #a8dcea, #cfe6f2 60%, transparent 70%);
+  opacity: 0.95;
+}
+body[data-wa-theme="glass-light"] .wa-x-b2 {
+  width: 900px; height: 900px; right: -14%; top: -20%;
+  background: radial-gradient(circle at 60% 40%, #f6e0ae, #fbf1da 58%, transparent 70%);
+  opacity: 0.95;
+}
+body[data-wa-theme="glass-light"] .wa-x-b3 {
+  width: 860px; height: 860px; left: 22%; bottom: -36%;
+  background: radial-gradient(circle at 50% 50%, #c3d0f2, #e3eaf9 60%, transparent 70%);
+  opacity: 0.95;
+}
+body[data-wa-theme="glass-light"] .wa-x-b4 {
+  width: 560px; height: 560px; right: 10%; bottom: -18%;
+  background: radial-gradient(circle at 50% 50%, #b6e7d5, #dcf3ea 60%, transparent 70%);
+  opacity: 0.9;
+}
+
+/* Theme Switcher Button & Dropdown */
+.wa-x-theme-container {
+  position: relative;
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.wa-x-theme-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: 210px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+  overflow: hidden;
+}
+
+.wa-x-theme-head {
+  padding: 8px 12px;
+  font-weight: 650;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.03em;
+}
+
+.wa-x-theme-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.wa-x-theme-item:hover,
+.wa-x-theme-item--active {
+  background: #f2f5f8;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+/* ==========================================================================
+   LIQUID GLASS (DARK) Theme Styles (Exact 1-dark.html)
+   ========================================================================== */
+body[data-wa-theme="glass-dark"] {
+  background: #0a1020 !important;
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] #root {
+  padding: 16px;
+  background: transparent !important;
+}
+
+body[data-wa-theme="glass-dark"] .app {
+  height: 100%;
+  border-radius: 26px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: blur(34px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 30px 80px rgba(3, 8, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+}
+
+body[data-wa-theme="glass-dark"] .sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.10) !important;
+}
+
+body[data-wa-theme="glass-dark"] .sidebar__title {
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] .btn--ghost {
+  background: rgba(255, 255, 255, 0.10) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #eef3f9 !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
+}
+
+body[data-wa-theme="glass-dark"] .btn--primary {
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+  border: 1px solid rgba(255, 235, 180, 0.5) !important;
+  color: #241b06 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 6px 18px rgba(200, 163, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+body[data-wa-theme="glass-dark"] .filter {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
+}
+
+body[data-wa-theme="glass-dark"] .filter__select,
+body[data-wa-theme="glass-dark"] .filter__search,
+body[data-wa-theme="glass-dark"] .wa-x-search-input {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+body[data-wa-theme="glass-dark"] .filter__select option {
+  background: #0e1a2b;
+  color: #eef3f9;
+}
+
+body[data-wa-theme="glass-dark"] .conv {
+  border-radius: 16px !important;
+  border: 1px solid transparent !important;
+  margin: 0 4px 4px !important;
+  transition: all 0.15s ease !important;
+}
+
+body[data-wa-theme="glass-dark"] .conv:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+body[data-wa-theme="glass-dark"] .conv--active {
+  background: rgba(255, 255, 255, 0.13) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 8px 24px rgba(3, 8, 20, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+body[data-wa-theme="glass-dark"] .conv__avatar {
+  border-radius: 14px !important;
+  background: linear-gradient(160deg, #dfe9f5, #a9c2dd) !important;
+  color: #0e1a2b !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+}
+
+body[data-wa-theme="glass-dark"] .conv__name {
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] .conv__time,
+body[data-wa-theme="glass-dark"] .conv__preview,
+body[data-wa-theme="glass-dark"] .conv__meta {
+  color: rgba(238, 243, 249, 0.62) !important;
+}
+
+body[data-wa-theme="glass-dark"] .badge {
+  background: #37d39b !important;
+  color: #06281c !important;
+  box-shadow: 0 4px 12px rgba(55, 211, 155, 0.4) !important;
+}
+
+body[data-wa-theme="glass-dark"] .thread__header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
+}
+
+body[data-wa-theme="glass-dark"] .thread__name {
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] .thread__sub {
+  color: rgba(238, 243, 249, 0.55) !important;
+}
+
+body[data-wa-theme="glass-dark"] .pill {
+  border-radius: 999px !important;
+}
+
+body[data-wa-theme="glass-dark"] .pill--open {
+  background: rgba(55, 211, 155, 0.16) !important;
+  border: 1px solid rgba(55, 211, 155, 0.35) !important;
+  color: #7ff0c6 !important;
+}
+
+body[data-wa-theme="glass-dark"] .thread__messages {
+  background: transparent !important;
+}
+
+body[data-wa-theme="glass-dark"] .daysep span {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+
+body[data-wa-theme="glass-dark"] .daysep::before,
+body[data-wa-theme="glass-dark"] .daysep::after {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+body[data-wa-theme="glass-dark"] .msg__bubble {
+  border-radius: 18px !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  box-shadow: 0 8px 22px rgba(3, 8, 20, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
+}
+
+body[data-wa-theme="glass-dark"] .msg--in .msg__bubble {
+  background: rgba(255, 255, 255, 0.11) !important;
+  border: 1px solid rgba(255, 255, 255, 0.17) !important;
+  border-bottom-left-radius: 7px !important;
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] .msg--out .msg__bubble {
+  background: linear-gradient(180deg, rgba(46, 168, 131, 0.34), rgba(30, 124, 99, 0.30)) !important;
+  border: 1px solid rgba(120, 235, 195, 0.32) !important;
+  border-bottom-right-radius: 7px !important;
+  color: #eef3f9 !important;
+}
+
+body[data-wa-theme="glass-dark"] .msg__foot {
+  color: rgba(238, 243, 249, 0.6) !important;
+}
+
+body[data-wa-theme="glass-dark"] .tick--read {
+  color: #7fd2ff !important;
+}
+
+body[data-wa-theme="glass-dark"] .thread__composer {
+  border-top: 1px solid rgba(255, 255, 255, 0.10) !important;
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
+}
+
+body[data-wa-theme="glass-dark"] .composer__input {
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+}
+
+body[data-wa-theme="glass-dark"] .btn--icon,
+body[data-wa-theme="glass-dark"] .wa-x-btn-icon {
+  border-radius: 13px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: rgba(238, 243, 249, 0.8) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+}
+
+body[data-wa-theme="glass-dark"] .btn--send {
+  border-radius: 999px !important;
+  background: linear-gradient(180deg, #5ee3ab, #23b483) !important;
+  border: 1px solid rgba(150, 255, 215, 0.5) !important;
+  color: #06281c !important;
+  font-weight: 650 !important;
+  box-shadow: 0 8px 22px rgba(35, 180, 131, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-theme-dropdown,
+body[data-wa-theme="glass-dark"] .wa-x-search-dropdown,
+body[data-wa-theme="glass-dark"] .wa-x-reminders-dropdown,
+body[data-wa-theme="glass-dark"] .wa-x-preset-menu,
+body[data-wa-theme="glass-dark"] .modal__box {
+  background: #0e1a2b !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #eef3f9 !important;
+  box-shadow: 0 16px 48px rgba(3, 8, 20, 0.65) !important;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-theme-head,
+body[data-wa-theme="glass-dark"] .wa-x-reminders-head,
+body[data-wa-theme="glass-dark"] .modal__head {
+  border-bottom-color: rgba(255, 255, 255, 0.12) !important;
+  color: rgba(238, 243, 249, 0.7) !important;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-theme-item:hover,
+body[data-wa-theme="glass-dark"] .wa-x-theme-item--active,
+body[data-wa-theme="glass-dark"] .wa-x-search-row:hover,
+body[data-wa-theme="glass-dark"] .wa-x-reminder-row:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+/* ==========================================================================
+   LIQUID GLASS (LIGHT) Theme Styles (Exact 2-light.html)
+   ========================================================================== */
+body[data-wa-theme="glass-light"] {
+  background: #dfe8f4 !important;
+  color: #16202e !important;
+}
+
+body[data-wa-theme="glass-light"] #root {
+  padding: 16px;
+  background: transparent !important;
+}
+
+body[data-wa-theme="glass-light"] .app {
+  height: 100%;
+  border-radius: 26px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(34px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 28px 70px rgba(24, 48, 82, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+}
+
+body[data-wa-theme="glass-light"] .sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34)) !important;
+  border-right: 1px solid rgba(22, 48, 82, 0.10) !important;
+}
+
+body[data-wa-theme="glass-light"] .sidebar__title {
+  color: #0e2a47 !important;
+}
+
+body[data-wa-theme="glass-light"] .btn--ghost {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(22, 48, 82, 0.14) !important;
+  color: #21395a !important;
+  border-radius: 999px !important;
+  box-shadow: 0 2px 6px rgba(24, 48, 82, 0.08), inset 0 1px 0 #fff !important;
+}
+
+body[data-wa-theme="glass-light"] .btn--primary {
+  background: linear-gradient(180deg, #f0d386, #d9b155) !important;
+  border: 1px solid rgba(160, 124, 40, 0.45) !important;
+  color: #3a2c08 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 6px 16px rgba(200, 163, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
+}
+
+body[data-wa-theme="glass-light"] .filter {
+  border-bottom: 1px solid rgba(22, 48, 82, 0.10) !important;
+}
+
+body[data-wa-theme="glass-light"] .filter__select,
+body[data-wa-theme="glass-light"] .filter__search,
+body[data-wa-theme="glass-light"] .wa-x-search-input {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(22, 48, 82, 0.12) !important;
+  color: #12243a !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 1px 0 #fff !important;
+}
+
+body[data-wa-theme="glass-light"] .conv {
+  border-radius: 16px !important;
+  border: 1px solid transparent !important;
+  margin: 0 4px 4px !important;
+  transition: all 0.15s ease !important;
+}
+
+body[data-wa-theme="glass-light"] .conv:hover {
+  background: rgba(255, 255, 255, 0.6) !important;
+}
+
+body[data-wa-theme="glass-light"] .conv--active {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(22, 48, 82, 0.12) !important;
+  box-shadow: 0 8px 20px rgba(24, 48, 82, 0.12), inset 0 1px 0 #fff !important;
+}
+
+body[data-wa-theme="glass-light"] .conv__avatar {
+  border-radius: 14px !important;
+  background: linear-gradient(160deg, #1b4470, #2f6ba3) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 10px rgba(24, 48, 82, 0.18) !important;
+}
+
+body[data-wa-theme="glass-light"] .conv__name {
+  color: #12243a !important;
+}
+
+body[data-wa-theme="glass-light"] .conv__time,
+body[data-wa-theme="glass-light"] .conv__preview,
+body[data-wa-theme="glass-light"] .conv__meta {
+  color: rgba(22, 38, 58, 0.62) !important;
+}
+
+body[data-wa-theme="glass-light"] .badge {
+  background: #17a06e !important;
+  color: #fff !important;
+  box-shadow: 0 3px 8px rgba(23, 160, 110, 0.35) !important;
+}
+
+body[data-wa-theme="glass-light"] .thread__header {
+  border-bottom: 1px solid rgba(22, 48, 82, 0.10) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.25)) !important;
+}
+
+body[data-wa-theme="glass-light"] .thread__name {
+  color: #12243a !important;
+}
+
+body[data-wa-theme="glass-light"] .thread__sub {
+  color: rgba(22, 38, 58, 0.55) !important;
+}
+
+body[data-wa-theme="glass-light"] .pill--open {
+  background: rgba(206, 244, 227, 0.9) !important;
+  border: 1px solid rgba(96, 190, 155, 0.5) !important;
+  color: #10704f !important;
+}
+
+body[data-wa-theme="glass-light"] .thread__messages {
+  background: transparent !important;
+}
+
+body[data-wa-theme="glass-light"] .daysep span {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(22, 48, 82, 0.1) !important;
+  color: rgba(22, 38, 58, 0.6) !important;
+}
+
+body[data-wa-theme="glass-light"] .daysep::before,
+body[data-wa-theme="glass-light"] .daysep::after {
+  background: rgba(22, 48, 82, 0.12) !important;
+}
+
+body[data-wa-theme="glass-light"] .msg__bubble {
+  border-radius: 18px !important;
+  box-shadow: 0 6px 16px rgba(24, 48, 82, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+body[data-wa-theme="glass-light"] .msg--in .msg__bubble {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(22, 48, 82, 0.09) !important;
+  border-bottom-left-radius: 7px !important;
+  color: #16202e !important;
+}
+
+body[data-wa-theme="glass-light"] .msg--out .msg__bubble {
+  background: linear-gradient(180deg, #d6f5e6, #b9e9d4) !important;
+  border: 1px solid rgba(96, 190, 155, 0.4) !important;
+  border-bottom-right-radius: 7px !important;
+  color: #16202e !important;
+}
+
+body[data-wa-theme="glass-light"] .msg__foot {
+  color: rgba(22, 38, 58, 0.55) !important;
+}
+
+body[data-wa-theme="glass-light"] .tick--read {
+  color: #2f7fd1 !important;
+}
+
+body[data-wa-theme="glass-light"] .thread__composer {
+  border-top: 1px solid rgba(22, 48, 82, 0.10) !important;
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.25)) !important;
+}
+
+body[data-wa-theme="glass-light"] .composer__input {
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(22, 48, 82, 0.12) !important;
+  color: #16202e !important;
+  box-shadow: inset 0 1px 0 #fff !important;
+}
+
+body[data-wa-theme="glass-light"] .btn--icon,
+body[data-wa-theme="glass-light"] .wa-x-btn-icon {
+  border-radius: 13px !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(22, 48, 82, 0.12) !important;
+  color: #3c526e !important;
+  box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(24, 48, 82, 0.07) !important;
+}
+
+body[data-wa-theme="glass-light"] .btn--send {
+  border-radius: 999px !important;
+  background: linear-gradient(180deg, #17a06e, #128257) !important;
+  border: 1px solid rgba(10, 90, 62, 0.5) !important;
+  color: #fff !important;
+  font-weight: 650 !important;
+  box-shadow: 0 8px 20px rgba(18, 130, 87, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+body[data-wa-theme="glass-light"] .wa-x-theme-dropdown,
+body[data-wa-theme="glass-light"] .wa-x-search-dropdown,
+body[data-wa-theme="glass-light"] .wa-x-reminders-dropdown,
+body[data-wa-theme="glass-light"] .wa-x-preset-menu,
+body[data-wa-theme="glass-light"] .modal__box {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(22, 48, 82, 0.14) !important;
+  color: #12243a !important;
+  box-shadow: 0 12px 36px rgba(24, 48, 82, 0.22) !important;
+}
+
+body[data-wa-theme="glass-light"] .wa-x-theme-item:hover,
+body[data-wa-theme="glass-light"] .wa-x-theme-item--active,
+body[data-wa-theme="glass-light"] .wa-x-search-row:hover,
+body[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
+  background: rgba(22, 48, 82, 0.08) !important;
+  color: #12243a !important;
 }
