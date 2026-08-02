@@ -271,7 +271,12 @@ export function mountInbox(root, { me }) {
         el(
           "li.conv",
           {
-            class: conversation.id === state.activeId ? "conv--active" : "",
+            class: [
+              conversation.id === state.activeId ? "conv--active" : "",
+              isClosingSoon(conversation) ? "conv--closing" : "",
+            ]
+              .filter(Boolean)
+              .join(" "),
             onclick: () => openConversation(conversation.id),
           },
           [
@@ -291,7 +296,14 @@ export function mountInbox(root, { me }) {
                   : null,
               ]),
               el("div.conv__meta", {}, [
-                el("span.dot", { class: open ? "dot--open" : "dot--closed", title: open ? "Session khuli" : "Session band" }),
+                el("span.dot", {
+                  class: !open ? "dot--closed" : isClosingSoon(conversation) ? "dot--closing" : "dot--open",
+                  title: !open
+                    ? "Session band"
+                    : isClosingSoon(conversation)
+                      ? `Window band ho rahi hai — ${untilText(conversation.session_expires_at) || "1 ghante"} baaki`
+                      : "Session khuli",
+                }),
                 el("span.conv__number", {}, [numberTitle(numberById(conversation.number_id))]),
               ]),
             ]),
@@ -393,6 +405,23 @@ export function mountInbox(root, { me }) {
     if (wasAtBottom) scrollToBottom();
   }
 
+  /** The server warns at this mark; the panel derives the same state itself. */
+  const CLOSING_SOON_MINUTES = 60;
+
+  /**
+   * Whether this chat's free window is about to lapse.
+   *
+   * Derived from session_expires_at rather than remembered from the
+   * session.closing event: the task behind that event runs every 15 minutes and
+   * re-sends for the same chat, and a computed answer is inherently
+   * de-duplicated — it is also right for chats loaded after the event fired.
+   */
+  function isClosingSoon(conversation) {
+    if (!conversation?.is_session_open) return false;
+    const left = minutesUntil(conversation.session_expires_at);
+    return left !== null && left >= 0 && left <= CLOSING_SOON_MINUTES;
+  }
+
   /**
    * The window closing is the deadline that costs money — once it lapses only
    * a paid template reopens the chat — so the pill warns before it happens
@@ -478,7 +507,32 @@ export function mountInbox(root, { me }) {
             : null,
         ]),
       ]),
+      reactionsNode(message),
     ]);
+  }
+
+  /**
+   * Reactions hang under their own bubble, WhatsApp-style — they are not
+   * messages of their own. The payload maps sender wa_id → emoji, so the same
+   * emoji from several people collapses into one chip with a count.
+   *
+   * There is no way to send one from here: the gateway rejects the `reaction`
+   * type outright.
+   */
+  function reactionsNode(message) {
+    const emojis = Object.values(message.reactions || {}).filter(Boolean);
+    if (!emojis.length) return null;
+
+    const counts = new Map();
+    for (const emoji of emojis) counts.set(emoji, (counts.get(emoji) || 0) + 1);
+
+    return el(
+      "div.reactions",
+      { title: `${emojis.length} reaction${emojis.length > 1 ? "s" : ""}` },
+      [...counts].map(([emoji, count]) =>
+        el("span.reaction", {}, [emoji, count > 1 ? el("span.reaction__n", {}, [String(count)]) : null])
+      )
+    );
   }
 
   /**
@@ -643,6 +697,20 @@ export function mountInbox(root, { me }) {
       textarea.value = "";
       autoGrow(textarea);
       await sendText(conversation, body);
+    }
+
+    // Last cheap chance to reply: after the window lapses every message costs a
+    // template, and Meta's marketing cap can refuse it outright.
+    if (isClosingSoon(conversation)) {
+      const left = untilText(conversation.session_expires_at);
+      ui.composer.append(
+        el("div.closingbar", {}, [
+          icon("clock", { size: 15 }),
+          el("span", {}, [
+            `Window ${left ? `${left} mein` : "ek ghante se kam mein"} band ho rahi hai — abhi jawab dein, warna template bhejna padega.`,
+          ]),
+        ])
+      );
     }
 
     const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, [icon("paperclip", { size: 19 })]);
@@ -1047,6 +1115,9 @@ export function mountInbox(root, { me }) {
     if (event === "conversation.updated" || event === "conversation.assigned") {
       return onConversationChanged(data.conversation);
     }
+    // The closing warning carries the conversation, and the panel derives the
+    // warning state from it — so re-sends of the same warning are harmless.
+    if (event === "session.closing") return onConversationChanged(data.conversation);
     console.debug("[a7-wa] unhandled ws event:", event, data);
   }
 
@@ -1067,12 +1138,32 @@ export function mountInbox(root, { me }) {
     ui.listStatus.textContent = state.conversations.length ? "" : "Koi conversation nahi.";
   }
 
+  /**
+   * Replaces a message already in the thread, in place.
+   *
+   * The server re-pushes the *same* message when something about it changes —
+   * a reaction arriving or being taken back is the common case. Appending that
+   * would show the message twice.
+   *
+   * @returns {boolean} false when the message is not in the open thread.
+   */
+  function replaceMessageById(message) {
+    const index = state.messages.findIndex((m) => String(m.id) === String(message.id));
+    if (index === -1) return false;
+
+    state.messages[index] = message;
+    const node = ui.messages.querySelector(`[data-id="${CSS.escape(String(message.id))}"]`);
+    node?.replaceWith(messageBubble(message));
+    return true;
+  }
+
   function onMessageNew({ message, conversation }) {
     const active = conversation?.id === state.activeId;
 
     if (active) {
-      // Ignore the echo of a send we already painted optimistically.
-      if (!state.messages.some((m) => String(m.id) === String(message.id))) {
+      // An id we already hold means this is a re-push (a reaction changed, or
+      // the echo of a send we painted optimistically) — update, never append.
+      if (!replaceMessageById(message)) {
         state.messages.push(message);
         appendMessageNode(messageBubble(message));
       }
@@ -1092,11 +1183,7 @@ export function mountInbox(root, { me }) {
 
   function onMessageStatus(message) {
     if (!message || message.conversation_id !== state.activeId) return;
-    const index = state.messages.findIndex((m) => String(m.id) === String(message.id));
-    if (index === -1) return;
-    state.messages[index] = message;
-    const node = ui.messages.querySelector(`[data-id="${CSS.escape(String(message.id))}"]`);
-    node?.replaceWith(messageBubble(message));
+    replaceMessageById(message);
   }
 
   function onConversationChanged(conversation) {

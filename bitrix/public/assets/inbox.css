@@ -354,6 +354,65 @@ body {
   background: #c2c9d2;
 }
 
+.dot--closing {
+  background: #d99022;
+}
+
+/* The free window is nearly up on this chat. */
+.conv--closing {
+  background: #fdf7ec;
+}
+
+.conv--closing:hover {
+  background: #fbf1de;
+}
+
+.conv--closing.conv--active {
+  background: #f7ecd8;
+}
+
+.closingbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #fdf3e2;
+  color: #8a6d21;
+  font-size: 12px;
+  border-bottom: 1px solid #f0dfbe;
+}
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -6px 0 0 8px;
+}
+
+.msg--out .reactions {
+  justify-content: flex-end;
+  margin: -6px 8px 0 0;
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+}
+
+.reaction__n {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
 /* -------------------------------------------------------------- thread */
 
 /* Flex, not grid: the connection bar is `hidden` while the socket is healthy,
@@ -578,17 +637,21 @@ body {
   color: var(--err);
 }
 
+/* Column, so a reaction chip can hang under its own bubble. */
 .msg {
   display: flex;
+  flex-direction: column;
   max-width: 76%;
 }
 
 .msg--in {
   align-self: flex-start;
+  align-items: flex-start;
 }
 
 .msg--out {
   align-self: flex-end;
+  align-items: flex-end;
 }
 
 /* Flash for a message arrived at from a search result or a reminder. */
