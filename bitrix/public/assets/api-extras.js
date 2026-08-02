@@ -56,7 +56,6 @@ export async function markReminderDone(reminderId) {
 export async function deleteReminder(reminderId) {
   return apiFetch(`/api/inbox/reminders/${reminderId}/`, {
     method: "DELETE",
-    raw: true,
   });
 }
 

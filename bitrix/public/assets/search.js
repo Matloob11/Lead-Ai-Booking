@@ -36,6 +36,7 @@ export function mountSearch() {
 
   let currentResults = [];
   let selectedIndex = -1;
+  let searchSeq = 0;
 
   // DOM elements
   const iconSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -70,6 +71,7 @@ export function mountSearch() {
   slot.append(container);
 
   const closeDropdown = () => {
+    searchSeq++;
     dropdown.hidden = true;
     dropdown.replaceChildren();
     hintEl.hidden = true;
@@ -90,6 +92,8 @@ export function mountSearch() {
   };
 
   const performSearch = debounce(async (term) => {
+    const seq = ++searchSeq;
+
     if (term.length < 2) {
       closeDropdown();
       if (term.length === 1) {
@@ -105,6 +109,8 @@ export function mountSearch() {
 
     try {
       const payload = await searchMessages({ q: term, limit: 50 });
+      if (seq !== searchSeq) return; // Stale request, ignore response
+
       const results = payload?.results || [];
       const totalCount = payload?.count || results.length;
       currentResults = results;

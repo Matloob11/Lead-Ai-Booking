@@ -309,7 +309,7 @@ function mountComposerClock() {
     const submitBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Reminder set karein"]);
 
     const content = el("div.wa-x-modal-body", {}, [
-      el("label.wa-x-field-row", {}, [el("span", {}, ["Aane wala waqt (Dubai Time +04:00)"]), dtInput]),
+      el("label.wa-x-field-row", {}, [el("span", {}, ["Aane wala waqt"]), dtInput]),
       el("label.wa-x-field-row", {}, [el("span", {}, ["Note"]), noteInput]),
       errorEl,
       el("div.wa-x-modal-actions", {}, [submitBtn]),
