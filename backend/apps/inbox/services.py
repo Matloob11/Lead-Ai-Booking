@@ -250,6 +250,49 @@ def start_conversation(number, agent, to, template, variables=None, header_varia
     return conversation
 
 
+def retry_message(message, agent):
+    """Send a failed message again.
+
+    A new row is created rather than the old one revived: WhatsApp assigns a
+    fresh id, and keeping the failure in the thread is the point — an agent
+    needs to see that the first attempt did not arrive.
+    """
+    if message.status != Message.Status.FAILED:
+        raise SendBlocked("Only a failed message can be sent again.")
+    if message.direction != Message.Direction.OUTBOUND:
+        raise SendBlocked("Only messages we sent can be retried.")
+
+    conversation = message.conversation
+    payload = message.payload or {}
+
+    if message.kind == Message.Kind.TEMPLATE:
+        if not message.template:
+            raise SendBlocked("The template this message used is no longer available.")
+        return send_template(
+            conversation,
+            agent,
+            message.template,
+            payload.get("variables") or {},
+            payload.get("header_variables") or {},
+            payload.get("header_media_id") or "",
+        )
+
+    if message.kind == Message.Kind.TEXT:
+        return send_text(conversation, agent, message.body)
+
+    media_id = payload.get("media_id")
+    if not media_id:
+        raise SendBlocked("The attachment is no longer available; please attach it again.")
+    return send_media(
+        conversation,
+        agent,
+        message.kind,
+        media_id,
+        caption=message.body,
+        filename=payload.get("filename", ""),
+    )
+
+
 def reassign(conversation, to_agent, changed_by, reason=""):
     previous = conversation.assigned_agent
     conversation.assigned_agent = to_agent

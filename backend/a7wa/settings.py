@@ -128,6 +128,21 @@ CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TIMEZONE = "Asia/Dubai"
 
+# Templates are created and approved in the gateway's own panel, so the mirror
+# would go stale on its own. Hourly is frequent enough that a template approved
+# during the day is usable the same day, and cheap: one call per WABA.
+# Channels change far less often, so they are refreshed a few times a day.
+CELERY_BEAT_SCHEDULE = {
+    "sync-templates-hourly": {
+        "task": "apps.catalog.tasks.sync_templates",
+        "schedule": 60 * 60,
+    },
+    "sync-numbers-every-6h": {
+        "task": "apps.catalog.tasks.sync_numbers",
+        "schedule": 6 * 60 * 60,
+    },
+}
+
 # Localisation
 # ---------------------------------------------------------------------------
 LANGUAGE_CODE = "en-us"

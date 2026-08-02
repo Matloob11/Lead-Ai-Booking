@@ -145,6 +145,21 @@ def send_template(request, pk):
 
 
 @api_view(["POST"])
+def retry(request, pk):
+    message = get_object_or_404(
+        Message.objects.filter(conversation__in=_visible_conversations(request.user)), pk=pk
+    )
+    try:
+        resent = services.retry_message(message, request.user)
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except AlotsError as exc:
+        return Response({"detail": f"Gateway rejected the message: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+    return Response(serialize_message(resent, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
 def start(request):
     """New Contact: open a chat with a number nobody has messaged yet."""
     number = get_object_or_404(request.user.visible_numbers, pk=request.data.get("number_id"))

@@ -160,6 +160,32 @@ def number_agents(request, pk):
 
 
 @api_view(["POST"])
+def sync_now(request):
+    """Pull templates (and optionally channels) from the gateway on demand.
+
+    A schedule already refreshes both, but an admin who has just had a template
+    approved should not have to wait for the next run to use it.
+    """
+    denied = _require_admin(request)
+    if denied:
+        return denied
+
+    from .tasks import sync_numbers, sync_templates
+
+    what = request.data.get("what", "templates")
+    try:
+        result = {}
+        if what in ("numbers", "all"):
+            result["numbers"] = sync_numbers()
+        if what in ("templates", "all"):
+            result["templates"] = sync_templates()
+    except Exception as exc:  # noqa: BLE001 - surface the gateway's complaint
+        return Response({"detail": f"Sync failed: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+    return Response({"status": "ok", **result})
+
+
+@api_view(["POST"])
 def set_agent_admin(request, pk):
     """Grant or revoke panel admin, without touching what Bitrix says."""
     denied = _require_admin(request)
