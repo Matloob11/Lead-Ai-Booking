@@ -1,5 +1,5 @@
 /**
- * Entry point for extras modules (Search, Reminders, Reply Buttons, Theme Switcher).
+ * Entry point for extras modules (Search, Reminders, Reply Buttons, Theme & Options Menu).
  * Self-mounts on "wa:ready" event or when DOM anchors become available.
  * Strictly uses SVG inline icons matching icons.js (NO EMOJIS).
  */
@@ -53,6 +53,12 @@ const ICON_SHAPES = {
   ],
   palette: "M12 21a9 9 0 1 1 0-18c2.5 0 4.5 1.8 4.5 4a3.5 3.5 0 0 1-3.5 3.5H11a2 2 0 0 0-2 2v.5C9 14.5 10.3 16 12 16h1a5 5 0 0 1 5 5",
   check: "M20 6 9 17l-5-5",
+  dots: [
+    { tag: "circle", cx: 12, cy: 5, r: 1.5 },
+    { tag: "circle", cx: 12, cy: 12, r: 1.5 },
+    { tag: "circle", cx: 12, cy: 19, r: 1.5 },
+  ],
+  hash: "M4 9h16M4 15h16M10 3 8 21M16 3l-2 18",
 };
 
 export function mountThemeSwitcher() {
@@ -73,15 +79,14 @@ export function mountThemeSwitcher() {
   const savedTheme = localStorage.getItem("wa_theme") || "glass-dark";
   document.body.setAttribute("data-wa-theme", savedTheme);
 
-  // Look for target slot: prefer .sidebar__top so it's ALWAYS visible in sidebar header!
   const sidebarTop = document.querySelector(".sidebar__top");
   const topbarSlot = document.querySelector("#wa-topbar-slot");
 
   if (!sidebarTop && !topbarSlot) return;
   if (document.querySelector(".wa-x-theme-container")) return;
 
-  const themeBtn = el("button.wa-x-theme-btn", { type: "button", title: "Theme / Design Change Karein" }, [
-    createIcon(ICON_SHAPES.palette, 14),
+  const themeBtn = el("button.wa-x-theme-btn", { type: "button", title: "Options & Design Theme" }, [
+    createIcon(ICON_SHAPES.dots, 14),
     el("span.wa-x-theme-label", {}, ["Theme"]),
   ]);
 
@@ -96,6 +101,7 @@ export function mountThemeSwitcher() {
   const renderDropdown = () => {
     clear(dropdown);
     const current = document.body.getAttribute("data-wa-theme") || "glass-dark";
+
     const head = el("div.wa-x-theme-head", {}, ["Design / Theme"]);
     dropdown.append(head);
 
@@ -124,6 +130,35 @@ export function mountThemeSwitcher() {
       );
       dropdown.append(row);
     });
+
+    // Check if Numbers button exists in sidebar top (if admin)
+    if (sidebarTop) {
+      const existingNumbersBtn = sidebarTop.querySelector(".btn--ghost");
+      if (existingNumbersBtn) {
+        existingNumbersBtn.style.display = "none"; // Clean header
+
+        dropdown.append(el("div.wa-x-theme-divider"));
+
+        const numbersRow = el(
+          "button.wa-x-theme-item",
+          {
+            type: "button",
+            onclick: (e) => {
+              e.stopPropagation();
+              dropdown.hidden = true;
+              existingNumbersBtn.click();
+            },
+          },
+          [
+            el("div.wa-x-theme-item-left", {}, [
+              createIcon(ICON_SHAPES.hash, 14),
+              el("span", {}, ["Numbers Admin"]),
+            ]),
+          ]
+        );
+        dropdown.append(numbersRow);
+      }
+    }
   };
 
   renderDropdown();

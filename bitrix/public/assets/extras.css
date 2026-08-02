@@ -846,6 +846,12 @@ body[data-wa-theme="glass-light"] .wa-x-b4 {
   letter-spacing: 0.03em;
 }
 
+.wa-x-theme-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
 .wa-x-theme-item {
   display: flex;
   align-items: center;
@@ -1101,24 +1107,29 @@ body[data-wa-theme="glass-dark"] .wa-x-reminders-dropdown,
 body[data-wa-theme="glass-dark"] .wa-x-preset-menu,
 body[data-wa-theme="glass-dark"] .modal__box {
   background: #0e1a2b !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  color: #eef3f9 !important;
-  box-shadow: 0 16px 48px rgba(3, 8, 20, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff !important;
+  box-shadow: 0 16px 48px rgba(3, 8, 20, 0.75) !important;
 }
 
 body[data-wa-theme="glass-dark"] .wa-x-theme-head,
 body[data-wa-theme="glass-dark"] .wa-x-reminders-head,
 body[data-wa-theme="glass-dark"] .modal__head {
-  border-bottom-color: rgba(255, 255, 255, 0.12) !important;
-  color: rgba(238, 243, 249, 0.7) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.14) !important;
+  color: #94a3b8 !important;
+  font-weight: 700 !important;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-theme-item {
+  color: #e2e8f0 !important;
 }
 
 body[data-wa-theme="glass-dark"] .wa-x-theme-item:hover,
 body[data-wa-theme="glass-dark"] .wa-x-theme-item--active,
 body[data-wa-theme="glass-dark"] .wa-x-search-row:hover,
 body[data-wa-theme="glass-dark"] .wa-x-reminder-row:hover {
-  background: rgba(255, 255, 255, 0.12) !important;
-  color: #eef3f9 !important;
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #ffffff !important;
 }
 
 /* ==========================================================================
@@ -1321,10 +1332,14 @@ body[data-wa-theme="glass-light"] .modal__box {
   box-shadow: 0 12px 36px rgba(24, 48, 82, 0.22) !important;
 }
 
+body[data-wa-theme="glass-light"] .wa-x-theme-item {
+  color: #1e293b !important;
+}
+
 body[data-wa-theme="glass-light"] .wa-x-theme-item:hover,
 body[data-wa-theme="glass-light"] .wa-x-theme-item--active,
 body[data-wa-theme="glass-light"] .wa-x-search-row:hover,
 body[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
-  background: rgba(22, 48, 82, 0.08) !important;
-  color: #12243a !important;
+  background: rgba(22, 48, 82, 0.1) !important;
+  color: #0f172a !important;
 }
