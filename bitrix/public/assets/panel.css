@@ -15,6 +15,8 @@
   --menu-hover: #f2f5f8;
   --menu-ink: var(--ink);
   --menu-line: var(--line);
+  --scroll-thumb: rgb(22 38 58 / 22%);
+  --scroll-thumb-hover: rgb(22 38 58 / 38%);
 }
 
 /* Theme hooks.
@@ -33,10 +35,47 @@ body[data-wa-theme="glass-dark"] {
   --menu-hover: rgba(255, 255, 255, 0.12);
   --menu-ink: #eef3f9;
   --menu-line: rgba(255, 255, 255, 0.16);
+  --scroll-thumb: rgb(255 255 255 / 26%);
+  --scroll-thumb-hover: rgb(255 255 255 / 45%);
 }
 
 body[data-wa-theme="glass-light"] {
   --menu-bg: rgba(255, 255, 255, 0.97);
+}
+
+/* Scrollbars.
+   The browser default is a wide grey trough with a dark thumb, which on a
+   tinted panel reads as a black-and-white strip glued to the edge. These are
+   thin, track-less and tinted per theme, so they sit inside the surface
+   instead of on top of it. Declared globally rather than per element so the
+   companion modules' own panes match without having to know about this. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  /* The transparent border plus padding-box clipping is what keeps the visible
+     bar hairline-thin while leaving a comfortable grab area. */
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
 }
 
 * {
