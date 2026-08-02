@@ -200,7 +200,23 @@ def media_download(request, pk):
 @api_view(["POST"])
 @parser_classes([MultiPartParser])
 def media_upload(request):
-    number = get_object_or_404(request.user.visible_numbers, pk=request.data.get("number_id"))
+    # The panel knows the conversation it is composing in, and often nothing
+    # else, so accept either — and answer 400 with a usable message when neither
+    # is present rather than a bare 404 that reads like a missing endpoint.
+    conversation_id = request.data.get("conversation_id")
+    number_id = request.data.get("number_id")
+
+    if conversation_id:
+        conversation = get_object_or_404(_visible_conversations(request.user), pk=conversation_id)
+        number = conversation.number
+    elif number_id:
+        number = get_object_or_404(request.user.visible_numbers, pk=number_id)
+    else:
+        return Response(
+            {"detail": "Send conversation_id (or number_id) alongside the file"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     upload = request.FILES.get("file")
     if not upload:
         return Response({"detail": "No file supplied"}, status=status.HTTP_400_BAD_REQUEST)
