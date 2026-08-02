@@ -18,6 +18,7 @@ import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
+import { openTemplateComposer } from "./template-composer.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
 import { bindEmojiPicker } from "./emoji.js";
@@ -910,84 +911,19 @@ export function mountInbox(root, { me }) {
     return list;
   }
 
-  /** Renders one input per {{n}} placeholder and returns a values getter. */
-  function variableFields(template) {
-    const count = Number(template?.variable_count) || 0;
-    const inputs = [];
-    const wrap = el("div.vars");
-    for (let i = 1; i <= count; i++) {
-      const input = el("input.field", { type: "text", placeholder: `{{${i}}}` });
-      inputs.push(input);
-      wrap.append(el("label.field__row", {}, [el("span", {}, [`Variable ${i}`]), input]));
-    }
-    return {
-      node: wrap,
-      values: () => Object.fromEntries(inputs.map((input, i) => [String(i + 1), input.value])),
-      complete: () => inputs.every((input) => input.value.trim()),
-    };
-  }
 
-  async function openTemplates(conversation) {
-    const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Loading templates…"])]);
-    const dialog = modal("Approved templates", body, { wide: true });
-
-    let templates;
-    try {
-      templates = await templatesFor(conversation.number_id);
-    } catch (error) {
-      clear(body).append(el("div.alert", {}, [`Could not load templates: ${error.message}`]));
-      return;
-    }
-
-    if (!templates.length) {
-      clear(body).append(el("div.thread__hint", {}, ["This number has no approved templates."]));
-      return;
-    }
-
-    clear(body);
-    const list = el("div.tpl-list");
-    const detail = el("div.tpl-detail", {}, [el("div.thread__hint", {}, ["Choose a template."])]);
-    body.append(el("div.tpl-split", {}, [list, detail]));
-
-    for (const template of templates) {
-      list.append(
-        el("button.tpl", { type: "button", onclick: () => select(template) }, [
-          el("div.tpl__name", {}, [template.name]),
-          el("div.tpl__lang", {}, [template.language || ""]),
-        ])
-      );
-    }
-
-    function select(template) {
-      const fields = variableFields(template);
-      const send = el("button.btn.btn--primary", { type: "button" }, ["Send"]);
-      send.addEventListener("click", async () => {
-        if (!fields.complete()) {
-          alert("Fill in every variable.");
-          return;
-        }
-        send.disabled = true;
-        send.textContent = "Sending…";
-        try {
-          await inbox.sendTemplate(conversation.id, {
-            template_id: template.id,
-            variables: fields.values(),
-          });
-          dialog.close();
-          await openConversation(conversation.id);
-        } catch (error) {
-          send.disabled = false;
-          send.textContent = "Send";
-          alert(`The template was not sent: ${error.message}`);
-        }
-      });
-
-      clear(detail).append(
-        el("div.tpl-detail__preview", {}, [template.body_text || ""]),
-        fields.node,
-        el("div.modal__actions", {}, [send])
-      );
-    }
+  /**
+   * Sending a template is its own screen: the fields it needs depend on the
+   * template, and the only way to be sure they were filled in right is to see
+   * the message being built. See template-composer.js.
+   */
+  function openTemplates(conversation) {
+    openTemplateComposer({
+      mode: "reply",
+      conversation,
+      templatesFor,
+      onSent: () => openConversation(conversation.id),
+    });
   }
 
   function openNumbers() {
@@ -1005,95 +941,20 @@ export function mountInbox(root, { me }) {
   }
 
   function openNewContact() {
-    const numberSelect = el(
-      "select.field",
-      {},
-      state.numbers.map((number) => el("option", { value: number.id }, [numberTitle(number)]))
-    );
-    const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
-    const templateSelect = el("select.field", {}, [el("option", { value: "" }, ["Loading templates…"])]);
-    const varsHost = el("div");
-    const error = el("div.alert", { hidden: true });
-    let fields = null;
-    let templates = [];
-
-    async function loadTemplates() {
-      clear(templateSelect).append(el("option", { value: "" }, ["Loading templates…"]));
-      clear(varsHost);
-      try {
-        templates = await templatesFor(numberSelect.value);
-      } catch (err) {
-        clear(templateSelect).append(el("option", { value: "" }, [`Load fail: ${err.message}`]));
-        return;
-      }
-      clear(templateSelect).append(
-        el("option", { value: "" }, [templates.length ? "Choose a template…" : "No approved templates"]),
-        ...templates.map((t) => el("option", { value: t.id }, [`${t.name} (${t.language || ""})`]))
-      );
-    }
-
-    templateSelect.addEventListener("change", () => {
-      clear(varsHost);
-      fields = null;
-      const template = templates.find((t) => String(t.id) === templateSelect.value);
-      if (!template) return;
-      varsHost.append(el("div.tpl-detail__preview", {}, [template.body_text || ""]));
-      fields = variableFields(template);
-      varsHost.append(fields.node);
-    });
-
-    numberSelect.addEventListener("change", loadTemplates);
-
-    const send = el("button.btn.btn--primary", { type: "button" }, ["Start a chat"]);
-    const body = el("div.modal__body", {}, [
-      el("label.field__row", {}, [el("span", {}, ["From which number"]), numberSelect]),
-      el("label.field__row", {}, [el("span", {}, ["Customer's number"]), phone]),
-      el("label.field__row", {}, [el("span", {}, ["Template"]), templateSelect]),
-      varsHost,
-      error,
-      el("div.modal__actions", {}, [send]),
-    ]);
-
-    const dialog = modal("New Contact", body);
-    loadTemplates();
-
-    send.addEventListener("click", async () => {
-      error.hidden = true;
-      const to = phone.value.replace(/[^\d]/g, "");
-      if (!to || !templateSelect.value) {
-        error.hidden = false;
-        error.textContent = "Both a number and a template are required.";
-        return;
-      }
-      if (fields && !fields.complete()) {
-        error.hidden = false;
-        error.textContent = "Fill in every variable.";
-        return;
-      }
-      send.disabled = true;
-      send.textContent = "Sending…";
-      try {
-        const created = await inbox.start({
-          number_id: numberSelect.value,
-          to,
-          template_id: templateSelect.value,
-          variables: fields ? fields.values() : {},
-        });
-        dialog.close();
+    openTemplateComposer({
+      mode: "new",
+      numbers: state.numbers.map((n) => ({ ...n, title: numberTitle(n) })),
+      templatesFor,
+      onSent: async (created) => {
         await loadConversations({ keepActive: false });
         if (created?.id) await openConversation(created.id);
-      } catch (err) {
-        send.disabled = false;
-        send.textContent = "Start a chat";
-        error.hidden = false;
-        error.textContent = err.message;
-      }
+      },
     });
   }
 
   function openTransfer(conversation) {
     const agentId = el("input.field", { type: "text", placeholder: "Agent ID" });
-    const reason = el("input.field", { type: "text", placeholder: "Wajah (optional)" });
+    const reason = el("input.field", { type: "text", placeholder: "Reason (optional)" });
     const error = el("div.alert", { hidden: true });
     const send = el("button.btn.btn--primary", { type: "button" }, ["Transfer"]);
 
@@ -1102,7 +963,7 @@ export function mountInbox(root, { me }) {
       el("div.modal__body", {}, [
         el("p.modal__note", {}, ["The full history moves with the chat. Nothing is deleted."]),
         el("label.field__row", {}, [el("span", {}, ["New agent"]), agentId]),
-        el("label.field__row", {}, [el("span", {}, ["Wajah"]), reason]),
+        el("label.field__row", {}, [el("span", {}, ["Reason"]), reason]),
         error,
         el("div.modal__actions", {}, [send]),
       ])

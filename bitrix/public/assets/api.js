@@ -66,10 +66,13 @@ export const inbox = {
    *
    * @returns {{promise: Promise<{media_id: string}>, abort: () => void}}
    */
-  uploadMedia(file, { conversationId, onProgress } = {}) {
+  uploadMedia(file, { conversationId, numberId, onProgress } = {}) {
     const form = new FormData();
     form.append("file", file);
     if (conversationId) form.append("conversation_id", conversationId);
+    // New Contact uploads a template's header image before any conversation
+    // exists, so the number is the only thing available to bill the upload to.
+    if (numberId) form.append("number_id", numberId);
 
     const xhr = new XMLHttpRequest();
     const promise = new Promise((resolve, reject) => {

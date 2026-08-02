@@ -338,7 +338,9 @@ def send_buttons(conversation, agent, body, buttons, header="", footer=""):
     return message
 
 
-def build_template_components(template, variables=None, header_variables=None, header_media_id=None):
+def build_template_components(
+    template, variables=None, header_variables=None, header_media_id=None, button_variables=None
+):
     """Assemble Meta's component array for one send.
 
     Only the parts that actually carry values are included; sending an empty
@@ -371,10 +373,36 @@ def build_template_components(template, variables=None, header_variables=None, h
             }
         )
 
+    # A URL button ending in {{1}} carries a suffix chosen per message. Meta
+    # addresses it by the button's position, and each such button is its own
+    # component rather than a list of parameters on a shared one.
+    for button in template.buttons:
+        if not button["variable_count"]:
+            continue
+        value = (button_variables or {}).get(str(button["index"]))
+        if not value:
+            continue
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": str(button["index"]),
+                "parameters": [{"type": "text", "text": str(value)}],
+            }
+        )
+
     return components or None
 
 
-def send_template(conversation, agent, template, variables=None, header_variables=None, header_media_id=None):
+def send_template(
+    conversation,
+    agent,
+    template,
+    variables=None,
+    header_variables=None,
+    header_media_id=None,
+    button_variables=None,
+):
     """Send an approved template, which also reopens the free-form window.
 
     The window is only extended once the gateway accepts the message; assuming
@@ -394,7 +422,9 @@ def send_template(conversation, agent, template, variables=None, header_variable
     if template.requires_header_media and not header_media_id:
         raise SendBlocked(f"Template '{template.name}' needs a header {template.header['format'].lower()}.")
 
-    components = build_template_components(template, variables, header_variables, header_media_id)
+    components = build_template_components(
+        template, variables, header_variables, header_media_id, button_variables
+    )
     preview = render_body(template, variables) or template.name
 
     message = Message.objects.create(
@@ -438,7 +468,16 @@ def send_template(conversation, agent, template, variables=None, header_variable
 
 
 @transaction.atomic
-def start_conversation(number, agent, to, template, variables=None, header_variables=None, header_media_id=None):
+def start_conversation(
+    number,
+    agent,
+    to,
+    template,
+    variables=None,
+    header_variables=None,
+    header_media_id=None,
+    button_variables=None,
+):
     """Open a brand-new chat. A template is the only lawful first message."""
     wa_id = "".join(ch for ch in to if ch.isdigit())
     if len(wa_id) < 8:
@@ -452,7 +491,9 @@ def start_conversation(number, agent, to, template, variables=None, header_varia
         conversation.assigned_agent = agent
         conversation.save(update_fields=["assigned_agent"])
 
-    send_template(conversation, agent, template, variables, header_variables, header_media_id)
+    send_template(
+        conversation, agent, template, variables, header_variables, header_media_id, button_variables
+    )
     return conversation
 
 

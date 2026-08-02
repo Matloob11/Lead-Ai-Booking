@@ -173,17 +173,26 @@ class WaTemplate(models.Model):
 
     @property
     def buttons(self):
+        """The approved buttons, in the order Meta indexes them.
+
+        A URL button may end in its own {{1}} — a dynamic suffix the sender
+        fills per message. That one needs a button parameter alongside the body
+        parameters, and it is addressed by position, so the index travels with
+        the button rather than being recomputed later.
+        """
         component = self._component("BUTTONS")
         if not component:
             return []
         return [
             {
+                "index": index,
                 "type": b.get("type", ""),
                 "text": b.get("text", ""),
                 "url": b.get("url", ""),
                 "phone_number": b.get("phone_number", ""),
+                "variable_count": self._count_placeholders(b.get("url", "")),
             }
-            for b in component.get("buttons", [])
+            for index, b in enumerate(component.get("buttons", []))
         ]
 
     @property
