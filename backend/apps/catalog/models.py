@@ -115,16 +115,67 @@ class WaTemplate(models.Model):
     def __str__(self):
         return f"{self.name} [{self.language}]"
 
+    def _component(self, kind):
+        for component in self.components:
+            if component.get("type") == kind:
+                return component
+        return None
+
+    @staticmethod
+    def _count_placeholders(text):
+        import re
+
+        return len(set(re.findall(r"\{\{(\d+)\}\}", text or "")))
+
     @property
     def body_text(self):
-        for component in self.components:
-            if component.get("type") == "BODY":
-                return component.get("text", "")
-        return ""
+        component = self._component("BODY")
+        return component.get("text", "") if component else ""
+
+    @property
+    def footer_text(self):
+        component = self._component("FOOTER")
+        return component.get("text", "") if component else ""
+
+    @property
+    def header(self):
+        """The header as the composer needs it, or None.
+
+        ``format`` decides what the sender must supply: TEXT headers may carry
+        their own {{1}}, while IMAGE/VIDEO/DOCUMENT headers need a media id
+        uploaded before the template can go out.
+        """
+        component = self._component("HEADER")
+        if not component:
+            return None
+        text = component.get("text", "")
+        return {
+            "format": component.get("format", "TEXT"),
+            "text": text,
+            "variable_count": self._count_placeholders(text),
+        }
+
+    @property
+    def buttons(self):
+        component = self._component("BUTTONS")
+        if not component:
+            return []
+        return [
+            {
+                "type": b.get("type", ""),
+                "text": b.get("text", ""),
+                "url": b.get("url", ""),
+                "phone_number": b.get("phone_number", ""),
+            }
+            for b in component.get("buttons", [])
+        ]
 
     @property
     def variable_count(self):
         """How many positional {{n}} placeholders the body expects."""
-        import re
+        return self._count_placeholders(self.body_text)
 
-        return len(set(re.findall(r"\{\{(\d+)\}\}", self.body_text)))
+    @property
+    def requires_header_media(self):
+        header = self.header
+        return bool(header and header["format"] in {"IMAGE", "VIDEO", "DOCUMENT"})

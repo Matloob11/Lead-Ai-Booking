@@ -127,7 +127,12 @@ def send_template(request, pk):
 
     try:
         message = services.send_template(
-            conversation, request.user, template, request.data.get("variables") or {}
+            conversation,
+            request.user,
+            template,
+            request.data.get("variables") or {},
+            request.data.get("header_variables") or {},
+            request.data.get("header_media_id") or "",
         )
     except services.SendBlocked as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
@@ -152,6 +157,8 @@ def start(request):
             request.data.get("to", ""),
             template,
             request.data.get("variables") or {},
+            request.data.get("header_variables") or {},
+            request.data.get("header_media_id") or "",
         )
     except services.SendBlocked as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)

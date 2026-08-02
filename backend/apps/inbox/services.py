@@ -114,20 +114,61 @@ def send_media(conversation, agent, kind, media_id, caption="", filename=""):
     return message
 
 
-def build_template_components(template, variables):
-    """Map ``{"1": "Ali"}`` onto Meta's positional body parameters."""
-    if not variables:
-        return None
-    ordered = [variables[key] for key in sorted(variables, key=lambda k: int(k))]
-    return [
-        {
-            "type": "body",
-            "parameters": [{"type": "text", "text": str(value)} for value in ordered],
-        }
-    ]
+def _positional(values):
+    """Order ``{"1": "Ali", "2": "5pm"}`` the way Meta expects to read it."""
+    return [values[key] for key in sorted(values, key=lambda k: int(k))]
 
 
-def send_template(conversation, agent, template, variables=None):
+def render_body(template, variables):
+    """Fill the placeholders so the stored message reads like what was sent.
+
+    Without this the thread would show a raw ``Hello {{1}}`` where the customer
+    saw their own name, and an agent scrolling back could not tell what went
+    out.
+    """
+    text = template.body_text
+    for index, value in (variables or {}).items():
+        text = text.replace("{{%s}}" % index, str(value))
+    return text
+
+
+def build_template_components(template, variables=None, header_variables=None, header_media_id=None):
+    """Assemble Meta's component array for one send.
+
+    Only the parts that actually carry values are included; sending an empty
+    component makes Meta reject the whole message.
+    """
+    components = []
+
+    header = template.header
+    if header:
+        if header["format"] in {"IMAGE", "VIDEO", "DOCUMENT"} and header_media_id:
+            kind = header["format"].lower()
+            components.append(
+                {"type": "header", "parameters": [{"type": kind, kind: {"id": header_media_id}}]}
+            )
+        elif header["variable_count"] and header_variables:
+            components.append(
+                {
+                    "type": "header",
+                    "parameters": [
+                        {"type": "text", "text": str(v)} for v in _positional(header_variables)
+                    ],
+                }
+            )
+
+    if variables:
+        components.append(
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(v)} for v in _positional(variables)],
+            }
+        )
+
+    return components or None
+
+
+def send_template(conversation, agent, template, variables=None, header_variables=None, header_media_id=None):
     """Send an approved template, which also reopens the free-form window.
 
     The window is only extended once the gateway accepts the message; assuming
@@ -138,8 +179,17 @@ def send_template(conversation, agent, template, variables=None):
     if template.waba_business_id != conversation.number.waba_business_id:
         raise SendBlocked("That template belongs to a different WhatsApp number.")
 
-    components = build_template_components(template, variables)
-    preview = template.body_text or template.name
+    expected = template.variable_count
+    supplied = len(variables or {})
+    if supplied != expected:
+        raise SendBlocked(
+            f"Template '{template.name}' needs {expected} value(s), got {supplied}."
+        )
+    if template.requires_header_media and not header_media_id:
+        raise SendBlocked(f"Template '{template.name}' needs a header {template.header['format'].lower()}.")
+
+    components = build_template_components(template, variables, header_variables, header_media_id)
+    preview = render_body(template, variables) or template.name
 
     message = Message.objects.create(
         conversation=conversation,
@@ -147,7 +197,11 @@ def send_template(conversation, agent, template, variables=None):
         kind=Message.Kind.TEMPLATE,
         body=preview,
         template=template,
-        payload={"variables": variables or {}},
+        payload={
+            "variables": variables or {},
+            "header_variables": header_variables or {},
+            "header_media_id": header_media_id or "",
+        },
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
@@ -178,11 +232,11 @@ def send_template(conversation, agent, template, variables=None):
 
 
 @transaction.atomic
-def start_conversation(number, agent, to, template, variables=None):
+def start_conversation(number, agent, to, template, variables=None, header_variables=None, header_media_id=None):
     """Open a brand-new chat. A template is the only lawful first message."""
     wa_id = "".join(ch for ch in to if ch.isdigit())
-    if not wa_id:
-        raise SendBlocked("Enter a valid phone number.")
+    if len(wa_id) < 8:
+        raise SendBlocked("Enter a valid phone number with country code.")
 
     contact, _ = Contact.objects.get_or_create(wa_id=wa_id)
     conversation, _ = Conversation.objects.get_or_create(
@@ -192,7 +246,7 @@ def start_conversation(number, agent, to, template, variables=None):
         conversation.assigned_agent = agent
         conversation.save(update_fields=["assigned_agent"])
 
-    send_template(conversation, agent, template, variables)
+    send_template(conversation, agent, template, variables, header_variables, header_media_id)
     return conversation
 
 
