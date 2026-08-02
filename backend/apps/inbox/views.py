@@ -2,6 +2,8 @@ from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -12,8 +14,13 @@ from apps.gateway.client import AlotsError
 
 from . import services
 from .events import publish_conversation
-from .models import Conversation, Label, MediaAsset, Message, QuickReply
-from .serializers import serialize_conversation, serialize_message, serialize_quick_reply
+from .models import Conversation, Label, MediaAsset, Message, QuickReply, Reminder
+from .serializers import (
+    serialize_conversation,
+    serialize_message,
+    serialize_quick_reply,
+    serialize_reminder,
+)
 
 
 def _visible_conversations(user):
@@ -356,6 +363,104 @@ def retry(request, pk):
         return Response({"detail": f"Gateway rejected the message: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
     return Response(serialize_message(resent, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+def send_buttons(request, pk):
+    """Send tappable reply buttons. The tap comes back as a normal message."""
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+    try:
+        message = services.send_buttons(
+            conversation,
+            request.user,
+            (request.data.get("body") or "").strip(),
+            request.data.get("buttons") or [],
+            header=request.data.get("header", ""),
+            footer=request.data.get("footer", ""),
+        )
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except (KeyError, TypeError) as exc:
+        return Response({"detail": f"Bad button definition: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+    except AlotsError as exc:
+        return Response({"detail": f"Gateway rejected the message: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+    return Response(serialize_message(message, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+def search(request):
+    """Find a message across every chat the agent can open."""
+    term = request.GET.get("q", "").strip()
+    if len(term) < 2:
+        return Response({"detail": "Search for at least two characters"}, status=status.HTTP_400_BAD_REQUEST)
+
+    queryset = Message.objects.filter(
+        conversation__in=_visible_conversations(request.user), body__icontains=term
+    ).select_related("conversation", "conversation__contact", "conversation__number", "sent_by")
+
+    if request.GET.get("conversation"):
+        queryset = queryset.filter(conversation_id=request.GET["conversation"])
+    if request.GET.get("number"):
+        queryset = queryset.filter(conversation__number_id=request.GET["number"])
+
+    limit = min(int(request.GET.get("limit", 50)), 200)
+    hits = queryset.order_by("-created_at")[:limit]
+
+    return Response(
+        {
+            "count": queryset.count(),
+            "results": [
+                {
+                    **serialize_message(m, request),
+                    "conversation": serialize_conversation(m.conversation),
+                }
+                for m in hits
+            ],
+        }
+    )
+
+
+@api_view(["GET", "POST"])
+def reminders(request, pk=None):
+    """Follow-ups. POST under a conversation, GET lists the caller's own."""
+    if request.method == "POST":
+        conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+        due_at = parse_datetime(str(request.data.get("due_at", "")))
+        if not due_at:
+            return Response(
+                {"detail": "due_at must be an ISO timestamp"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if timezone.is_naive(due_at):
+            due_at = timezone.make_aware(due_at)
+
+        reminder = Reminder.objects.create(
+            conversation=conversation,
+            agent=request.user,
+            due_at=due_at,
+            note=str(request.data.get("note", ""))[:255],
+        )
+        return Response(serialize_reminder(reminder), status=status.HTTP_201_CREATED)
+
+    queryset = Reminder.objects.filter(agent=request.user).select_related(
+        "conversation", "conversation__contact", "conversation__number"
+    )
+    if request.GET.get("open") != "0":
+        queryset = queryset.filter(is_done=False)
+
+    return Response([serialize_reminder(r) for r in queryset[:100]])
+
+
+@api_view(["POST", "DELETE"])
+def reminder_detail(request, pk):
+    reminder = get_object_or_404(Reminder, pk=pk, agent=request.user)
+    if request.method == "DELETE":
+        reminder.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    reminder.is_done = True
+    reminder.save(update_fields=["is_done"])
+    return Response(serialize_reminder(reminder))
 
 
 @api_view(["POST"])

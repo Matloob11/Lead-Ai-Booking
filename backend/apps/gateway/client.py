@@ -156,6 +156,23 @@ class AlotsClient:
             },
         )
 
+    def send_interactive(self, phone_number_id, to, interactive):
+        """Send reply buttons or a list menu.
+
+        Only valid inside the free-form window — an interactive message is not
+        a template, so it cannot reopen a closed one.
+        """
+        return self.send_raw(
+            phone_number_id,
+            {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "interactive",
+                "interactive": interactive,
+            },
+        )
+
     def send_media(self, phone_number_id, to, kind, media_id, caption=None, filename=None):
         """Send an already-uploaded asset. ``kind`` is image/document/audio/video."""
         media = {"id": media_id}

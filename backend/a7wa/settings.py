@@ -141,6 +141,16 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.catalog.tasks.sync_numbers",
         "schedule": 6 * 60 * 60,
     },
+    # A follow-up set for 15:00 should not surface at 15:04.
+    "fire-due-reminders": {
+        "task": "apps.inbox.tasks.fire_due_reminders",
+        "schedule": 60,
+    },
+    # The last cheap hour before a free-form window shuts.
+    "warn-closing-windows": {
+        "task": "apps.inbox.tasks.warn_closing_windows",
+        "schedule": 15 * 60,
+    },
 }
 
 # Localisation

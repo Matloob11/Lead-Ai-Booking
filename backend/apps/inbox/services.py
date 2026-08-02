@@ -157,6 +157,63 @@ def render_body(template, variables):
     return text
 
 
+def send_buttons(conversation, agent, body, buttons, header="", footer=""):
+    """Send up to three tappable reply buttons.
+
+    The customer's tap comes back as an ordinary inbound message carrying the
+    button's id, so nothing special is needed to receive the answer.
+    """
+    if not conversation.is_session_open:
+        raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
+    if not buttons:
+        raise SendBlocked("Add at least one button.")
+    if len(buttons) > 3:
+        raise SendBlocked("WhatsApp allows at most three reply buttons.")
+
+    interactive = {
+        "type": "button",
+        "body": {"text": body},
+        "action": {
+            "buttons": [
+                {
+                    "type": "reply",
+                    "reply": {"id": str(b.get("id") or f"btn_{i}")[:256], "title": str(b["title"])[:20]},
+                }
+                for i, b in enumerate(buttons)
+            ]
+        },
+    }
+    if header:
+        interactive["header"] = {"type": "text", "text": header[:60]}
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+
+    message = Message.objects.create(
+        conversation=conversation,
+        direction=Message.Direction.OUTBOUND,
+        kind=Message.Kind.INTERACTIVE,
+        body=body,
+        payload={"interactive": interactive},
+        sent_by=agent,
+        status=Message.Status.QUEUED,
+    )
+    _touch(conversation, body, Message.Kind.INTERACTIVE)
+
+    try:
+        response = AlotsClient().send_interactive(
+            conversation.number.phone_number_id, conversation.contact.wa_id, interactive
+        )
+    except AlotsError as exc:
+        message.status = Message.Status.FAILED
+        message.error_detail = str(exc)[:2000]
+        message.save(update_fields=["status", "error_detail"])
+        raise
+
+    _record_result(message, response)
+    publish_message(message)
+    return message
+
+
 def build_template_components(template, variables=None, header_variables=None, header_media_id=None):
     """Assemble Meta's component array for one send.
 

@@ -62,10 +62,42 @@ def _describe(message):
     return f"[{kind}]"
 
 
+def _apply_reaction(message):
+    """Put an emoji on the bubble it belongs to.
+
+    A reaction names the message it decorates, so it is recorded there rather
+    than added to the thread as a message of its own. An empty emoji means the
+    customer took their reaction back.
+    """
+    blob = message.get("reaction") or {}
+    target = Message.objects.filter(wamid=blob.get("message_id")).first()
+    if not target:
+        return None
+
+    reactions = dict(target.reactions or {})
+    emoji = blob.get("emoji") or ""
+    sender = message.get("from", "")
+    if emoji:
+        reactions[sender] = emoji
+    else:
+        reactions.pop(sender, None)
+
+    target.reactions = reactions
+    target.save(update_fields=["reactions"])
+
+    from apps.inbox.events import publish_status
+
+    publish_status(target)
+    return target.conversation
+
+
 def _store_inbound(number, message, contact_profiles):
     wa_id = message.get("from", "")
     if not wa_id:
         return None
+
+    if message.get("type") == "reaction":
+        return _apply_reaction(message)
 
     profile_name = contact_profiles.get(wa_id, "")
     contact, _ = Contact.objects.get_or_create(wa_id=wa_id)

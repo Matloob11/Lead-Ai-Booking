@@ -1,7 +1,7 @@
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
-from .events import group_for_number
+from .events import group_for_agent, group_for_number
 
 
 class InboxConsumer(AsyncJsonWebsocketConsumer):
@@ -29,4 +29,8 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _number_groups(self, user):
-        return [group_for_number(pk) for pk in user.visible_numbers.values_list("pk", flat=True)]
+        groups = [group_for_number(pk) for pk in user.visible_numbers.values_list("pk", flat=True)]
+        # Plus a channel of their own, for anything addressed to this agent
+        # rather than to everyone watching a number.
+        groups.append(group_for_agent(user.pk))
+        return groups

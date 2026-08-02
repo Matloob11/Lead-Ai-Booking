@@ -228,6 +228,12 @@ class Message(models.Model):
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies"
     )
 
+    # Emoji the customer put on this message, keyed by their wa_id. Reactions
+    # arrive as their own webhook event naming a target, and belong on the
+    # bubble they decorate rather than as a message of their own. Sending one
+    # back is not possible — the gateway refuses the type.
+    reactions = models.JSONField(default=dict, blank=True)
+
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
     error_code = models.CharField(max_length=32, blank=True)
     error_detail = models.TextField(blank=True)
@@ -246,6 +252,31 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.direction} {self.kind} #{self.pk}"
+
+
+class Reminder(models.Model):
+    """A nudge to come back to a chat.
+
+    Real estate leads go quiet and come back weeks later, and the 24-hour
+    window makes timing matter — an agent who forgets to follow up before it
+    closes has to spend a template to say anything at all.
+    """
+
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="reminders")
+    agent = models.ForeignKey("accounts.Agent", on_delete=models.CASCADE, related_name="reminders")
+    due_at = models.DateTimeField(db_index=True)
+    note = models.CharField(max_length=255, blank=True)
+
+    is_done = models.BooleanField(default=False)
+    fired_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["due_at"]
+        indexes = [models.Index(fields=["agent", "is_done", "due_at"])]
+
+    def __str__(self):
+        return f"{self.agent} -> {self.conversation} at {self.due_at}"
 
 
 class AssignmentLog(models.Model):

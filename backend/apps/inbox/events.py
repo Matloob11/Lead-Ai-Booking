@@ -20,6 +20,23 @@ def group_for_number(number_id):
     return f"wa.number.{number_id}"
 
 
+def group_for_agent(agent_id):
+    """A channel for things meant for one person, like their own reminders."""
+    return f"wa.agent.{agent_id}"
+
+
+def publish_to_agent(agent_id, event, data):
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    try:
+        async_to_sync(layer.group_send)(
+            group_for_agent(agent_id), {"type": "inbox.event", "event": event, "data": data}
+        )
+    except Exception:  # noqa: BLE001 - a dead socket must not fail the caller
+        logger.exception("Failed to publish %s to agent %s", event, agent_id)
+
+
 def publish(conversation, event, data):
     layer = get_channel_layer()
     if layer is None:

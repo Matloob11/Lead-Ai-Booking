@@ -104,6 +104,8 @@ def serialize_message(message, request=None):
         "delivered_at": _iso(message.delivered_at),
         "read_at": _iso(message.read_at),
         "sent_by": serialize_agent(message.sent_by),
+        # {wa_id: emoji}. Drawn on the bubble, not as a message of its own.
+        "reactions": message.reactions or {},
         # Enough of the quoted message to draw the little bar above a reply,
         # without pulling its whole record along.
         "reply_to": (
@@ -116,6 +118,17 @@ def serialize_message(message, request=None):
             if message.reply_to_id
             else None
         ),
+    }
+
+
+def serialize_reminder(reminder):
+    return {
+        "id": reminder.pk,
+        "due_at": _iso(reminder.due_at),
+        "note": reminder.note,
+        "is_done": reminder.is_done,
+        "fired_at": _iso(reminder.fired_at),
+        "conversation": serialize_conversation(reminder.conversation),
     }
 
 
