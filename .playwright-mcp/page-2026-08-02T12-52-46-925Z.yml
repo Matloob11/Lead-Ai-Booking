@@ -1,0 +1,42 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e4]:
+    - heading "WhatsApp Template Sender" [level=1] [ref=f2e8]
+    - generic "Backend connection" [ref=f2e9]: Online
+    - button "Toggle dark or light theme" [ref=f2e12] [cursor=pointer]: ☾
+    - button "Backend settings" [ref=f2e13] [cursor=pointer]: ⚙
+  - generic [ref=f2e14]:
+    - generic [ref=f2e15]:
+      - generic [ref=f2e20]:
+        - generic [ref=f2e21]: "--"
+        - generic [ref=f2e22]: hrs left
+      - generic [ref=f2e23]:
+        - generic [ref=f2e24]: Awaiting number
+        - paragraph [ref=f2e27]: "--:--:--"
+        - paragraph [ref=f2e28]: Enter a valid recipient number to check its 24-hour session window.
+    - generic [ref=f2e29]:
+      - strong [ref=f2e30]: Awaiting number.
+      - text: Enter a valid recipient number to check its 24-hour session window.
+  - generic [ref=f2e31]:
+    - generic [ref=f2e32]:
+      - generic [ref=f2e33]: Recipient Phone Number
+      - textbox "Recipient Phone Number" [ref=f2e34]:
+        - /placeholder: e.g. 923001234567
+      - paragraph [ref=f2e35]: International format, country code first. 8–15 digits.
+    - generic [ref=f2e36]:
+      - generic [ref=f2e37]: Sender WhatsApp Number
+      - generic [ref=f2e38]: "123456789"
+      - paragraph [ref=f2e39]: Meta Phone Number ID. The 24-hour window is tracked per sender/customer pair.
+    - generic [ref=f2e40]:
+      - generic [ref=f2e41]: Meta-Approved Template
+      - searchbox "Meta-Approved Template" [ref=f2e42]
+      - combobox [ref=f2e43] [cursor=pointer]:
+        - option "— Select template —" [selected]
+        - option "promo_blast · ar"
+        - option "invoice_document · en"
+        - option "order_update · en"
+      - paragraph [ref=f2e44]: 3 approved templates available.
+    - generic [ref=f2e45]:
+      - generic [ref=f2e46]: Live Preview
+      - generic [ref=f2e47]: Select a template to preview the message.
+    - button "Send Template Message" [ref=f2e49] [cursor=pointer]
+  - status [ref=f2e51]

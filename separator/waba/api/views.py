@@ -15,7 +15,15 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from separator.waba.models import App, PartnerApp, Waba, Phone
+from separator.waba.models import (
+    App,
+    PartnerApp,
+    Waba,
+    Phone,
+    Template,
+    SessionWindow,
+    normalize_msisdn,
+)
 from separator.waba import tasks as waba_tasks
 from separator.waba.utils import (
     build_embedded_signup_link,
@@ -24,6 +32,7 @@ from separator.waba.utils import (
     event_processing,
     get_api_credentials,
     messages_processing,
+    send_message_from_phone,
 )
 
 logger = logging.getLogger("waba")
@@ -391,4 +400,332 @@ def embedded_signup_popup_callback(request):
         "scheduled": True,
         "waba_id": session.get("waba_id"),
         "phone_number_id": session.get("phone_number_id"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# BE-05: Agent widget API (consumed by the Bitrix side-panel widget, Session 2)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_agent_phone(user, phone_id):
+    """
+    Resolves a WABA phone the user is allowed to operate.
+
+    Mirrors the access rules in `separator.waba.views.phone_details`: owner, superuser,
+    or a Bitrix portal admin when the number is shared with B24 admins.
+    Returns (phone, error_response); exactly one is non-None.
+    """
+    if not phone_id:
+        return None, Response({"error": "phone_id is required"}, status=400)
+
+    phone = Phone.objects.select_related(
+        "waba", "waba__app", "line", "line__portal", "line__connector",
+    ).filter(phone_id=phone_id).first()
+    if not phone:
+        return None, Response({"error": "phone not found"}, status=404)
+
+    if user.is_superuser or phone.owner_id == user.id:
+        return phone, None
+
+    portal_id = phone.line.portal_id if phone.line_id and phone.line else None
+    if phone.owner_id and portal_id and phone.availabletoB24admins:
+        from separator.bitrix.models import User as BitrixUser
+
+        if BitrixUser.objects.filter(
+            owner=user, bitrix_id=portal_id, admin=True, active=True,
+        ).exists():
+            return phone, None
+
+    return None, Response({"error": "permission denied"}, status=403)
+
+
+def _serialize_window(phone, customer_phone, window):
+    open_now = bool(window and window.is_open)
+    return {
+        "phone_id": phone.phone_id,
+        "customer_phone": customer_phone,
+        "open": open_now,
+        "window_hours": settings.WABA_SESSION_WINDOW_HOURS,
+        "enforced": settings.WABA_ENFORCE_SESSION_WINDOW,
+        "last_inbound_at": window.last_inbound_at.isoformat() if window else None,
+        "expires_at": window.expires_at.isoformat() if window else None,
+        "remaining_seconds": window.remaining_seconds if window else 0,
+        # Free-form is only permitted inside the window; outside it, only templates.
+        "can_send_freeform": open_now,
+        "can_send_template": True,
+    }
+
+
+@extend_schema(
+    tags=["waba"],
+    summary="24-hour session window status for a customer",
+    description=(
+        "Returns whether the Meta 24-hour customer service window is open for a given "
+        "(business phone, customer) pair, plus the remaining seconds for a countdown timer. "
+        "A customer who has never messaged this number is reported as closed."
+    ),
+    parameters=[
+        OpenApiParameter("phone_id", str, OpenApiParameter.QUERY, required=True,
+                         description="Meta Phone Number ID of the business number."),
+        OpenApiParameter("customer_phone", str, OpenApiParameter.QUERY, required=True,
+                         description="Customer MSISDN, with or without a leading '+'."),
+    ],
+    responses={
+        200: OpenApiResponse(description="Window status."),
+        400: OpenApiResponse(description="Missing parameter."),
+        403: OpenApiResponse(description="Phone belongs to another user."),
+        404: OpenApiResponse(description="Phone not found."),
+    },
+    examples=[
+        OpenApiExample(
+            "Open window",
+            value={
+                "phone_id": "123456789", "customer_phone": "+77001234567", "open": True,
+                "window_hours": 24, "enforced": False,
+                "last_inbound_at": "2026-08-02T09:00:00+00:00",
+                "expires_at": "2026-08-03T09:00:00+00:00", "remaining_seconds": 60840,
+                "can_send_freeform": True, "can_send_template": True,
+            },
+            response_only=True,
+        ),
+    ],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def session_window_status(request):
+    phone, error = _resolve_agent_phone(request.user, request.query_params.get("phone_id"))
+    if error:
+        return error
+
+    customer_phone = request.query_params.get("customer_phone")
+    if not customer_phone:
+        return Response({"error": "customer_phone is required"}, status=400)
+
+    _open, window = SessionWindow.status_for(phone, customer_phone)
+    return Response(_serialize_window(phone, normalize_msisdn(customer_phone), window))
+
+
+@extend_schema(
+    tags=["waba"],
+    summary="Approved templates available to the agent widget",
+    description=(
+        "Lists Meta message templates for the WABA that owns this phone, including the "
+        "named and positional parameters each component expects so the widget can render "
+        "inputs for `{{1}}`, `{{2}}` and named placeholders. Defaults to APPROVED templates "
+        "that are marked available in Bitrix24."
+    ),
+    parameters=[
+        OpenApiParameter("phone_id", str, OpenApiParameter.QUERY, required=True,
+                         description="Meta Phone Number ID of the business number."),
+        OpenApiParameter("status", str, OpenApiParameter.QUERY, required=False,
+                         description="Template status filter. Defaults to APPROVED; pass 'all' to disable."),
+    ],
+    responses={
+        200: OpenApiResponse(description="Template list."),
+        403: OpenApiResponse(description="Phone belongs to another user."),
+        404: OpenApiResponse(description="Phone not found."),
+    },
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def agent_templates(request):
+    phone, error = _resolve_agent_phone(request.user, request.query_params.get("phone_id"))
+    if error:
+        return error
+
+    if not phone.waba_id:
+        return Response({"phone_id": phone.phone_id, "count": 0, "templates": []})
+
+    templates = Template.objects.filter(waba=phone.waba).prefetch_related(
+        "components__named_params",
+        "components__positional_params",
+        "components__buttons__named_params",
+        "components__buttons__positional_params",
+    )
+
+    status_filter = (request.query_params.get("status") or "APPROVED").strip()
+    if status_filter.lower() != "all":
+        templates = templates.filter(status__iexact=status_filter, availableInB24=True)
+
+    results = []
+    for template in templates.order_by("name", "lang"):
+        named, positional, components = [], [], []
+        for component in template.components.order_by("index", "id"):
+            comp_named = [p.name for p in component.named_params.all()]
+            comp_positional = [p.position for p in component.positional_params.all()]
+            named.extend(comp_named)
+            positional.extend(comp_positional)
+
+            buttons = []
+            for button in component.buttons.order_by("index", "id"):
+                buttons.append({
+                    "type": button.type,
+                    "text": button.text,
+                    "url": button.url,
+                    "phone_number": button.phone_number,
+                    "index": button.index,
+                    "named_params": [p.name for p in button.named_params.all()],
+                    "positional_params": [p.position for p in button.positional_params.all()],
+                })
+
+            components.append({
+                "type": component.type,
+                "format": component.format,
+                "text": component.text,
+                "index": component.index,
+                "named_params": comp_named,
+                "positional_params": sorted(comp_positional),
+                "buttons": buttons,
+            })
+
+        results.append({
+            "id": template.id,
+            "name": template.name,
+            "language": template.lang,
+            "category": template.category,
+            "status": template.status,
+            "content": template.content,
+            "components": components,
+            "params": {
+                "named": sorted(set(named)),
+                "positional": sorted(set(positional)),
+            },
+        })
+
+    return Response({"phone_id": phone.phone_id, "count": len(results), "templates": results})
+
+
+def _build_template_shortcode(template_id, named_params, positional_params):
+    """
+    Renders the `template+<id>+name:value|value` shortcode consumed by
+    `separator.bitrix.utils.parse_template_code`, so the Meta payload is built by the
+    same code path Bitrix agents already use rather than a second implementation.
+    """
+    segments = []
+    for key, value in (named_params or {}).items():
+        segments.append(f"{key}:{value}")
+    segments.extend(str(value) for value in (positional_params or []))
+
+    code = f"template+{template_id}"
+    if segments:
+        code = f"{code}+{'|'.join(segments)}"
+    return code
+
+
+@extend_schema(
+    tags=["waba"],
+    summary="Send an approved template to a customer",
+    description=(
+        "Sends a Meta-approved template from a business number to a customer. This is the "
+        "sanctioned way to reach a customer whose 24-hour window has closed.\n\n"
+        "Provide parameters either as `params` (named), `positional` (ordered `{{1}}`, `{{2}}` "
+        "values), or `components` for a raw Meta-format passthrough that overrides both.\n\n"
+        "Note: sending a template does NOT reopen the 24-hour window. Only an inbound "
+        "customer message does, so the window status in the response is unchanged by this call."
+    ),
+    request={
+        "application/json": {
+            "type": "object",
+            "required": ["phone_id", "customer_phone", "template_id"],
+            "properties": {
+                "phone_id": {"type": "string"},
+                "customer_phone": {"type": "string"},
+                "template_id": {"type": "string"},
+                "params": {"type": "object", "additionalProperties": {"type": "string"}},
+                "positional": {"type": "array", "items": {"type": "string"}},
+                "components": {"type": "array", "items": {"type": "object"}},
+            },
+        }
+    },
+    responses={
+        200: OpenApiResponse(description="Meta send response plus post-send window status."),
+        400: OpenApiResponse(description="Validation error or Meta rejection."),
+        403: OpenApiResponse(description="Phone belongs to another user."),
+        404: OpenApiResponse(description="Phone or template not found."),
+    },
+)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def send_template(request):
+    phone, error = _resolve_agent_phone(request.user, request.data.get("phone_id"))
+    if error:
+        return error
+
+    customer_phone = request.data.get("customer_phone")
+    template_id = request.data.get("template_id")
+    if not customer_phone:
+        return Response({"error": "customer_phone is required"}, status=400)
+    if not template_id:
+        return Response({"error": "template_id is required"}, status=400)
+
+    template = Template.objects.filter(id=template_id, waba=phone.waba).first()
+    if not template:
+        return Response({"error": "template not found for this phone's WABA"}, status=404)
+
+    to = normalize_msisdn(customer_phone)
+    if not to:
+        return Response({"error": "customer_phone is not a valid number"}, status=400)
+
+    message = {
+        "messaging_product": "whatsapp",
+        "to": to.lstrip("+"),
+    }
+
+    raw_components = request.data.get("components")
+    if raw_components:
+        message["type"] = "template"
+        message["template"] = {
+            "name": template.name,
+            "language": {"code": template.lang},
+            "components": raw_components,
+        }
+    else:
+        named_params = request.data.get("params") or {}
+        positional_params = request.data.get("positional") or []
+        if not isinstance(named_params, dict):
+            return Response({"error": "params must be an object"}, status=400)
+        if not isinstance(positional_params, list):
+            return Response({"error": "positional must be an array"}, status=400)
+
+        # The shortcode is '|'-separated and ':'-delimited, so those characters cannot
+        # survive a round trip. Reject rather than silently corrupt the message.
+        for value in list(named_params.values()) + list(positional_params):
+            if "|" in str(value):
+                return Response(
+                    {"error": "parameter values cannot contain '|'; use the 'components' field instead"},
+                    status=400,
+                )
+        for key in named_params:
+            if ":" in str(key):
+                return Response(
+                    {"error": "parameter names cannot contain ':'; use the 'components' field instead"},
+                    status=400,
+                )
+
+        from separator.bitrix.utils import parse_template_code
+
+        try:
+            message.update(parse_template_code(
+                _build_template_shortcode(template.id, named_params, positional_params)
+            ))
+        except Exception as e:
+            logger.warning("Template payload build failed for %s: %s", template.id, e)
+            return Response({"error": f"failed to build template payload: {e}"}, status=400)
+
+    if message.get("type") != "template":
+        return Response({"error": "could not resolve template payload"}, status=400)
+
+    send_result = send_message_from_phone(phone, message, template=template)
+    if isinstance(send_result, dict) and send_result.get("error"):
+        return Response({"error": send_result.get("message", "send failed"), "meta": send_result}, status=400)
+
+    # Deliberately no SessionWindow.touch() here: under Meta's rules an outbound template
+    # does not open the customer service window; only an inbound customer message does.
+    _open, window = SessionWindow.status_for(phone, to)
+    return Response({
+        "ok": True,
+        "template": {"id": template.id, "name": template.name, "language": template.lang},
+        "meta": send_result,
+        "window": _serialize_window(phone, to, window),
     })

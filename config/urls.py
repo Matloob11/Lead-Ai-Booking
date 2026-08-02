@@ -14,7 +14,12 @@ from rest_framework.authtoken.views import obtain_auth_token
 from separator.bitrix.views import log_and_serve_temp_file, proxy_waba_media_file
 from separator.bitrix.api.views import SmsViewSet, BizprocViewSet
 from separator.olx.api.views import OlxAuthorizationAPIView
-from separator.waba.api.views import partner_graph_proxy
+from separator.waba.api.views import (
+    partner_graph_proxy,
+    session_window_status,
+    agent_templates,
+    send_template,
+)
 from django.conf.urls.i18n import i18n_patterns
 
 urlpatterns = [
@@ -66,6 +71,10 @@ urlpatterns += [
         partner_graph_proxy,
         name="waba-partner-graph-object-proxy",
     ),
+    # BE-05: agent widget API (Frontend Session 2)
+    path("api/waba/session-window/", session_window_status, name="waba-session-window"),
+    path("api/waba/templates/", agent_templates, name="waba-agent-templates"),
+    path("api/waba/templates/send/", send_template, name="waba-send-template"),
     path("api/", include("config.api_router")),
     # DRF auth token
     path("api/auth-token/", obtain_auth_token),

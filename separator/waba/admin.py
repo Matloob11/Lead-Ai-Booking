@@ -23,6 +23,7 @@ from .models import (
     CtwaEvents,
     Bot,
     TemplateComponent,
+    SessionWindow,
 )
 from .tasks import call_management, force_sync_waba_phones
 
@@ -250,6 +251,23 @@ class EventAdmin(admin.ModelAdmin):
     list_display = ("id", "date", "waba")
     search_fields = ["waba__waba_id", "waba__app__client_id", "content"]
     list_filter = ("date",)
+
+
+@admin.register(SessionWindow)
+class SessionWindowAdmin(admin.ModelAdmin):
+    list_display = ("phone", "customer_phone", "last_inbound_at", "window_state", "expires_at")
+    search_fields = ("customer_phone", "phone__phone", "phone__phone_id", "last_inbound_wamid")
+    list_filter = ("last_inbound_at",)
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("phone",)
+
+    @admin.display(description="Window", boolean=True)
+    def window_state(self, instance):
+        return instance.is_open
+
+    @admin.display(description="Expires at")
+    def expires_at(self, instance):
+        return instance.expires_at
 
 
 @admin.register(Error)

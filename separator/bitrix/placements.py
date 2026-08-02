@@ -9,7 +9,7 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from separator.waba.models import Interactive, Phone, Template
+from separator.waba.models import Interactive, Phone, SessionWindow, Template
 import separator.waba.bitrix as waba_bitrix
 from separator.olx.models import OlxUser
 from separator.waweb.models import Session
@@ -554,6 +554,37 @@ class WabaPlacementModule:
     def _plain_response(text):
         return HttpResponse(text, status=200)
 
+    @staticmethod
+    def _serialize_window(is_open, window):
+        """Shape of the 24h window as consumed by the agent widget countdown."""
+        return {
+            "ok": True,
+            "open": is_open,
+            "window_hours": getattr(settings, "WABA_SESSION_WINDOW_HOURS", 24),
+            "enforced": getattr(settings, "WABA_ENFORCE_SESSION_WINDOW", False),
+            "remaining_seconds": window.remaining_seconds if window else 0,
+            "expires_at": window.expires_at.isoformat() if window else None,
+            "last_inbound_at": window.last_inbound_at.isoformat() if window else None,
+        }
+
+    def _window_status_action(self, data, sender_phones):
+        """
+        Reports whether the Meta 24h window is open for a (sender phone, customer) pair.
+
+        Drives the widget countdown and decides whether the agent is offered free-form
+        text or is restricted to approved templates.
+        """
+        sender_phone = self._get_sender_phone(sender_phones, data.get("sender_phone_id"))
+        if not sender_phone:
+            return self._action_response({"ok": False, "error": _("sender phone not found")})
+
+        recipient_phone = self._normalize_phone(data.get("phone", ""))
+        if not recipient_phone:
+            return self._action_response({"ok": False, "error": _("recipient phone is required")})
+
+        is_open, window = SessionWindow.status_for(sender_phone, recipient_phone)
+        return self._action_response(self._serialize_window(is_open, window))
+
     def _send_template_action(self, request, data, appinstance, sender_phones):
         sender_phone = self._get_sender_phone(sender_phones, data.get("sender_phone_id"))
         if not sender_phone:
@@ -824,6 +855,8 @@ class WabaPlacementModule:
             return self._send_template_action(request, data, appinstance, sender_phones)
         if action == "send_interactive":
             return self._send_interactive_action(data, appinstance, sender_phones)
+        if action == "window_status":
+            return self._window_status_action(data, sender_phones)
         if action in self.BLOCK_ACTION_METHODS:
             return self._block_users_action(data, sender_phones, action)
         if action in self.CALL_ACTIONS:

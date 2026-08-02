@@ -1,0 +1,126 @@
+- generic [active] [ref=f6e1]:
+  - main [ref=f6e5]:
+    - progressbar [ref=f6e7]
+    - generic [ref=f6e9]:
+      - link [ref=f6e11] [cursor=pointer]:
+        - /url: /ProductsHome
+        - heading "WBBOX ADMIN" [level=5] [ref=f6e12]
+      - group [ref=f6e14]:
+        - group [ref=f6e15]:
+          - link "" [ref=f6e16] [cursor=pointer]:
+            - /url: "#"
+      - generic [ref=f6e18]:
+        - link "A7GroupWBX" [ref=f6e19] [cursor=pointer]:
+          - /url: "#"
+        - text:    
+      - navigation [ref=f6e22]:
+        - tablist:    
+    - generic [ref=f6e24]:
+      - complementary [ref=f6e25]:
+        - navigation [ref=f6e29]:
+          - tabpanel [ref=f6e31]:
+            - list [ref=f6e32]:
+              - listitem [ref=f6e33] [cursor=pointer]:
+                - link " Home" [ref=f6e34]:
+                  - /url: /ProductsHome
+                  - generic [ref=f6e35]:
+                    - generic [ref=f6e36]: 
+                    - generic [ref=f6e37]: Home
+              - listitem [ref=f6e38] [cursor=pointer]:
+                - generic "Close" [ref=f6e39]:
+                  - generic [ref=f6e40]:
+                    - generic [ref=f6e41]: 
+                    - generic [ref=f6e42]: Dashboard
+              - listitem [ref=f6e43] [cursor=pointer]:
+                - generic "Close" [ref=f6e44]:
+                  - generic [ref=f6e45]:
+                    - generic [ref=f6e46]: 
+                    - generic [ref=f6e47]: Agent
+              - text: 
+              - listitem [ref=f6e48] [cursor=pointer]:
+                - generic "Close" [ref=f6e49]:
+                  - generic [ref=f6e50]:
+                    - generic [ref=f6e51]: 
+                    - generic [ref=f6e52]: Campaign
+              - listitem [ref=f6e53] [cursor=pointer]:
+                - generic "Close" [ref=f6e54]:
+                  - generic [ref=f6e55]:
+                    - generic [ref=f6e56]: 
+                    - generic [ref=f6e57]: Config
+              - listitem [ref=f6e58] [cursor=pointer]:
+                - generic "Close" [ref=f6e59]:
+                  - generic [ref=f6e60]:
+                    - generic [ref=f6e61]: 
+                    - generic [ref=f6e62]: Catalog
+              - listitem [ref=f6e63] [cursor=pointer]:
+                - generic "Close" [ref=f6e64]:
+                  - generic [ref=f6e65]:
+                    - generic [ref=f6e66]: 
+                    - generic [ref=f6e67]: AI
+                    - generic [ref=f6e68]: Automation
+              - text: 
+              - listitem [ref=f6e69] [cursor=pointer]:
+                - generic "Close" [ref=f6e70]:
+                  - generic [ref=f6e71]:
+                    - generic [ref=f6e72]: 
+                    - generic [ref=f6e73]: Report
+              - listitem [ref=f6e74] [cursor=pointer]:
+                - generic "Close" [ref=f6e75]:
+                  - generic [ref=f6e76]:
+                    - generic [ref=f6e77]: 
+                    - generic [ref=f6e78]: Payment
+              - listitem [ref=f6e79] [cursor=pointer]:
+                - link " API" [ref=f6e80]:
+                  - /url: https://alots.io/developer/console.html?api=whatsapp
+                  - generic [ref=f6e81]:
+                    - generic [ref=f6e82]: 
+                    - generic [ref=f6e83]: API
+          - text: 
+      - generic [ref=f6e86]:
+        - generic [ref=f6e88]:
+          - text: ":"
+          - generic [ref=f6e90]:
+            - strong [ref=f6e91]:
+              - text: Update
+              - generic [ref=f6e92]: 
+            - text: Technology is best when it brings people together |
+        - generic [ref=f6e93]:
+          - generic [ref=f6e95]:
+            - heading " WABA Channels" [level=5] [ref=f6e96] [cursor=pointer]:
+              - generic [ref=f6e97]: 
+              - text: WABA Channels
+            - navigation "breadcrumb" [ref=f6e98]:
+              - list [ref=f6e99]:
+                - listitem [ref=f6e100]:
+                  - link "WhatsApp" [ref=f6e101] [cursor=pointer]:
+                    - /url: "#"
+                - listitem [ref=f6e102]:
+                  - link "Configuration" [ref=f6e103] [cursor=pointer]:
+                    - /url: "#"
+                - listitem [ref=f6e104]: WABA Channels
+          - separator [ref=f6e105]
+          - button " Register New WhatsApp" [ref=f6e107] [cursor=pointer]:
+            - generic [ref=f6e108]: 
+            - text: Register New WhatsApp
+          - text:       
+    - text: 
+  - link [ref=f6e110] [cursor=pointer]:
+    - /url: /ProductsHome
+  - generic [ref=f6e112]:
+    - checkbox " " [ref=f6e113]
+    - generic [ref=f6e114]: 
+    - generic [ref=f6e116]: 
+  - link "Scroll back to top":
+    - /url: "#top"
+    - generic: 
+  - contentinfo [ref=f6e118]:
+    - generic [ref=f6e120]:
+      - text: "Email Id: support@wbbox.in | Mobile Number :9816373892 | All Rights Reserved By WBBOX -"
+      - link "Privacy" [ref=f6e121] [cursor=pointer]:
+        - /url: /Home/Privacy
+      - text: "|"
+      - link "Terms & Conditions" [ref=f6e122] [cursor=pointer]:
+        - /url: /Home/TermsAndConditions
+  - link "Scroll back to top":
+    - /url: "#top"
+    - generic: 

@@ -22,7 +22,7 @@ from celery import shared_task
 import separator.olx.tasks as olx_tasks
 import separator.waba.utils as waba
 import separator.waba.tasks as waba_tasks
-from separator.waba.models import Ctwa, Phone
+from separator.waba.models import Ctwa, Phone, SessionWindow
 
 from separator.waweb.models import Session
 import separator.waweb.tasks as waweb_tasks
@@ -1601,6 +1601,22 @@ def event_processor(self, data):
                 elif not files and text:
                     message["type"] = "text"
                     message["text"] = {"body": text}
+
+                # BE-03: enforce the Meta 24h customer service window before spending a
+                # Meta API call. Templates are exempt - they are the sanctioned way to
+                # reach a customer whose window has closed.
+                if settings.WABA_ENFORCE_SESSION_WINDOW and message.get("type") != "template":
+                    window_open, _window = SessionWindow.status_for(phone, chat)
+                    if not window_open:
+                        send_error_to_openline(
+                            appinstance.id,
+                            chat,
+                            "24-hour session window is closed for this contact. "
+                            "Send an approved template to re-engage.",
+                            connector.code,
+                            line_id,
+                        )
+                        return "session window closed"
 
                 # Если есть файлы, отправляем сообщение с каждым файлом отдельно
                 if files:

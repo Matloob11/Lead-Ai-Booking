@@ -1,0 +1,655 @@
+                                                                                                                            A7 GROUP | WhatsApp Lead-Control System Spec
+
+             A7 GROUP REAL ESTATE
+
+                                      Anwar Al Riyadh Properties · Dubai
+
+     WhatsApp Business Communication & Lead-Control System
+
+                                Technical Specification & Developer Build Guide
+
+Prepared for
+The A7 Group Development Team (Lahore) -- n8n / Backend / Mobile Engineers
+Purpose: A complete, build-ready blueprint. No feature should be missed.
+Target build time: 15 working days with 2-3 engineers using AI-assisted development.
+
+                                                    Version 1.0 · Confidential -- Internal Use Only
+
+                                                              Confidential -- A7 Group Real Estate · Page 1
+                                                         A7 GROUP | WhatsApp Lead-Control System Spec
+
+Contents
+
+1. Executive Summary -- What We Are Building and Why
+2. The Business Problems This Solves
+3. System Architecture (The Big Picture)
+4. Component 1 -- WhatsApp Business API Layer
+5. Component 2 -- Agent Mobile App (React Native)
+6. Component 3 -- The 24-Hour Window & Template System
+7. Component 4 -- Bitrix24 Two-Way Sync
+8. Component 5 -- AI Sentiment & Serious-Lead Detection
+9. Component 6 -- Manager Dashboard
+10. Component 7 -- Duplicate-Client Detection
+11. Component 8 -- Competitor-Agent Detection
+12. Component 9 -- Quality Monitoring & Admin Controls
+13. Database Schema
+14. WhatsApp Message Cost Control (Meta Pricing)
+15. 15-Day Implementation Plan (Day by Day)
+16. Testing Checklist
+17. Deployment & Go-Live Guide
+18. What to Give the Engineers on Day 1
+
+Confidential -- A7 Group Real Estate · Page 2
+                                                                                                                               A7 GROUP | WhatsApp Lead-Control System Spec
+
+1. Executive Summary -- What We Are Building and Why
+
+This document describes a single, connected system that lets A7 Group agents talk to customers on WhatsApp using
+the company's own number -- never their personal number -- while the company keeps full control and visibility of
+every conversation.
+Today, agents pull leads out of Bitrix24, message customers from their personal WhatsApp, and close deals privately.
+Management cannot see what was said, cannot protect the lead, and cannot stop an agent from taking the client with
+them if they leave. This system closes that gap completely.
+
+The one-line goal
+
+  Goal
+  Every customer conversation happens on the COMPANY WhatsApp number, is visible to management in real time, is
+  logged automatically into Bitrix24, and works from an agent's phone while they are out doing viewings -- with no
+  laptop required.
+
+What the agent experiences
+
+  · One app. A simple app on their phone (like a normal chat app) that shows their assigned customer chats.
+  · Chat normally. They tap a customer, type, and send -- the message goes out from the company WhatsApp
+
+      number.
+  · One-tap re-open. If the 24-hour window is closed, one button sends an approved template to re-open the chat.
+  · No personal number. They never see or use their personal WhatsApp for company customers.
+
+What the manager (you) experiences
+
+  · See everything. A live dashboard showing every agent's conversations as they happen.
+  · Smart alerts. Automatic flags: serious buyer, competitor agent, duplicate client, poor agent behaviour.
+  · One source of truth. Everything already sitting inside / linked to Bitrix24 -- no double data entry.
+
+                                                                  Confidential -- A7 Group Real Estate · Page 3
+                                                             A7 GROUP | WhatsApp Lead-Control System Spec
+
+2. The Business Problems This Solves
+
+Each feature in this build exists to solve a specific, real problem A7 Group faces every day. Engineers should keep
+these in mind -- the goal is the business outcome, not just the code.
+
+Problem today                                                How this system fixes it
+Agents talk to customers on personal WhatsApp;
+management is blind to it.                                   All chats run through the company number and are
+Leads get 'stolen' -- an agent leaves and takes the client.  visible + logged automatically.
+
+Agents are out on viewings with only a phone, not a          The company owns the number and the chat history. The
+laptop.                                                      relationship stays with A7 Group.
+After 24 hours WhatsApp blocks free messages; agents
+give up and use personal WhatsApp.                           A mobile app lets them do everything from the phone, in
+Two or three agents unknowingly chase the same client        the field.
+and undercut each other.
+Competitor agents pose as buyers to extract owner            One-tap approved templates re-open the chat instantly.
+details and cut A7 out.                                      No friction.
+No idea which leads are hot.
+                                                             Duplicate-client detection alerts management the
+Template/utility messages cost money if sent carelessly.     moment it happens.
+
+                                                             A 30k-40k agent database auto-flags them before the
+                                                             agent even replies.
+
+                                                             AI reads each chat and scores how serious the customer
+                                                             is.
+
+                                                             The system uses the free 24-hour window first and only
+                                                             sends paid templates when needed.
+
+Confidential -- A7 Group Real Estate · Page 4
+                                                                                 A7 GROUP | WhatsApp Lead-Control System Spec
+
+3. System Architecture (The Big Picture)
+
+The system has five moving parts. Everything is glued together by one central Backend Server that A7 Group owns
+and controls.
+
+The five parts
+
+  · 1) WhatsApp Cloud API. Meta's WhatsApp Business Cloud API -- already owned by A7 Group. Sends and
+      receives the actual WhatsApp messages.
+
+  · 2) Backend Server. A Node.js server that receives every incoming message (webhook), stores it, applies the AI +
+      detection logic, and pushes it to the app, dashboard and Bitrix24. This is the brain.
+
+  · 3) Agent Mobile App. The phone app agents use in the field. It talks ONLY to the Backend Server, never directly
+      to Meta.
+
+  · 4) Manager Dashboard. A web dashboard for you and sales managers to watch and control everything.
+  · 5) Bitrix24 + n8n. Already owned. The backend writes contacts, deals and chat history into Bitrix24 so the CRM
+
+      stays the record of truth. n8n handles the automation glue.
+
+How a message travels (incoming)
+
+  1. Customer sends a WhatsApp message to the company number.
+  2. Meta forwards it to the Backend Server via webhook.
+  3. Backend saves the message, checks: is this number a known competitor agent? Is this client already talking to
+
+      another agent? What is the AI sentiment?
+  4. Backend pushes the message + flags to the assigned agent's app and to the Manager Dashboard in real time.
+  5. Backend writes/updates the contact and chat in Bitrix24.
+
+How a message travels (outgoing)
+
+  6. Agent types a reply in the app (or taps a template button).
+  7. App sends it to the Backend Server.
+  8. Backend checks the 24-hour window: if open, send free-form; if closed, send an approved template.
+  9. Backend calls Meta's WhatsApp API to deliver the message from the company number.
+  10. Backend logs the outgoing message to the database, dashboard and Bitrix24.
+
+  Key design rule
+  The Agent App NEVER connects directly to Meta or holds any WhatsApp API key. It only talks to our Backend Server.
+  This is what keeps the company in full control and stops any agent from taking the number or the data with them.
+
+Recommended technology
+
+Layer           Recommended tech               Why
+
+Backend server  Node.js + Express (or NestJS)  Fast, huge talent pool, works perfectly with
+                                               WhatsApp Cloud API & Bitrix24 REST.
+Database        PostgreSQL
+                                               Reliable, handles the message + agent-database
+Realtime        Socket.IO or WebSocket         volume easily.
+
+                                               Pushes new messages to app & dashboard instantly.
+
+                                  Confidential -- A7 Group Real Estate · Page 5
+Layer         Recommended tech                                                    A7 GROUP | WhatsApp Lead-Control System Spec
+Mobile app    React Native
+                                                   Why
+Dashboard     React + Tailwind
+AI sentiment  OpenAI / Claude API                  One codebase for Android + iPhone; agents install on
+                                                   any phone.
+Automation glue n8n (already owned)                Fast to build, clean, works on any browser.
+                                                   Reads chats and scores lead seriousness with no
+Hosting       AWS (Lightsail/EC2 -- already used)  training needed.
+                                                   Connects backend events to Bitrix24 actions without
+                                                   heavy coding.
+                                                   A7 Group already runs Bitrix24 here; keep it together.
+
+                                     Confidential -- A7 Group Real Estate · Page 6
+                                               A7 GROUP | WhatsApp Lead-Control System Spec
+
+4. Component 1 -- WhatsApp Business API Layer
+
+A7 Group already has WhatsApp Business API access. This section tells the engineer exactly how to wire it into the
+Backend Server.
+
+4.1 What must be in place
+
+  · A verified Meta Business account and a WhatsApp Business API phone number (already owned).
+  · A permanent System User access token (not a temporary token) so the connection never expires.
+  · A registered Webhook URL pointing to our Backend Server, subscribed to 'messages' events.
+  · Pre-approved message templates in the Meta Business Manager (see Section 6).
+
+4.2 Receiving messages (Webhook)
+
+The Backend exposes one public HTTPS endpoint, e.g. /webhook/whatsapp. Meta sends a GET request once to verify
+it (echo the challenge token), then POSTs every incoming message to it.
+
+For each incoming message the backend must capture: sender phone number, message text/media, timestamp, and
+the WhatsApp message ID. Store it, then run the detection pipeline (Sections 8, 10, 11).
+
+4.3 Sending messages
+
+The backend sends messages by calling Meta's Cloud API endpoint /{phone-number-id}/messages with the company
+token. Two message types matter:
+
+  · Session message. Free-form text -- allowed only inside the open 24-hour window.
+  · Template message. Pre-approved template -- required to start a chat or re-open a chat after 24 hours.
+
+  Security note for the engineer
+  The WhatsApp token lives ONLY on the Backend Server, stored as an environment variable / secret. It is never shipped
+  inside the mobile app or the dashboard code. If it ever leaks, rotate it immediately in Meta Business Manager.
+
+Confidential -- A7 Group Real Estate · Page 7
+                                                                              A7 GROUP | WhatsApp Lead-Control System Spec
+
+5. Component 2 -- Agent Mobile App (React Native)
+
+This is the app the agent installs on their phone and uses in the field. It must feel as simple as a normal chat app so
+agents actually use it and never fall back to personal WhatsApp.
+
+5.1 Screens the app must have
+
+Screen           What it does
+
+Login            Agent logs in with company credentials. No WhatsApp key is stored on the phone.
+
+Chat list        All customers assigned to this agent, newest first, with unread badges and flags (
+                 serious,  competitor,  duplicate).
+Chat window
+Template button  The full conversation. Type & send. Shows if the 24-hour window is open or closed.
+
+Customer card    When window is closed, a one-tap menu of approved templates (property list,
+Notifications    follow-up, greeting, etc.).
+
+                 Name, community interest, budget, Bitrix24 link, and any auto-flags on this contact.
+
+                 Push alerts for new customer messages even when the app is closed.
+
+5.2 Rules built into the app
+
+  · Least access. An agent sees ONLY their own assigned chats -- not the whole company's leads.
+  · Company number only. Sending always goes through the Backend, which stamps the company number as
+
+      sender.
+  · No dead ends. If the 24-hour window is closed, the free-text box is disabled and the template menu is shown
+
+      instead -- the agent physically cannot get stuck.
+  · Full audit. Every action (open chat, send, send template) is logged with agent ID and time.
+
+5.3 Why an app and not just a website
+
+Malik's requirement: when an agent is out on a viewing they must NOT have to open a browser and log into a
+website. A native app gives push notifications, one-tap open from the home screen, and works smoothly on a phone
+in the field. The app is the priority; a browser version of the dashboard is only for managers at a desk.
+
+                               Confidential -- A7 Group Real Estate · Page 8
+                                                                                                                               A7 GROUP | WhatsApp Lead-Control System Spec
+
+6. Component 3 -- The 24-Hour Window & Template System
+
+This is the single most important feature for adoption. If agents find it hard to message a customer after a day or two,
+they will go back to personal WhatsApp. This must be effortless.
+
+6.1 How WhatsApp's rule works
+
+  · When a customer messages you, a 24-hour 'service window' opens. Inside it you can send any free-form
+      message for free.
+
+  · After 24 hours of customer silence, the window closes. You can then only reach them with a pre-approved
+      TEMPLATE message.
+
+  · A7 Group's reality: customers often go quiet for 2-3 days while the team finds the right property, then the agent
+      needs to re-open the chat. This is normal and must be one tap.
+
+6.2 What the system does automatically
+
+  11. The backend tracks, per customer, the time of their last inbound message.
+  12. The app shows a clear status: green 'Open -- reply freely' or grey 'Closed -- send a template to re-open'.
+  13. When closed, the agent taps one template from a ready list; the backend sends the approved Meta template
+
+      with the customer's name filled in.
+  14. The customer replies  the 24-hour window re-opens  the agent chats freely again.
+
+6.3 Templates to pre-approve in Meta (starting set)
+
+Template name     Purpose                                                 Category
+
+welcome_intro     First contact / greeting a new lead.                    Marketing / Utility
+property_ready    'We found properties matching your needs' re-open.      Utility
+
+follow_up         Gentle follow-up after silence.                         Utility
+viewing_confirm   Confirm a viewing date/time.                            Utility
+
+document_request  Ask for documents (Emirates ID, etc.).                  Utility
+
+Each template should have 2-3 rotating versions (worded differently) to stay compliant with anti-spam rules -- the
+
+same pattern already used in A7 Group's owner-outreach packs.
+
+Adoption is the whole game
+If this feature takes more than ONE tap, agents will abandon the system. Build the template menu to be instant, pre-
+filled with the customer's name, and impossible to get wrong.
+
+                           Confidential -- A7 Group Real Estate · Page 9
+                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+7. Component 4 -- Bitrix24 Two-Way Sync
+
+Bitrix24 stays the company's record of truth. The agent never has to enter anything twice -- the backend keeps
+Bitrix24 updated automatically.
+
+7.1 What syncs into Bitrix24
+
+  · Contacts. Every new customer becomes / updates a Contact in Bitrix24.
+  · Chat history. Every conversation is attached to that contact (as timeline/chat history or a linked deal).
+  · Flags & scores. AI sentiment score, competitor-agent flag, and duplicate flag are written to custom fields on the
+
+      contact.
+  · Deals. Serious leads can auto-create or move a Deal in the sales pipeline.
+
+7.2 How it connects
+
+The backend uses the Bitrix24 REST API (inbound webhook) already available on A7 Group's on-premise Bitrix24. n8n
+can handle much of this glue: backend fires an event  n8n workflow  Bitrix24 action. This keeps heavy CRM logic
+out of the core code and easy to change later.
+
+Custom fields to add in Bitrix24: Sentiment Score, Lead Status (Hot/Warm/Cold), Is Competitor Agent (Y/N), Duplicate
+Alert (Y/N), Assigned Agent, Last WhatsApp Contact.
+
+Confidential -- A7 Group Real Estate · Page 10
+                                                                                                                               A7 GROUP | WhatsApp Lead-Control System Spec
+
+8. Component 5 -- AI Sentiment & Serious-Lead Detection
+
+AI reads each conversation and tells you which customers are serious, so agents and managers focus energy where it
+matters.
+
+8.1 What the AI decides                     Meaning
+                                            The customer's mood and interest level.
+ Signal                                     How likely this is a real, ready buyer/tenant vs a time-waster.
+ Sentiment (positive / neutral / negative)  A simple label managers can act on instantly.
+ Seriousness score (0-100)                  Buying, renting, just browsing, or (importantly) a competitor agent
+ Lead status (Hot / Warm / Cold)            fishing.
+ Intent
+
+8.2 How it works
+
+  15. After each customer message (or every few messages), the backend sends the recent conversation to the AI API
+      with a fixed instruction: 'Score this real-estate lead's seriousness 0-100, give sentiment, status and intent, reply
+      in JSON only.'
+
+  16. The backend saves the scores and updates the app, dashboard and Bitrix24.
+  17. If the score crosses a 'hot' threshold, the manager gets an instant alert: 'Serious customer -- Agent X,
+
+      Community Y.'
+
+  Cost tip
+  Do not call the AI on every single word. Batch it -- score after a customer replies, or every 3-4 messages. This keeps AI
+  costs low while still catching hot leads fast.
+
+                                            Confidential -- A7 Group Real Estate · Page 11
+                                                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+9. Component 6 -- Manager Dashboard
+
+The web dashboard is where you, the sales manager and the CEO watch the whole operation live. This is your control
+tower.
+
+9.1 What the dashboard shows
+
+  · Live chats. Every agent's live conversations, updating in real time.
+  · Hot leads. A 'Hot Leads' panel -- all serious customers right now, across all agents.
+  · Alerts. Alerts feed: competitor agent detected, duplicate client detected, agent misbehaviour.
+  · Agent scoreboard. Per-agent stats: messages sent, response time, hot leads handled, deals moved.
+  · Search. Search any customer / number and see the full history instantly.
+
+9.2 Roles                       Can see / do
+                                Only their own assigned chats (in the app).
+ Role                           All chats of their team + alerts + stats.
+ Agent                          Everything, all teams, plus admin controls.
+ Sales Manager
+ CEO / Managing Director (you)
+
+                                Confidential -- A7 Group Real Estate · Page 12
+                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+10. Component 7 -- Duplicate-Client Detection
+
+Sometimes one customer contacts two or three A7 Group agents. The agents then compete against each other,
+undercut on price, and the deal breaks or margin is lost. The company must know instantly.
+
+10.1 The logic
+
+  18. Every incoming customer number is checked against all currently active conversations.
+  19. If the same number is already open with a different agent, the system raises a Duplicate-Client alert.
+  20. The alert goes to both agents' managers and appears on the dashboard: 'Client +9715XXXX is talking to Agent A
+
+      and Agent B.'
+  21. Management decides who keeps the client. The system can then re-assign the chat to one agent.
+
+  Business value
+  This single feature stops internal price wars and 'deal break' situations that cost A7 Group money and reputation. One
+  customer, one agent, decided by management -- not by whoever shouts loudest.
+
+Confidential -- A7 Group Real Estate · Page 13
+                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+11. Component 8 -- Competitor-Agent Detection
+
+Many callers on Property Finder and Bayut are not real buyers -- they are competitor agents fishing for property
+details, who then go directly to the owner to avoid paying A7 Group a commission. A7 Group already has a database
+of 30,000-100,000 agent numbers. The system uses it to unmask them automatically.
+
+11.1 The logic
+
+  22. A7 Group's agent-number database (30k-100k numbers) is loaded into a dedicated, indexed table.
+  23. The moment any call or WhatsApp arrives, the number is checked against this list -- before the agent even
+
+      replies.
+  24. If it matches, the app and dashboard show a clear banner: 'THIS IS A COMPETITOR AGENT.'
+  25. The agent instantly knows to change approach -- share less, protect the owner's details, and follow company
+
+      policy on what not to reveal.
+
+11.2 Keeping the list fresh
+
+  · Admin can bulk-upload new agent numbers (Excel/CSV) any time.
+  · If a flagged 'agent' turns out to be a real buyer, admin can remove or whitelist them.
+  · The system can suggest new agent numbers to add when a caller behaves like an agent (optional AI assist).
+
+  Compliance reminder
+  This database is used defensively -- to recognise who is calling YOU and protect owner details. It must be used in line
+  with UAE data-protection rules (PDPL) and TDRA telemarketing regulations. Do not use these numbers for unsolicited
+  cold marketing.
+
+Confidential -- A7 Group Real Estate · Page 14
+                                                                                                                               A7 GROUP | WhatsApp Lead-Control System Spec
+
+12. Component 9 -- Quality Monitoring & Admin Controls
+
+12.1 Quality monitoring
+
+  · Behaviour flags. AI flags rude, unprofessional, or off-policy messages by agents.
+  · Response time. Slow responses (customer waiting too long) are highlighted.
+  · Coaching. Managers can review any conversation and leave a private coaching note.
+
+12.2 Admin controls (for you)
+
+  · Add / remove agents and assign them to communities.
+  · Add / edit message templates and their rotating versions.
+  · Upload / update the competitor-agent database.
+  · Set the 'hot lead' threshold and alert rules.
+  · Re-assign a customer from one agent to another in one click.
+  · Export any conversation or report.
+
+                                                                 Confidential -- A7 Group Real Estate · Page 15
+                                                                                 A7 GROUP | WhatsApp Lead-Control System Spec
+
+13. Database Schema
+
+A simple, clean PostgreSQL schema. This is enough to build the whole system; engineers can add indexes and fields as
+needed.
+
+agents                Type       Notes
+                      UUID       Primary key
+ Field                text       Agent full name
+ id                   text       Agent's own phone (for login only)
+ name                 text       agent / manager / admin
+ phone                text       Assigned community/pod
+ role                 boolean    Enabled or disabled
+ community
+ active
+
+customers             Type       Notes
+                      UUID       Primary key
+ Field                text       Customer WhatsApp number (E.164)
+ id                   text       From WhatsApp profile / manual
+ wa_number            UUID       FK  agents.id
+ name                 text       Linked Bitrix24 contact
+ assigned_agent_id    int        0-100 latest AI score
+ bitrix_contact_id    text       hot / warm / cold
+ sentiment_score      boolean    Matched against agent DB
+ lead_status          boolean    Talking to >1 agent
+ is_competitor_agent  timestamp  Drives the 24-hour window
+ duplicate_flag
+ last_inbound_at
+
+messages              Type       Notes
+                      UUID       Primary key
+ Field                UUID       FK  customers.id
+ id                   UUID       FK  agents.id (null if inbound)
+ customer_id          text       inbound / outbound
+ agent_id             text       Message content
+ direction            boolean    Was a template used
+ body                 text       Meta's message ID
+ is_template          timestamp  Time
+ wa_message_id
+ created_at
+
+                                 Confidential -- A7 Group Real Estate · Page 16
+competitor_agents  Type                                                     A7 GROUP | WhatsApp Lead-Control System Spec
+                   UUID
+ Field             text       Notes
+ id                text       Primary key
+ phone             timestamp  Agent number (indexed for fast lookup)
+ source                       Where the number came from
+ added_at          Type       When added
+                   UUID
+templates          text       Notes
+                   jsonb      Primary key
+ Field             text       Meta template name
+ id                           Rotating worded versions
+ name                         utility / marketing
+ versions
+ category
+
+                              Confidential -- A7 Group Real Estate · Page 17
+                                                  A7 GROUP | WhatsApp Lead-Control System Spec
+
+14. WhatsApp Message Cost Control (Meta Pricing)
+
+Meta charges for WhatsApp messages based on message category and whether you are inside the free service
+window. The system is designed to minimise cost automatically.
+
+14.1 The key facts
+
+  · Free window. Messages a customer sends to you, and your replies inside the 24-hour window, are effectively
+      free (service conversations).
+
+  · Utility < Marketing. Utility templates (order/appointment/follow-up style) are cheaper than Marketing
+      templates.
+
+  · Re-open cost. Re-opening a chat after 24 hours needs a template, which has a cost -- so the system uses the
+      free window whenever possible.
+
+  Important -- verify current pricing
+  Meta changes WhatsApp pricing periodically (and moved toward per-message pricing for utility/marketing categories).
+  Before go-live, the engineer must confirm the CURRENT UAE rates in the Meta Business Manager, because exact per-
+  message fees change over time.
+
+14.2 How the system saves money
+
+  26. Always prefer a free-form reply inside the open 24-hour window.
+  27. When a template is required, default to the cheaper Utility category, not Marketing, wherever the message
+
+      qualifies.
+  28. Show the manager a monthly report: number of free messages vs paid templates, and estimated spend -- so
+
+      cost is always visible.
+
+Confidential -- A7 Group Real Estate · Page 18
+                                                            A7 GROUP | WhatsApp Lead-Control System Spec
+
+15. 15-Day Implementation Plan (Day by Day)
+
+This plan assumes 2-3 engineers working in parallel, using AI coding tools (GitHub Copilot / ChatGPT / Claude) to
+move fast. A7 Group already owns the WhatsApp API, Bitrix24 and n8n, which removes the slowest setup steps.
+
+Team split
+
+  · Engineer 1: Backend + WhatsApp API + Bitrix24 + detection logic.
+  · Engineer 2: React Native mobile app.
+  · Engineer 3: Manager dashboard + AI sentiment + n8n glue (can be shared with Engineer 1 if only 2 people).
+
+Day-by-day
+
+Days   Work                                                                        Owner
+1-2    Set up server, database, WhatsApp webhook receiving & sending working end-  Eng 1
+       to-end.
+1-2    Mobile app skeleton: login + chat list + chat window (dummy data).          Eng 2
+3-4    Connect app to backend: real messages send & receive from company number.   Eng 1+2
+3-4    24-hour window logic + template send (one-tap re-open).                     Eng 1
+5-6    Bitrix24 sync: contacts, chat history, custom fields via REST/n8n.          Eng 3
+5-7    Manager dashboard: live chats, agent list, search.                          Eng 3
+7-8    AI sentiment scoring + hot-lead alerts.                                     Eng 3
+8-9    Competitor-agent database load + real-time lookup + banner.                 Eng 1
+9-10   Duplicate-client detection + alerts.                                        Eng 1
+10-11  Quality monitoring, admin panel (templates, agents, thresholds).            Eng 3
+11-12  Push notifications, polish app UX, role permissions.                        Eng 2
+12-13  Full integration testing (see Section 16).                                  All
+13-14  Fix bugs, load real competitor database, real templates approved in Meta.   All
+14-15  Deploy to production, train a pilot group of agents, go live.               All
+
+Realistic expectation
+
+15 days is achievable for a working system with 2-3 focused engineers and AI assistance, BECAUSE the
+WhatsApp API, Bitrix24 and n8n already exist. If only one engineer is available, expect 26-32 days. Build the
+mobile app + WhatsApp + 24-hour window FIRST (that is what agents touch daily); dashboards and AI can
+follow in week 2.
+
+            Confidential -- A7 Group Real Estate · Page 19
+                                                                       A7 GROUP | WhatsApp Lead-Control System Spec
+
+16. Testing Checklist
+
+Do not go live until every box below passes.
+ Customer sends a WhatsApp message  it appears in the assigned agent's app within seconds.
+ Agent replies in the app  customer receives it from the COMPANY number (not the agent's personal number).
+ Message appears in the Manager Dashboard live.
+ Message and contact appear in Bitrix24.
+ After 24 hours of silence, the free-text box is disabled and the template menu appears.
+ One tap on a template re-opens the chat successfully.
+ AI sentiment score appears and updates as the chat continues.
+ A hot lead triggers a manager alert.
+ A known competitor-agent number triggers the 'Competitor Agent' banner instantly.
+ The same customer talking to two agents triggers a Duplicate-Client alert.
+ Agent can only see their own chats; manager sees the whole team.
+ Push notification arrives when the app is closed.
+ Admin can upload competitor numbers, add templates, and re-assign a customer.
+ Cost report shows free vs paid messages for the month.
+ No WhatsApp API key is present anywhere in the mobile app or dashboard code.
+
+                       Confidential -- A7 Group Real Estate · Page 20
+                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+17. Deployment & Go-Live Guide
+
+29. Host the backend on A7 Group's AWS (same environment as Bitrix24) with HTTPS.
+30. Store all secrets (WhatsApp token, Bitrix24 webhook, AI key) as server environment variables -- never in code.
+31. Register the production webhook URL in Meta Business Manager.
+32. Get all message templates approved in Meta (allow 1-2 days for Meta review).
+33. Load the real competitor-agent database (Excel  import).
+34. Create agent accounts and assign communities.
+35. Publish the mobile app: Android APK / Google Play internal, and iOS via TestFlight or App Store.
+36. Run a pilot with 3-5 agents for one week before rolling out to the full team.
+37. Once stable, mandate the app company-wide and disable personal-WhatsApp use for company customers via
+
+    the signed agent policy.
+
+Confidential -- A7 Group Real Estate · Page 21
+                                                A7 GROUP | WhatsApp Lead-Control System Spec
+
+18. What to Give the Engineers on Day 1
+
+Hand the team this list so nothing blocks the start.
+
+  · Meta Business account access + WhatsApp Business API phone number ID and permanent token.
+  · Bitrix24 inbound webhook URL and API access.
+  · Access to the AWS environment (or a new server) for hosting.
+  · n8n access (already owned).
+  · An AI API key (OpenAI or Claude) for sentiment analysis.
+  · The competitor-agent Excel database (30k-100k numbers).
+  · A7 Group logo + brand colours (navy & gold) for the app and dashboard.
+  · The list of communities and which agents belong to each.
+  · This specification document.
+
+                                        A7 Group Real Estate -- Confidential
+This blueprint is designed so no requirement is missed. Build the daily-use pieces first, then layer intelligence on top.
+
+Confidential -- A7 Group Real Estate · Page 22
+

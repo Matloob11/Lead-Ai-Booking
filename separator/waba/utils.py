@@ -10,7 +10,7 @@ import hashlib
 import requests
 import mimetypes
 from urllib.parse import urlparse, urlencode
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 
 from django.db import models
 from django.utils import timezone
@@ -41,6 +41,7 @@ from .models import (
     TemplateComponentPositionalParam,
     TemplateBroadcastRecipient,
     TemplateBroadcast,
+    SessionWindow,
 )
 
 API_URL = settings.FACEBOOK_API_URL
@@ -1433,6 +1434,33 @@ def _queue_waba_read_status(waba, phone, message_id):
         logger.warning(f"Failed to queue read status for message {message_id}: {e}")
 
 
+def _parse_waba_timestamp(raw):
+    """Meta sends message timestamps as a unix epoch string. Falls back to now."""
+    try:
+        return datetime.fromtimestamp(int(raw), tz=dt_timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return timezone.now()
+
+
+def _touch_session_window(phone, customer_phone, raw_timestamp=None, wamid=None):
+    """
+    Re-anchors the Meta 24h window on an inbound customer message.
+
+    Deliberately never raises: window bookkeeping must not be able to break message
+    delivery into Bitrix, which is the critical path.
+    """
+    try:
+        return SessionWindow.touch(
+            phone,
+            customer_phone,
+            when=_parse_waba_timestamp(raw_timestamp),
+            wamid=wamid,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to touch session window for {customer_phone}: {e}")
+        return None
+
+
 @shared_task(
     queue='waba',
     **RETRY_KWARGS,
@@ -1713,6 +1741,17 @@ def event_processing(raw_body=None, signature=None, app_id=None, host=None):
             message_type = message.get("type")
             message_id = message["id"]
             message_timestamp = message.get("timestamp")
+
+            # BE-03: an inbound customer message (re)opens the Meta 24h window.
+            # `system` messages are Meta housekeeping, not customer traffic, so they
+            # must not extend the window.
+            if message_type != "system":
+                _touch_session_window(
+                    phone,
+                    user_identy or message.get("from"),
+                    raw_timestamp=message_timestamp,
+                    wamid=message_id,
+                )
 
             if message_type == "text":
                 text = message["text"]["body"]

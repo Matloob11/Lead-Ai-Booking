@@ -23,6 +23,11 @@ WABA_VERIFY_SIGNATURE = env.bool("WABA_VERIFY_SIGNATURE", default=True)
 WABA_EVENTS_SEPARATOR = env.bool("WABA_EVENTS_SEPARATOR", default=False)
 WABA_SEND_BITRIX_MESSAGES_ASYNC = env.bool("WABA_SEND_BITRIX_MESSAGES_ASYNC", default=False)
 WABA_SEND_MEDIA_CAPTION_SEPARATELY = env.bool("WABA_SEND_MEDIA_CAPTION_SEPARATELY", default=False)
+# Meta customer service window. 24h is Meta's own value; configurable only to ease testing.
+WABA_SESSION_WINDOW_HOURS = env.int("WABA_SESSION_WINDOW_HOURS", default=24)
+# Block free-form outbound sends once the window has closed. Off by default so the
+# existing behaviour (let Meta reject with error 131047) is preserved until opted in.
+WABA_ENFORCE_SESSION_WINDOW = env.bool("WABA_ENFORCE_SESSION_WINDOW", default=False)
 
 BITRIX_OAUTH_URL = env("BITRIX_OAUTH_URL", default="https://oauth.bitrix24.tech")
 BITRIX_TEMP_FILE_BASE_URL = env("BITRIX_TEMP_FILE_BASE_URL", default="")
@@ -48,7 +53,7 @@ DEBUG = env.bool("DJANGO_DEBUG", True)
 # In Windows, this must be set to your system time zone.
 TIME_ZONE = "Asia/Almaty"
 # https://docs.djangoproject.com/en/dev/ref/settings/#language-code
-LANGUAGE_CODE = "ru"
+LANGUAGE_CODE = "en-us"
 # https://docs.djangoproject.com/en/dev/ref/settings/#languages
 from django.utils.translation import gettext_lazy as _
 LANGUAGES = [

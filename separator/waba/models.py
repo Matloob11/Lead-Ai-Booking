@@ -419,3 +419,96 @@ class ApiCall(models.Model):
     method = models.CharField(max_length=16, choices=METHOD_CHOICES)
     endpoint = models.CharField(max_length=1024, null=True, blank=True)
     payload = models.JSONField(blank=True, null=True)
+
+
+def normalize_msisdn(value):
+    """Normalizes a phone number to `+<digits>`, matching Phone.save()."""
+    digits = ''.join(filter(str.isdigit, str(value or '')))
+    return f"+{digits}" if digits else ""
+
+
+class SessionWindow(models.Model):
+    """
+    Meta 24-hour customer service window, scoped per (business phone, customer).
+
+    The window is anchored on the customer's most recent inbound message and is the
+    only thing that reopens it — sending a template does NOT reopen the window, it
+    only permits the business to reach a customer whose window is closed.
+    """
+
+    phone = models.ForeignKey(Phone, on_delete=models.CASCADE, related_name="session_windows")
+    customer_phone = models.CharField(max_length=32)
+    last_inbound_at = models.DateTimeField()
+    last_inbound_wamid = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Session window"
+        verbose_name_plural = "Session windows"
+        constraints = [
+            models.UniqueConstraint(fields=["phone", "customer_phone"], name="uniq_waba_session_window"),
+        ]
+        indexes = [
+            models.Index(fields=["phone", "customer_phone"]),
+            models.Index(fields=["last_inbound_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.phone_id}:{self.customer_phone} ({'open' if self.is_open else 'closed'})"
+
+    @staticmethod
+    def window_duration():
+        from django.conf import settings as django_settings
+        from datetime import timedelta
+
+        return timedelta(hours=getattr(django_settings, "WABA_SESSION_WINDOW_HOURS", 24))
+
+    @property
+    def expires_at(self):
+        return self.last_inbound_at + self.window_duration()
+
+    @property
+    def remaining_seconds(self):
+        from django.utils import timezone as django_timezone
+
+        return max(0, int((self.expires_at - django_timezone.now()).total_seconds()))
+
+    @property
+    def is_open(self):
+        return self.remaining_seconds > 0
+
+    @classmethod
+    def touch(cls, phone, customer_phone, when=None, wamid=None):
+        """
+        Anchors (or re-anchors) the window on an inbound customer message.
+
+        `when` is the Meta message timestamp when available, since that is authoritative
+        and survives queue delays. Out-of-order deliveries never move the anchor backwards.
+        """
+        from django.utils import timezone as django_timezone
+
+        customer_phone = normalize_msisdn(customer_phone)
+        if not phone or not customer_phone:
+            return None
+
+        when = when or django_timezone.now()
+        window, created = cls.objects.get_or_create(
+            phone=phone,
+            customer_phone=customer_phone,
+            defaults={"last_inbound_at": when, "last_inbound_wamid": wamid},
+        )
+        if not created and when > window.last_inbound_at:
+            window.last_inbound_at = when
+            window.last_inbound_wamid = wamid
+            window.save(update_fields=["last_inbound_at", "last_inbound_wamid", "updated_at"])
+        return window
+
+    @classmethod
+    def status_for(cls, phone, customer_phone):
+        """Returns (is_open, window_or_None). A customer we've never heard from is closed."""
+        window = cls.objects.filter(
+            phone=phone,
+            customer_phone=normalize_msisdn(customer_phone),
+        ).first()
+        return (bool(window and window.is_open), window)
