@@ -109,6 +109,11 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
       const message = await inbox.send(conversationId, {
         kind,
         media_id: uploaded.media_id,
+        // The stored asset the upload just created. The backend can find it
+        // from media_id alone, but naming it keeps the send off that lookup —
+        // and it is what makes the reply carry a ready media_url, so the sent
+        // photo renders straight away instead of after a refetch.
+        asset_id: uploaded.asset_id,
         body: caption.value.trim(),
         filename: kind === "document" ? file.name : undefined,
       });

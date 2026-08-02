@@ -251,11 +251,7 @@ export function mountInbox(root, { me }) {
     contacts: "👤 ",
   };
 
-  /**
-   * Marks a media preview in the list. Depends on `last_message_kind`, which
-   * the conversation payload does not carry yet — it degrades to no icon until
-   * the backend adds it, rather than guessing from the preview text.
-   */
+  /** Marks a media preview in the list; plain text and templates get no icon. */
   const kindIcon = (kind) => KIND_ICONS[String(kind || "").toLowerCase()] || "";
 
   function renderEmptyThread() {
