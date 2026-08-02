@@ -16,6 +16,7 @@
 import { catalog, inbox, asList } from "./api.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { keepFrameSized } from "./frame.js";
+import { imagesInThread, openLightbox } from "./lightbox.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, debounce, stamp, untilText, initials } from "./dom.js";
 
@@ -324,6 +325,13 @@ export function mountInbox(root, { me }) {
    * The panel is same-origin with the API and the media view is cookie
    * authenticated, so `src` works directly: no fetch, no blob, no header.
    */
+  /** Opens the viewer on this image, with the rest of the thread's images loaded. */
+  function openImage(message) {
+    const images = imagesInThread(state.messages);
+    const at = Math.max(0, images.findIndex((i) => String(i.id) === String(message.id)));
+    openLightbox(images, at);
+  }
+
   function mediaNode(message) {
     const kind = String(message.kind || "").toLowerCase();
     if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
@@ -337,7 +345,13 @@ export function mountInbox(root, { me }) {
     }
 
     if (kind === "image" || kind === "sticker") {
-      return el("img.msg__image", { src: message.media_url, alt: message.media_name || "image", loading: "lazy" });
+      return el("img.msg__image", {
+        src: message.media_url,
+        alt: message.media_name || "image",
+        loading: "lazy",
+        title: "Bara karke dekhein",
+        onclick: () => openImage(message),
+      });
     }
     if (kind === "audio") return el("audio.msg__audio", { src: message.media_url, controls: true });
     if (kind === "video") return el("video.msg__video", { src: message.media_url, controls: true });

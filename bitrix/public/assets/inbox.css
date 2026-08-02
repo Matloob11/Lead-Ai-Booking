@@ -340,6 +340,10 @@ body {
   margin-bottom: 6px;
 }
 
+.msg__image {
+  cursor: zoom-in;
+}
+
 .msg__audio {
   display: block;
   margin-bottom: 6px;

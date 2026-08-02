@@ -1,0 +1,129 @@
+/* Full-screen image viewer (lightbox.js). */
+
+.lb {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "bar bar bar"
+    "prev stage next";
+  background: rgb(12 18 28 / 92%);
+  user-select: none;
+  touch-action: none;
+}
+
+.lb__bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: #e8edf3;
+}
+
+.lb__spacer {
+  flex: 1;
+}
+
+.lb__counter {
+  font-size: 13px;
+  opacity: 0.85;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lb__zoom {
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.lb__btn {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 10%);
+  color: #e8edf3;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.lb__btn:hover {
+  background: rgb(255 255 255 / 20%);
+}
+
+.lb__btn--close:hover {
+  background: #c2382f;
+}
+
+.lb__stage {
+  grid-area: stage;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lb__img {
+  max-width: 100%;
+  max-height: 100%;
+  /* The transform is the zoom/pan state; the origin must match the maths in
+     zoomAt(), which works from the stage centre. */
+  transform-origin: center center;
+  cursor: zoom-in;
+  -webkit-user-drag: none;
+}
+
+.lb__nav {
+  align-self: center;
+  appearance: none;
+  border: 0;
+  background: rgb(255 255 255 / 8%);
+  color: #e8edf3;
+  font-size: 30px;
+  line-height: 1;
+  width: 44px;
+  height: 72px;
+  cursor: pointer;
+}
+
+.lb__nav--prev {
+  grid-area: prev;
+  border-radius: 0 10px 10px 0;
+}
+
+.lb__nav--next {
+  grid-area: next;
+  border-radius: 10px 0 0 10px;
+}
+
+.lb__nav:hover {
+  background: rgb(255 255 255 / 18%);
+}
+
+.lb__nav[hidden] {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .lb__nav {
+    width: 32px;
+    height: 56px;
+    font-size: 22px;
+  }
+}
