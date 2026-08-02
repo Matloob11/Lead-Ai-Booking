@@ -187,12 +187,7 @@ export function mountInbox(root, { me }) {
 
       if (highlightMessageId) highlightMessage(highlightMessageId);
 
-      if (conversation?.unread_count) {
-        inbox.markRead(id).then(() => {
-          conversation.unread_count = 0;
-          renderConversations();
-        }, () => {});
-      }
+      markRead(conversation);
     } catch (error) {
       clear(ui.messages).append(el("div.thread__hint.thread__hint--error", {}, [`Could not load the thread: ${error.message}`]));
       console.error("[a7-wa] messages failed:", error);
@@ -202,6 +197,32 @@ export function mountInbox(root, { me }) {
   }
 
   const findConversation = (id) => state.conversations.find((c) => c.id === id) || null;
+
+  /**
+   * Clears the unread badge for a chat, but only if this tab is actually on
+   * screen.
+   *
+   * The panel is commonly left open in a second tab. Without the visibility
+   * check that tab still holds an `activeId`, so every arriving message looked
+   * "read" to it: it cleared the badge the agent was meant to see in the tab
+   * they were really using, and sent the customer a blue tick for a message
+   * nobody had looked at. A hidden tab reads nothing.
+   */
+  function markRead(conversation) {
+    if (!conversation?.unread_count) return;
+    if (document.visibilityState !== "visible") return;
+
+    inbox.markRead(conversation.id).then(() => {
+      conversation.unread_count = 0;
+      renderConversations();
+    }, () => {});
+  }
+
+  // Coming back to the tab is the moment the open chat is genuinely read.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !state.activeId) return;
+    markRead(findConversation(state.activeId));
+  });
 
   /** How far back a deep link may pull before giving up. */
   const HIGHLIGHT_MAX_PAGES = 5;
@@ -245,7 +266,7 @@ export function mountInbox(root, { me }) {
       return;
     }
     ui.numberSelect.hidden = false;
-    ui.numberSelect.append(el("option", { value: "" }, ["Saare numbers"]));
+    ui.numberSelect.append(el("option", { value: "" }, ["All numbers"]));
     for (const number of state.numbers) {
       ui.numberSelect.append(el("option", { value: number.id }, [numberTitle(number)]));
     }
@@ -1167,11 +1188,8 @@ export function mountInbox(root, { me }) {
         state.messages.push(message);
         appendMessageNode(messageBubble(message));
       }
-      // An open thread is being read, so it must not accrue an unread badge.
-      if (message.direction === "in") {
-        inbox.markRead(state.activeId).catch(() => {});
-        conversation.unread_count = 0;
-      }
+      // The open thread is only actually being read if this tab is on screen.
+      if (message.direction === "in") markRead(conversation);
     }
 
     upsertConversation(conversation);
