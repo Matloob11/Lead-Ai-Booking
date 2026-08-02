@@ -34,6 +34,17 @@ def _serialize(agent):
         # One flag for the panel; where the right came from is not its concern.
         "is_wa_admin": agent.has_admin_rights,
         "numbers": [serialize_number(n) for n in agent.visible_numbers],
+        # What the gateway will forward, so the panel hides buttons that could
+        # only ever fail rather than showing an agent a dead control.
+        "capabilities": {
+            "read_receipts": settings.GATEWAY_SUPPORTS_READ_RECEIPTS,
+            "typing_indicator": settings.GATEWAY_SUPPORTS_TYPING,
+            "send_reactions": settings.GATEWAY_SUPPORTS_REACTIONS,
+            "contact_cards": settings.GATEWAY_SUPPORTS_CONTACT_CARDS,
+            "reply_quote": True,
+            "location": True,
+            "interactive": True,
+        },
     }
 
 

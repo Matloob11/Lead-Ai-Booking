@@ -65,6 +65,11 @@ def serialize_conversation(conversation):
         "unread_count": conversation.unread_count,
         "session_expires_at": _iso(conversation.session_expires_at),
         "is_session_open": conversation.is_session_open,
+        "is_pinned": conversation.is_pinned,
+        "is_archived": conversation.is_archived,
+        "labels": [
+            {"id": l.pk, "name": l.name, "colour": l.colour} for l in conversation.labels.all()
+        ],
     }
 
 
@@ -99,4 +104,25 @@ def serialize_message(message, request=None):
         "delivered_at": _iso(message.delivered_at),
         "read_at": _iso(message.read_at),
         "sent_by": serialize_agent(message.sent_by),
+        # Enough of the quoted message to draw the little bar above a reply,
+        # without pulling its whole record along.
+        "reply_to": (
+            {
+                "id": message.reply_to_id,
+                "direction": message.reply_to.direction,
+                "kind": message.reply_to.kind,
+                "body": message.reply_to.body[:120],
+            }
+            if message.reply_to_id
+            else None
+        ),
+    }
+
+
+def serialize_quick_reply(reply):
+    return {
+        "id": reply.pk,
+        "shortcut": reply.shortcut,
+        "body": reply.body,
+        "is_shared": reply.owner_id is None,
     }

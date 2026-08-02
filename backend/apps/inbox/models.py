@@ -29,6 +29,53 @@ class Contact(models.Model):
         return self.display_name or self.profile_name or self.wa_id
 
 
+class Label(models.Model):
+    """A tag an agent puts on a chat — Hot lead, Site visit, Follow-up.
+
+    Ours, not WhatsApp's: the API has no concept of labels, so these live here
+    and are shared across the team so a transferred chat keeps its meaning.
+    """
+
+    name = models.CharField(max_length=64, unique=True)
+    colour = models.CharField(max_length=16, default="#25D366")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class QuickReply(models.Model):
+    """A saved answer an agent can drop into the composer.
+
+    Agents type the same handful of replies all day. A quick reply with no
+    owner is shared with everyone; one with an owner belongs to that agent
+    alone.
+    """
+
+    shortcut = models.CharField(max_length=32, help_text="Typed after / to insert it")
+    body = models.TextField()
+    owner = models.ForeignKey(
+        "accounts.Agent", on_delete=models.CASCADE, null=True, blank=True, related_name="quick_replies"
+    )
+    created_by = models.ForeignKey(
+        "accounts.Agent", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["shortcut"]
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "shortcut"], name="unique_shortcut_per_owner")
+        ]
+
+    def __str__(self):
+        return f"/{self.shortcut}"
+
+
 class Conversation(models.Model):
     """One thread between one of our numbers and one customer.
 
@@ -63,13 +110,20 @@ class Conversation(models.Model):
     last_message_kind = models.CharField(max_length=16, blank=True)
     unread_count = models.PositiveIntegerField(default=0)
 
+    # Housekeeping the WhatsApp API knows nothing about. Kept on the
+    # conversation rather than per agent: everyone working a number sees the
+    # same list, so pinning has to mean the same thing to all of them.
+    is_pinned = models.BooleanField(default=False)
+    is_archived = models.BooleanField(default=False)
+    labels = models.ManyToManyField(Label, blank=True, related_name="conversations")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["number", "contact"], name="unique_conversation_per_number")
         ]
-        ordering = ["-last_message_at", "-created_at"]
+        ordering = ["-is_pinned", "-last_message_at", "-created_at"]
         indexes = [models.Index(fields=["number", "-last_message_at"])]
 
     def __str__(self):
@@ -167,6 +221,12 @@ class Message(models.Model):
     # Everything Meta sent or we sent, kept for debugging and for rendering
     # message kinds the UI does not model yet.
     payload = models.JSONField(default=dict, blank=True)
+
+    # The message this one quotes, in either direction. Null when the customer
+    # replied to something sent before we started recording, or to nothing.
+    reply_to = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies"
+    )
 
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
     error_code = models.CharField(max_length=32, blank=True)

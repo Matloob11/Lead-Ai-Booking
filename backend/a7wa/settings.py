@@ -179,6 +179,26 @@ ALOTS_WEBHOOK_TOKEN = env("ALOTS_WEBHOOK_TOKEN", "")
 # Meta closes the free-form window 24h after the customer's last inbound message.
 SESSION_WINDOW_HOURS = int(env("SESSION_WINDOW_HOURS", "24"))
 
+# What the gateway will actually forward. Its /messages endpoint is documented
+# as a raw pass-through to Meta but is really an allowlist, verified by probing
+# each type on 2026-08-02:
+#
+#   forwarded : text, image, video, audio, document, sticker, location,
+#               template, interactive
+#   rejected  : read (receipts, and the typing indicator that rides on them),
+#               reaction, contacts, order, button, system
+#               -> "Unsupported message type: <x>"
+#
+# So blue ticks, "typing…" and sending reactions are unavailable through this
+# gateway however correct our payload is. Inbound reactions still arrive over
+# the webhook. These flags exist so we neither waste a call on a send that
+# cannot succeed nor offer the agent a button that will never work — flip them
+# if the gateway widens its allowlist.
+GATEWAY_SUPPORTS_READ_RECEIPTS = env_bool("GATEWAY_SUPPORTS_READ_RECEIPTS", False)
+GATEWAY_SUPPORTS_TYPING = env_bool("GATEWAY_SUPPORTS_TYPING", False)
+GATEWAY_SUPPORTS_REACTIONS = env_bool("GATEWAY_SUPPORTS_REACTIONS", False)
+GATEWAY_SUPPORTS_CONTACT_CARDS = env_bool("GATEWAY_SUPPORTS_CONTACT_CARDS", False)
+
 # Hosts the media downloader may fetch from. The URL it follows arrives inside a
 # webhook body, so it is third-party input: without this list a crafted payload
 # would turn the worker into a proxy for anything reachable from the box — and

@@ -8,6 +8,7 @@ never silently loses a message when alots is slow or down — the row is there i
 import hashlib
 import logging
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
@@ -52,17 +53,20 @@ def _touch(conversation, preview, kind=Message.Kind.TEXT):
     )
 
 
-def send_text(conversation, agent, body):
+def send_text(conversation, agent, body, reply_to=None):
     if not conversation.is_session_open:
         raise SendBlocked(
             "The 24-hour window is closed. Send an approved template to reopen the conversation."
         )
+    if reply_to and reply_to.conversation_id != conversation.pk:
+        raise SendBlocked("You can only quote a message from this conversation.")
 
     message = Message.objects.create(
         conversation=conversation,
         direction=Message.Direction.OUTBOUND,
         kind=Message.Kind.TEXT,
         body=body,
+        reply_to=reply_to,
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
@@ -70,7 +74,12 @@ def send_text(conversation, agent, body):
 
     try:
         response = AlotsClient().send_text(
-            conversation.number.phone_number_id, conversation.contact.wa_id, body
+            conversation.number.phone_number_id,
+            conversation.contact.wa_id,
+            body,
+            # A quote only works if WhatsApp knows the message being quoted;
+            # ours does not exist there until it has a wamid.
+            reply_to_wamid=reply_to.wamid if reply_to else None,
         )
     except AlotsError as exc:
         message.status = Message.Status.FAILED
@@ -264,6 +273,36 @@ def start_conversation(number, agent, to, template, variables=None, header_varia
 
     send_template(conversation, agent, template, variables, header_variables, header_media_id)
     return conversation
+
+
+def mark_read_on_whatsapp(conversation, typing=False):
+    """Turn the customer's ticks blue for what they last sent us.
+
+    Best effort by design: an agent opening a chat must not see an error
+    because a receipt failed, and Meta rejects receipts for messages older than
+    the window anyway.
+    """
+    if typing and not settings.GATEWAY_SUPPORTS_TYPING:
+        return False
+    if not typing and not settings.GATEWAY_SUPPORTS_READ_RECEIPTS:
+        return False
+
+    last_inbound = (
+        conversation.messages.filter(direction=Message.Direction.INBOUND)
+        .exclude(wamid="")
+        .exclude(wamid__isnull=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not last_inbound:
+        return False
+
+    try:
+        AlotsClient().mark_read(conversation.number.phone_number_id, last_inbound.wamid, typing=typing)
+        return True
+    except AlotsError as exc:
+        logger.info("Read receipt for conversation %s was not accepted: %s", conversation.pk, exc)
+        return False
 
 
 def retry_message(message, agent):

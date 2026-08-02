@@ -104,15 +104,40 @@ class AlotsClient:
         """Post a Meta Cloud API payload verbatim and return the response."""
         return self._request("POST", f"/{self.version}/{phone_number_id}/messages", json=payload)
 
-    def send_text(self, phone_number_id, to, body, preview_url=False):
+    def send_text(self, phone_number_id, to, body, preview_url=False, reply_to_wamid=None):
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "text",
+            "text": {"preview_url": preview_url, "body": body},
+        }
+        if reply_to_wamid:
+            payload["context"] = {"message_id": reply_to_wamid}
+        return self.send_raw(phone_number_id, payload)
+
+    def mark_read(self, phone_number_id, wamid, typing=False):
+        """Turn the customer's ticks blue, and optionally show "typing…".
+
+        Meta carries the typing indicator on the read receipt rather than as
+        its own call, and it lapses on its own after about 25 seconds or when
+        a message is sent.
+        """
+        payload = {"messaging_product": "whatsapp", "status": "read", "message_id": wamid}
+        if typing:
+            payload["typing_indicator"] = {"type": "text"}
+        return self.send_raw(phone_number_id, payload)
+
+    def send_reaction(self, phone_number_id, to, wamid, emoji):
+        """Send an emoji reaction. An empty emoji removes it."""
         return self.send_raw(
             phone_number_id,
             {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
                 "to": to,
-                "type": "text",
-                "text": {"preview_url": preview_url, "body": body},
+                "type": "reaction",
+                "reaction": {"message_id": wamid, "emoji": emoji},
             },
         )
 

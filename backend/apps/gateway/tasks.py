@@ -95,6 +95,13 @@ def _store_inbound(number, message, contact_profiles):
             sha256=blob.get("sha256", ""),
         )
 
+    # When the customer quotes one of our messages, Meta names it by wamid.
+    # A miss is normal — they may be quoting something sent before we existed.
+    quoted = None
+    quoted_wamid = (message.get("context") or {}).get("id")
+    if quoted_wamid:
+        quoted = Message.objects.filter(wamid=quoted_wamid).first()
+
     msg, msg_created = Message.objects.get_or_create(
         wamid=message.get("id") or None,
         defaults={
@@ -103,6 +110,7 @@ def _store_inbound(number, message, contact_profiles):
             "kind": kind,
             "body": preview if kind == "text" else message.get(kind, {}).get("caption", ""),
             "media": media,
+            "reply_to": quoted,
             "payload": message,
             "status": Message.Status.RECEIVED,
             "created_at": sent_at,

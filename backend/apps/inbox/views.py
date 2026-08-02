@@ -12,8 +12,8 @@ from apps.gateway.client import AlotsError
 
 from . import services
 from .events import publish_conversation
-from .models import Conversation, MediaAsset, Message
-from .serializers import serialize_conversation, serialize_message
+from .models import Conversation, Label, MediaAsset, Message, QuickReply
+from .serializers import serialize_conversation, serialize_message, serialize_quick_reply
 
 
 def _visible_conversations(user):
@@ -46,6 +46,16 @@ def conversation_list(request):
 
     if request.GET.get("mine") == "1":
         queryset = queryset.filter(assigned_agent=request.user)
+
+    label_id = request.GET.get("label")
+    if label_id:
+        queryset = queryset.filter(labels__pk=label_id)
+
+    # Archived chats stay out of the way unless asked for.
+    if request.GET.get("archived") == "1":
+        queryset = queryset.filter(is_archived=True)
+    else:
+        queryset = queryset.filter(is_archived=False)
 
     limit = min(int(request.GET.get("limit", 50)), 200)
     offset = int(request.GET.get("offset", 0))
@@ -156,9 +166,101 @@ def mark_read(request, pk):
     conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
     conversation.unread_count = 0
     conversation.save(update_fields=["unread_count"])
+
+    # Also tell WhatsApp, so the customer's ticks turn blue and they know a
+    # person is actually looking. Best effort — never fails opening a chat.
+    receipted = services.mark_read_on_whatsapp(conversation)
+
     # Other agents on the same number have this chat in their list too.
     publish_conversation(conversation)
-    return Response({"status": "ok"})
+    return Response({"status": "ok", "receipted": receipted})
+
+
+@api_view(["POST"])
+def typing(request, pk):
+    """Show "typing…" on the customer's phone. Lapses by itself after ~25s."""
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+    return Response({"status": "ok", "sent": services.mark_read_on_whatsapp(conversation, typing=True)})
+
+
+@api_view(["POST"])
+def set_flags(request, pk):
+    """Pin, archive, and label a chat. None of this reaches WhatsApp."""
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+
+    fields = []
+    if "is_pinned" in request.data:
+        conversation.is_pinned = bool(request.data["is_pinned"])
+        fields.append("is_pinned")
+    if "is_archived" in request.data:
+        conversation.is_archived = bool(request.data["is_archived"])
+        fields.append("is_archived")
+    if fields:
+        conversation.save(update_fields=fields)
+
+    if "label_ids" in request.data:
+        conversation.labels.set(Label.objects.filter(pk__in=request.data["label_ids"] or []))
+
+    publish_conversation(conversation)
+    return Response(serialize_conversation(conversation))
+
+
+@api_view(["GET", "POST"])
+def label_list(request):
+    if request.method == "POST":
+        name = str(request.data.get("name", "")).strip()
+        if not name:
+            return Response({"detail": "Label needs a name"}, status=status.HTTP_400_BAD_REQUEST)
+        label, _ = Label.objects.get_or_create(
+            name=name[:64], defaults={"colour": request.data.get("colour", "#25D366")}
+        )
+        return Response({"id": label.pk, "name": label.name, "colour": label.colour}, status=201)
+
+    return Response(
+        [{"id": l.pk, "name": l.name, "colour": l.colour} for l in Label.objects.all()]
+    )
+
+
+@api_view(["DELETE"])
+def label_delete(request, pk):
+    if not request.user.has_admin_rights:
+        return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
+    get_object_or_404(Label, pk=pk).delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+def quick_reply_list(request):
+    """Saved answers: the shared set, plus the caller's own."""
+    mine = Q(owner=request.user) | Q(owner__isnull=True)
+
+    if request.method == "POST":
+        shortcut = str(request.data.get("shortcut", "")).strip().lstrip("/")[:32]
+        body = str(request.data.get("body", "")).strip()
+        if not shortcut or not body:
+            return Response(
+                {"detail": "A quick reply needs a shortcut and a body"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Shared replies are everyone's business, so only admins make them.
+        shared = bool(request.data.get("is_shared")) and request.user.has_admin_rights
+        reply, created = QuickReply.objects.update_or_create(
+            owner=None if shared else request.user,
+            shortcut=shortcut,
+            defaults={"body": body, "created_by": request.user},
+        )
+        return Response(serialize_quick_reply(reply), status=201 if created else 200)
+
+    return Response([serialize_quick_reply(r) for r in QuickReply.objects.filter(mine)])
+
+
+@api_view(["DELETE"])
+def quick_reply_delete(request, pk):
+    reply = get_object_or_404(QuickReply, pk=pk)
+    if reply.owner_id != request.user.pk and not request.user.has_admin_rights:
+        return Response({"detail": "That quick reply is not yours"}, status=status.HTTP_403_FORBIDDEN)
+    reply.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(["POST"])
@@ -167,11 +269,17 @@ def send(request, pk):
     kind = request.data.get("kind", Message.Kind.TEXT)
     body = (request.data.get("body") or "").strip()
 
+    reply_to = None
+    if request.data.get("reply_to_id"):
+        reply_to = get_object_or_404(
+            conversation.messages, pk=request.data["reply_to_id"]
+        )
+
     try:
         if kind == Message.Kind.TEXT:
             if not body:
                 return Response({"detail": "Message body is empty"}, status=status.HTTP_400_BAD_REQUEST)
-            message = services.send_text(conversation, request.user, body)
+            message = services.send_text(conversation, request.user, body, reply_to=reply_to)
         else:
             media_id = request.data.get("media_id")
             if not media_id:
