@@ -60,8 +60,11 @@ export function keepFrameSized() {
     if (Math.abs(height - last) < 8) return;
     last = height;
 
-    const width = document.documentElement.clientWidth || window.innerWidth;
-    window.BX24?.resizeWindow?.(width, height);
+    // Width is passed back unchanged: resizeWindow needs both values, but the
+    // container decides how wide the panel may be. Feeding it clientWidth
+    // (which excludes a scrollbar) made the frame fight its own container and
+    // left a horizontal scrollbar behind.
+    window.BX24?.resizeWindow?.(window.innerWidth, height);
     console.debug("[a7-wa] frame height →", height, {
       screenAvail: window.screen?.availHeight,
       screenY: window.screenY,

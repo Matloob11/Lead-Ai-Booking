@@ -464,7 +464,17 @@ export function mountInbox(root, { me }) {
       return el("div.msg__media-failed", {}, ["📎 Attachment available nahi hai"]);
     }
 
-    if (!message.media_ready || !message.media_url) {
+    if (!message.media_url) {
+      // Outbound attachments are uploaded straight to the gateway and never
+      // stored our side, so there is nothing to show back — saying it is still
+      // downloading would be plainly wrong. Inbound is the real waiting case.
+      if (message.direction === "out") {
+        return el("div.msg__sent-media", {}, [`${SENT_MEDIA_ICON[kind] || "📎"} ${SENT_MEDIA_LABEL[kind] || "File"} bhej di gayi`]);
+      }
+      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
+    }
+
+    if (!message.media_ready) {
       return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
     }
 
@@ -495,6 +505,9 @@ export function mountInbox(root, { me }) {
       el("div.msg__doc-dl", { title: "Download" }, ["⤓"]),
     ]);
   }
+
+  const SENT_MEDIA_ICON = { image: "📷", sticker: "📷", video: "🎬", audio: "🎤", document: "📄" };
+  const SENT_MEDIA_LABEL = { image: "Photo", sticker: "Sticker", video: "Video", audio: "Audio", document: "Document" };
 
   const DOC_ICONS = { pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", ppt: "📙", pptx: "📙", zip: "🗜", csv: "📗", txt: "📄" };
 

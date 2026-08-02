@@ -542,6 +542,13 @@ body {
   color: var(--err);
 }
 
+/* Our own attachment: sent to the gateway, never stored here to show back. */
+.msg__sent-media {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .spinner--sm {
   width: 12px;
   height: 12px;
