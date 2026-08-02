@@ -1,6 +1,7 @@
 /**
  * Entry point for extras modules (Search, Reminders, Reply Buttons, Theme Switcher).
  * Self-mounts on "wa:ready" event or when DOM anchors become available.
+ * Strictly uses SVG inline icons matching icons.js (NO EMOJIS).
  */
 
 import { el, clear } from "./dom.js";
@@ -9,6 +10,50 @@ import { mountReminders } from "./reminders.js";
 import { mountButtons } from "./buttons.js";
 
 let isMounted = false;
+
+function createIcon(shapes, size = 14) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.classList.add("icon");
+
+  const list = Array.isArray(shapes) ? shapes : [shapes];
+  list.forEach((item) => {
+    if (typeof item === "string") {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", item);
+      svg.appendChild(p);
+    } else if (item && typeof item === "object") {
+      const tag = item.tag || "path";
+      const elem = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      Object.entries(item).forEach(([k, v]) => {
+        if (k !== "tag") elem.setAttribute(k, String(v));
+      });
+      svg.appendChild(elem);
+    }
+  });
+  return svg;
+}
+
+const ICON_SHAPES = {
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+  sun: [
+    { tag: "circle", cx: 12, cy: 12, r: 5 },
+    "M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42",
+  ],
+  layout: [
+    { tag: "rect", x: 3, y: 3, width: 18, height: 18, rx: 2 },
+    "M3 9h18M9 21V9",
+  ],
+  palette: "M12 21a9 9 0 1 1 0-18c2.5 0 4.5 1.8 4.5 4a3.5 3.5 0 0 1-3.5 3.5H11a2 2 0 0 0-2 2v.5C9 14.5 10.3 16 12 16h1a5 5 0 0 1 5 5",
+  check: "M20 6 9 17l-5-5",
+};
 
 export function mountThemeSwitcher() {
   // Create background blobs container for glass themes if not existing
@@ -28,39 +73,30 @@ export function mountThemeSwitcher() {
   const savedTheme = localStorage.getItem("wa_theme") || "glass-dark";
   document.body.setAttribute("data-wa-theme", savedTheme);
 
-  const slot = document.querySelector("#wa-topbar-slot");
-  if (!slot) return;
+  // Look for target slot: prefer .sidebar__top so it's ALWAYS visible in sidebar header!
+  const sidebarTop = document.querySelector(".sidebar__top");
+  const topbarSlot = document.querySelector("#wa-topbar-slot");
 
-  // Check if theme switcher already mounted in slot
-  if (slot.querySelector(".wa-x-theme-container")) return;
+  if (!sidebarTop && !topbarSlot) return;
+  if (document.querySelector(".wa-x-theme-container")) return;
 
-  // Palette icon
-  const iconSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  iconSvg.setAttribute("viewBox", "0 0 24 24");
-  iconSvg.setAttribute("width", "17");
-  iconSvg.setAttribute("height", "17");
-  iconSvg.setAttribute("fill", "none");
-  iconSvg.setAttribute("stroke", "currentColor");
-  iconSvg.setAttribute("stroke-width", "2");
-  iconSvg.setAttribute("stroke-linecap", "round");
-  iconSvg.setAttribute("stroke-linejoin", "round");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M12 21a9 9 0 1 1 0-18c2.5 0 4.5 1.8 4.5 4a3.5 3.5 0 0 1-3.5 3.5H11a2 2 0 0 0-2 2v.5C9 14.5 10.3 16 12 16h1a5 5 0 0 1 5 5");
-  iconSvg.appendChild(path);
+  const themeBtn = el("button.wa-x-theme-btn", { type: "button", title: "Theme / Design Change Karein" }, [
+    createIcon(ICON_SHAPES.palette, 14),
+    el("span.wa-x-theme-label", {}, ["Theme"]),
+  ]);
 
-  const themeBtn = el("button.wa-x-btn-icon", { type: "button", title: "Design / Theme Change Karein" }, [iconSvg]);
   const dropdown = el("div.wa-x-theme-dropdown", { hidden: true });
 
   const themes = [
-    { id: "glass-dark", label: "🌙 Liquid Glass (Dark)" },
-    { id: "glass-light", label: "☀️ Liquid Glass (Light)" },
-    { id: "classic", label: "🎨 Classic Bitrix" },
+    { id: "glass-dark", label: "Liquid Glass (Dark)", iconKey: "moon" },
+    { id: "glass-light", label: "Liquid Glass (Light)", iconKey: "sun" },
+    { id: "classic", label: "Classic Bitrix", iconKey: "layout" },
   ];
 
   const renderDropdown = () => {
     clear(dropdown);
     const current = document.body.getAttribute("data-wa-theme") || "glass-dark";
-    const head = el("div.wa-x-theme-head", {}, ["Theme Select Karein"]);
+    const head = el("div.wa-x-theme-head", {}, ["Design / Theme"]);
     dropdown.append(head);
 
     themes.forEach((t) => {
@@ -70,14 +106,21 @@ export function mountThemeSwitcher() {
         {
           type: "button",
           class: active ? "wa-x-theme-item--active" : "",
-          onclick: () => {
+          onclick: (e) => {
+            e.stopPropagation();
             document.body.setAttribute("data-wa-theme", t.id);
             localStorage.setItem("wa_theme", t.id);
             dropdown.hidden = true;
             renderDropdown();
           },
         },
-        [t.label, active ? " ✓" : ""]
+        [
+          el("div.wa-x-theme-item-left", {}, [
+            createIcon(ICON_SHAPES[t.iconKey], 14),
+            el("span", {}, [t.label]),
+          ]),
+          active ? createIcon(ICON_SHAPES.check, 13) : null,
+        ]
       );
       dropdown.append(row);
     });
@@ -86,9 +129,20 @@ export function mountThemeSwitcher() {
   renderDropdown();
 
   const container = el("div.wa-x-theme-container", {}, [themeBtn, dropdown]);
-  slot.prepend(container);
 
-  themeBtn.addEventListener("click", () => {
+  if (sidebarTop) {
+    const newBtn = sidebarTop.querySelector(".btn--primary") || sidebarTop.querySelector(".btn");
+    if (newBtn) {
+      sidebarTop.insertBefore(container, newBtn);
+    } else {
+      sidebarTop.append(container);
+    }
+  } else if (topbarSlot) {
+    topbarSlot.prepend(container);
+  }
+
+  themeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     dropdown.hidden = !dropdown.hidden;
   });
 
@@ -140,10 +194,15 @@ function checkDomAndMount() {
   if (
     document.querySelector("#wa-search-slot") ||
     document.querySelector("#wa-topbar-slot") ||
-    document.querySelector("#wa-composer-slot")
+    document.querySelector("#wa-composer-slot") ||
+    document.querySelector(".sidebar__top")
   ) {
     mountAll(null);
   }
+}
+
+if (document.querySelector(".sidebar__top")) {
+  mountThemeSwitcher();
 }
 
 if (document.readyState === "loading") {

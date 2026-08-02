@@ -1,6 +1,6 @@
 /* ==========================================================================
    A7 WhatsApp Inbox — Extras (Search, Reminders, Reply Buttons, Theme System)
-   All selectors strictly prefixed with .wa-x- to isolate from inbox.css
+   All selectors strictly prefixed with .wa-x- or targeted for theme overrides.
    ========================================================================== */
 
 /* Buttons & Common Controls */
@@ -688,6 +688,65 @@
    Exact matches for wa-ui-mockups/1-dark.html & wa-ui-mockups/2-light.html
    ========================================================================== */
 
+/* Header Controls & Sidebar Header Alignment */
+.sidebar__top {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 14px 12px 10px !important;
+  min-width: 0 !important;
+}
+
+.sidebar__title {
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  margin-right: 0 !important;
+}
+
+.sidebar__top .btn {
+  padding: 5px 8px !important;
+  font-size: 11px !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+  flex: none !important;
+}
+
+.wa-x-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #eef3f9;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+  flex: none;
+}
+
+body[data-wa-theme="glass-light"] .wa-x-theme-btn {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(22, 48, 82, 0.14);
+  color: #21395a;
+  box-shadow: 0 2px 6px rgba(24, 48, 82, 0.08), inset 0 1px 0 #fff;
+}
+
+body[data-wa-theme="classic"] .wa-x-theme-btn {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--navy);
+  border-radius: 8px;
+}
+
 /* Background Blobs */
 .wa-x-glass-bg {
   position: fixed;
@@ -757,17 +816,17 @@ body[data-wa-theme="glass-light"] .wa-x-b4 {
   opacity: 0.9;
 }
 
-/* Theme Switcher Button & Dropdown */
+/* Theme Switcher Container & Dropdown */
 .wa-x-theme-container {
   position: relative;
   display: inline-block;
-  margin-right: 4px;
+  flex: none;
 }
 
 .wa-x-theme-dropdown {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   z-index: 60;
   width: 210px;
   background: #fff;
@@ -803,6 +862,12 @@ body[data-wa-theme="glass-light"] .wa-x-b4 {
   transition: background 0.1s ease;
 }
 
+.wa-x-theme-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .wa-x-theme-item:hover,
 .wa-x-theme-item--active {
   background: #f2f5f8;
@@ -818,14 +883,28 @@ body[data-wa-theme="glass-dark"] {
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] #root {
-  padding: 16px;
-  background: transparent !important;
+body[data-wa-theme="glass-dark"] #root,
+body[data-wa-theme="glass-light"] #root {
+  padding: 12px !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+}
+
+body[data-wa-theme="glass-dark"] .app,
+body[data-wa-theme="glass-light"] .app {
+  flex: 1 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  box-sizing: border-box !important;
 }
 
 body[data-wa-theme="glass-dark"] .app {
-  height: 100%;
-  border-radius: 26px !important;
+  border-radius: 24px !important;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.07) !important;
   backdrop-filter: blur(34px) saturate(180%) !important;
@@ -1050,14 +1129,8 @@ body[data-wa-theme="glass-light"] {
   color: #16202e !important;
 }
 
-body[data-wa-theme="glass-light"] #root {
-  padding: 16px;
-  background: transparent !important;
-}
-
 body[data-wa-theme="glass-light"] .app {
-  height: 100%;
-  border-radius: 26px !important;
+  border-radius: 24px !important;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.55) !important;
   backdrop-filter: blur(34px) saturate(180%) !important;
