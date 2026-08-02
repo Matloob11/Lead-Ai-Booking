@@ -1,0 +1,685 @@
+/* ==========================================================================
+   A7 WhatsApp Inbox — Extras (Search, Reminders, Reply Buttons)
+   All selectors strictly prefixed with .wa-x- to isolate from inbox.css
+   ========================================================================== */
+
+/* Buttons & Common Controls */
+.wa-x-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 0;
+  transition: all 0.15s ease;
+}
+
+.wa-x-btn-icon:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+  background: #f8fafc;
+}
+
+.wa-x-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 0;
+  transition: all 0.15s ease;
+}
+
+.wa-x-btn--primary {
+  background: var(--navy);
+  color: #fff;
+}
+
+.wa-x-btn--primary:hover {
+  background: var(--navy-soft);
+}
+
+.wa-x-btn--ghost {
+  background: transparent;
+  color: var(--navy);
+  border: 1px solid var(--line);
+}
+
+.wa-x-btn--ghost:hover {
+  background: #f2f5f8;
+}
+
+.wa-x-btn--sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.wa-x-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wa-x-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--err);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* Fields & Forms */
+.wa-x-field-row {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.wa-x-label-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wa-x-field {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.wa-x-field:focus {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 2px rgb(14 42 71 / 10%);
+}
+
+.wa-x-textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+
+.wa-x-char-counter {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.wa-x-alert {
+  border: 1px solid #f0c6c2;
+  background: #fdf3f2;
+  color: var(--err);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.wa-x-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--navy);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.wa-x-action-btn:hover {
+  background: #eef3f8;
+  border-color: var(--navy);
+}
+
+.wa-x-action-btn--del:hover {
+  background: #fdf3f2;
+  color: var(--err);
+  border-color: #f0c6c2;
+}
+
+.wa-x-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Modals */
+.wa-x-modal-body {
+  padding: 16px 18px;
+}
+
+.wa-x-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ==========================================================================
+   KAAM A — SEARCH
+   ========================================================================== */
+
+.wa-x-search-container {
+  position: relative;
+  width: 100%;
+}
+
+.wa-x-search-field {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+}
+
+.wa-x-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.wa-x-search-input {
+  width: 100%;
+  padding: 7px 10px 7px 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+.wa-x-search-input:focus {
+  outline: none;
+  border-color: var(--navy);
+}
+
+.wa-x-search-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  padding: 0 4px;
+}
+
+.wa-x-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.wa-x-search-status,
+.wa-x-search-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.wa-x-search-status--err {
+  color: var(--err);
+}
+
+.wa-x-search-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.wa-x-search-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.wa-x-search-row:last-child {
+  border-bottom: 0;
+}
+
+.wa-x-search-row:hover,
+.wa-x-search-row--selected {
+  background: #f2f5f8;
+}
+
+.wa-x-search-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wa-x-search-contact {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-x-search-time {
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+.wa-x-search-snippet {
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.4;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wa-x-search-mark {
+  background: #fef08a;
+  color: #854d0e;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.wa-x-search-footer {
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ==========================================================================
+   KAAM B — REMINDERS
+   ========================================================================== */
+
+.wa-x-topbar-container {
+  position: relative;
+  display: inline-block;
+}
+
+.wa-x-reminders-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 320px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.wa-x-reminders-head {
+  padding: 10px 12px;
+  font-weight: 650;
+  font-size: 12px;
+  color: var(--navy);
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wa-x-reminders-status,
+.wa-x-reminders-empty {
+  padding: 14px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.wa-x-reminders-status--err {
+  color: var(--err);
+}
+
+.wa-x-reminders-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.wa-x-reminder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.wa-x-reminder-row:last-child {
+  border-bottom: 0;
+}
+
+.wa-x-reminder-row:hover {
+  background: #f2f5f8;
+}
+
+.wa-x-reminder-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.wa-x-reminder-contact {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-x-reminder-note {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.wa-x-reminder-time {
+  font-size: 11px;
+  color: #b45309;
+
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.wa-x-reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.wa-x-composer-clock-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.wa-x-preset-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 170px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+}
+
+.wa-x-preset-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--ink);
+  transition: background 0.1s ease;
+}
+
+.wa-x-preset-item:hover {
+  background: #f2f5f8;
+  color: var(--navy);
+}
+
+/* Reminders Toast Notification */
+.wa-x-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.wa-x-toast {
+  pointer-events: auto;
+  width: 320px;
+  background: #fff;
+  border: 1px solid var(--gold);
+  border-left: 4px solid var(--gold);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 30px rgb(16 24 40 / 20%);
+  animation: wa-x-toast-in 0.25s ease-out forwards;
+}
+
+.wa-x-toast--hiding {
+  animation: wa-x-toast-out 0.25s ease-in forwards;
+}
+
+@keyframes wa-x-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes wa-x-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+.wa-x-toast-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.wa-x-toast-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: #8a6d21;
+  text-transform: uppercase;
+}
+
+.wa-x-toast-close {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.wa-x-toast-contact {
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--navy);
+}
+
+.wa-x-toast-note {
+  font-size: 12px;
+  color: var(--ink);
+  margin-top: 2px;
+}
+
+.wa-x-toast-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   KAAM C — REPLY BUTTONS
+   ========================================================================== */
+
+.wa-x-buttons-split {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 20px;
+  padding: 16px 18px;
+}
+
+.wa-x-buttons-form {
+  min-width: 0;
+}
+
+.wa-x-button-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wa-x-field-with-counter {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.wa-x-field-with-counter .wa-x-field {
+  padding-right: 48px;
+}
+
+.wa-x-field-with-counter .wa-x-char-counter {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.wa-x-add-btn-wrapper {
+  margin-top: 6px;
+}
+
+/* Preview Pane */
+.wa-x-buttons-preview-pane {
+  background: #f4f6f8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wa-x-preview-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+
+.wa-x-preview-bubble {
+  background: #e7f2ea;
+  border: 1px solid #cfe4d6;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.wa-x-preview-header {
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 6px;
+}
+
+.wa-x-preview-body {
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.wa-x-preview-footer {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.wa-x-preview-buttons-list {
+  margin-top: 10px;
+  border-top: 1px solid #c0d8c8;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wa-x-preview-btn-item {
+  background: #fff;
+  color: #0084ff;
+  border: 1px solid #b8dac2;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .wa-x-buttons-split {
+    grid-template-columns: 1fr;
+  }
+}
