@@ -1,0 +1,84 @@
+# The VPS already runs Frappe, n8n and other stacks, so nothing here is exposed
+# on a shared port or a shared data store. Only the web service is published,
+# bound to loopback, where the host nginx picks it up.
+
+name: a7wa
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      # Bind mounts, not named volumes: the host nginx serves /static/ straight
+      # off disk, and media must survive a stack rebuild.
+      - ../media:/app/media
+      - ../static:/app/staticfiles
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes:
+      - ../media:/app/media
+    command: ["celery", "-A", "a7wa", "worker", "-l", "info", "--concurrency", "4"]
+
+  beat:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    command: ["celery", "-A", "a7wa", "beat", "-l", "info"]
+
+volumes:
+  pgdata:
+  redisdata:

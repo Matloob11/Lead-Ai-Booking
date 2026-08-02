@@ -1,32 +1,47 @@
-# A7 Bitrix24 WhatsApp Business API (WABA) Integration System
+# A7 WhatsApp Agent Inbox
 
-## Master Documentation Suite
+A WhatsApp inbox for A7 Group Real Estate, embedded in Bitrix24 and backed by the
+alots.io (WBBOX) gateway.
 
-Welcome to the **A7 WABA Integration Hub** repository. This project provides a direct, in-house integration between **Meta Cloud WhatsApp Business API** and **Bitrix24 Open Channels** for 50+ sales agents, featuring 24-hour session window tracking, Meta HSM approved template messaging, and dedicated phone number routing.
+Each agent owns a WhatsApp number and works every chat that arrives on it. An
+admin sees all numbers and can hand any conversation to another agent without the
+history moving. Conversations live here permanently — the gateway's own agent UI
+is not used, so nothing depends on their retention.
 
----
+Meta closes the free-form window 24 hours after a customer's last message. The
+panel tracks that window per conversation: while it is open agents type freely,
+and once it lapses the composer is replaced by that number's approved templates,
+which reopen the window when sent.
 
-## 📚 Complete Project Documentation Index
+## Layout
 
-1. 📘 **[01 - System Overview & Business Vision](file:///C:/Users/Matloob/Desktop/a7-full-whatsapp-system/docs/01_SYSTEM_OVERVIEW.md)**
-   - Business Purpose, Zero Third-Party Subscription Model, Architectural Pillars.
-2. 📗 **[02 - Bitrix24 Open Channels Connector Specification](file:///C:/Users/Matloob/Desktop/a7-full-whatsapp-system/docs/02_BITRIX24_OPEN_CHANNELS_CONNECTOR.md)**
-   - Local App Scopes, `imconnector` REST API methods, Inbound & Outbound workflows.
-3. 📙 **[03 - Meta WhatsApp Business API Cloud Specification](file:///C:/Users/Matloob/Desktop/a7-full-whatsapp-system/docs/03_META_WABA_API_SPECIFICATION.md)**
-   - Webhook Verification, HMAC SHA-256 Signature Security, `/messages` API payloads.
-4. 📕 **[04 - 24-Hour Session Window & Template Engine](file:///C:/Users/Matloob/Desktop/a7-full-whatsapp-system/docs/04_SESSION_WINDOW_AND_TEMPLATES.md)**
-   - WhatsApp 24h Window Policy, Meta Approved HSM Templates, Embedded UI Widget.
-5. 📓 **[05 - Local Development & Testing Guide](file:///C:/Users/Matloob/Desktop/a7-full-whatsapp-system/docs/05_LOCAL_DEVELOPMENT_AND_TESTING_GUIDE.md)**
-   - Running Local Django Server, Local Admin Panel (`http://127.0.0.1:8000/admin/`), Mock Payload Testing.
-
----
-
-## 🛠️ Quick Local Setup
-```bash
-cd C:\Users\Matloob\Desktop\a7-full-whatsapp-system
-python manage.py migrate
-python manage.py runserver 8000
 ```
-- **Admin Dashboard**: [http://127.0.0.1:8000/admin/](http://127.0.0.1:8000/admin/)
-- **Superuser Email**: `admin@example.com`
-- **Superuser Password**: `admin123456`
+backend/     Django + DRF + Channels + Celery — API, webhook receiver, gateway client
+frontend/    The panel UI rendered inside the Bitrix placement iframe
+deploy/      Dockerfile, compose stack, environment template
+reference/   Superseded prototypes and notes, kept for context only
+```
+
+`reference/` is not built or deployed. The pre-rebuild tree, including the
+`vaestvita/thoth` fork this repository started from, is preserved on the
+`archive/thoth-base` branch.
+
+## Running locally
+
+```bash
+cd backend
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp ../deploy/.env.example .env      # then fill in ALOTS_API_KEY etc.
+python manage.py migrate
+python manage.py runserver
+```
+
+## Deployment
+
+The stack runs on the Hostinger VPS behind nginx at
+`https://wa.srv1802669.hstgr.cloud`, which proxies to the app on
+`127.0.0.1:8100` and permits framing only from the Bitrix portal origin.
+
+Note that the VPS also hosts unrelated services (Frappe, n8n, pearlzshop), so the
+stack is Docker-isolated with its own Postgres and Redis.

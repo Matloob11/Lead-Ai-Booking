@@ -1,0 +1,260 @@
+/* A7 WhatsApp Inbox — shell styles for the Bitrix placement pages.
+   The chat UI lands here later; for now this covers the SSO boot + diagnostics. */
+
+:root {
+  --navy: #0e2a47;
+  --navy-soft: #17395e;
+  --gold: #c8a34a;
+  --ink: #1c2430;
+  --muted: #667485;
+  --line: #e2e8f0;
+  --bg: #f6f8fa;
+  --ok: #17825a;
+  --err: #c2382f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.boot {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+}
+
+.card {
+  width: 100%;
+  max-width: 560px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 1px 3px rgb(16 24 40 / 6%);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.brand__mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--navy);
+  color: var(--gold);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+.brand__name {
+  font-weight: 650;
+  color: var(--navy);
+}
+
+.brand__sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+h1 {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+
+p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--navy);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+  vertical-align: -4px;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+.steps {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.steps li {
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.steps li:first-child {
+  border-top: 0;
+}
+
+.steps li[data-state="done"] {
+  color: var(--ink);
+}
+
+.steps li[data-state="done"] .steps__dot::after {
+  content: "✓";
+  color: var(--ok);
+}
+
+.steps li[data-state="active"] .steps__dot::after {
+  content: "…";
+  color: var(--navy);
+}
+
+.steps li[data-state="failed"] {
+  color: var(--err);
+}
+
+.steps li[data-state="failed"] .steps__dot::after {
+  content: "✕";
+  color: var(--err);
+}
+
+.steps__dot {
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.steps__dot::after {
+  content: "·";
+  color: var(--line);
+}
+
+.alert {
+  border: 1px solid #f0c6c2;
+  background: #fdf3f2;
+  border-radius: 9px;
+  padding: 14px 16px;
+  margin-top: 16px;
+}
+
+.alert__title {
+  font-weight: 650;
+  color: var(--err);
+  margin-bottom: 4px;
+}
+
+.alert__code {
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--muted);
+}
+
+.alert pre {
+  margin: 10px 0 0;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  color: var(--ink);
+}
+
+.btn {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  cursor: pointer;
+  margin-top: 16px;
+}
+
+.btn:hover {
+  background: var(--navy-soft);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--navy);
+  border: 1px solid var(--line);
+  margin-left: 8px;
+}
+
+.facts {
+  margin: 16px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-all;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  background: #eef2f7;
+  color: var(--navy);
+}
+
+.pill--gold {
+  background: #fbf3e0;
+  color: #8a6d21;
+}

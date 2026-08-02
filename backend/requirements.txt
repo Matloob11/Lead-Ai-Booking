@@ -1,0 +1,14 @@
+Django==5.2.5
+djangorestframework==3.16.0
+django-cors-headers==4.7.0
+channels==4.2.2
+channels-redis==4.2.1
+daphne==4.2.0
+celery==5.5.3
+redis==5.2.1
+psycopg[binary]==3.2.9
+uvicorn[standard]==0.35.0
+gunicorn==23.0.0
+httpx==0.28.1
+python-dotenv==1.1.1
+whitenoise==6.9.0

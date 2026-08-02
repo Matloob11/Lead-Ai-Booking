@@ -1,0 +1,184 @@
+"""Settings for the A7 WhatsApp agent inbox.
+
+Single-tenant: one alots.io account, many WABA numbers, many Bitrix agents.
+Everything environment-specific comes from the environment; see deploy/.env.example.
+"""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+
+def env(name, default=None, required=False):
+    value = os.environ.get(name, default)
+    if required and not value:
+        raise RuntimeError(f"Required environment variable {name} is not set")
+    return value
+
+
+def env_bool(name, default=False):
+    return str(os.environ.get(name, default)).lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+# Core
+# ---------------------------------------------------------------------------
+SECRET_KEY = env("DJANGO_SECRET_KEY", "dev-insecure-key-change-me")
+DEBUG = env_bool("DJANGO_DEBUG", False)
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+# The panel is served inside a Bitrix24 placement iframe, so the portal origin
+# must be trusted for CSRF and allowed as a CORS origin.
+BITRIX_PORTAL_URL = env("BITRIX_PORTAL_URL", "https://crm.a7grouprealestatedxb.com").rstrip("/")
+PANEL_BASE_URL = env("PANEL_BASE_URL", "https://wa.srv1802669.hstgr.cloud").rstrip("/")
+
+CSRF_TRUSTED_ORIGINS = [BITRIX_PORTAL_URL, PANEL_BASE_URL]
+CORS_ALLOWED_ORIGINS = [BITRIX_PORTAL_URL, PANEL_BASE_URL]
+CORS_ALLOW_CREDENTIALS = True
+
+# Cookies must survive the cross-site iframe, which requires SameSite=None+Secure.
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+INSTALLED_APPS = [
+    "daphne",
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "corsheaders",
+    "channels",
+    "apps.accounts",
+    "apps.catalog",
+    "apps.inbox",
+    "apps.gateway",
+]
+
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+]
+
+ROOT_URLCONF = "a7wa.urls"
+ASGI_APPLICATION = "a7wa.asgi.application"
+WSGI_APPLICATION = "a7wa.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+AUTH_USER_MODEL = "accounts.Agent"
+
+# Data stores
+# ---------------------------------------------------------------------------
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": env("POSTGRES_DB", "a7wa"),
+        "USER": env("POSTGRES_USER", "a7wa"),
+        "PASSWORD": env("POSTGRES_PASSWORD", "a7wa"),
+        "HOST": env("POSTGRES_HOST", "127.0.0.1"),
+        "PORT": env("POSTGRES_PORT", "5432"),
+        "CONN_MAX_AGE": 60,
+    }
+}
+
+REDIS_URL = env("REDIS_URL", "redis://127.0.0.1:6379/0")
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    }
+}
+
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", REDIS_URL)
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TIMEZONE = "Asia/Dubai"
+
+# Localisation
+# ---------------------------------------------------------------------------
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Asia/Dubai"
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(env("MEDIA_ROOT", BASE_DIR / "media"))
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
+    "PAGE_SIZE": 50,
+}
+
+# alots.io (WBBOX) gateway
+# ---------------------------------------------------------------------------
+ALOTS_BASE_URL = env("ALOTS_BASE_URL", "https://alots.io").rstrip("/")
+ALOTS_API_KEY = env("ALOTS_API_KEY", "")
+ALOTS_VERSION = env("ALOTS_VERSION", "v23.0")
+ALOTS_TIMEOUT = float(env("ALOTS_TIMEOUT", "30"))
+
+# Shared secret alots sends back on every webhook call, configured per number in
+# their panel as a Bearer token. Requests without it are rejected.
+ALOTS_WEBHOOK_TOKEN = env("ALOTS_WEBHOOK_TOKEN", "")
+
+# Meta closes the free-form window 24h after the customer's last inbound message.
+SESSION_WINDOW_HOURS = int(env("SESSION_WINDOW_HOURS", "24"))
+
+# Bitrix24
+# ---------------------------------------------------------------------------
+BITRIX_CLIENT_ID = env("BITRIX_CLIENT_ID", "")
+BITRIX_CLIENT_SECRET = env("BITRIX_CLIENT_SECRET", "")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "root": {"handlers": ["console"], "level": env("LOG_LEVEL", "INFO")},
+    "loggers": {
+        "django.db.backends": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+    },
+}

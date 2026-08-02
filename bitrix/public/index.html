@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A7 WhatsApp Inbox</title>
+    <link rel="stylesheet" href="./assets/panel.css" />
+  </head>
+  <body>
+    <!--
+      LEFT_MENU placement handler. Bitrix opens this in an iframe and POSTs the
+      placement params; we pick the same values up through the JS SDK instead
+      (see assets/bitrix-sso.js), swap them for a Django session, and boot.
+
+      The chat UI replaces the panel below once it is built — the SSO boot and
+      the error surface stay as they are.
+    -->
+    <main class="boot" id="root">
+      <section class="card">
+        <div class="brand">
+          <div class="brand__mark">A7</div>
+          <div>
+            <div class="brand__name">WhatsApp Inbox</div>
+            <div class="brand__sub">A7 Group Real Estate</div>
+          </div>
+        </div>
+
+        <h1 id="title"><span class="spinner"></span>Signing you in…</h1>
+        <p id="subtitle">Bitrix24 se aapki pehchaan li ja rahi hai. Alag login ki zaroorat nahi.</p>
+
+        <ul class="steps" id="steps">
+          <li data-step="bitrix"><span class="steps__dot"></span><span>Bitrix24 placement se token</span></li>
+          <li data-step="session"><span class="steps__dot"></span><span>Panel session</span></li>
+          <li data-step="numbers"><span class="steps__dot"></span><span>Aapke WhatsApp numbers</span></li>
+        </ul>
+
+        <div id="result"></div>
+      </section>
+    </main>
+
+    <script type="module">
+      import { ensureSession, apiFetch, getBitrixAuth, SsoError } from "./assets/bitrix-sso.js";
+
+      const els = {
+        title: document.getElementById("title"),
+        subtitle: document.getElementById("subtitle"),
+        steps: document.getElementById("steps"),
+        result: document.getElementById("result"),
+      };
+
+      const setStep = (name, state) =>
+        els.steps.querySelector(`[data-step="${name}"]`)?.setAttribute("data-state", state);
+
+      const escape = (value) =>
+        String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+
+      function fail(step, error) {
+        setStep(step, "failed");
+        els.title.textContent = "Panel start nahi ho saka";
+        els.subtitle.textContent = "Neeche di gayi tafseel backend session ya IT ko bhejein.";
+
+        const code = error instanceof SsoError ? error.code : error?.name || "unknown";
+        const detail = error instanceof SsoError ? error.detail : error?.stack;
+
+        els.result.innerHTML = `
+          <div class="alert">
+            <div class="alert__title">${escape(error?.message || "Unknown error")}</div>
+            <div class="alert__code">code: ${escape(code)}</div>
+            ${detail ? `<pre>${escape(typeof detail === "string" ? detail : JSON.stringify(detail, null, 2))}</pre>` : ""}
+          </div>
+          <button class="btn" id="retry">Dobara koshish karein</button>`;
+        document.getElementById("retry").addEventListener("click", () => window.location.reload());
+        console.error("[a7-wa] boot failed at step:", step, error);
+      }
+
+      function renderReady(me, numbers) {
+        els.title.textContent = "Connected";
+        els.subtitle.textContent =
+          "SSO chal raha hai. Chat panel isi jagah render hoga — abhi sirf connection verify ho raha hai.";
+
+        const list = numbers.length
+          ? numbers
+              .map((n) => `<div><dt>${escape(n.label || n.display_number || n.id)}</dt><dd>${escape(n.display_number || n.phone_number_id || "—")}</dd></div>`)
+              .join("")
+          : `<div><dt>Numbers</dt><dd>koi number assign nahi</dd></div>`;
+
+        els.result.innerHTML = `
+          <dl class="facts">
+            <div><dt>Agent</dt><dd>${escape(me.display_name)}</dd></div>
+            <div><dt>Agent ID</dt><dd>${escape(me.id)}</dd></div>
+            <div><dt>Role</dt><dd><span class="pill ${me.is_wa_admin ? "pill--gold" : ""}">${me.is_wa_admin ? "Admin" : "Agent"}</span></dd></div>
+            ${list}
+          </dl>`;
+      }
+
+      async function boot() {
+        let step = "bitrix";
+        try {
+          setStep("bitrix", "active");
+          const auth = await getBitrixAuth();
+          console.info("[a7-wa] bitrix portal:", auth.DOMAIN, "member:", auth.member_id);
+          setStep("bitrix", "done");
+
+          step = "session";
+          setStep("session", "active");
+          const me = await ensureSession();
+          setStep("session", "done");
+
+          step = "numbers";
+          setStep("numbers", "active");
+          // /api/auth/me/ already carries the visible numbers; the catalog call is
+          // the real check that the session cookie survives a second request.
+          const catalog = await apiFetch("/api/catalog/numbers/");
+          const numbers = Array.isArray(catalog) ? catalog : catalog?.numbers || me.numbers || [];
+          setStep("numbers", "done");
+
+          renderReady(me, numbers);
+        } catch (error) {
+          fail(step, error);
+        }
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
