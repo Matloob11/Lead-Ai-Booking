@@ -6,7 +6,7 @@
  * means a contract change is a one-file edit.
  */
 
-import { apiFetch } from "./bitrix-sso.js";
+import { apiFetch, csrfToken, SsoError } from "./bitrix-sso.js";
 
 export const auth = {
   me: () => apiFetch("/api/auth/me/"),
@@ -45,10 +45,58 @@ export const inbox = {
 
   start: (body) => apiFetch("/api/inbox/start/", { method: "POST", body }),
 
-  uploadMedia(file) {
+  /**
+   * Uploads an attachment and reports progress.
+   *
+   * XMLHttpRequest rather than fetch: fetch still cannot report upload
+   * progress, and a 100 MB document sent over a phone connection needs a bar
+   * and a cancel button rather than a frozen dialog.
+   *
+   * @returns {{promise: Promise<{media_id: string}>, abort: () => void}}
+   */
+  uploadMedia(file, { conversationId, onProgress } = {}) {
     const form = new FormData();
     form.append("file", file);
-    return apiFetch("/api/inbox/media/upload/", { method: "POST", body: form });
+    if (conversationId) form.append("conversation_id", conversationId);
+
+    const xhr = new XMLHttpRequest();
+    const promise = new Promise((resolve, reject) => {
+      xhr.open("POST", `${window.location.origin}/api/inbox/media/upload/`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Accept", "application/json");
+      const csrf = csrfToken();
+      if (csrf) xhr.setRequestHeader("X-CSRFToken", csrf);
+
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+      });
+
+      xhr.addEventListener("load", () => {
+        let payload = null;
+        try {
+          payload = JSON.parse(xhr.responseText);
+        } catch {
+          /* handled below */
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && payload) {
+          resolve(payload);
+        } else {
+          reject(
+            new SsoError(
+              `http_${xhr.status}`,
+              payload?.detail || `Upload fail ho gaya (HTTP ${xhr.status})`,
+              payload
+            )
+          );
+        }
+      });
+
+      xhr.addEventListener("error", () => reject(new SsoError("network", "Upload ke dauran connection toot gaya.")));
+      xhr.addEventListener("abort", () => reject(new SsoError("aborted", "Upload cancel kar diya gaya.")));
+      xhr.send(form);
+    });
+
+    return { promise, abort: () => xhr.abort() };
   },
 };
 

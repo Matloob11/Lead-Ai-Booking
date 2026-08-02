@@ -14,11 +14,12 @@
  */
 
 import { catalog, inbox, asList } from "./api.js";
+import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { keepFrameSized } from "./frame.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
 import { InboxSocket } from "./realtime.js";
-import { el, clear, debounce, stamp, untilText, initials } from "./dom.js";
+import { el, clear, debounce, formatBytes, modal, stamp, untilText, initials } from "./dom.js";
 
 const PAGE_SIZE = 40;
 
@@ -43,6 +44,10 @@ export function mountInbox(root, { me }) {
     loadingThread: false,
     connection: "connecting",
   };
+
+  // Composer listeners (attach button, drop zone, paste) are rebound whenever
+  // the composer is re-rendered; this releases the previous set.
+  let teardownFileSources = null;
 
   /* ------------------------------------------------------------ structure */
 
@@ -353,17 +358,45 @@ export function mountInbox(root, { me }) {
         onclick: () => openImage(message),
       });
     }
+    // Voice notes arrive as audio/ogg; a plain player is what they need.
     if (kind === "audio") return el("audio.msg__audio", { src: message.media_url, controls: true });
-    if (kind === "video") return el("video.msg__video", { src: message.media_url, controls: true });
-    return el("a.msg__file", { href: message.media_url, target: "_blank", rel: "noopener" }, [
-      "📎 ",
-      message.media_name || "Attachment",
+
+    if (kind === "video") {
+      // No poster comes from the API, so preload the metadata — the browser
+      // then paints the first frame instead of a black rectangle.
+      return el("video.msg__video", { src: message.media_url, controls: true, preload: "metadata" });
+    }
+
+    return el("a.msg__doc", { href: message.media_url, target: "_blank", rel: "noopener", download: message.media_name || "" }, [
+      el("div.msg__doc-icon", {}, [docIcon(message.media_name, message.media_mime)]),
+      el("div.msg__doc-meta", {}, [
+        el("div.msg__doc-name", { title: message.media_name || "" }, [message.media_name || "Document"]),
+        el("div.msg__doc-sub", {}, [docSubtitle(message)]),
+      ]),
+      el("div.msg__doc-dl", { title: "Download" }, ["⤓"]),
     ]);
+  }
+
+  const DOC_ICONS = { pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", ppt: "📙", pptx: "📙", zip: "🗜", csv: "📗", txt: "📄" };
+
+  function docIcon(name = "", mime = "") {
+    const ext = String(name).split(".").pop()?.toLowerCase();
+    if (DOC_ICONS[ext]) return DOC_ICONS[ext];
+    if (String(mime).includes("pdf")) return "📕";
+    return "📄";
+  }
+
+  function docSubtitle(message) {
+    const ext = String(message.media_name || "").split(".").pop()?.toUpperCase();
+    const size = formatBytes(message.media_size);
+    return [ext && ext.length <= 5 ? ext : null, size].filter(Boolean).join(" · ") || "Download";
   }
 
   /* ------------------------------------------------------------- composer */
 
   function renderComposer(conversation) {
+    teardownFileSources?.();
+    teardownFileSources = null;
     clear(ui.composer);
     if (!conversation) return;
 
@@ -390,31 +423,63 @@ export function mountInbox(root, { me }) {
           submit();
         }
       },
-    });
-
-    const file = el("input", {
-      type: "file",
-      hidden: true,
-      accept: "image/*,audio/*,video/*,application/pdf",
-      onchange: () => file.files[0] && sendMedia(conversation, file.files[0], textarea),
+      oninput: () => autoGrow(textarea),
     });
 
     async function submit() {
       const body = textarea.value.trim();
       if (!body) return;
       textarea.value = "";
+      autoGrow(textarea);
       await sendText(conversation, body);
     }
 
+    const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, ["📎"]);
+
     ui.composer.append(
       el("div.composer", {}, [
-        file,
-        el("button.btn.btn--icon", { type: "button", title: "Attach", onclick: () => file.click() }, ["📎"]),
+        el("div.composer__attach", {}, [attachBtn]),
         textarea,
         el("button.btn.btn--primary", { type: "button", onclick: submit }, ["Send"]),
       ])
     );
+
+    // Files can arrive from the button, a drop anywhere on the thread, or a
+    // paste — a screenshot straight from the clipboard is the fastest of the
+    // three and the one agents reach for most.
+    teardownFileSources = bindFileSources({
+      button: attachBtn,
+      dropZone: ui.messages,
+      pasteTarget: textarea,
+      onFile: (file) => attachFile(conversation, file),
+    });
+
     textarea.focus();
+  }
+
+  /** Grows the composer with the text, up to the CSS max-height. */
+  function autoGrow(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }
+
+  function attachFile(conversation, file) {
+    const problem = checkFile(file);
+    if (problem) {
+      // Still open the dialog: it shows the reason next to the file, which is
+      // clearer than a toast that disappears.
+      openAttachmentDialog(file, { conversationId: conversation.id, onSent: () => {} });
+      return;
+    }
+    openAttachmentDialog(file, {
+      conversationId: conversation.id,
+      onSent: (message) => {
+        if (message?.id && !state.messages.some((m) => String(m.id) === String(message.id))) {
+          state.messages.push(message);
+          appendMessageNode(messageBubble(message), { wasAtBottom: true });
+        }
+      },
+    });
   }
 
   /**
@@ -466,46 +531,7 @@ export function mountInbox(root, { me }) {
     }
   }
 
-  async function sendMedia(conversation, file, textarea) {
-    const caption = textarea?.value.trim() || "";
-    const kind = mediaKind(file.type);
-    const draft = appendOptimistic({ kind, body: caption || file.name });
-    if (textarea) textarea.value = "";
-
-    try {
-      const uploaded = await inbox.uploadMedia(file);
-      const real = await inbox.send(conversation.id, {
-        kind,
-        body: caption,
-        media_id: uploaded.media_id,
-      });
-      replaceMessage(draft.id, real || { status: "sent" });
-    } catch (error) {
-      replaceMessage(draft.id, { status: "failed", body: `${file.name}\n\n⚠ ${error.message}` });
-    }
-  }
-
-  function mediaKind(mime = "") {
-    if (mime.startsWith("image/")) return "image";
-    if (mime.startsWith("audio/")) return "audio";
-    if (mime.startsWith("video/")) return "video";
-    return "document";
-  }
-
   /* ------------------------------------------------------------- modals */
-
-  function modal(title, content, { wide = false } = {}) {
-    const box = el("div.modal__box", { class: wide ? "modal__box--wide" : "" }, [
-      el("div.modal__head", {}, [el("h2.modal__title", {}, [title]), el("button.modal__x", { type: "button", onclick: close }, ["×"])]),
-      content,
-    ]);
-    const backdrop = el("div.modal", { onclick: (e) => e.target === backdrop && close() }, [box]);
-    function close() {
-      backdrop.remove();
-    }
-    document.body.append(backdrop);
-    return { close, box };
-  }
 
   async function templatesFor(numberId) {
     if (state.templates.has(numberId)) return state.templates.get(numberId);

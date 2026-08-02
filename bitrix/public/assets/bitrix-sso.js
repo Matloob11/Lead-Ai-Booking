@@ -176,6 +176,9 @@ export async function ensurePlacement({ placement = "LEFT_MENU", title = "WhatsA
 
 /* -------------------------------------------------------------------- HTTP */
 
+/** Django's CSRF token, once /api/auth/me/ has handed us the cookie. */
+export const csrfToken = () => readCookie("csrftoken");
+
 function readCookie(name) {
   const hit = document.cookie
     .split(";")

@@ -72,6 +72,48 @@ export function untilText(iso) {
   return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 }
 
+/** "1.4 MB" — sizes are shown next to files the agent is about to send. */
+export function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  const value = n / 1024 ** i;
+  return `${value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * Centred dialog over the panel. Returns { close, box } so callers can swap
+ * their own content in and dismiss it themselves.
+ */
+export function modal(title, content, { wide = false, onClose } = {}) {
+  const close = () => {
+    document.removeEventListener("keydown", onKey, true);
+    backdrop.remove();
+    onClose?.();
+  };
+
+  const onKey = (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    close();
+  };
+
+  const box = el("div.modal__box", { class: wide ? "modal__box--wide" : "" }, [
+    el("div.modal__head", {}, [
+      el("h2.modal__title", {}, [title]),
+      el("button.modal__x", { type: "button", onclick: close }, ["×"]),
+    ]),
+    content,
+  ]);
+
+  const backdrop = el("div.modal", { onclick: (event) => event.target === backdrop && close() }, [box]);
+
+  document.addEventListener("keydown", onKey, true);
+  document.body.append(backdrop);
+  return { close, box };
+}
+
 /** Initials for the avatar circle. */
 export function initials(name) {
   const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
