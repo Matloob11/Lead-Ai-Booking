@@ -11,6 +11,29 @@
   --bg: #f6f8fa;
   --ok: #17825a;
   --err: #c2382f;
+  --menu-bg: #fff;
+  --menu-hover: #f2f5f8;
+}
+
+/* Theme hooks.
+   A companion module sets data-wa-theme on <body> and restyles the surfaces.
+   The palette itself is defined here, so flipping these few variables carries
+   every piece of text, every border and every popup with it — far more
+   reliable than the theme chasing each selector one at a time. */
+body[data-wa-theme="glass-dark"] {
+  --ink: #eef3f9;
+  --muted: rgba(238, 243, 249, 0.62);
+  --line: rgba(255, 255, 255, 0.16);
+  --navy: #eef3f9;
+  --bg: transparent;
+  --menu-bg: rgba(24, 38, 62, 0.92);
+  --menu-hover: rgba(255, 255, 255, 0.12);
+}
+
+body[data-wa-theme="glass-light"] {
+  --line: rgba(22, 48, 82, 0.12);
+  --bg: transparent;
+  --menu-bg: rgba(255, 255, 255, 0.96);
 }
 
 * {

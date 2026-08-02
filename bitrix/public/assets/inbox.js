@@ -82,21 +82,41 @@ export function mountInbox(root, { me }) {
     composer: el("div.slot", { id: "wa-composer-slot" }),
   };
 
+  /**
+   * Everything that is not the app's name lives behind one button.
+   *
+   * Four controls side by side left no room for the title — it rendered as
+   * "W…" — and companion modules append their own into this bar too, so it
+   * only gets tighter. A name and a menu is all the bar holds now.
+   */
+  const menuPanel = el("div.sidebar__menu", { hidden: true }, [
+    slots.search,
+    me.is_wa_admin
+      ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [
+          icon("hash", { size: 16 }),
+          "Numbers",
+        ])
+      : null,
+    el("button.btn.menu__item", { onclick: openNewContact, type: "button" }, [
+      icon("plus", { size: 16 }),
+      "New contact",
+    ]),
+  ]);
+
+  const menuBtn = el("button.btn.btn--icon.sidebar__menu-btn", { type: "button", title: "Menu" }, [
+    icon("menu", { size: 19 }),
+  ]);
+
   const layout = el("div.app", {}, [
     el("aside.sidebar", {}, [
+      // The menu button is a direct child of the bar on purpose: companion
+      // modules locate their insertion point with
+      // `sidebarTop.querySelector(".btn")` and then insertBefore it, which
+      // throws if that button is nested inside a wrapper.
       el("div.sidebar__top", {}, [
         el("div.sidebar__title", {}, ["WhatsApp"]),
-        slots.search,
-        me.is_wa_admin
-          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Number names and agents" }, [
-              icon("hash", { size: 15 }),
-              "Numbers",
-            ])
-          : null,
-        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button", title: "New contact" }, [
-          icon("plus", { size: 15 }),
-          "New",
-        ]),
+        menuBtn,
+        menuPanel,
       ]),
       el("div.filter", {}, [ui.numberSelect, ui.search]),
       // List and status share one scroll box so the empty-state message sits
@@ -106,7 +126,48 @@ export function mountInbox(root, { me }) {
     el("section.thread", {}, [ui.connection, ui.threadHeader, ui.messages, ui.composer]),
   ]);
 
+  bindSidebarMenu();
   renderEmptyThread();
+
+  /**
+   * Opens and closes the sidebar menu, and adopts anything a companion module
+   * drops into the bar.
+   *
+   * The companions append their controls to `.sidebar__top` directly — that is
+   * the surface they were written against — so rather than ask them to change,
+   * the bar hands anything unexpected to the menu. Without it, the crowding
+   * this menu exists to fix would come straight back.
+   */
+  function bindSidebarMenu() {
+    const closeMenu = () => {
+      menuPanel.hidden = true;
+      document.removeEventListener("click", onOutside, true);
+    };
+
+    const onOutside = (event) => {
+      if (!menuPanel.contains(event.target) && !menuBtn.contains(event.target)) closeMenu();
+    };
+
+    menuBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (!menuPanel.hidden) return closeMenu();
+      menuPanel.hidden = false;
+      document.addEventListener("click", onOutside, true);
+    });
+
+    // Choosing anything in the menu is the end of that interaction.
+    menuPanel.addEventListener("click", (event) => {
+      if (event.target.closest(".menu__item")) closeMenu();
+    });
+
+    const bar = layout.querySelector(".sidebar__top");
+    const mine = new Set([bar.firstElementChild, menuBtn, menuPanel]);
+    new MutationObserver(() => {
+      for (const node of [...bar.children]) {
+        if (!mine.has(node)) menuPanel.append(node);
+      }
+    }).observe(bar, { childList: true });
+  }
 
   /* ------------------------------------------------------------- loading */
 
