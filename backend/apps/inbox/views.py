@@ -1,5 +1,7 @@
+import csv
+
 from django.db.models import Q
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
@@ -21,6 +23,18 @@ from .serializers import (
     serialize_quick_reply,
     serialize_reminder,
 )
+
+
+class Echo:
+    """A write-only file that hands the line straight back.
+
+    csv.writer insists on writing somewhere; giving it this instead of a buffer
+    turns each writerow() into a value we can yield, which is what lets an
+    export stream row by row instead of being built in memory first.
+    """
+
+    def write(self, value):
+        return value
 
 
 def _visible_conversations(user):
@@ -570,3 +584,169 @@ def media_upload(request):
             "size": upload.size,
         }
     )
+
+
+@api_view(["POST"])
+def send_location(request, pk):
+    """Drop a pin in the chat."""
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+    try:
+        message = services.send_location(
+            conversation,
+            request.user,
+            request.data.get("latitude"),
+            request.data.get("longitude"),
+            name=str(request.data.get("name", ""))[:200],
+            address=str(request.data.get("address", ""))[:500],
+        )
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except AlotsError as exc:
+        return Response(
+            {"detail": f"Gateway rejected the message: {exc}"}, status=status.HTTP_502_BAD_GATEWAY
+        )
+
+    return Response(serialize_message(message, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+def forward(request, pk):
+    """Send an existing message into another chat.
+
+    Both ends are checked against the caller's own visible chats, so a forward
+    cannot be used to read out of, or write into, a number they do not cover.
+    """
+    visible = _visible_conversations(request.user)
+    message = get_object_or_404(Message.objects.filter(conversation__in=visible), pk=pk)
+
+    target_id = request.data.get("conversation_id")
+    if not target_id:
+        return Response(
+            {"detail": "Say which conversation to forward to"}, status=status.HTTP_400_BAD_REQUEST
+        )
+    target = get_object_or_404(visible, pk=target_id)
+    if target.pk == message.conversation_id:
+        return Response(
+            {"detail": "That message is already in this chat."}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        sent = services.forward_message(message, target, request.user)
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+    except AlotsError as exc:
+        return Response(
+            {"detail": f"Gateway rejected the message: {exc}"}, status=status.HTTP_502_BAD_GATEWAY
+        )
+
+    return Response(serialize_message(sent, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+def star(request, pk):
+    """Flag a message for the team, or clear the flag."""
+    message = get_object_or_404(
+        Message.objects.filter(conversation__in=_visible_conversations(request.user)), pk=pk
+    )
+    message.is_starred = bool(request.data.get("starred", True))
+    message.save(update_fields=["is_starred"])
+    return Response(serialize_message(message, request))
+
+
+@api_view(["GET"])
+def starred(request):
+    """Every flagged message across the chats the agent can open."""
+    queryset = (
+        Message.objects.filter(
+            conversation__in=_visible_conversations(request.user), is_starred=True
+        )
+        .select_related("conversation", "conversation__contact", "conversation__number", "media", "sent_by")
+        .order_by("-created_at")
+    )
+
+    if request.GET.get("conversation"):
+        queryset = queryset.filter(conversation_id=request.GET["conversation"])
+
+    return Response(
+        [
+            {**serialize_message(m, request), "conversation": serialize_conversation(m.conversation)}
+            for m in queryset[:200]
+        ]
+    )
+
+
+@api_view(["GET"])
+def export(request, pk):
+    """Download a chat as a plain transcript or as CSV.
+
+    Streamed rather than assembled: chats are never deleted here, so the oldest
+    ones will outgrow whatever limit a buffered response could hold.
+    """
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+
+    # Deliberately not ?format=: DRF reserves that for content negotiation and
+    # answers 404 for any value it has no renderer for, which would swallow this
+    # endpoint entirely.
+    fmt = request.GET.get("fmt", "txt").lower()
+    if fmt not in {"txt", "csv"}:
+        return Response({"detail": "fmt must be txt or csv"}, status=status.HTTP_400_BAD_REQUEST)
+
+    messages = (
+        conversation.messages.select_related("sent_by", "media", "template")
+        .order_by("created_at", "id")
+        .iterator(chunk_size=500)
+    )
+    them = str(conversation.contact)
+    stamp = timezone.localtime().strftime("%Y%m%d-%H%M")
+    filename = f"whatsapp-{conversation.contact.wa_id}-{stamp}.{fmt}"
+
+    def who(message):
+        if message.direction == Message.Direction.INBOUND:
+            return them
+        return (message.sent_by and message.sent_by.display_name) or conversation.number.title
+
+    def content(message):
+        if message.kind == Message.Kind.LOCATION:
+            pin = message.payload.get("location") or {}
+            place = pin.get("name") or pin.get("address") or ""
+            return f"[location] {place} ({pin.get('latitude')}, {pin.get('longitude')})".strip()
+        if message.media:
+            label = f"<{message.media.file_name or message.kind}>"
+            return f"{label} {message.body}".strip()
+        return message.body or f"[{message.kind}]"
+
+    if fmt == "txt":
+        def lines():
+            yield f"WhatsApp chat with {them} ({conversation.contact.wa_id})\n"
+            yield f"Number: {conversation.number.title} ({conversation.number.phone_number})\n"
+            yield f"Exported {timezone.localtime().strftime('%d/%m/%Y %H:%M')}\n\n"
+            for message in messages:
+                when = timezone.localtime(message.created_at).strftime("%d/%m/%Y, %H:%M")
+                yield f"[{when}] {who(message)}: {content(message)}\n"
+
+        response = StreamingHttpResponse(lines(), content_type="text/plain; charset=utf-8")
+    else:
+        def rows():
+            writer = csv.writer(Echo())
+            yield writer.writerow(
+                ["timestamp", "direction", "sender", "kind", "body", "status", "file"]
+            )
+            for message in messages:
+                yield writer.writerow(
+                    [
+                        timezone.localtime(message.created_at).isoformat(),
+                        message.direction,
+                        who(message),
+                        message.kind,
+                        content(message),
+                        message.status,
+                        message.media.file_name if message.media else "",
+                    ]
+                )
+
+        response = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
+
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

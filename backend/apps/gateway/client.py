@@ -191,6 +191,29 @@ class AlotsClient:
             },
         )
 
+    def send_location(self, phone_number_id, to, latitude, longitude, name=None, address=None):
+        """Share a pin.
+
+        Meta documents the coordinates as strings; this gateway answers
+        "Invalid JSON format" to those and only accepts JSON numbers, so they
+        go out as floats.
+        """
+        location = {"latitude": float(latitude), "longitude": float(longitude)}
+        if name:
+            location["name"] = name
+        if address:
+            location["address"] = address
+        return self.send_raw(
+            phone_number_id,
+            {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to,
+                "type": "location",
+                "location": location,
+            },
+        )
+
     # Media ----------------------------------------------------------------
     def upload_media(self, phone_number_id, file_obj, filename, mime_type):
         """Upload a file and return the ``media_id`` Meta assigns it."""

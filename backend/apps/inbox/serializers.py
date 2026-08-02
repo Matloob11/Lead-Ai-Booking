@@ -36,8 +36,7 @@ def serialize_number(number):
         "waba_business_id": number.waba_business_id,
         "label": number.label,
         "display_name": number.display_name,
-        # What the panel should print. Falls back through what we know.
-        "title": number.label or number.display_name or number.phone_number,
+        "title": number.title,
         "quality_rating": number.quality_rating,
         "verification_status": number.verification_status,
         "webhook_configured": number.webhook_configured,
@@ -106,6 +105,11 @@ def serialize_message(message, request=None):
         "sent_by": serialize_agent(message.sent_by),
         # {wa_id: emoji}. Drawn on the bubble, not as a message of its own.
         "reactions": message.reactions or {},
+        "is_starred": message.is_starred,
+        # Both directions store the pin under the same key, so one shape serves.
+        "location": message.payload.get("location") if message.kind == "location" else None,
+        # WhatsApp prints a "Forwarded" tag; this is what earns it.
+        "is_forwarded": bool(message.payload.get("forwarded_from")),
         # Enough of the quoted message to draw the little bar above a reply,
         # without pulling its whole record along.
         "reply_to": (

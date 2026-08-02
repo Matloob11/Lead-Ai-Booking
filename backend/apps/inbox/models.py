@@ -234,6 +234,11 @@ class Message(models.Model):
     # back is not possible — the gateway refuses the type.
     reactions = models.JSONField(default=dict, blank=True)
 
+    # Shared across the team rather than per-agent: several people can work the
+    # same number, and a starred message here means "this one matters to whoever
+    # picks up the chat", not "I personally bookmarked it".
+    is_starred = models.BooleanField(default=False)
+
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
     error_code = models.CharField(max_length=32, blank=True)
     error_detail = models.TextField(blank=True)

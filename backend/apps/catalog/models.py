@@ -43,6 +43,16 @@ class WabaNumber(models.Model):
         return f"{self.phone_number} ({self.label or self.display_name or 'unnamed'})"
 
     @property
+    def title(self):
+        """What to print for this number, falling back through what we know.
+
+        The admin's own label wins: the gateway's display_name is whatever was
+        registered with Meta, while the label is usually the agent who holds
+        the number, which is what the team actually calls it.
+        """
+        return self.label or self.display_name or self.phone_number
+
+    @property
     def templates(self):
         return WaTemplate.objects.filter(waba_business_id=self.waba_business_id)
 

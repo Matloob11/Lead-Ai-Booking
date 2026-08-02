@@ -6,7 +6,10 @@ never silently loses a message when alots is slow or down — the row is there i
 """
 
 import hashlib
+import io
 import logging
+import mimetypes
+import os
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -137,6 +140,127 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
     _record_result(message, response)
     publish_message(message)
     return message
+
+
+def send_location(conversation, agent, latitude, longitude, name="", address=""):
+    """Drop a pin — in this business, almost always a property's."""
+    if not conversation.is_session_open:
+        raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
+
+    try:
+        latitude, longitude = float(latitude), float(longitude)
+    except (TypeError, ValueError):
+        raise ValueError("Latitude and longitude must be numbers.")
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        raise ValueError("Those coordinates are not on Earth.")
+
+    location = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "name": name,
+        "address": address,
+    }
+    # A pin has no text of its own, so the list needs something to print.
+    preview = name or address or f"{latitude:.5f}, {longitude:.5f}"
+
+    message = Message.objects.create(
+        conversation=conversation,
+        direction=Message.Direction.OUTBOUND,
+        kind=Message.Kind.LOCATION,
+        body=preview,
+        payload={"location": location},
+        sent_by=agent,
+        status=Message.Status.QUEUED,
+    )
+    _touch(conversation, preview, Message.Kind.LOCATION)
+
+    try:
+        response = AlotsClient().send_location(
+            conversation.number.phone_number_id,
+            conversation.contact.wa_id,
+            latitude,
+            longitude,
+            name=name,
+            address=address,
+        )
+    except AlotsError as exc:
+        message.status = Message.Status.FAILED
+        message.error_detail = str(exc)[:2000]
+        message.save(update_fields=["status", "error_detail"])
+        publish_status(message)
+        raise
+
+    _record_result(message, response)
+    publish_message(message)
+    return message
+
+
+FORWARDABLE_MEDIA = {
+    Message.Kind.IMAGE,
+    Message.Kind.DOCUMENT,
+    Message.Kind.AUDIO,
+    Message.Kind.VIDEO,
+    Message.Kind.STICKER,
+}
+
+
+def forward_message(message, to_conversation, agent):
+    """Send an existing message into another chat.
+
+    There is no forward primitive here, so a forward is an ordinary send that
+    happens to carry the same content. Media is re-uploaded from our own stored
+    copy rather than resent by id: a media id belongs to the number that
+    uploaded it, and the destination is often a different number.
+    """
+    if message.kind == Message.Kind.TEXT:
+        sent = send_text(to_conversation, agent, message.body)
+
+    elif message.kind == Message.Kind.LOCATION:
+        pin = message.payload.get("location") or {}
+        if not pin.get("latitude") and not pin.get("longitude"):
+            raise SendBlocked("This pin has no coordinates to forward.")
+        sent = send_location(
+            to_conversation,
+            agent,
+            pin.get("latitude"),
+            pin.get("longitude"),
+            name=pin.get("name", ""),
+            address=pin.get("address", ""),
+        )
+
+    elif message.kind in FORWARDABLE_MEDIA:
+        asset = message.media
+        if not asset or not asset.file:
+            raise SendBlocked("The file is still downloading. Try again in a moment.")
+
+        with asset.file.open("rb") as handle:
+            payload = handle.read()
+
+        filename = asset.file_name or os.path.basename(asset.file.name)
+        mime = asset.mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+        media_id, copy = _upload_bytes(to_conversation.number, payload, filename, mime, agent)
+        if not media_id:
+            raise SendBlocked("The gateway would not accept the file.")
+
+        sent = send_media(
+            to_conversation,
+            agent,
+            message.kind,
+            media_id,
+            caption=message.body,
+            filename=filename,
+            asset=copy,
+        )
+
+    else:
+        raise SendBlocked(f"A {message.get_kind_display().lower()} message cannot be forwarded.")
+
+    # WhatsApp marks a forward on the bubble; keeping the origin lets us do the
+    # same, and lets an admin trace where a file travelled.
+    sent.payload = {**sent.payload, "forwarded_from": message.pk}
+    sent.save(update_fields=["payload"])
+    return sent
 
 
 def _positional(values):
@@ -305,10 +429,10 @@ def send_template(conversation, agent, template, variables=None, header_variable
 
     _record_result(message, response)
 
-    if message.status == Message.Status.SENT:
-        conversation.open_session()
-        conversation.save(update_fields=["last_inbound_at", "session_expires_at"])
-
+    # Deliberately does not open the free-form window. Only a message *from* the
+    # customer does that — a delivered template merely earns the right to be
+    # replied to. Opening it here made the panel show an open window, let the
+    # agent type, and hand them Meta's error 131047 once the send failed.
     publish_message(message)
     return message
 
@@ -422,8 +546,8 @@ def reassign(conversation, to_agent, changed_by, reason=""):
     return conversation
 
 
-def upload_media(number: WabaNumber, django_file, agent=None):
-    """Push a file to the gateway and keep our own copy.
+def _upload_bytes(number: WabaNumber, payload: bytes, filename, mime_type, agent=None):
+    """Push bytes to the gateway and keep our own copy.
 
     The gateway only hands back an id it can send with; it gives us nothing to
     display. So the file is stored here too, and the resulting asset is what
@@ -431,27 +555,32 @@ def upload_media(number: WabaNumber, django_file, agent=None):
 
     Returns ``(media_id, asset)``.
     """
-    payload = django_file.read()
-    django_file.seek(0)
-
     media_id = AlotsClient().upload_media(
-        number.phone_number_id,
-        django_file.file,
-        django_file.name,
-        getattr(django_file, "content_type", "application/octet-stream"),
+        number.phone_number_id, io.BytesIO(payload), filename, mime_type
     )
     if not media_id:
         return None, None
 
     asset = MediaAsset(
         alots_media_id=media_id,
-        mime_type=getattr(django_file, "content_type", "") or "application/octet-stream",
-        file_name=django_file.name,
+        mime_type=mime_type,
+        file_name=filename,
         size_bytes=len(payload),
         sha256=hashlib.sha256(payload).hexdigest(),
         downloaded=True,
         uploaded_by=agent,
     )
-    asset.file.save(django_file.name, ContentFile(payload), save=False)
+    asset.file.save(filename, ContentFile(payload), save=False)
     asset.save()
     return media_id, asset
+
+
+def upload_media(number: WabaNumber, django_file, agent=None):
+    """Upload what an agent picked in the composer. See ``_upload_bytes``."""
+    return _upload_bytes(
+        number,
+        django_file.read(),
+        django_file.name,
+        getattr(django_file, "content_type", "") or "application/octet-stream",
+        agent,
+    )
