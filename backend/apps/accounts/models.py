@@ -19,7 +19,14 @@ class Agent(AbstractUser):
     # Distinct from is_staff/is_superuser, which govern the Django admin. This
     # flag governs the WhatsApp panel: every number, every chat, and the right
     # to reassign a conversation to another agent.
-    is_wa_admin = models.BooleanField(default=False)
+    #
+    # Two sources, because neither alone is right. Portal admins should not have
+    # to be granted access twice, but the panel also needs admins who are not
+    # Bitrix admins. So ``is_bitrix_admin`` is refreshed from the portal on every
+    # sign-in — losing it there loses it here — while ``is_wa_admin`` is a manual
+    # grant that survives.
+    is_wa_admin = models.BooleanField(default=False, help_text="Granted here, independent of Bitrix")
+    is_bitrix_admin = models.BooleanField(default=False, help_text="Mirrored from the portal at sign-in")
 
     last_seen_at = models.DateTimeField(null=True, blank=True)
 
@@ -30,11 +37,16 @@ class Agent(AbstractUser):
         return self.display_name or self.username
 
     @property
+    def has_admin_rights(self):
+        """Whether this agent administers the panel, from either source."""
+        return self.is_wa_admin or self.is_bitrix_admin or self.is_superuser
+
+    @property
     def visible_numbers(self):
         """Numbers whose chats this agent may open."""
         from apps.catalog.models import WabaNumber
 
-        if self.is_wa_admin:
+        if self.has_admin_rights:
             return WabaNumber.objects.filter(is_active=True)
         return WabaNumber.objects.filter(
             is_active=True,

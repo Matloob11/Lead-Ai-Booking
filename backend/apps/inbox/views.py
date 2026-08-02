@@ -1,7 +1,6 @@
 from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
-from django.urls import reverse
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -11,7 +10,9 @@ from apps.catalog.models import WaTemplate
 from apps.gateway.client import AlotsError
 
 from . import services
+from .events import publish_conversation
 from .models import Conversation, MediaAsset, Message
+from .serializers import serialize_conversation, serialize_message
 
 
 def _visible_conversations(user):
@@ -24,57 +25,6 @@ def _visible_conversations(user):
     return Conversation.objects.filter(number__in=user.visible_numbers).select_related(
         "contact", "number", "assigned_agent"
     )
-
-
-def serialize_conversation(conversation):
-    agent = conversation.assigned_agent
-    return {
-        "id": conversation.pk,
-        "number_id": conversation.number_id,
-        "contact": {
-            "wa_id": conversation.contact.wa_id,
-            "name": str(conversation.contact),
-        },
-        "assigned_agent": (
-            {"id": agent.pk, "display_name": agent.display_name or agent.username} if agent else None
-        ),
-        "status": conversation.status,
-        "last_message_at": conversation.last_message_at,
-        "last_message_preview": conversation.last_message_preview,
-        "unread_count": conversation.unread_count,
-        "session_expires_at": conversation.session_expires_at,
-        "is_session_open": conversation.is_session_open,
-    }
-
-
-def serialize_message(message, request=None):
-    # Attachments are served through an authenticated view rather than a static
-    # path: customer documents must not be readable by anyone who guesses a URL.
-    media_url = ""
-    if message.media_id:
-        media_url = reverse("inbox:media-download", args=[message.media_id])
-        if request:
-            media_url = request.build_absolute_uri(media_url)
-
-    return {
-        "id": message.pk,
-        "direction": message.direction,
-        "kind": message.kind,
-        "body": message.body,
-        "media_url": media_url,
-        "media_name": message.media.file_name if message.media else "",
-        "template_name": message.template.name if message.template else "",
-        "status": message.status,
-        "error_detail": message.error_detail,
-        "created_at": message.created_at,
-        "delivered_at": message.delivered_at,
-        "read_at": message.read_at,
-        "sent_by": (
-            {"id": message.sent_by.pk, "display_name": message.sent_by.display_name}
-            if message.sent_by
-            else None
-        ),
-    }
 
 
 @api_view(["GET"])
@@ -134,6 +84,8 @@ def mark_read(request, pk):
     conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
     conversation.unread_count = 0
     conversation.save(update_fields=["unread_count"])
+    # Other agents on the same number have this chat in their list too.
+    publish_conversation(conversation)
     return Response({"status": "ok"})
 
 
@@ -211,7 +163,7 @@ def start(request):
 
 @api_view(["POST"])
 def assign(request, pk):
-    if not request.user.is_wa_admin:
+    if not request.user.has_admin_rights:
         return Response({"detail": "Only admins can reassign a chat"}, status=status.HTTP_403_FORBIDDEN)
 
     conversation = get_object_or_404(Conversation, pk=pk)

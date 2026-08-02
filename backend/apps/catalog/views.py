@@ -2,20 +2,9 @@ from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from apps.inbox.serializers import serialize_number
+
 from .models import WaTemplate
-
-
-def serialize_number(number):
-    return {
-        "id": number.pk,
-        "phone_number": number.phone_number,
-        "phone_number_id": number.phone_number_id,
-        "waba_business_id": number.waba_business_id,
-        "display_name": number.display_name,
-        "quality_rating": number.quality_rating,
-        "verification_status": number.verification_status,
-        "webhook_configured": number.webhook_configured,
-    }
 
 
 def serialize_template(template):

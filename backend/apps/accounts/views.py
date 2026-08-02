@@ -24,16 +24,16 @@ Agent = get_user_model()
 
 
 def _serialize(agent):
+    from apps.inbox.serializers import serialize_number
+
     return {
         "id": agent.pk,
         "bitrix_user_id": agent.bitrix_user_id,
         "display_name": agent.display_name or agent.get_full_name() or agent.username,
         "avatar_url": agent.avatar_url,
-        "is_wa_admin": agent.is_wa_admin,
-        "numbers": [
-            {"id": n.pk, "phone_number": n.phone_number, "display_name": n.display_name}
-            for n in agent.visible_numbers
-        ],
+        # One flag for the panel; where the right came from is not its concern.
+        "is_wa_admin": agent.has_admin_rights,
+        "numbers": [serialize_number(n) for n in agent.visible_numbers],
     }
 
 
@@ -47,6 +47,22 @@ def _fetch_bitrix_user(domain, auth_id):
     if "result" not in body:
         raise ValueError(body.get("error_description") or "Bitrix returned no user")
     return body["result"]
+
+
+def _is_portal_admin(domain, auth_id):
+    """Ask the portal whether this user administers it.
+
+    A failure here is treated as "not an admin" rather than an error: the token
+    is already proven, and losing the panel's admin screens is a far better
+    outcome than refusing an agent their inbox.
+    """
+    try:
+        with httpx.Client(timeout=15) as client:
+            response = client.get(f"https://{domain}/rest/user.admin.json", params={"auth": auth_id})
+        return bool(response.json().get("result"))
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        logger.info("Could not read portal admin status: %s", exc)
+        return False
 
 
 # The very first call from the panel has no csrftoken cookie yet, so CSRF is
@@ -97,8 +113,11 @@ def bitrix_login(request):
     agent.display_name = full_name or agent.display_name
     agent.bitrix_portal = domain
     agent.avatar_url = profile.get("PERSONAL_PHOTO") or agent.avatar_url
+    agent.is_bitrix_admin = _is_portal_admin(domain, auth_id)
     agent.last_seen_at = timezone.now()
-    agent.save(update_fields=["display_name", "bitrix_portal", "avatar_url", "last_seen_at"])
+    agent.save(
+        update_fields=["display_name", "bitrix_portal", "avatar_url", "is_bitrix_admin", "last_seen_at"]
+    )
 
     login(request, agent, backend="django.contrib.auth.backends.ModelBackend")
     return Response({**_serialize(agent), "created": created})

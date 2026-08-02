@@ -127,7 +127,9 @@ def _store_inbound(number, message, contact_profiles):
 
         download_media.delay(media.pk, number.phone_number_id)
 
-    _broadcast(conversation, "message.new", {"message_id": msg.pk, "conversation_id": conversation.pk})
+    from apps.inbox.events import publish_message
+
+    publish_message(msg)
     return conversation
 
 
@@ -175,18 +177,10 @@ def _apply_status(status_entry):
         fields += ["error_code", "error_detail"]
 
     message.save(update_fields=fields)
-    _broadcast(
-        message.conversation,
-        "message.status",
-        {"message_id": message.pk, "status": message.status},
-    )
 
+    from apps.inbox.events import publish_status
 
-def _broadcast(conversation, event, data):
-    """Push an update to everyone watching this number."""
-    from apps.inbox.events import publish
-
-    publish(conversation, event, data)
+    publish_status(message)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)

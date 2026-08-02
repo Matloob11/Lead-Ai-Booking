@@ -2,6 +2,10 @@
 
 Everyone assigned to a number sees the same stream — chats are not hidden behind
 ownership — so the channel group is keyed on the number, not the agent.
+
+Payloads carry the whole object rather than an id. A pushed message should be
+renderable on arrival; making the panel fetch what we already have in hand adds
+a round trip to the one path where latency is visible.
 """
 
 import logging
@@ -21,8 +25,44 @@ def publish(conversation, event, data):
     if layer is None:
         return
 
-    message = {"type": "inbox.event", "event": event, "data": {**data, "number_id": conversation.number_id}}
+    message = {
+        "type": "inbox.event",
+        "event": event,
+        "data": {**data, "number_id": conversation.number_id},
+    }
     try:
         async_to_sync(layer.group_send)(group_for_number(conversation.number_id), message)
     except Exception:  # noqa: BLE001 - a dead socket must not fail the write path
         logger.exception("Failed to publish %s for conversation %s", event, conversation.pk)
+
+
+def publish_message(message):
+    """A message arrived or was sent. Carries the message and its conversation."""
+    from .serializers import serialize_conversation, serialize_message
+
+    conversation = message.conversation
+    publish(
+        conversation,
+        "message.new",
+        {
+            "message": serialize_message(message),
+            "conversation": serialize_conversation(conversation),
+        },
+    )
+
+
+def publish_status(message):
+    """A delivery receipt moved a message forward, or it failed."""
+    from .serializers import serialize_message
+
+    publish(
+        message.conversation,
+        "message.status",
+        {"message": serialize_message(message)},
+    )
+
+
+def publish_conversation(conversation, event="conversation.updated"):
+    from .serializers import serialize_conversation
+
+    publish(conversation, event, {"conversation": serialize_conversation(conversation)})

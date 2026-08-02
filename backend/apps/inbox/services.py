@@ -13,7 +13,7 @@ from django.utils import timezone
 from apps.catalog.models import WabaNumber, WaTemplate
 from apps.gateway.client import AlotsClient, AlotsError
 
-from .events import publish
+from .events import publish_conversation, publish_message, publish_status
 from .models import AssignmentLog, Contact, Conversation, Message
 
 logger = logging.getLogger(__name__)
@@ -71,11 +71,11 @@ def send_text(conversation, agent, body):
         message.status = Message.Status.FAILED
         message.error_detail = str(exc)[:2000]
         message.save(update_fields=["status", "error_detail"])
-        publish(conversation, "message.status", {"message_id": message.pk, "status": message.status})
+        publish_status(message)
         raise
 
     _record_result(message, response)
-    publish(conversation, "message.new", {"message_id": message.pk, "conversation_id": conversation.pk})
+    publish_message(message)
     return message
 
 
@@ -110,7 +110,7 @@ def send_media(conversation, agent, kind, media_id, caption="", filename=""):
         raise
 
     _record_result(message, response)
-    publish(conversation, "message.new", {"message_id": message.pk, "conversation_id": conversation.pk})
+    publish_message(message)
     return message
 
 
@@ -173,7 +173,7 @@ def send_template(conversation, agent, template, variables=None):
         conversation.open_session()
         conversation.save(update_fields=["last_inbound_at", "session_expires_at"])
 
-    publish(conversation, "message.new", {"message_id": message.pk, "conversation_id": conversation.pk})
+    publish_message(message)
     return message
 
 
@@ -208,11 +208,7 @@ def reassign(conversation, to_agent, changed_by, reason=""):
         changed_by=changed_by,
         reason=reason,
     )
-    publish(
-        conversation,
-        "conversation.assigned",
-        {"conversation_id": conversation.pk, "assigned_agent_id": to_agent.pk if to_agent else None},
-    )
+    publish_conversation(conversation, "conversation.assigned")
     return conversation
 
 
