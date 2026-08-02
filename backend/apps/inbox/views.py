@@ -37,6 +37,18 @@ class Echo:
         return value
 
 
+# Excel and Sheets treat a cell opening with any of these as a formula, and a
+# WhatsApp message is written by whoever is on the other end of the number.
+# Without this, a customer could send =HYPERLINK(...) and have it run when an
+# agent opens the export.
+FORMULA_LEADERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value):
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(FORMULA_LEADERS) else text
+
+
 def _visible_conversations(user):
     """Every chat on every number the agent covers.
 
@@ -409,9 +421,17 @@ def search(request):
     if len(term) < 2:
         return Response({"detail": "Search for at least two characters"}, status=status.HTTP_400_BAD_REQUEST)
 
-    queryset = Message.objects.filter(
-        conversation__in=_visible_conversations(request.user), body__icontains=term
-    ).select_related("conversation", "conversation__contact", "conversation__number", "sent_by")
+    # Searching the contact's name as well as the text: an agent looking for
+    # "Ahmed" means the person at least as often as the word.
+    queryset = (
+        Message.objects.filter(conversation__in=_visible_conversations(request.user))
+        .filter(
+            Q(body__icontains=term)
+            | Q(conversation__contact__display_name__icontains=term)
+            | Q(conversation__contact__profile_name__icontains=term)
+        )
+        .select_related("conversation", "conversation__contact", "conversation__number", "sent_by")
+    )
 
     if request.GET.get("conversation"):
         queryset = queryset.filter(conversation_id=request.GET["conversation"])
@@ -735,7 +755,8 @@ def export(request, pk):
             )
             for message in messages:
                 yield writer.writerow(
-                    [
+                    _csv_safe(cell)
+                    for cell in [
                         timezone.localtime(message.created_at).isoformat(),
                         message.direction,
                         who(message),
