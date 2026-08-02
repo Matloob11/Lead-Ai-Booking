@@ -115,6 +115,7 @@ def _store_inbound(number, message, contact_profiles):
     conversation.open_session(sent_at)
     conversation.last_message_at = sent_at
     conversation.last_message_preview = preview[:255]
+    conversation.last_message_kind = kind
     conversation.unread_count = conversation.unread_count + 1
     conversation.status = Conversation.Status.OPEN
     conversation.save(
@@ -123,6 +124,7 @@ def _store_inbound(number, message, contact_profiles):
             "session_expires_at",
             "last_message_at",
             "last_message_preview",
+            "last_message_kind",
             "unread_count",
             "status",
         ]

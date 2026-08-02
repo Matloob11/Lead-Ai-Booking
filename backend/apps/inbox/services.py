@@ -5,8 +5,10 @@ never silently loses a message when alots is slow or down — the row is there i
 ``queued`` and carries the failure if one comes back.
 """
 
+import hashlib
 import logging
 
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
@@ -14,7 +16,7 @@ from apps.catalog.models import WabaNumber, WaTemplate
 from apps.gateway.client import AlotsClient, AlotsError
 
 from .events import publish_conversation, publish_message, publish_status
-from .models import AssignmentLog, Contact, Conversation, Message
+from .models import AssignmentLog, Contact, Conversation, MediaAsset, Message
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +43,13 @@ def _record_result(message, response):
         message.save(update_fields=["status", "error_detail"])
 
 
-def _touch(conversation, preview):
+def _touch(conversation, preview, kind=Message.Kind.TEXT):
     conversation.last_message_at = timezone.now()
     conversation.last_message_preview = preview[:255]
-    conversation.save(update_fields=["last_message_at", "last_message_preview"])
+    conversation.last_message_kind = kind
+    conversation.save(
+        update_fields=["last_message_at", "last_message_preview", "last_message_kind"]
+    )
 
 
 def send_text(conversation, agent, body):
@@ -79,7 +84,13 @@ def send_text(conversation, agent, body):
     return message
 
 
-def send_media(conversation, agent, kind, media_id, caption="", filename=""):
+def send_media(conversation, agent, kind, media_id, caption="", filename="", asset=None):
+    """Send a file the agent already uploaded to the gateway.
+
+    ``asset`` is our own copy of that file. Linking it is what makes the sent
+    photo visible in the thread — without it the message knows only the
+    gateway's id, which nothing can render.
+    """
     if not conversation.is_session_open:
         raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
 
@@ -88,11 +99,16 @@ def send_media(conversation, agent, kind, media_id, caption="", filename=""):
         direction=Message.Direction.OUTBOUND,
         kind=kind,
         body=caption,
-        payload={"media_id": media_id, "filename": filename},
+        media=asset,
+        payload={
+            "media_id": media_id,
+            "filename": filename,
+            "asset_id": asset.pk if asset else None,
+        },
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
-    _touch(conversation, caption or f"[{kind}]")
+    _touch(conversation, caption or f"[{kind}]", kind)
 
     try:
         response = AlotsClient().send_media(
@@ -205,7 +221,7 @@ def send_template(conversation, agent, template, variables=None, header_variable
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
-    _touch(conversation, preview)
+    _touch(conversation, preview, Message.Kind.TEMPLATE)
 
     try:
         response = AlotsClient().send_template(
@@ -290,6 +306,7 @@ def retry_message(message, agent):
         media_id,
         caption=message.body,
         filename=payload.get("filename", ""),
+        asset=message.media,
     )
 
 
@@ -310,10 +327,34 @@ def reassign(conversation, to_agent, changed_by, reason=""):
 
 
 def upload_media(number: WabaNumber, django_file):
-    """Push a file to the gateway and return the media id to send with."""
-    return AlotsClient().upload_media(
+    """Push a file to the gateway and keep our own copy.
+
+    The gateway only hands back an id it can send with; it gives us nothing to
+    display. So the file is stored here too, and the resulting asset is what
+    makes a sent photo appear in the thread — the same way an inbound one does.
+
+    Returns ``(media_id, asset)``.
+    """
+    payload = django_file.read()
+    django_file.seek(0)
+
+    media_id = AlotsClient().upload_media(
         number.phone_number_id,
         django_file.file,
         django_file.name,
         getattr(django_file, "content_type", "application/octet-stream"),
     )
+    if not media_id:
+        return None, None
+
+    asset = MediaAsset(
+        alots_media_id=media_id,
+        mime_type=getattr(django_file, "content_type", "") or "application/octet-stream",
+        file_name=django_file.name,
+        size_bytes=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        downloaded=True,
+    )
+    asset.file.save(django_file.name, ContentFile(payload), save=False)
+    asset.save()
+    return media_id, asset

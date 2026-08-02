@@ -1,6 +1,7 @@
 from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -104,6 +105,13 @@ def send(request, pk):
             media_id = request.data.get("media_id")
             if not media_id:
                 return Response({"detail": "media_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Our stored copy of the upload, so the sent file renders in the
+            # thread instead of showing as an empty bubble.
+            asset = MediaAsset.objects.filter(pk=request.data.get("asset_id")).first()
+            if asset is None:
+                asset = MediaAsset.objects.filter(alots_media_id=media_id).order_by("-id").first()
+
             message = services.send_media(
                 conversation,
                 request.user,
@@ -111,6 +119,7 @@ def send(request, pk):
                 media_id,
                 caption=body,
                 filename=request.data.get("filename", ""),
+                asset=asset,
             )
     except services.SendBlocked as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
@@ -244,7 +253,7 @@ def media_upload(request):
         return Response({"detail": "No file supplied"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        media_id = services.upload_media(number, upload)
+        media_id, asset = services.upload_media(number, upload)
     except AlotsError as exc:
         return Response({"detail": f"Upload failed: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
@@ -254,6 +263,13 @@ def media_upload(request):
     return Response(
         {
             "media_id": media_id,
+            # Send this back with the message so the thread can render the file.
+            "asset_id": asset.pk if asset else None,
+            "media_url": request.build_absolute_uri(
+                reverse("inbox:media-download", args=[asset.pk])
+            )
+            if asset
+            else "",
             "name": upload.name,
             "mime": getattr(upload, "content_type", ""),
             "size": upload.size,

@@ -53,6 +53,9 @@ class Conversation(models.Model):
 
     last_message_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_message_preview = models.CharField(max_length=255, blank=True)
+    # Lets the conversation list mark a photo or document without loading the
+    # message itself.
+    last_message_kind = models.CharField(max_length=16, blank=True)
     unread_count = models.PositiveIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)

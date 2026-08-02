@@ -58,6 +58,7 @@ def serialize_conversation(conversation):
         "status": conversation.status,
         "last_message_at": _iso(conversation.last_message_at),
         "last_message_preview": conversation.last_message_preview,
+        "last_message_kind": conversation.last_message_kind,
         "unread_count": conversation.unread_count,
         "session_expires_at": _iso(conversation.session_expires_at),
         "is_session_open": conversation.is_session_open,
@@ -83,6 +84,7 @@ def serialize_message(message, request=None):
         "media_url": media_url,
         "media_name": message.media.file_name if message.media else "",
         "media_mime": message.media.mime_type if message.media else "",
+        "media_size": message.media.size_bytes if message.media else 0,
         "media_ready": bool(message.media and message.media.downloaded),
         # Lets the panel stop showing "loading" and say so instead.
         "media_failed": bool(message.media and not message.media.downloaded and message.media.download_error),
