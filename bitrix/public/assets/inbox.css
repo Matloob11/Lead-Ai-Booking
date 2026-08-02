@@ -75,6 +75,19 @@ body {
   white-space: nowrap;
 }
 
+/* Mount points for the companion modules. Invisible until something is put
+   inside them, so an unloaded module leaves no gap in the layout. */
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slot:empty {
+  display: none;
+}
+
 /* ------------------------------------------------------------------ icons */
 
 /* Icons sit on the text baseline and take the colour of whatever contains
@@ -576,6 +589,12 @@ body {
 
 .msg--out {
   align-self: flex-end;
+}
+
+/* Flash for a message arrived at from a search result or a reminder. */
+.msg--highlight .msg__bubble {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .msg__bubble {

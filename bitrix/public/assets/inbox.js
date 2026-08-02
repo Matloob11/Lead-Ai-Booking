@@ -73,10 +73,20 @@ export function mountInbox(root, { me }) {
     connection: el("div.connbar", { hidden: true }),
   };
 
+  // Mount points for the companion modules (search, reminders, reply buttons).
+  // They own what goes inside; this file only guarantees the slots exist, keep
+  // their id, and take no space while empty.
+  const slots = {
+    search: el("div.slot", { id: "wa-search-slot" }),
+    topbar: el("div.slot", { id: "wa-topbar-slot" }),
+    composer: el("div.slot", { id: "wa-composer-slot" }),
+  };
+
   const layout = el("div.app", {}, [
     el("aside.sidebar", {}, [
       el("div.sidebar__top", {}, [
         el("div.sidebar__title", {}, ["WhatsApp"]),
+        slots.search,
         me.is_wa_admin
           ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Numbers ke naam aur agents" }, [
               icon("hash", { size: 15 }),
@@ -116,6 +126,7 @@ export function mountInbox(root, { me }) {
     root.className = "";
     clear(root).append(layout);
     connectSocket();
+    publishApi();
 
     // The frame's height is Bitrix's to decide, and the panel simply fills it.
     // Asking for a taller frame (there is no API for "how much room do I have")
@@ -145,7 +156,7 @@ export function mountInbox(root, { me }) {
     }
   }
 
-  async function openConversation(id) {
+  async function openConversation(id, { highlightMessageId } = {}) {
     if (state.loadingThread) return;
     state.activeId = id;
     state.loadingThread = true;
@@ -160,6 +171,9 @@ export function mountInbox(root, { me }) {
       // which is exactly the reading order — do not re-sort it.
       state.messages = asList(payload, "messages");
 
+      // A search hit can point at a message far above the newest page.
+      if (highlightMessageId) await loadUntilMessage(id, highlightMessageId);
+
       // It also returns the conversation, fresher than the list copy.
       const conversation = payload?.conversation || findConversation(id);
       if (payload?.conversation) upsertConversation(payload.conversation);
@@ -170,6 +184,8 @@ export function mountInbox(root, { me }) {
       renderThreadHeader(conversation);
       renderMessages();
       renderComposer(conversation);
+
+      if (highlightMessageId) highlightMessage(highlightMessageId);
 
       if (conversation?.unread_count) {
         inbox.markRead(id).then(() => {
@@ -186,6 +202,38 @@ export function mountInbox(root, { me }) {
   }
 
   const findConversation = (id) => state.conversations.find((c) => c.id === id) || null;
+
+  /** How far back a deep link may pull before giving up. */
+  const HIGHLIGHT_MAX_PAGES = 5;
+
+  /**
+   * Pages backwards until the wanted message is loaded, so a deep link into an
+   * old message lands on it instead of on an empty scroll position. Bounded:
+   * a wrong id must not walk the whole history.
+   */
+  async function loadUntilMessage(conversationId, messageId) {
+    const wanted = String(messageId);
+    for (let page = 0; page < HIGHLIGHT_MAX_PAGES; page++) {
+      if (state.messages.some((m) => String(m.id) === wanted)) return true;
+
+      const oldest = state.messages[0]?.id;
+      if (!oldest) return false;
+
+      const older = asList(await inbox.messages(conversationId, { before: oldest, limit: PAGE_SIZE }), "messages");
+      if (!older.length) return false;
+      state.messages = [...older, ...state.messages];
+    }
+    return false;
+  }
+
+  /** Scrolls a message into view and flashes it, the way a search result should. */
+  function highlightMessage(messageId) {
+    const node = ui.messages.querySelector(`[data-id="${CSS.escape(String(messageId))}"]`);
+    if (!node) return;
+    node.scrollIntoView({ block: "center" });
+    node.classList.add("msg--highlight");
+    setTimeout(() => node.classList.remove("msg--highlight"), 2000);
+  }
 
   /* ------------------------------------------------------------ rendering */
 
@@ -258,15 +306,23 @@ export function mountInbox(root, { me }) {
   /** Marks a media preview in the list; plain text and templates get no icon. */
   const kindIcon = (kind) => iconForKind(kind, { size: 13, className: "conv__kind" });
 
+  /**
+   * The slot anchors must be in the document from mount, not only while a chat
+   * is open: the companion modules look them up once on wa:ready. Every render
+   * path that clears the header or composer puts them back.
+   */
   function renderEmptyThread() {
-    clear(ui.threadHeader);
-    clear(ui.composer);
+    clear(ui.threadHeader).append(slots.topbar);
+    clear(ui.composer).append(slots.composer);
     clear(ui.messages).append(el("div.thread__hint", {}, ["Baaein taraf se ek chat chunein."]));
   }
 
   function renderThreadHeader(conversation) {
     clear(ui.threadHeader);
-    if (!conversation) return;
+    if (!conversation) {
+      ui.threadHeader.append(slots.topbar);
+      return;
+    }
 
     const open = conversation.is_session_open;
     const left = untilText(conversation.session_expires_at);
@@ -290,6 +346,7 @@ export function mountInbox(root, { me }) {
         conversation.assigned_agent
           ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
           : null,
+        slots.topbar,
         state.me.is_wa_admin
           ? el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: () => openTransfer(conversation) }, [
               icon("users", { size: 15 }),
@@ -548,7 +605,10 @@ export function mountInbox(root, { me }) {
     teardownEmoji?.destroy();
     teardownEmoji = null;
     clear(ui.composer);
-    if (!conversation) return;
+    if (!conversation) {
+      ui.composer.append(slots.composer);
+      return;
+    }
 
     if (!conversation.is_session_open) {
       ui.composer.append(
@@ -556,6 +616,7 @@ export function mountInbox(root, { me }) {
           el("div.locked__text", {}, [
             "24-ghante ki window band hai — free-form message nahi ja sakta. Template bhejne se window dobara khulegi.",
           ]),
+          slots.composer,
           el("button.btn.btn--primary", { type: "button", onclick: () => openTemplates(conversation) }, [
             "Template chunein",
           ]),
@@ -591,6 +652,7 @@ export function mountInbox(root, { me }) {
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
         el("div.composer__attach", {}, [emojiBtn]),
+        slots.composer,
         textarea,
         el("button.btn.btn--primary.btn--send", { type: "button", onclick: submit, title: "Send" }, [
           icon("send", { size: 17 }),
@@ -913,6 +975,28 @@ export function mountInbox(root, { me }) {
         error.textContent = err.message;
       }
     });
+  }
+
+  /* ------------------------------------------------- API for companions */
+
+  /**
+   * The seam the companion modules (search, reminders, reply buttons) build
+   * against. They render into the #wa-*-slot anchors and drive the thread
+   * through here, so they never reach into this file's internals.
+   *
+   * `wa:ready` fires last, once the panel is on screen and the API is callable.
+   */
+  function publishApi() {
+    window.a7wa = window.a7wa || {};
+
+    window.a7wa.openConversation = (id, options = {}) => openConversation(id, options);
+
+    // Read-only views of what the panel is showing, so a companion does not
+    // have to refetch what is already here.
+    window.a7wa.getActiveConversationId = () => state.activeId;
+    window.a7wa.getMe = () => state.me;
+
+    window.dispatchEvent(new CustomEvent("wa:ready", { detail: { me: state.me } }));
   }
 
   /* ------------------------------------------------------------ realtime */

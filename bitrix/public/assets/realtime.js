@@ -62,7 +62,14 @@ export class InboxSocket {
       // Channels usually wraps the body; accept both shapes.
       const type = payload.type || payload.event;
       const data = payload.data ?? payload.payload ?? payload;
-      if (type) this.onEvent(type, data);
+      if (!type) return;
+
+      this.onEvent(type, data);
+
+      // Re-broadcast on the window so the companion modules can listen without
+      // being wired into the inbox. Dispatched for every event, including the
+      // ones the inbox itself ignores.
+      window.dispatchEvent(new CustomEvent("wa:event", { detail: { event: type, data } }));
     });
 
     socket.addEventListener("close", (event) => {
