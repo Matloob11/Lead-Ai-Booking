@@ -104,6 +104,12 @@ class MediaAsset(models.Model):
     sha256 = models.CharField(max_length=64, blank=True, db_index=True)
     downloaded = models.BooleanField(default=False)
     download_error = models.TextField(blank=True)
+
+    # Who uploaded it, so an outbound asset can only be attached by the agent
+    # who put it there. Null for inbound media, which nobody uploaded.
+    uploaded_by = models.ForeignKey(
+        "accounts.Agent", on_delete=models.SET_NULL, null=True, blank=True, related_name="uploads"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

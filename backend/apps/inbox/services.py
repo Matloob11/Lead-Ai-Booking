@@ -326,7 +326,7 @@ def reassign(conversation, to_agent, changed_by, reason=""):
     return conversation
 
 
-def upload_media(number: WabaNumber, django_file):
+def upload_media(number: WabaNumber, django_file, agent=None):
     """Push a file to the gateway and keep our own copy.
 
     The gateway only hands back an id it can send with; it gives us nothing to
@@ -354,6 +354,7 @@ def upload_media(number: WabaNumber, django_file):
         size_bytes=len(payload),
         sha256=hashlib.sha256(payload).hexdigest(),
         downloaded=True,
+        uploaded_by=agent,
     )
     asset.file.save(django_file.name, ContentFile(payload), save=False)
     asset.save()

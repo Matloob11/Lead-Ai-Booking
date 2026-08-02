@@ -107,10 +107,21 @@ def send(request, pk):
                 return Response({"detail": "media_id is required"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Our stored copy of the upload, so the sent file renders in the
-            # thread instead of showing as an empty bubble.
-            asset = MediaAsset.objects.filter(pk=request.data.get("asset_id")).first()
-            if asset is None:
-                asset = MediaAsset.objects.filter(alots_media_id=media_id).order_by("-id").first()
+            # thread instead of showing as an empty bubble. Scoped to the
+            # caller's own uploads: an unscoped lookup would let any agent
+            # attach a colleague's file to their own chat and then read it
+            # through the media view.
+            mine = MediaAsset.objects.filter(uploaded_by=request.user)
+            asset_id = request.data.get("asset_id")
+            if asset_id:
+                asset = mine.filter(pk=asset_id).first()
+                if asset is None:
+                    return Response(
+                        {"detail": "That attachment is not yours to send"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            else:
+                asset = mine.filter(alots_media_id=media_id).order_by("-id").first()
 
             message = services.send_media(
                 conversation,
@@ -253,7 +264,7 @@ def media_upload(request):
         return Response({"detail": "No file supplied"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        media_id, asset = services.upload_media(number, upload)
+        media_id, asset = services.upload_media(number, upload, agent=request.user)
     except AlotsError as exc:
         return Response({"detail": f"Upload failed: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
