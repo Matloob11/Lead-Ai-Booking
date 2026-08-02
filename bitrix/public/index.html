@@ -28,10 +28,10 @@
         </div>
 
         <h1 id="title"><span class="spinner"></span>Signing you in…</h1>
-        <p id="subtitle">Bitrix24 se aapki pehchaan li ja rahi hai. Alag login ki zaroorat nahi.</p>
+        <p id="subtitle">Verifying your identity with Bitrix24. No separate sign-in is needed.</p>
 
         <ul class="steps" id="steps">
-          <li data-step="bitrix"><span class="steps__dot"></span><span>Bitrix24 placement se token</span></li>
+          <li data-step="bitrix"><span class="steps__dot"></span><span>Token from the Bitrix24 placement</span></li>
           <li data-step="session"><span class="steps__dot"></span><span>Panel session</span></li>
           <li data-step="inbox"><span class="steps__dot"></span><span>Inbox</span></li>
         </ul>
@@ -60,8 +60,8 @@
 
       function fail(step, error) {
         setStep(step, "failed");
-        els.title.textContent = "Panel start nahi ho saka";
-        els.subtitle.textContent = "Neeche di gayi tafseel backend session ya IT ko bhejein.";
+        els.title.textContent = "The panel could not start";
+        els.subtitle.textContent = "Send the details below to your backend team or IT.";
 
         const code = error instanceof SsoError ? error.code : error?.name || "unknown";
         const detail = error instanceof SsoError ? error.detail : error?.stack;
@@ -72,7 +72,7 @@
             <div class="alert__code">code: ${escape(code)}</div>
             ${detail ? `<pre>${escape(typeof detail === "string" ? detail : JSON.stringify(detail, null, 2))}</pre>` : ""}
           </div>
-          <button class="btn" id="retry">Dobara koshish karein</button>`;
+          <button class="btn" id="retry">Try again</button>`;
         document.getElementById("retry").addEventListener("click", () => window.location.reload());
         console.error("[a7-wa] boot failed at step:", step, error);
       }

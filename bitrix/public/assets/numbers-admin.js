@@ -16,7 +16,7 @@ import { el, clear, modal } from "./dom.js";
  *        the inbox behind can pick up a rename without a reload.
  */
 export function openNumbersAdmin({ onSaved } = {}) {
-  const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Load ho raha hai…"])]);
+  const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Loading…"])]);
   const dialog = modal("Numbers", body, { wide: true });
 
   load();
@@ -27,12 +27,12 @@ export function openNumbersAdmin({ onSaved } = {}) {
     try {
       [numbers, agents] = await Promise.all([catalog.numbers(), catalog.agents()]);
     } catch (error) {
-      clear(body).append(el("div.alert", {}, [`Load nahi hua: ${error.message}`]));
+      clear(body).append(el("div.alert", {}, [`Could not load: ${error.message}`]));
       return;
     }
 
     if (!numbers.length) {
-      clear(body).append(el("div.thread__hint", {}, ["Koi number nahi mila."]));
+      clear(body).append(el("div.thread__hint", {}, ["No numbers found."]));
       return;
     }
 
@@ -40,13 +40,13 @@ export function openNumbersAdmin({ onSaved } = {}) {
     // conditional notice is filtered out rather than passed through.
     const parts = [
       el("p.modal__note", {}, [
-        "Naam sirf yahan rakha jata hai — panel har jagah yehi dikhata hai. " +
-          "Naam khali chhorne par number khud dikhne lagega.",
+        "The name is stored here only, and the panel shows it everywhere. " +
+          "Leave it empty and the number itself is shown.",
       ]),
       agents.length
         ? null
         : el("div.alert", {}, [
-            "Abhi koi agent list mein nahi hai. Agent tab hi banta hai jab wo pehli baar Bitrix se panel kholta hai.",
+            "No agents yet. An agent appears here the first time they open the panel from Bitrix.",
           ]),
       el("div.numrows", {}, numbers.map((number) => numberRow(number, agents))),
     ].filter(Boolean);
@@ -112,7 +112,7 @@ export function openNumbersAdmin({ onSaved } = {}) {
 
     return el("div.numrow", {}, [
       el("div.numrow__who", {}, [title, el("div.numrow__phone", {}, [number.phone_number])]),
-      el("label.numrow__field", {}, [el("span", {}, ["Naam"]), label]),
+      el("label.numrow__field", {}, [el("span", {}, ["Name"]), label]),
       el("label.numrow__field", {}, [el("span", {}, ["Agents"]), picker]),
       el("div.numrow__actions", {}, [save, status]),
     ]);

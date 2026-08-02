@@ -55,7 +55,7 @@ export function mountSearch() {
 
   const input = el("input.wa-x-search-input", {
     type: "search",
-    placeholder: "Messages mein dhoondein…",
+    placeholder: "Search messages…",
     autocomplete: "off",
   });
 
@@ -97,14 +97,14 @@ export function mountSearch() {
     if (term.length < 2) {
       closeDropdown();
       if (term.length === 1) {
-        hintEl.textContent = "Dhoondne ke liye kam az kam 2 characters likhein";
+        hintEl.textContent = "Type at least two characters";
         hintEl.hidden = false;
       }
       return;
     }
 
     hintEl.hidden = true;
-    dropdown.replaceChildren(el("div.wa-x-search-status", {}, ["Dhoond rahe hain…"]));
+    dropdown.replaceChildren(el("div.wa-x-search-status", {}, ["Searching…"]));
     dropdown.hidden = false;
 
     try {
@@ -119,7 +119,7 @@ export function mountSearch() {
       clear(dropdown);
 
       if (!results.length) {
-        dropdown.append(el("div.wa-x-search-empty", {}, ["Kuch nahi mila."]));
+        dropdown.append(el("div.wa-x-search-empty", {}, ["No matches."]));
         return;
       }
 
@@ -166,7 +166,7 @@ export function mountSearch() {
 
       if (totalCount > results.length) {
         dropdown.append(
-          el("div.wa-x-search-footer", {}, [`${totalCount} mein se ${results.length} dikhaye ja rahe hain`])
+          el("div.wa-x-search-footer", {}, [`Showing ${results.length} of ${totalCount}`])
         );
       }
     } catch (err) {

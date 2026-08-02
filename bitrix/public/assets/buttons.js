@@ -56,14 +56,14 @@ export function mountButtons() {
   iconSvg.appendChild(rect);
   iconSvg.appendChild(line1);
 
-  const btnIcon = el("button.wa-x-btn-icon", { type: "button", title: "Reply Buttons Bhejein" }, [iconSvg]);
+  const btnIcon = el("button.wa-x-btn-icon", { type: "button", title: "Send reply buttons" }, [iconSvg]);
 
   slot.append(btnIcon);
 
   btnIcon.addEventListener("click", () => {
     const convId = getActiveConversationId();
     if (!convId) {
-      alert("Pehle ek chat select karein.");
+      alert("Select a chat first.");
       return;
     }
     openButtonsModal(convId);
@@ -71,7 +71,7 @@ export function mountButtons() {
 }
 
 function openButtonsModal(conversationId) {
-  let buttonTitles = ["Haan", "Nahi"]; // default 2 buttons
+  let buttonTitles = ["Yes", "No"]; // default 2 buttons
 
   // Form elements
   const headerInput = el("input.wa-x-field", { type: "text", maxlength: "60", placeholder: "Damac Hills 2 (optional)" });
@@ -80,7 +80,7 @@ function openButtonsModal(conversationId) {
   const bodyTextarea = el("textarea.wa-x-field.wa-x-textarea", {
     rows: 3,
     maxlength: "1024",
-    placeholder: "Kya aap site visit karna chahenge?",
+    placeholder: "Would you like to arrange a site visit?",
   });
   const bodyCounter = el("span.wa-x-char-counter", {}, ["0/1024"]);
 
@@ -91,7 +91,7 @@ function openButtonsModal(conversationId) {
   const addBtn = el("button.wa-x-btn.wa-x-btn--sm.wa-x-btn--ghost", { type: "button" }, ["+ Button"]);
 
   const errorEl = el("div.wa-x-alert", { hidden: true });
-  const sendBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Buttons Bhejein"]);
+  const sendBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Send buttons"]);
 
   // Live preview elements
   const previewHeader = el("div.wa-x-preview-header");
@@ -224,20 +224,20 @@ function openButtonsModal(conversationId) {
 
   const modalBody = el("div.wa-x-buttons-split", {}, [formSection, previewSection]);
 
-  const dlg = modal("Reply Buttons Bhejein", modalBody, { wide: true });
+  const dlg = modal("Send reply buttons", modalBody, { wide: true });
 
   sendBtn.addEventListener("click", async () => {
     errorEl.hidden = true;
 
     const bodyVal = bodyTextarea.value.trim();
     if (!bodyVal) {
-      errorEl.textContent = "Message body bharna zaroori hai.";
+      errorEl.textContent = "The message body is required.";
       errorEl.hidden = false;
       return;
     }
 
     if (buttonTitles.length < 1 || buttonTitles.length > 3) {
-      errorEl.textContent = "1 se 3 tak buttons allowed hain.";
+      errorEl.textContent = "Between one and three buttons are allowed.";
       errorEl.hidden = false;
       return;
     }
@@ -248,12 +248,12 @@ function openButtonsModal(conversationId) {
     for (let i = 0; i < buttonTitles.length; i++) {
       const title = buttonTitles[i].trim();
       if (!title) {
-        errorEl.textContent = `Button ${i + 1} ka title khali nahi ho sakta.`;
+        errorEl.textContent = `Button ${i + 1} needs a title.`;
         errorEl.hidden = false;
         return;
       }
       if (title.length > 20) {
-        errorEl.textContent = `Button "${title}" 20 characters se bara hai.`;
+        errorEl.textContent = `"${title}" is longer than 20 characters.`;
         errorEl.hidden = false;
         return;
       }
@@ -271,7 +271,7 @@ function openButtonsModal(conversationId) {
     }
 
     sendBtn.disabled = true;
-    sendBtn.textContent = "Bhej rahe hain…";
+    sendBtn.textContent = "Sending…";
 
     try {
       await sendReplyButtons(conversationId, {
@@ -284,8 +284,8 @@ function openButtonsModal(conversationId) {
       dlg.close();
     } catch (err) {
       sendBtn.disabled = false;
-      sendBtn.textContent = "Buttons Bhejein";
-      errorEl.textContent = err.message || "Reply buttons bhejte waqt error aaya.";
+      sendBtn.textContent = "Send buttons";
+      errorEl.textContent = err.message || "The reply buttons could not be sent.";
       errorEl.hidden = false;
       // Note: Modal stays OPEN so user input is NOT lost!
     }

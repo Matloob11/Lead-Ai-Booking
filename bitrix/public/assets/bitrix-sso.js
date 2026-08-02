@@ -37,8 +37,8 @@ export function loadBX24() {
       reject(
         new SsoError(
           "not_in_frame",
-          "Panel Bitrix ke bahar khula hai.",
-          "Ye page sirf Bitrix24 ke left menu se khulta hai — seedha URL open karne par auth nahi milegi."
+          "The panel was opened outside Bitrix.",
+          "This page only opens from the Bitrix24 left menu. Opening the URL directly leaves it with no way to authenticate."
         )
       );
       return;
@@ -48,8 +48,8 @@ export function loadBX24() {
       reject(
         new SsoError(
           "sdk_timeout",
-          "Bitrix JS SDK load nahi hua.",
-          `${BX24_SDK} ${SDK_TIMEOUT_MS / 1000}s mein jawab nahi de saka. Portal ka internet access ya CSP block ho sakta hai.`
+          "The Bitrix JS SDK did not load.",
+          `${BX24_SDK} did not respond within ${SDK_TIMEOUT_MS / 1000}s. The portal's internet access or its CSP may be blocking it.`
         )
       );
     }, SDK_TIMEOUT_MS);
@@ -69,14 +69,14 @@ export function loadBX24() {
     script.onload = () => {
       if (!window.BX24) {
         clearTimeout(timer);
-        reject(new SsoError("sdk_missing", "BX24 object SDK load ke baad bhi nahi mila."));
+        reject(new SsoError("sdk_missing", "The BX24 object is still missing after the SDK loaded."));
         return;
       }
       window.BX24.init(done);
     };
     script.onerror = () => {
       clearTimeout(timer);
-      reject(new SsoError("sdk_unreachable", "Bitrix JS SDK download nahi ho saka.", BX24_SDK));
+      reject(new SsoError("sdk_unreachable", "The Bitrix JS SDK could not be downloaded.", BX24_SDK));
     };
     document.head.appendChild(script);
   });
@@ -96,8 +96,8 @@ export async function getBitrixAuth({ allowRefresh = true } = {}) {
     if (!allowRefresh) {
       throw new SsoError(
         "no_auth",
-        "Bitrix ne authorization token nahi diya.",
-        "BX24.getAuth() false laut raha hai — app placement se nahi khula ya token expire ho chuka hai."
+        "Bitrix did not return an authorization token.",
+        "BX24.getAuth() is returning false — the app was not opened from its placement, or the token has expired."
       );
     }
     await refreshBitrixAuth();
@@ -115,12 +115,12 @@ export async function getBitrixAuth({ allowRefresh = true } = {}) {
 export function refreshBitrixAuth() {
   return new Promise((resolve, reject) => {
     if (!window.BX24 || typeof window.BX24.refreshAuth !== "function") {
-      reject(new SsoError("no_refresh", "BX24.refreshAuth available nahi hai."));
+      reject(new SsoError("no_refresh", "BX24.refreshAuth is not available."));
       return;
     }
     window.BX24.refreshAuth((auth) => {
       if (auth && auth.access_token) resolve(auth);
-      else reject(new SsoError("refresh_failed", "Bitrix token refresh nahi ho saka."));
+      else reject(new SsoError("refresh_failed", "The Bitrix token could not be refreshed."));
     });
   });
 }
@@ -257,8 +257,8 @@ export async function ensureSession() {
   // almost always the browser blocking third-party cookies.
   throw new SsoError(
     "cookie_blocked",
-    "Session cookie iframe mein save nahi hui.",
-    "Bitrix login to ho gaya lekin /api/auth/me/ phir bhi 401 de raha hai. " +
-      "Browser third-party cookies block kar raha hai (Safari/Firefox default, ya Chrome mein manually band)."
+    "The session cookie was not stored inside the iframe.",
+    "Bitrix signed you in, but /api/auth/me/ still answers 401. " +
+      "The browser is blocking third-party cookies (the default in Safari and Firefox, or switched off manually in Chrome)."
   );
 }

@@ -59,7 +59,7 @@ export function mountInbox(root, { me }) {
     numberSelect: el("select.filter__select", { onchange: onNumberFilterChange }),
     search: el("input.filter__search", {
       type: "search",
-      placeholder: "Naam ya number dhoondein",
+      placeholder: "Search by name or number",
       oninput: debounce((event) => {
         state.search = event.target.value.trim();
         loadConversations();
@@ -88,12 +88,12 @@ export function mountInbox(root, { me }) {
         el("div.sidebar__title", {}, ["WhatsApp"]),
         slots.search,
         me.is_wa_admin
-          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Numbers ke naam aur agents" }, [
+          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Number names and agents" }, [
               icon("hash", { size: 15 }),
               "Numbers",
             ])
           : null,
-        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button", title: "Naya contact" }, [
+        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button", title: "New contact" }, [
           icon("plus", { size: 15 }),
           "New",
         ]),
@@ -144,14 +144,14 @@ export function mountInbox(root, { me }) {
       });
       state.conversations = asList(payload, "conversations");
       renderConversations();
-      ui.listStatus.textContent = state.conversations.length ? "" : "Koi conversation nahi.";
+      ui.listStatus.textContent = state.conversations.length ? "" : "No conversations.";
 
       if (keepActive && state.activeId) {
         const still = state.conversations.some((c) => c.id === state.activeId);
         if (!still) renderEmptyThread();
       }
     } catch (error) {
-      ui.listStatus.textContent = `List load nahi hui: ${error.message}`;
+      ui.listStatus.textContent = `Could not load the list: ${error.message}`;
       console.error("[a7-wa] conversations failed:", error);
     }
   }
@@ -194,7 +194,7 @@ export function mountInbox(root, { me }) {
         }, () => {});
       }
     } catch (error) {
-      clear(ui.messages).append(el("div.thread__hint.thread__hint--error", {}, [`Thread load nahi hua: ${error.message}`]));
+      clear(ui.messages).append(el("div.thread__hint.thread__hint--error", {}, [`Could not load the thread: ${error.message}`]));
       console.error("[a7-wa] messages failed:", error);
     } finally {
       state.loadingThread = false;
@@ -299,10 +299,10 @@ export function mountInbox(root, { me }) {
                 el("span.dot", {
                   class: !open ? "dot--closed" : isClosingSoon(conversation) ? "dot--closing" : "dot--open",
                   title: !open
-                    ? "Session band"
+                    ? "Window closed"
                     : isClosingSoon(conversation)
-                      ? `Window band ho rahi hai — ${untilText(conversation.session_expires_at) || "1 ghante"} baaki`
-                      : "Session khuli",
+                      ? `Window closing — ${untilText(conversation.session_expires_at) || "1 hour"} left`
+                      : "Window open",
                 }),
                 el("span.conv__number", {}, [numberTitle(numberById(conversation.number_id))]),
               ]),
@@ -326,7 +326,7 @@ export function mountInbox(root, { me }) {
   function renderEmptyThread() {
     clear(ui.threadHeader).append(slots.topbar);
     clear(ui.composer).append(slots.composer);
-    clear(ui.messages).append(el("div.thread__hint", {}, ["Baaein taraf se ek chat chunein."]));
+    clear(ui.messages).append(el("div.thread__hint", {}, ["Select a chat from the left."]));
   }
 
   function renderThreadHeader(conversation) {
@@ -353,7 +353,7 @@ export function mountInbox(root, { me }) {
       ]),
       el("div.thread__tools", {}, [
         el("span.pill", { class: sessionPillClass(conversation) }, [
-          open ? (left ? `Session khuli · ${left}` : "Session khuli") : "Session band",
+          open ? (left ? `Window open · ${left}` : "Window open") : "Window closed",
         ]),
         conversation.assigned_agent
           ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
@@ -448,7 +448,7 @@ export function mountInbox(root, { me }) {
         lastDay = day;
       }
       if (index === unreadFrom) {
-        ui.messages.append(el("div.unreadsep", {}, [el("span", {}, ["Yahan se naye messages"])]));
+        ui.messages.append(el("div.unreadsep", {}, [el("span", {}, ["New messages"])]));
       }
       ui.messages.append(messageBubble(message));
     });
@@ -545,7 +545,7 @@ export function mountInbox(root, { me }) {
    * authenticated, so `src` works directly: no fetch, no blob, no header.
    */
   /**
-   * "Dobara bhejein" under a failed outbound message.
+   * "Send again" under a failed outbound message.
    *
    * Only text can be replayed from what the panel holds: a failed attachment's
    * media_id is not in the message payload, so that one has to be re-attached.
@@ -561,13 +561,13 @@ export function mountInbox(root, { me }) {
         onclick: async (event) => {
           const button = event.currentTarget;
           button.disabled = true;
-          button.textContent = "Bhej rahe hain…";
+          button.textContent = "Sending…";
           const conversation = findConversation(state.activeId);
           if (conversation) await sendText(conversation, message.body);
           button.remove();
         },
       },
-      [icon("refresh", { size: 13 }), "Dobara bhejein"]
+      [icon("refresh", { size: 13 }), "Send again"]
     );
   }
 
@@ -583,7 +583,7 @@ export function mountInbox(root, { me }) {
     if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
 
     if (message.media_failed) {
-      return el("div.msg__media-failed", {}, [icon("alert", { size: 15 }), "Attachment available nahi hai"]);
+      return el("div.msg__media-failed", {}, [icon("alert", { size: 15 }), "This attachment is unavailable"]);
     }
 
     if (!message.media_url) {
@@ -593,14 +593,14 @@ export function mountInbox(root, { me }) {
       if (message.direction === "out") {
         return el("div.msg__sent-media", {}, [
           iconForKind(kind, { size: 15 }) || icon("paperclip", { size: 15 }),
-          `${SENT_MEDIA_LABEL[kind] || "File"} bhej di gayi`,
+          `${SENT_MEDIA_LABEL[kind] || "File"} sent`,
         ]);
       }
-      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
+      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Downloading attachment…"]);
     }
 
     if (!message.media_ready) {
-      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
+      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Downloading attachment…"]);
     }
 
     if (kind === "image" || kind === "sticker") {
@@ -608,7 +608,7 @@ export function mountInbox(root, { me }) {
         src: message.media_url,
         alt: message.media_name || "image",
         loading: "lazy",
-        title: "Bara karke dekhein",
+        title: "View full size",
         onclick: () => openImage(message),
       });
     }
@@ -634,8 +634,8 @@ export function mountInbox(root, { me }) {
   const SENT_MEDIA_LABEL = { image: "Photo", sticker: "Sticker", video: "Video", audio: "Audio", document: "Document" };
 
   const UNSUPPORTED_LABEL = {
-    location: "Location bheji gayi",
-    contacts: "Contact card bheja gaya",
+    location: "Location sent",
+    contacts: "Contact card sent",
     reaction: "Reaction",
     interactive: "Interactive message",
     button: "Button reply",
@@ -668,11 +668,11 @@ export function mountInbox(root, { me }) {
       ui.composer.append(
         el("div.locked", {}, [
           el("div.locked__text", {}, [
-            "24-ghante ki window band hai — free-form message nahi ja sakta. Template bhejne se window dobara khulegi.",
+            "The 24-hour window is closed, so a free-form message cannot be sent. Sending a template reopens it.",
           ]),
           slots.composer,
           el("button.btn.btn--primary", { type: "button", onclick: () => openTemplates(conversation) }, [
-            "Template chunein",
+            "Choose a template",
           ]),
         ])
       );
@@ -681,7 +681,7 @@ export function mountInbox(root, { me }) {
 
     const textarea = el("textarea.composer__input", {
       rows: 1,
-      placeholder: "Message likhein…",
+      placeholder: "Write a message…",
       onkeydown: (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
@@ -707,7 +707,7 @@ export function mountInbox(root, { me }) {
         el("div.closingbar", {}, [
           icon("clock", { size: 15 }),
           el("span", {}, [
-            `Window ${left ? `${left} mein` : "ek ghante se kam mein"} band ho rahi hai — abhi jawab dein, warna template bhejna padega.`,
+            `The window closes ${left ? `in ${left}` : "in under an hour"} — reply now, or a template will be needed.`,
           ]),
         ])
       );
@@ -846,25 +846,25 @@ export function mountInbox(root, { me }) {
   }
 
   async function openTemplates(conversation) {
-    const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Templates load ho rahe hain…"])]);
+    const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Loading templates…"])]);
     const dialog = modal("Approved templates", body, { wide: true });
 
     let templates;
     try {
       templates = await templatesFor(conversation.number_id);
     } catch (error) {
-      clear(body).append(el("div.alert", {}, [`Templates load nahi hue: ${error.message}`]));
+      clear(body).append(el("div.alert", {}, [`Could not load templates: ${error.message}`]));
       return;
     }
 
     if (!templates.length) {
-      clear(body).append(el("div.thread__hint", {}, ["Is number par koi approved template nahi hai."]));
+      clear(body).append(el("div.thread__hint", {}, ["This number has no approved templates."]));
       return;
     }
 
     clear(body);
     const list = el("div.tpl-list");
-    const detail = el("div.tpl-detail", {}, [el("div.thread__hint", {}, ["Ek template chunein."])]);
+    const detail = el("div.tpl-detail", {}, [el("div.thread__hint", {}, ["Choose a template."])]);
     body.append(el("div.tpl-split", {}, [list, detail]));
 
     for (const template of templates) {
@@ -878,14 +878,14 @@ export function mountInbox(root, { me }) {
 
     function select(template) {
       const fields = variableFields(template);
-      const send = el("button.btn.btn--primary", { type: "button" }, ["Bhejein"]);
+      const send = el("button.btn.btn--primary", { type: "button" }, ["Send"]);
       send.addEventListener("click", async () => {
         if (!fields.complete()) {
-          alert("Sab variables bharna zaroori hain.");
+          alert("Fill in every variable.");
           return;
         }
         send.disabled = true;
-        send.textContent = "Bhej rahe hain…";
+        send.textContent = "Sending…";
         try {
           await inbox.sendTemplate(conversation.id, {
             template_id: template.id,
@@ -895,8 +895,8 @@ export function mountInbox(root, { me }) {
           await openConversation(conversation.id);
         } catch (error) {
           send.disabled = false;
-          send.textContent = "Bhejein";
-          alert(`Template nahi gaya: ${error.message}`);
+          send.textContent = "Send";
+          alert(`The template was not sent: ${error.message}`);
         }
       });
 
@@ -929,14 +929,14 @@ export function mountInbox(root, { me }) {
       state.numbers.map((number) => el("option", { value: number.id }, [numberTitle(number)]))
     );
     const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
-    const templateSelect = el("select.field", {}, [el("option", { value: "" }, ["Template load ho rahe hain…"])]);
+    const templateSelect = el("select.field", {}, [el("option", { value: "" }, ["Loading templates…"])]);
     const varsHost = el("div");
     const error = el("div.alert", { hidden: true });
     let fields = null;
     let templates = [];
 
     async function loadTemplates() {
-      clear(templateSelect).append(el("option", { value: "" }, ["Template load ho rahe hain…"]));
+      clear(templateSelect).append(el("option", { value: "" }, ["Loading templates…"]));
       clear(varsHost);
       try {
         templates = await templatesFor(numberSelect.value);
@@ -945,7 +945,7 @@ export function mountInbox(root, { me }) {
         return;
       }
       clear(templateSelect).append(
-        el("option", { value: "" }, [templates.length ? "Template chunein…" : "Koi approved template nahi"]),
+        el("option", { value: "" }, [templates.length ? "Choose a template…" : "No approved templates"]),
         ...templates.map((t) => el("option", { value: t.id }, [`${t.name} (${t.language || ""})`]))
       );
     }
@@ -962,10 +962,10 @@ export function mountInbox(root, { me }) {
 
     numberSelect.addEventListener("change", loadTemplates);
 
-    const send = el("button.btn.btn--primary", { type: "button" }, ["Chat shuru karein"]);
+    const send = el("button.btn.btn--primary", { type: "button" }, ["Start a chat"]);
     const body = el("div.modal__body", {}, [
-      el("label.field__row", {}, [el("span", {}, ["Kis number se"]), numberSelect]),
-      el("label.field__row", {}, [el("span", {}, ["Customer ka number"]), phone]),
+      el("label.field__row", {}, [el("span", {}, ["From which number"]), numberSelect]),
+      el("label.field__row", {}, [el("span", {}, ["Customer's number"]), phone]),
       el("label.field__row", {}, [el("span", {}, ["Template"]), templateSelect]),
       varsHost,
       error,
@@ -980,16 +980,16 @@ export function mountInbox(root, { me }) {
       const to = phone.value.replace(/[^\d]/g, "");
       if (!to || !templateSelect.value) {
         error.hidden = false;
-        error.textContent = "Number aur template dono chahiye.";
+        error.textContent = "Both a number and a template are required.";
         return;
       }
       if (fields && !fields.complete()) {
         error.hidden = false;
-        error.textContent = "Sab variables bharna zaroori hain.";
+        error.textContent = "Fill in every variable.";
         return;
       }
       send.disabled = true;
-      send.textContent = "Bhej rahe hain…";
+      send.textContent = "Sending…";
       try {
         const created = await inbox.start({
           number_id: numberSelect.value,
@@ -1002,7 +1002,7 @@ export function mountInbox(root, { me }) {
         if (created?.id) await openConversation(created.id);
       } catch (err) {
         send.disabled = false;
-        send.textContent = "Chat shuru karein";
+        send.textContent = "Start a chat";
         error.hidden = false;
         error.textContent = err.message;
       }
@@ -1013,13 +1013,13 @@ export function mountInbox(root, { me }) {
     const agentId = el("input.field", { type: "text", placeholder: "Agent ID" });
     const reason = el("input.field", { type: "text", placeholder: "Wajah (optional)" });
     const error = el("div.alert", { hidden: true });
-    const send = el("button.btn.btn--primary", { type: "button" }, ["Transfer karein"]);
+    const send = el("button.btn.btn--primary", { type: "button" }, ["Transfer"]);
 
     const dialog = modal(
       "Chat transfer",
       el("div.modal__body", {}, [
-        el("p.modal__note", {}, ["Poori history naye agent ke saath chali jayegi. Chat delete nahi hoti."]),
-        el("label.field__row", {}, [el("span", {}, ["Naya agent"]), agentId]),
+        el("p.modal__note", {}, ["The full history moves with the chat. Nothing is deleted."]),
+        el("label.field__row", {}, [el("span", {}, ["New agent"]), agentId]),
         el("label.field__row", {}, [el("span", {}, ["Wajah"]), reason]),
         error,
         el("div.modal__actions", {}, [send]),
@@ -1029,7 +1029,7 @@ export function mountInbox(root, { me }) {
     send.addEventListener("click", async () => {
       if (!agentId.value.trim()) {
         error.hidden = false;
-        error.textContent = "Agent ID chahiye.";
+        error.textContent = "An agent ID is required.";
         return;
       }
       send.disabled = true;
@@ -1077,7 +1077,7 @@ export function mountInbox(root, { me }) {
         state.connection = connState;
         ui.connection.hidden = connState === "open";
         ui.connection.textContent =
-          connState === "open" ? "" : "Live connection toot gaya — dobara jur raha hai…";
+          connState === "open" ? "" : "Live connection lost — reconnecting…";
         // A gap in the socket means missed events; REST is the source of truth.
         if (connState === "open" && resync) {
           loadConversations();
@@ -1090,13 +1090,13 @@ export function mountInbox(root, { me }) {
       // a login prompt, which is the whole point of the SSO.
       onAuthLost: async () => {
         ui.connection.hidden = false;
-        ui.connection.textContent = "Session dobara banayi ja rahi hai…";
+        ui.connection.textContent = "Re-establishing your session…";
         try {
           await ensureSession();
           socket.connect();
           loadConversations();
         } catch (error) {
-          ui.connection.textContent = `Session bahaal nahi hui — page reload karein. (${error.message})`;
+          ui.connection.textContent = `Your session could not be restored — reload the page. (${error.message})`;
           console.error("[a7-wa] re-auth failed:", error);
         }
       },
@@ -1135,7 +1135,7 @@ export function mountInbox(root, { me }) {
       (a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)
     );
     renderConversations();
-    ui.listStatus.textContent = state.conversations.length ? "" : "Koi conversation nahi.";
+    ui.listStatus.textContent = state.conversations.length ? "" : "No conversations.";
   }
 
   /**

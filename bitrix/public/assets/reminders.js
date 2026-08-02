@@ -93,7 +93,7 @@ function showToast({ contactName, note, conversationId }) {
             }
           },
         },
-        ["Kholein"]
+        ["Open"]
       ),
     ]),
   ]);
@@ -156,7 +156,7 @@ function mountTopbar() {
       clear(dropdown);
 
       if (!reminders.length) {
-        dropdown.append(el("div.wa-x-reminders-empty", {}, ["Koi open reminder nahi hai."]));
+        dropdown.append(el("div.wa-x-reminders-empty", {}, ["No open reminders."]));
         return;
       }
 
@@ -169,7 +169,7 @@ function mountTopbar() {
       reminders.forEach((r) => {
         const contactName = r.conversation?.contact?.name || r.conversation?.contact?.wa_id || "Unknown chat";
         const relTime = untilText(r.due_at);
-        const timeText = relTime ? `in ${relTime}` : `Passed (${stamp(r.due_at)})`;
+        const timeText = relTime ? `in ${relTime}` : `Overdue (${stamp(r.due_at)})`;
 
         const checkBtn = el(
           "button.wa-x-action-btn",
@@ -294,7 +294,7 @@ function mountComposerClock() {
   const openReminderDialog = (initialDate = new Date()) => {
     const convId = getActiveConversationId();
     if (!convId) {
-      alert("Pehle ek conversation chunein.");
+      alert("Select a conversation first.");
       return;
     }
 
@@ -306,10 +306,10 @@ function mountComposerClock() {
     const dtInput = el("input.wa-x-field", { type: "datetime-local", value: localIsoStr });
     const noteInput = el("input.wa-x-field", { type: "text", placeholder: "Note (e.g. Call back re Damac)" });
     const errorEl = el("div.wa-x-alert", { hidden: true });
-    const submitBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Reminder set karein"]);
+    const submitBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Set reminder"]);
 
     const content = el("div.wa-x-modal-body", {}, [
-      el("label.wa-x-field-row", {}, [el("span", {}, ["Aane wala waqt"]), dtInput]),
+      el("label.wa-x-field-row", {}, [el("span", {}, ["Due at"]), dtInput]),
       el("label.wa-x-field-row", {}, [el("span", {}, ["Note"]), noteInput]),
       errorEl,
       el("div.wa-x-modal-actions", {}, [submitBtn]),
@@ -321,20 +321,20 @@ function mountComposerClock() {
       errorEl.hidden = true;
       const dtValue = dtInput.value;
       if (!dtValue) {
-        errorEl.textContent = "Waqt select karna zaroori hai.";
+        errorEl.textContent = "Choose a time.";
         errorEl.hidden = false;
         return;
       }
 
       const selectedDate = new Date(dtValue);
       if (Number.isNaN(selectedDate.getTime())) {
-        errorEl.textContent = "Sahi waqt select karein.";
+        errorEl.textContent = "That time is not valid.";
         errorEl.hidden = false;
         return;
       }
 
       if (selectedDate <= new Date()) {
-        errorEl.textContent = "Guzaarish: Aane wala waqt muntakhib karein (beeta hua waqt select nahi ho sakta).";
+        errorEl.textContent = "Choose a time in the future.";
         errorEl.hidden = false;
         return;
       }
@@ -353,8 +353,8 @@ function mountComposerClock() {
         refreshTopbarBadge();
       } catch (err) {
         submitBtn.disabled = false;
-        submitBtn.textContent = "Reminder set karein";
-        errorEl.textContent = err.message || "Reminder create nahi ho saka.";
+        submitBtn.textContent = "Set reminder";
+        errorEl.textContent = err.message || "The reminder could not be created.";
         errorEl.hidden = false;
       }
     });
@@ -371,7 +371,7 @@ function mountComposerClock() {
     { label: "30 minutes", getDate: () => new Date(Date.now() + 30 * 60000) },
     { label: "1 hour", getDate: () => new Date(Date.now() + 60 * 60000) },
     { label: "3 hours", getDate: () => new Date(Date.now() + 180 * 60000) },
-    { label: "Kal subah 9 baje", getDate: getTomorrow9AM },
+    { label: "Tomorrow 9 am", getDate: getTomorrow9AM },
     { label: "Custom…", getDate: null },
   ];
 

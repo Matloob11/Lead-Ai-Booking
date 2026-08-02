@@ -36,19 +36,19 @@ export function kindForFile(file) {
 
 /** @returns {string|null} an error to show, or null when the file is sendable. */
 export function checkFile(file) {
-  if (!file) return "Koi file nahi chuni gayi.";
-  if (!file.size) return "Ye file khali hai.";
+  if (!file) return "No file selected.";
+  if (!file.size) return "That file is empty.";
 
   const kind = kindForFile(file);
   if (file.size > MEDIA_LIMITS[kind]) {
-    return `Ye ${kind} ${formatBytes(file.size)} ka hai. WhatsApp ${LIMIT_LABEL[kind]} se bara ${kind} qubool nahi karta.`;
+    return `This ${kind} is ${formatBytes(file.size)}. WhatsApp will not accept a ${kind} larger than ${LIMIT_LABEL[kind]}.`;
   }
   return null;
 }
 
 /** File-picker presets behind the attach button. */
 export const ATTACH_MENU = [
-  { key: "media", icon: "image", label: "Photo ya Video", accept: "image/*,video/*" },
+  { key: "media", icon: "image", label: "Photo or video", accept: "image/*,video/*" },
   { key: "document", icon: "file", label: "Document", accept: ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" },
   { key: "audio", icon: "mic", label: "Audio", accept: "audio/*" },
 ];
@@ -66,14 +66,14 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
 
   const caption = el("textarea.field.attach__caption", {
     rows: 2,
-    placeholder: kind === "document" ? "Caption (optional)" : "Caption likhein (optional)",
+    placeholder: kind === "document" ? "Caption (optional)" : "Add a caption (optional)",
   });
 
   const error = el("div.alert", { hidden: !problem }, [problem || ""]);
   const bar = el("div.attach__bar-fill");
   const progress = el("div.attach__progress", { hidden: true }, [el("div.attach__bar", {}, [bar])]);
 
-  const sendBtn = el("button.btn.btn--primary", { type: "button", disabled: Boolean(problem) }, ["Bhejein"]);
+  const sendBtn = el("button.btn.btn--primary", { type: "button", disabled: Boolean(problem) }, ["Send"]);
   const cancelBtn = el("button.btn.btn--ghost", { type: "button" }, ["Cancel"]);
 
   const body = el("div.modal__body", {}, [
@@ -105,7 +105,7 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
 
     try {
       const uploaded = await upload.promise;
-      sendBtn.textContent = "Bhej rahe hain…";
+      sendBtn.textContent = "Sending…";
 
       const message = await inbox.send(conversationId, {
         kind,
@@ -125,12 +125,12 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
       upload = null;
       progress.hidden = true;
       sendBtn.disabled = false;
-      sendBtn.textContent = "Bhejein";
+      sendBtn.textContent = "Send";
       error.hidden = false;
       // A closed 24h window comes back as 409 and is not a retryable failure.
       error.textContent =
         failure.code === "http_409"
-          ? "24-ghante ki window band ho chuki hai — pehle template bhej kar dobara kholein."
+          ? "The 24-hour window has closed. Send a template first to reopen it."
           : failure.message;
     }
   });
@@ -141,10 +141,10 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
 }
 
 function titleFor(kind) {
-  if (kind === "image") return "Photo bhejein";
-  if (kind === "video") return "Video bhejein";
-  if (kind === "audio") return "Audio bhejein";
-  return "Document bhejein";
+  if (kind === "image") return "Send a photo";
+  if (kind === "video") return "Send a video";
+  if (kind === "audio") return "Send audio";
+  return "Send a document";
 }
 
 /** Thumbnail for images/video, a file card for everything else. */

@@ -54,7 +54,7 @@ export function openLightbox(images, startIndex = 0) {
       el("button.lb__btn", { type: "button", title: "Zoom in (+)", onclick: () => zoomBy(STEP) }, [icon("plus")]),
       el("button.lb__btn", { type: "button", title: "Reset (0)", onclick: reset }, [icon("zoomReset")]),
       download,
-      el("button.lb__btn.lb__btn--close", { type: "button", title: "Band karein (Esc)", onclick: close }, [icon("close")]),
+      el("button.lb__btn.lb__btn--close", { type: "button", title: "Close (Esc)", onclick: close }, [icon("close")]),
     ]),
     prevBtn,
     stage,

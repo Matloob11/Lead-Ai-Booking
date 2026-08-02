@@ -96,15 +96,15 @@ export const inbox = {
           reject(
             new SsoError(
               `http_${xhr.status}`,
-              payload?.detail || `Upload fail ho gaya (HTTP ${xhr.status})`,
+              payload?.detail || `Upload failed (HTTP ${xhr.status})`,
               payload
             )
           );
         }
       });
 
-      xhr.addEventListener("error", () => reject(new SsoError("network", "Upload ke dauran connection toot gaya.")));
-      xhr.addEventListener("abort", () => reject(new SsoError("aborted", "Upload cancel kar diya gaya.")));
+      xhr.addEventListener("error", () => reject(new SsoError("network", "The connection dropped during the upload.")));
+      xhr.addEventListener("abort", () => reject(new SsoError("aborted", "The upload was cancelled.")));
       xhr.send(form);
     });
 
