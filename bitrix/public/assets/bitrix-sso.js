@@ -125,6 +125,55 @@ export function refreshBitrixAuth() {
   });
 }
 
+/** Promisified BX24.callMethod. */
+export function callBitrix(method, params = {}) {
+  return new Promise((resolve, reject) => {
+    window.BX24.callMethod(method, params, (result) => {
+      const error = result.error();
+      if (!error) {
+        resolve(result.data());
+        return;
+      }
+      // The SDK wraps REST errors differently across versions — sometimes the
+      // payload sits on .ex, sometimes on the error object itself.
+      const raw = error.ex || error;
+      reject(new SsoError(raw.error || "rest_error", raw.error_description || String(error), { method, params }));
+    });
+  });
+}
+
+/**
+ * Makes sure the portal's main menu carries our "WhatsApp" item.
+ *
+ * Bitrix only runs the app's install handler when it installs the app itself;
+ * an app registered by hand in Developer resources never gets that call, so the
+ * placement would silently stay unbound. Checking it on an admin's page load
+ * keeps the menu item self-healing — including after someone edits the handler
+ * URL, which orphans the old binding.
+ *
+ * Never throws: a missing menu item must not stop the inbox from loading.
+ */
+export async function ensurePlacement({ placement = "LEFT_MENU", title = "WhatsApp" } = {}) {
+  const handler = new URL(".", window.location.href).href;
+  try {
+    const bound = await callBitrix("placement.get");
+    const existing = (bound || []).filter((row) => row.placement === placement);
+
+    if (existing.some((row) => row.handler === handler)) return { status: "already-bound" };
+
+    // A handler pointing somewhere else is a leftover from an older URL.
+    for (const stale of existing) {
+      await callBitrix("placement.unbind", { PLACEMENT: placement, HANDLER: stale.handler });
+    }
+
+    await callBitrix("placement.bind", { PLACEMENT: placement, HANDLER: handler, TITLE: title });
+    return { status: existing.length ? "rebound" : "bound", handler };
+  } catch (error) {
+    console.warn("[a7-wa] placement bind skipped:", error);
+    return { status: "failed", error };
+  }
+}
+
 /* -------------------------------------------------------------------- HTTP */
 
 function readCookie(name) {

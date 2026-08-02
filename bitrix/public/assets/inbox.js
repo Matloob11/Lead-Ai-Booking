@@ -1,0 +1,796 @@
+/**
+ * The agent inbox: conversation list on the left, thread on the right.
+ *
+ * Deliberately framework-free — the panel is served as static files from nginx,
+ * so staying on plain ES modules keeps "deploy" equal to "copy the folder" with
+ * no build step between an edit and the browser.
+ *
+ * Server rules the UI must mirror (see the API contract):
+ *  - an agent sees every chat on their numbers, assigned or not; `assigned_agent`
+ *    is ownership for transfers, never a list filter;
+ *  - when `is_session_open` is false the composer is locked and only approved
+ *    templates can reopen the 24h window;
+ *  - transfer is admin-only.
+ */
+
+import { catalog, inbox, asList } from "./api.js";
+import { ensureSession } from "./bitrix-sso.js";
+import { InboxSocket } from "./realtime.js";
+import { el, clear, debounce, stamp, untilText, initials } from "./dom.js";
+
+const PAGE_SIZE = 40;
+
+const STATUS_TICK = {
+  queued: { glyph: "🕘", label: "queued" },
+  sent: { glyph: "✓", label: "sent" },
+  delivered: { glyph: "✓✓", label: "delivered" },
+  read: { glyph: "✓✓", label: "read", className: "tick--read" },
+  failed: { glyph: "!", label: "failed", className: "tick--failed" },
+};
+
+export function mountInbox(root, { me }) {
+  const state = {
+    me,
+    numbers: [],
+    numberFilter: "",
+    search: "",
+    conversations: [],
+    activeId: null,
+    messages: [],
+    templates: new Map(), // numberId -> template[]
+    loadingThread: false,
+    connection: "connecting",
+  };
+
+  /* ------------------------------------------------------------ structure */
+
+  const ui = {
+    numberSelect: el("select.filter__select", { onchange: onNumberFilterChange }),
+    search: el("input.filter__search", {
+      type: "search",
+      placeholder: "Naam ya number dhoondein",
+      oninput: debounce((event) => {
+        state.search = event.target.value.trim();
+        loadConversations();
+      }),
+    }),
+    list: el("ul.convs"),
+    listStatus: el("div.convs__status"),
+    threadHeader: el("header.thread__header"),
+    messages: el("div.thread__messages"),
+    composer: el("footer.thread__composer"),
+    connection: el("div.connbar", { hidden: true }),
+  };
+
+  const layout = el("div.app", {}, [
+    el("aside.sidebar", {}, [
+      el("div.sidebar__top", {}, [
+        el("div.sidebar__title", {}, ["WhatsApp"]),
+        el("button.btn.btn--primary", { onclick: openNewContact, type: "button" }, ["+ New Contact"]),
+      ]),
+      el("div.filter", {}, [ui.numberSelect, ui.search]),
+      // List and status share one scroll box so the empty-state message sits
+      // right under the (possibly empty) list instead of at the sidebar's foot.
+      el("div.convs__wrap", {}, [ui.list, ui.listStatus]),
+    ]),
+    el("section.thread", {}, [ui.connection, ui.threadHeader, ui.messages, ui.composer]),
+  ]);
+
+  renderEmptyThread();
+
+  /* ------------------------------------------------------------- loading */
+
+  /**
+   * Builds the inbox off-screen and only swaps it in once the first fetches
+   * succeed — if they don't, the caller's boot screen is still mounted and can
+   * show the error instead of an empty panel.
+   */
+  async function boot() {
+    // /api/auth/me/ already carries the visible numbers, so the panel opens on
+    // one round trip; the catalog call is only the fallback.
+    state.numbers = asList(me.numbers, "numbers");
+    if (!state.numbers.length) state.numbers = asList(await catalog.numbers(), "numbers");
+    renderNumberFilter();
+    await loadConversations();
+
+    root.className = "";
+    clear(root).append(layout);
+    connectSocket();
+
+    // Bitrix sizes the placement iframe to its content, so a full-height app
+    // has to ask for the room it needs after it is actually in the document.
+    window.BX24?.fitWindow?.();
+  }
+
+  async function loadConversations({ keepActive = true } = {}) {
+    ui.listStatus.textContent = "Loading…";
+    try {
+      const payload = await inbox.conversations({
+        number: state.numberFilter || undefined,
+        q: state.search || undefined,
+        limit: PAGE_SIZE,
+      });
+      state.conversations = asList(payload, "conversations");
+      renderConversations();
+      ui.listStatus.textContent = state.conversations.length ? "" : "Koi conversation nahi.";
+
+      if (keepActive && state.activeId) {
+        const still = state.conversations.some((c) => c.id === state.activeId);
+        if (!still) renderEmptyThread();
+      }
+    } catch (error) {
+      ui.listStatus.textContent = `List load nahi hui: ${error.message}`;
+      console.error("[a7-wa] conversations failed:", error);
+    }
+  }
+
+  async function openConversation(id) {
+    if (state.loadingThread) return;
+    state.activeId = id;
+    state.loadingThread = true;
+    renderConversations();
+    clear(ui.messages).append(el("div.thread__hint", {}, ["Loading…"]));
+
+    try {
+      renderThreadHeader(findConversation(id));
+      const payload = await inbox.messages(id, { limit: PAGE_SIZE });
+
+      // The endpoint already hands back the newest slice in oldest-first order,
+      // which is exactly the reading order — do not re-sort it.
+      state.messages = asList(payload, "messages");
+
+      // It also returns the conversation, fresher than the list copy.
+      const conversation = payload?.conversation || findConversation(id);
+      if (payload?.conversation) upsertConversation(payload.conversation);
+
+      renderThreadHeader(conversation);
+      renderMessages();
+      renderComposer(conversation);
+
+      if (conversation?.unread_count) {
+        inbox.markRead(id).then(() => {
+          conversation.unread_count = 0;
+          renderConversations();
+        }, () => {});
+      }
+    } catch (error) {
+      clear(ui.messages).append(el("div.thread__hint.thread__hint--error", {}, [`Thread load nahi hua: ${error.message}`]));
+      console.error("[a7-wa] messages failed:", error);
+    } finally {
+      state.loadingThread = false;
+    }
+  }
+
+  const findConversation = (id) => state.conversations.find((c) => c.id === id) || null;
+
+  /* ------------------------------------------------------------ rendering */
+
+  function renderNumberFilter() {
+    clear(ui.numberSelect);
+    // With a single number the filter is noise — the agent has no choice to make.
+    if (state.numbers.length < 2) {
+      ui.numberSelect.hidden = true;
+      return;
+    }
+    ui.numberSelect.hidden = false;
+    ui.numberSelect.append(el("option", { value: "" }, ["Saare numbers"]));
+    for (const number of state.numbers) {
+      ui.numberSelect.append(el("option", { value: number.id }, [numberLabel(number)]));
+    }
+  }
+
+  function onNumberFilterChange(event) {
+    state.numberFilter = event.target.value;
+    loadConversations({ keepActive: false });
+  }
+
+  /** display_name is the human label; phone_number is the fallback agents know. */
+  const numberLabel = (number) =>
+    number?.display_name || number?.phone_number || number?.phone_number_id || "—";
+
+  function renderConversations() {
+    clear(ui.list);
+    for (const conversation of state.conversations) {
+      const open = conversation.is_session_open;
+      ui.list.append(
+        el(
+          "li.conv",
+          {
+            class: conversation.id === state.activeId ? "conv--active" : "",
+            onclick: () => openConversation(conversation.id),
+          },
+          [
+            el("div.conv__avatar", {}, [initials(conversation.contact?.name || conversation.contact?.wa_id)]),
+            el("div.conv__body", {}, [
+              el("div.conv__line", {}, [
+                el("span.conv__name", {}, [conversation.contact?.name || conversation.contact?.wa_id || "—"]),
+                el("span.conv__time", {}, [stamp(conversation.last_message_at)]),
+              ]),
+              el("div.conv__line", {}, [
+                el("span.conv__preview", {}, [conversation.last_message_preview || ""]),
+                conversation.unread_count
+                  ? el("span.badge", {}, [String(conversation.unread_count)])
+                  : null,
+              ]),
+              el("div.conv__meta", {}, [
+                el("span.dot", { class: open ? "dot--open" : "dot--closed", title: open ? "Session khuli" : "Session band" }),
+                el("span.conv__number", {}, [numberLabel(numberById(conversation.number_id))]),
+              ]),
+            ]),
+          ]
+        )
+      );
+    }
+  }
+
+  const numberById = (id) => state.numbers.find((n) => String(n.id) === String(id));
+
+  function renderEmptyThread() {
+    clear(ui.threadHeader);
+    clear(ui.composer);
+    clear(ui.messages).append(el("div.thread__hint", {}, ["Baaein taraf se ek chat chunein."]));
+  }
+
+  function renderThreadHeader(conversation) {
+    clear(ui.threadHeader);
+    if (!conversation) return;
+
+    const open = conversation.is_session_open;
+    const left = untilText(conversation.session_expires_at);
+
+    ui.threadHeader.append(
+      el("div.thread__who", {}, [
+        el("div.conv__avatar", {}, [initials(conversation.contact?.name || conversation.contact?.wa_id)]),
+        el("div", {}, [
+          el("div.thread__name", {}, [conversation.contact?.name || conversation.contact?.wa_id || "—"]),
+          el("div.thread__sub", {}, [
+            conversation.contact?.wa_id || "",
+            " · ",
+            numberLabel(numberById(conversation.number_id)),
+          ]),
+        ]),
+      ]),
+      el("div.thread__tools", {}, [
+        el("span.pill", { class: open ? "pill--open" : "pill--closed" }, [
+          open ? (left ? `Session khuli · ${left}` : "Session khuli") : "Session band",
+        ]),
+        conversation.assigned_agent
+          ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
+          : null,
+        state.me.is_wa_admin
+          ? el("button.btn.btn--ghost", { type: "button", onclick: () => openTransfer(conversation) }, ["Transfer"])
+          : null,
+      ])
+    );
+  }
+
+  function renderMessages() {
+    clear(ui.messages);
+    for (const message of state.messages) ui.messages.append(messageBubble(message));
+    ui.messages.scrollTop = ui.messages.scrollHeight;
+  }
+
+  function messageBubble(message) {
+    const outbound = message.direction === "out";
+    const tick = outbound ? STATUS_TICK[message.status] : null;
+    const failure = [message.error_code, message.error_detail].filter(Boolean).join(" · ");
+    // On a shared number the agent needs to see who replied, but their own name
+    // on every one of their bubbles is noise.
+    const author = outbound && message.sent_by && message.sent_by.id !== state.me.id ? message.sent_by.display_name : null;
+
+    return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
+      el("div.msg__bubble", {}, [
+        mediaNode(message),
+        message.body ? el("div.msg__text", {}, [message.body]) : null,
+        failure ? el("div.msg__error", {}, [failure]) : null,
+        el("div.msg__foot", {}, [
+          author ? el("span.msg__author", {}, [author]) : null,
+          el("span", {}, [stamp(message.created_at)]),
+          tick
+            ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [tick.glyph])
+            : null,
+        ]),
+      ]),
+    ]);
+  }
+
+  /**
+   * Attachments are downloaded from Meta by a background task, so a message can
+   * arrive before its file does. The server pushes a message.status event once
+   * the download settles, which re-renders this bubble — so the waiting state
+   * needs no polling and no retry affordance.
+   *
+   * The panel is same-origin with the API and the media view is cookie
+   * authenticated, so `src` works directly: no fetch, no blob, no header.
+   */
+  function mediaNode(message) {
+    const kind = String(message.kind || "").toLowerCase();
+    if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
+
+    if (message.media_failed) {
+      return el("div.msg__media-failed", {}, ["📎 Attachment available nahi hai"]);
+    }
+
+    if (!message.media_ready || !message.media_url) {
+      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
+    }
+
+    if (kind === "image" || kind === "sticker") {
+      return el("img.msg__image", { src: message.media_url, alt: message.media_name || "image", loading: "lazy" });
+    }
+    if (kind === "audio") return el("audio.msg__audio", { src: message.media_url, controls: true });
+    if (kind === "video") return el("video.msg__video", { src: message.media_url, controls: true });
+    return el("a.msg__file", { href: message.media_url, target: "_blank", rel: "noopener" }, [
+      "📎 ",
+      message.media_name || "Attachment",
+    ]);
+  }
+
+  /* ------------------------------------------------------------- composer */
+
+  function renderComposer(conversation) {
+    clear(ui.composer);
+    if (!conversation) return;
+
+    if (!conversation.is_session_open) {
+      ui.composer.append(
+        el("div.locked", {}, [
+          el("div.locked__text", {}, [
+            "24-ghante ki window band hai — free-form message nahi ja sakta. Template bhejne se window dobara khulegi.",
+          ]),
+          el("button.btn.btn--primary", { type: "button", onclick: () => openTemplates(conversation) }, [
+            "Template chunein",
+          ]),
+        ])
+      );
+      return;
+    }
+
+    const textarea = el("textarea.composer__input", {
+      rows: 1,
+      placeholder: "Message likhein…",
+      onkeydown: (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          submit();
+        }
+      },
+    });
+
+    const file = el("input", {
+      type: "file",
+      hidden: true,
+      accept: "image/*,audio/*,video/*,application/pdf",
+      onchange: () => file.files[0] && sendMedia(conversation, file.files[0], textarea),
+    });
+
+    async function submit() {
+      const body = textarea.value.trim();
+      if (!body) return;
+      textarea.value = "";
+      await sendText(conversation, body);
+    }
+
+    ui.composer.append(
+      el("div.composer", {}, [
+        file,
+        el("button.btn.btn--icon", { type: "button", title: "Attach", onclick: () => file.click() }, ["📎"]),
+        textarea,
+        el("button.btn.btn--primary", { type: "button", onclick: submit }, ["Send"]),
+      ])
+    );
+    textarea.focus();
+  }
+
+  /**
+   * Optimistic append: the agent sees the bubble instantly, and the real message
+   * (with its id and status) replaces it when the API answers. A failure turns
+   * the same bubble red instead of losing what they typed.
+   */
+  function appendOptimistic(patch) {
+    const draft = {
+      id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      direction: "out",
+      status: "queued",
+      created_at: new Date().toISOString(),
+      ...patch,
+    };
+    state.messages.push(draft);
+    ui.messages.append(messageBubble(draft));
+    ui.messages.scrollTop = ui.messages.scrollHeight;
+    return draft;
+  }
+
+  function replaceMessage(draftId, real) {
+    const index = state.messages.findIndex((m) => m.id === draftId);
+    if (index === -1) return;
+    const node = ui.messages.querySelector(`[data-id="${CSS.escape(String(draftId))}"]`);
+
+    // The WebSocket echo of our own send can land before the HTTP response.
+    // If it already painted the real message, drop the draft instead of
+    // producing a second copy of it.
+    const alreadyLive =
+      real?.id !== undefined && state.messages.some((m, i) => i !== index && String(m.id) === String(real.id));
+    if (alreadyLive) {
+      state.messages.splice(index, 1);
+      node?.remove();
+      return;
+    }
+
+    state.messages[index] = { ...state.messages[index], ...real };
+    node?.replaceWith(messageBubble(state.messages[index]));
+  }
+
+  async function sendText(conversation, body) {
+    const draft = appendOptimistic({ kind: "text", body });
+    try {
+      const real = await inbox.send(conversation.id, { kind: "text", body });
+      replaceMessage(draft.id, real || { status: "sent" });
+    } catch (error) {
+      replaceMessage(draft.id, { status: "failed", body: `${body}\n\n⚠ ${error.message}` });
+    }
+  }
+
+  async function sendMedia(conversation, file, textarea) {
+    const caption = textarea?.value.trim() || "";
+    const kind = mediaKind(file.type);
+    const draft = appendOptimistic({ kind, body: caption || file.name });
+    if (textarea) textarea.value = "";
+
+    try {
+      const uploaded = await inbox.uploadMedia(file);
+      const real = await inbox.send(conversation.id, {
+        kind,
+        body: caption,
+        media_id: uploaded.media_id,
+      });
+      replaceMessage(draft.id, real || { status: "sent" });
+    } catch (error) {
+      replaceMessage(draft.id, { status: "failed", body: `${file.name}\n\n⚠ ${error.message}` });
+    }
+  }
+
+  function mediaKind(mime = "") {
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("audio/")) return "audio";
+    if (mime.startsWith("video/")) return "video";
+    return "document";
+  }
+
+  /* ------------------------------------------------------------- modals */
+
+  function modal(title, content, { wide = false } = {}) {
+    const box = el("div.modal__box", { class: wide ? "modal__box--wide" : "" }, [
+      el("div.modal__head", {}, [el("h2.modal__title", {}, [title]), el("button.modal__x", { type: "button", onclick: close }, ["×"])]),
+      content,
+    ]);
+    const backdrop = el("div.modal", { onclick: (e) => e.target === backdrop && close() }, [box]);
+    function close() {
+      backdrop.remove();
+    }
+    document.body.append(backdrop);
+    return { close, box };
+  }
+
+  async function templatesFor(numberId) {
+    if (state.templates.has(numberId)) return state.templates.get(numberId);
+    const list = asList(await catalog.templates(numberId), "templates");
+    state.templates.set(numberId, list);
+    return list;
+  }
+
+  /** Renders one input per {{n}} placeholder and returns a values getter. */
+  function variableFields(template) {
+    const count = Number(template?.variable_count) || 0;
+    const inputs = [];
+    const wrap = el("div.vars");
+    for (let i = 1; i <= count; i++) {
+      const input = el("input.field", { type: "text", placeholder: `{{${i}}}` });
+      inputs.push(input);
+      wrap.append(el("label.field__row", {}, [el("span", {}, [`Variable ${i}`]), input]));
+    }
+    return {
+      node: wrap,
+      values: () => Object.fromEntries(inputs.map((input, i) => [String(i + 1), input.value])),
+      complete: () => inputs.every((input) => input.value.trim()),
+    };
+  }
+
+  async function openTemplates(conversation) {
+    const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Templates load ho rahe hain…"])]);
+    const dialog = modal("Approved templates", body, { wide: true });
+
+    let templates;
+    try {
+      templates = await templatesFor(conversation.number_id);
+    } catch (error) {
+      clear(body).append(el("div.alert", {}, [`Templates load nahi hue: ${error.message}`]));
+      return;
+    }
+
+    if (!templates.length) {
+      clear(body).append(el("div.thread__hint", {}, ["Is number par koi approved template nahi hai."]));
+      return;
+    }
+
+    clear(body);
+    const list = el("div.tpl-list");
+    const detail = el("div.tpl-detail", {}, [el("div.thread__hint", {}, ["Ek template chunein."])]);
+    body.append(el("div.tpl-split", {}, [list, detail]));
+
+    for (const template of templates) {
+      list.append(
+        el("button.tpl", { type: "button", onclick: () => select(template) }, [
+          el("div.tpl__name", {}, [template.name]),
+          el("div.tpl__lang", {}, [template.language || ""]),
+        ])
+      );
+    }
+
+    function select(template) {
+      const fields = variableFields(template);
+      const send = el("button.btn.btn--primary", { type: "button" }, ["Bhejein"]);
+      send.addEventListener("click", async () => {
+        if (!fields.complete()) {
+          alert("Sab variables bharna zaroori hain.");
+          return;
+        }
+        send.disabled = true;
+        send.textContent = "Bhej rahe hain…";
+        try {
+          await inbox.sendTemplate(conversation.id, {
+            template_id: template.id,
+            variables: fields.values(),
+          });
+          dialog.close();
+          await openConversation(conversation.id);
+        } catch (error) {
+          send.disabled = false;
+          send.textContent = "Bhejein";
+          alert(`Template nahi gaya: ${error.message}`);
+        }
+      });
+
+      clear(detail).append(
+        el("div.tpl-detail__preview", {}, [template.body_text || ""]),
+        fields.node,
+        el("div.modal__actions", {}, [send])
+      );
+    }
+  }
+
+  function openNewContact() {
+    const numberSelect = el(
+      "select.field",
+      {},
+      state.numbers.map((number) => el("option", { value: number.id }, [numberLabel(number)]))
+    );
+    const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
+    const templateSelect = el("select.field", {}, [el("option", { value: "" }, ["Template load ho rahe hain…"])]);
+    const varsHost = el("div");
+    const error = el("div.alert", { hidden: true });
+    let fields = null;
+    let templates = [];
+
+    async function loadTemplates() {
+      clear(templateSelect).append(el("option", { value: "" }, ["Template load ho rahe hain…"]));
+      clear(varsHost);
+      try {
+        templates = await templatesFor(numberSelect.value);
+      } catch (err) {
+        clear(templateSelect).append(el("option", { value: "" }, [`Load fail: ${err.message}`]));
+        return;
+      }
+      clear(templateSelect).append(
+        el("option", { value: "" }, [templates.length ? "Template chunein…" : "Koi approved template nahi"]),
+        ...templates.map((t) => el("option", { value: t.id }, [`${t.name} (${t.language || ""})`]))
+      );
+    }
+
+    templateSelect.addEventListener("change", () => {
+      clear(varsHost);
+      fields = null;
+      const template = templates.find((t) => String(t.id) === templateSelect.value);
+      if (!template) return;
+      varsHost.append(el("div.tpl-detail__preview", {}, [template.body_text || ""]));
+      fields = variableFields(template);
+      varsHost.append(fields.node);
+    });
+
+    numberSelect.addEventListener("change", loadTemplates);
+
+    const send = el("button.btn.btn--primary", { type: "button" }, ["Chat shuru karein"]);
+    const body = el("div.modal__body", {}, [
+      el("label.field__row", {}, [el("span", {}, ["Kis number se"]), numberSelect]),
+      el("label.field__row", {}, [el("span", {}, ["Customer ka number"]), phone]),
+      el("label.field__row", {}, [el("span", {}, ["Template"]), templateSelect]),
+      varsHost,
+      error,
+      el("div.modal__actions", {}, [send]),
+    ]);
+
+    const dialog = modal("New Contact", body);
+    loadTemplates();
+
+    send.addEventListener("click", async () => {
+      error.hidden = true;
+      const to = phone.value.replace(/[^\d]/g, "");
+      if (!to || !templateSelect.value) {
+        error.hidden = false;
+        error.textContent = "Number aur template dono chahiye.";
+        return;
+      }
+      if (fields && !fields.complete()) {
+        error.hidden = false;
+        error.textContent = "Sab variables bharna zaroori hain.";
+        return;
+      }
+      send.disabled = true;
+      send.textContent = "Bhej rahe hain…";
+      try {
+        const created = await inbox.start({
+          number_id: numberSelect.value,
+          to,
+          template_id: templateSelect.value,
+          variables: fields ? fields.values() : {},
+        });
+        dialog.close();
+        await loadConversations({ keepActive: false });
+        if (created?.id) await openConversation(created.id);
+      } catch (err) {
+        send.disabled = false;
+        send.textContent = "Chat shuru karein";
+        error.hidden = false;
+        error.textContent = err.message;
+      }
+    });
+  }
+
+  function openTransfer(conversation) {
+    const agentId = el("input.field", { type: "text", placeholder: "Agent ID" });
+    const reason = el("input.field", { type: "text", placeholder: "Wajah (optional)" });
+    const error = el("div.alert", { hidden: true });
+    const send = el("button.btn.btn--primary", { type: "button" }, ["Transfer karein"]);
+
+    const dialog = modal(
+      "Chat transfer",
+      el("div.modal__body", {}, [
+        el("p.modal__note", {}, ["Poori history naye agent ke saath chali jayegi. Chat delete nahi hoti."]),
+        el("label.field__row", {}, [el("span", {}, ["Naya agent"]), agentId]),
+        el("label.field__row", {}, [el("span", {}, ["Wajah"]), reason]),
+        error,
+        el("div.modal__actions", {}, [send]),
+      ])
+    );
+
+    send.addEventListener("click", async () => {
+      if (!agentId.value.trim()) {
+        error.hidden = false;
+        error.textContent = "Agent ID chahiye.";
+        return;
+      }
+      send.disabled = true;
+      try {
+        await inbox.assign(conversation.id, { agent_id: agentId.value.trim(), reason: reason.value.trim() || undefined });
+        dialog.close();
+        await loadConversations();
+      } catch (err) {
+        send.disabled = false;
+        error.hidden = false;
+        error.textContent = err.message;
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------ realtime */
+
+  function connectSocket() {
+    const socket = new InboxSocket({
+      onEvent: handleEvent,
+
+      onStatus: ({ state: connState, resync }) => {
+        state.connection = connState;
+        ui.connection.hidden = connState === "open";
+        ui.connection.textContent =
+          connState === "open" ? "" : "Live connection toot gaya — dobara jur raha hai…";
+        // A gap in the socket means missed events; REST is the source of truth.
+        if (connState === "open" && resync) {
+          loadConversations();
+          if (state.activeId) openConversation(state.activeId);
+        }
+      },
+
+      // The socket was rejected as unauthenticated: the Django session lapsed.
+      // Re-run the Bitrix handshake once, then reconnect — the agent never sees
+      // a login prompt, which is the whole point of the SSO.
+      onAuthLost: async () => {
+        ui.connection.hidden = false;
+        ui.connection.textContent = "Session dobara banayi ja rahi hai…";
+        try {
+          await ensureSession();
+          socket.connect();
+          loadConversations();
+        } catch (error) {
+          ui.connection.textContent = `Session bahaal nahi hui — page reload karein. (${error.message})`;
+          console.error("[a7-wa] re-auth failed:", error);
+        }
+      },
+    });
+
+    socket.connect();
+    window.addEventListener("beforeunload", () => socket.close());
+  }
+
+  // Events carry whole objects, not ids, so the panel renders them directly
+  // instead of refetching the list on every inbound message.
+  function handleEvent(event, data) {
+    if (event === "ready") return;
+    if (event === "message.new") return onMessageNew(data);
+    if (event === "message.status") return onMessageStatus(data.message);
+    if (event === "conversation.updated" || event === "conversation.assigned") {
+      return onConversationChanged(data.conversation);
+    }
+    console.debug("[a7-wa] unhandled ws event:", event, data);
+  }
+
+  /** Inserts or replaces a conversation, keeping the list newest-activity-first. */
+  function upsertConversation(conversation) {
+    if (!conversation) return;
+    // A filtered-out number must not silently reappear in the list.
+    if (state.numberFilter && String(conversation.number_id) !== String(state.numberFilter)) return;
+
+    const index = state.conversations.findIndex((c) => c.id === conversation.id);
+    if (index === -1) state.conversations.unshift(conversation);
+    else state.conversations[index] = conversation;
+
+    state.conversations.sort(
+      (a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)
+    );
+    renderConversations();
+    ui.listStatus.textContent = state.conversations.length ? "" : "Koi conversation nahi.";
+  }
+
+  function onMessageNew({ message, conversation }) {
+    const active = conversation?.id === state.activeId;
+
+    if (active) {
+      // Ignore the echo of a send we already painted optimistically.
+      if (!state.messages.some((m) => String(m.id) === String(message.id))) {
+        state.messages.push(message);
+        ui.messages.append(messageBubble(message));
+        ui.messages.scrollTop = ui.messages.scrollHeight;
+      }
+      // An open thread is being read, so it must not accrue an unread badge.
+      if (message.direction === "in") {
+        inbox.markRead(state.activeId).catch(() => {});
+        conversation.unread_count = 0;
+      }
+    }
+
+    upsertConversation(conversation);
+    if (active) {
+      renderThreadHeader(conversation);
+      renderComposer(conversation);
+    }
+  }
+
+  function onMessageStatus(message) {
+    if (!message || message.conversation_id !== state.activeId) return;
+    const index = state.messages.findIndex((m) => String(m.id) === String(message.id));
+    if (index === -1) return;
+    state.messages[index] = message;
+    const node = ui.messages.querySelector(`[data-id="${CSS.escape(String(message.id))}"]`);
+    node?.replaceWith(messageBubble(message));
+  }
+
+  function onConversationChanged(conversation) {
+    upsertConversation(conversation);
+    if (conversation?.id === state.activeId) {
+      // Assignment or an expiring window changes what the composer may do.
+      renderThreadHeader(conversation);
+      renderComposer(conversation);
+    }
+  }
+
+  return boot();
+}

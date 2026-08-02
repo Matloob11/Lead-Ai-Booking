@@ -32,7 +32,7 @@
     </main>
 
     <script type="module">
-      import { loadBX24, SsoError } from "./assets/bitrix-sso.js";
+      import { loadBX24, callBitrix } from "./assets/bitrix-sso.js";
 
       const PLACEMENT = "LEFT_MENU";
       const TITLE = "WhatsApp";
@@ -48,24 +48,6 @@
 
       const escape = (value) =>
         String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
-
-      function call(method, params) {
-        return new Promise((resolve, reject) => {
-          window.BX24.callMethod(method, params, (result) => {
-            const error = result.error();
-            if (!error) {
-              resolve(result.data());
-              return;
-            }
-            // The SDK wraps REST errors differently across versions — sometimes
-            // the payload sits on .ex, sometimes on the error object itself.
-            const raw = error.ex || error;
-            reject(
-              new SsoError(raw.error || "rest_error", raw.error_description || String(error), { method, params })
-            );
-          });
-        });
-      }
 
       function ok(message, note) {
         els.title.textContent = message;
@@ -94,7 +76,7 @@
 
       async function unbind() {
         try {
-          await call("placement.unbind", { PLACEMENT, HANDLER });
+          await callBitrix("placement.unbind", { PLACEMENT, HANDLER });
           els.result.innerHTML = `<p>Menu item hata diya gaya. Wapas lagane ke liye ye page dobara kholein.</p>`;
         } catch (error) {
           fail(error);
@@ -105,11 +87,13 @@
         try {
           await loadBX24();
           try {
-            await call("placement.bind", { PLACEMENT, HANDLER, TITLE });
+            await callBitrix("placement.bind", { PLACEMENT, HANDLER, TITLE });
             ok("WhatsApp menu item lag gaya", "Left menu refresh karein — item wahan nazar aayega.");
           } catch (error) {
             // Binding the same handler twice is the normal re-install path.
-            if (/ALREADY|EXIST/i.test(error.code || "")) {
+            // Bitrix reports it as a generic ERROR_CORE, so the message — not
+            // the code — is what identifies it ("Handler already binded").
+            if (/alread|exist/i.test(`${error.code} ${error.message}`)) {
               ok("Menu item pehle se maujood hai", "Kuch badalna nahi para — placement already bound thi.");
             } else {
               throw error;

@@ -29,7 +29,7 @@ alag rehta hai.
 |------|---------|
 | `public/index.html` | LEFT_MENU placement handler — SSO boot + connection diagnostics. Chat UI yahin aayegi. |
 | `public/install.html` | Install handler — `placement.bind(LEFT_MENU)` + `installFinish()`. Unbind button bhi isi par. |
-| `public/assets/bitrix-sso.js` | BX24 load/init, `getAuth`/`refreshAuth`, session bootstrap, CSRF-aware `apiFetch`. |
+| `public/assets/bitrix-sso.js` | BX24 load/init, `getAuth`/`refreshAuth`, `ensurePlacement`, session bootstrap, CSRF-aware `apiFetch`. |
 | `public/assets/panel.css` | Shell styling (navy/gold). |
 | `deploy/a7-wa-panel.location.conf` | nginx `location /app/` block — haath se `a7-wa.conf` mein daalna hai. |
 | `deploy/deploy-panel.sh` | `public/` ko `/opt/a7-wa/panel/` par rsync karta hai. |
@@ -70,16 +70,42 @@ Other → Local application* (self-hosted 26.x mein *Integrations → Other* bhi
 Save karne par Bitrix **Client ID (`client_id`)** aur **Client secret** dikhata hai.
 Ye dono **backend session ko `.env` ke zariye** dein — chat/commit mein na likhein.
 
-Phir **Install** dabayein: Bitrix `install.html` kholega, wo `LEFT_MENU` placement
-bind karke `installFinish()` call karega. Left menu refresh par **WhatsApp** item
-aa jayega.
+App banne ke baad `/marketplace/app/<ID>/` kholein: Bitrix `install.html` chalayega,
+wo `LEFT_MENU` bind kar ke `installFinish()` call karega. Left menu refresh par
+**WhatsApp** item aa jata hai.
 
 > Re-install ya handler URL badalne ke baad `install.html` dobara khol lena kaafi
 > hai — already-bound placement ko wo success maanta hai.
+>
+> Iske alawa `index.html` khud bhi har **Bitrix admin** ke load par `ensurePlacement()`
+> chalata hai: agar menu item gayab ho ya purane handler URL par atka ho to wo
+> chupchap dobara bind kar deta hai. Yani manual install step ab lazmi nahi.
+
+### Is portal par jo cheez lagi hui hai (2026-08-02)
+
+| Cheez | Value |
+| --- | --- |
+| App ID | `76` (`/marketplace/app/76/`) |
+| `client_id` | `local.6a6f610dbf9b18.33835228` |
+| Scope | `crm, placement, user` |
+| Placement | `#282` — `LEFT_MENU` → `https://wa.srv1802669.hstgr.cloud/app/` |
+
+`crm` scope Bitrix ke form mein by-default chuna hua tha aur chip se hataya nahi ja
+saka. App ise kabhi use nahi karta; agli baar form khulne par hata dena behtar hai.
 
 ---
 
-## Verify
+## Verify — 2026-08-02 ko live confirm hua
+
+Left menu → **WhatsApp** → panel khula, teenon step ✓, agent `Admin Abdul Malik`
+(Agent ID 2) identify hua. Yani BX24 token → Django session → catalog call, poori
+chain iframe ke andar chal rahi hai aur third-party session cookie bhi tik rahi hai.
+
+Do cheezein data side par abhi baaqi hain (backend/admin ka kaam, panel ka nahi):
+`is_wa_admin` is user par `false` hai, aur us ko koi number assign nahi — is liye
+panel "koi number assign nahi" dikhata hai.
+
+## Verify (kisi bhi waqt dobara)
 
 1. Bitrix mein left menu → **WhatsApp** → panel khulta hai.
 2. Teenon step ✓ hone chahiyein: *Bitrix token → Panel session → Numbers*.
@@ -92,6 +118,10 @@ Koi step ✕ hua to page par exact `code` + detail aa jata hai (`sdk_timeout`,
 ---
 
 ## Backend session ke liye requests
+
+**Neeche ke chaaron ✅ ho chuke hain** (backend session ne 2026-08-02 ko confirm kiye,
+aur live test mein chalte hue verify bhi ho gaye). Yahan record ke liye rakhe hain —
+inmein se koi bhi wapas toota to panel foran `http_403`/`cookie_blocked` dikhayega.
 
 Panel static hai, is liye ye chaar cheezein Django side par honi zaroori hain:
 
@@ -107,6 +137,16 @@ Panel static hai, is liye ye chaar cheezein Django side par honi zaroori hain:
    aur uske `ID`/`member_id` ko request ke `member_id` se match karein. Bagair iske
    koi bhi POST karke kisi bhi agent ka session le sakta hai.
 
+### Khula sawaal — WA admin kaun hai
+
+Portal ka Bitrix admin (`Admin Abdul Malik`) auto-provision to ho gaya, lekin
+`/api/auth/me/` us par `is_wa_admin: false` deta hai. Transfer dialog aur admin-only
+screens isi flag par chalengi, to backend/admin mein tay karna hoga ke WA admin kaun
+hai — Bitrix ke admin flag se derive hoga ya Django admin mein manually set hoga.
+
+Note: menu item bind karne ka gate **ye flag nahi** hai — uske liye `BX24.isAdmin()`
+istemal hota hai, kyunki `placement.bind` Bitrix ki permission hai, hamari nahi.
+
 ## Known risk — third-party cookies
 
 Panel `wa.srv1802669.hstgr.cloud` ka iframe `crm.a7grouprealestatedxb.com` ke andar
@@ -117,4 +157,5 @@ lekin **Safari aur Firefox default par ise block karte hain**, aur wahan panel
 
 Agar agents Safari/Firefox use karte hain to backend ko `/api/auth/bitrix/` se ek
 short-lived token bhi return karna hoga jo panel `Authorization` header mein bheje.
-Ye abhi banaya nahi gaya — pehle Chrome par chala kar dekhte hain.
+Ye jaan boojh kar nahi banaya — team Chrome/Edge par hai, aur Chrome par live test
+mein cookie theek chal gayi.

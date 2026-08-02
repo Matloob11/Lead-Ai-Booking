@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A7 WhatsApp Inbox</title>
     <link rel="stylesheet" href="./assets/panel.css" />
+    <link rel="stylesheet" href="./assets/inbox.css" />
   </head>
   <body>
     <!--
       LEFT_MENU placement handler. Bitrix opens this in an iframe and POSTs the
       placement params; we pick the same values up through the JS SDK instead
-      (see assets/bitrix-sso.js), swap them for a Django session, and boot.
-
-      The chat UI replaces the panel below once it is built — the SSO boot and
-      the error surface stay as they are.
+      (see assets/bitrix-sso.js), swap them for a Django session, and mount the
+      inbox. The boot card below is only what the agent sees for that first
+      second — and the surface where any failure is reported.
     -->
     <main class="boot" id="root">
       <section class="card">
@@ -31,7 +31,7 @@
         <ul class="steps" id="steps">
           <li data-step="bitrix"><span class="steps__dot"></span><span>Bitrix24 placement se token</span></li>
           <li data-step="session"><span class="steps__dot"></span><span>Panel session</span></li>
-          <li data-step="numbers"><span class="steps__dot"></span><span>Aapke WhatsApp numbers</span></li>
+          <li data-step="inbox"><span class="steps__dot"></span><span>Inbox</span></li>
         </ul>
 
         <div id="result"></div>
@@ -39,8 +39,10 @@
     </main>
 
     <script type="module">
-      import { ensureSession, apiFetch, getBitrixAuth, SsoError } from "./assets/bitrix-sso.js";
+      import { ensureSession, ensurePlacement, getBitrixAuth, SsoError } from "./assets/bitrix-sso.js";
+      import { mountInbox } from "./assets/inbox.js";
 
+      const root = document.getElementById("root");
       const els = {
         title: document.getElementById("title"),
         subtitle: document.getElementById("subtitle"),
@@ -73,26 +75,6 @@
         console.error("[a7-wa] boot failed at step:", step, error);
       }
 
-      function renderReady(me, numbers) {
-        els.title.textContent = "Connected";
-        els.subtitle.textContent =
-          "SSO chal raha hai. Chat panel isi jagah render hoga — abhi sirf connection verify ho raha hai.";
-
-        const list = numbers.length
-          ? numbers
-              .map((n) => `<div><dt>${escape(n.label || n.display_number || n.id)}</dt><dd>${escape(n.display_number || n.phone_number_id || "—")}</dd></div>`)
-              .join("")
-          : `<div><dt>Numbers</dt><dd>koi number assign nahi</dd></div>`;
-
-        els.result.innerHTML = `
-          <dl class="facts">
-            <div><dt>Agent</dt><dd>${escape(me.display_name)}</dd></div>
-            <div><dt>Agent ID</dt><dd>${escape(me.id)}</dd></div>
-            <div><dt>Role</dt><dd><span class="pill ${me.is_wa_admin ? "pill--gold" : ""}">${me.is_wa_admin ? "Admin" : "Agent"}</span></dd></div>
-            ${list}
-          </dl>`;
-      }
-
       async function boot() {
         let step = "bitrix";
         try {
@@ -106,15 +88,16 @@
           const me = await ensureSession();
           setStep("session", "done");
 
-          step = "numbers";
-          setStep("numbers", "active");
-          // /api/auth/me/ already carries the visible numbers; the catalog call is
-          // the real check that the session cookie survives a second request.
-          const catalog = await apiFetch("/api/catalog/numbers/");
-          const numbers = Array.isArray(catalog) ? catalog : catalog?.numbers || me.numbers || [];
-          setStep("numbers", "done");
+          // Portal admins keep the main-menu item in sync. The gate is Bitrix's
+          // own admin flag, not our is_wa_admin — placement.bind is a portal
+          // permission and a WhatsApp admin is not necessarily a Bitrix one.
+          if (typeof window.BX24.isAdmin === "function" && window.BX24.isAdmin()) {
+            ensurePlacement().then((r) => console.info("[a7-wa] LEFT_MENU:", r.status));
+          }
 
-          renderReady(me, numbers);
+          step = "inbox";
+          setStep("inbox", "active");
+          await mountInbox(root, { me });
         } catch (error) {
           fail(step, error);
         }
