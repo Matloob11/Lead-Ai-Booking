@@ -13,6 +13,7 @@ import httpx
 from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -48,6 +49,10 @@ def _fetch_bitrix_user(domain, auth_id):
     return body["result"]
 
 
+# The very first call from the panel has no csrftoken cookie yet, so CSRF is
+# waived here. The protection that matters is stronger: the AUTH_ID is spent
+# against the portal's own REST API, and only the configured portal is accepted.
+@csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def bitrix_login(request):
@@ -99,6 +104,8 @@ def bitrix_login(request):
     return Response({**_serialize(agent), "created": created})
 
 
+# Hands the panel its csrftoken cookie; every later POST depends on it.
+@ensure_csrf_cookie
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def me(request):
