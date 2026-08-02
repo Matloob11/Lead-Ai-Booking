@@ -8,6 +8,16 @@ there is only one definition of what a message looks like.
 from django.urls import reverse
 
 
+def _iso(value):
+    """Timestamps go out as ISO strings, never as datetime objects.
+
+    The channel layer packs payloads with msgpack, which cannot encode a
+    datetime — leaving them native made every WebSocket push fail while the
+    REST responses looked fine, so the panel silently fell back to polling.
+    """
+    return value.isoformat() if value else None
+
+
 def serialize_agent(agent):
     if not agent:
         return None
@@ -46,10 +56,10 @@ def serialize_conversation(conversation):
         "contact": serialize_contact(conversation.contact),
         "assigned_agent": serialize_agent(conversation.assigned_agent),
         "status": conversation.status,
-        "last_message_at": conversation.last_message_at,
+        "last_message_at": _iso(conversation.last_message_at),
         "last_message_preview": conversation.last_message_preview,
         "unread_count": conversation.unread_count,
-        "session_expires_at": conversation.session_expires_at,
+        "session_expires_at": _iso(conversation.session_expires_at),
         "is_session_open": conversation.is_session_open,
     }
 
@@ -74,12 +84,14 @@ def serialize_message(message, request=None):
         "media_name": message.media.file_name if message.media else "",
         "media_mime": message.media.mime_type if message.media else "",
         "media_ready": bool(message.media and message.media.downloaded),
+        # Lets the panel stop showing "loading" and say so instead.
+        "media_failed": bool(message.media and not message.media.downloaded and message.media.download_error),
         "template_name": message.template.name if message.template else "",
         "status": message.status,
         "error_code": message.error_code,
         "error_detail": message.error_detail,
-        "created_at": message.created_at,
-        "delivered_at": message.delivered_at,
-        "read_at": message.read_at,
+        "created_at": _iso(message.created_at),
+        "delivered_at": _iso(message.delivered_at),
+        "read_at": _iso(message.read_at),
         "sent_by": serialize_agent(message.sent_by),
     }

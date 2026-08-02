@@ -15,6 +15,9 @@ from django.utils import timezone
 from apps.catalog.models import WabaNumber
 from apps.inbox.models import Contact, Conversation, MediaAsset, Message
 
+# Celery's autodiscovery only imports each app's tasks module, so the media
+# task has to be pulled in here or the worker rejects it as unregistered.
+from .media import download_media  # noqa: F401
 from .models import WebhookEvent
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,9 @@ def _store_inbound(number, message, contact_profiles):
         blob = message.get(message["type"], {})
         media = MediaAsset.objects.create(
             alots_media_id=blob.get("id", ""),
+            # Prefer the gateway's own hosted copy: it needs no credentials and
+            # does not expire, unlike Meta's lookaside link.
+            source_url=blob.get("filelink") or blob.get("url") or "",
             mime_type=blob.get("mime_type", ""),
             file_name=blob.get("filename", ""),
             sha256=blob.get("sha256", ""),
@@ -123,8 +129,6 @@ def _store_inbound(number, message, contact_profiles):
     )
 
     if media and media.alots_media_id:
-        from .media import download_media
-
         download_media.delay(media.pk, number.phone_number_id)
 
     from apps.inbox.events import publish_message

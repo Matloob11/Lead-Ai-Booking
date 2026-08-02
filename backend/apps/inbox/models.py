@@ -88,11 +88,19 @@ class MediaAsset(models.Model):
 
     file = models.FileField(upload_to="wa/%Y/%m/", blank=True)
     alots_media_id = models.CharField(max_length=128, blank=True, db_index=True)
+
+    # The webhook hands us a ready-to-fetch link, which is the only route that
+    # actually works: the gateway's media-by-id endpoint answers 400 for every
+    # media we own. Their hosted copy needs no auth; Meta's lookaside link is
+    # short-lived and does.
+    source_url = models.TextField(blank=True)
+
     mime_type = models.CharField(max_length=128, blank=True)
     file_name = models.CharField(max_length=255, blank=True)
     size_bytes = models.PositiveBigIntegerField(default=0)
     sha256 = models.CharField(max_length=64, blank=True, db_index=True)
     downloaded = models.BooleanField(default=False)
+    download_error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
