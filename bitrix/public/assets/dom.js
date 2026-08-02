@@ -62,6 +62,34 @@ export function stamp(iso) {
   return sameDay ? TIME.format(date) : DAY.format(date);
 }
 
+const DATE_FULL = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", year: "numeric" });
+
+/** Local calendar day, for deciding where a date separator goes. */
+export function dayKey(iso) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** "Aaj" / "Kal" / "14 March 2026" for the separator between days. */
+export function dayLabel(iso) {
+  const key = dayKey(iso);
+  if (!key) return "";
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (key === dayKey(today.toISOString())) return "Aaj";
+  if (key === dayKey(yesterday.toISOString())) return "Kal";
+  return DATE_FULL.format(new Date(iso));
+}
+
+/** Minutes from now until the given instant; negative once it has passed. */
+export function minutesUntil(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - Date.now();
+  return Number.isFinite(ms) ? Math.floor(ms / 60000) : null;
+}
+
 /** "3h 12m" until the given instant, or null once it has passed. */
 export function untilText(iso) {
   if (!iso) return null;

@@ -19,7 +19,8 @@ import { ensureSession } from "./bitrix-sso.js";
 import { keepFrameSized } from "./frame.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
 import { InboxSocket } from "./realtime.js";
-import { el, clear, debounce, formatBytes, modal, stamp, untilText, initials } from "./dom.js";
+import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
+import { bindEmojiPicker } from "./emoji.js";
 
 const PAGE_SIZE = 40;
 
@@ -40,6 +41,7 @@ export function mountInbox(root, { me }) {
     conversations: [],
     activeId: null,
     messages: [],
+    unreadAtOpen: 0,
     templates: new Map(), // numberId -> template[]
     loadingThread: false,
     connection: "connecting",
@@ -48,6 +50,7 @@ export function mountInbox(root, { me }) {
   // Composer listeners (attach button, drop zone, paste) are rebound whenever
   // the composer is re-rendered; this releases the previous set.
   let teardownFileSources = null;
+  let teardownEmoji = null;
 
   /* ------------------------------------------------------------ structure */
 
@@ -150,6 +153,9 @@ export function mountInbox(root, { me }) {
       const conversation = payload?.conversation || findConversation(id);
       if (payload?.conversation) upsertConversation(payload.conversation);
 
+      // Captured before mark-read so the "new messages" divider survives.
+      state.unreadAtOpen = conversation?.unread_count || 0;
+
       renderThreadHeader(conversation);
       renderMessages();
       renderComposer(conversation);
@@ -214,7 +220,10 @@ export function mountInbox(root, { me }) {
                 el("span.conv__time", {}, [stamp(conversation.last_message_at)]),
               ]),
               el("div.conv__line", {}, [
-                el("span.conv__preview", {}, [conversation.last_message_preview || ""]),
+                el("span.conv__preview", {}, [
+                  kindIcon(conversation.last_message_kind),
+                  conversation.last_message_preview || "",
+                ]),
                 conversation.unread_count
                   ? el("span.badge", {}, [String(conversation.unread_count)])
                   : null,
@@ -231,6 +240,23 @@ export function mountInbox(root, { me }) {
   }
 
   const numberById = (id) => state.numbers.find((n) => String(n.id) === String(id));
+
+  const KIND_ICONS = {
+    image: "📷 ",
+    sticker: "📷 ",
+    video: "🎬 ",
+    audio: "🎤 ",
+    document: "📄 ",
+    location: "📍 ",
+    contacts: "👤 ",
+  };
+
+  /**
+   * Marks a media preview in the list. Depends on `last_message_kind`, which
+   * the conversation payload does not carry yet — it degrades to no icon until
+   * the backend adds it, rather than guessing from the preview text.
+   */
+  const kindIcon = (kind) => KIND_ICONS[String(kind || "").toLowerCase()] || "";
 
   function renderEmptyThread() {
     clear(ui.threadHeader);
@@ -258,7 +284,7 @@ export function mountInbox(root, { me }) {
         ]),
       ]),
       el("div.thread__tools", {}, [
-        el("span.pill", { class: open ? "pill--open" : "pill--closed" }, [
+        el("span.pill", { class: sessionPillClass(conversation) }, [
           open ? (left ? `Session khuli · ${left}` : "Session khuli") : "Session band",
         ]),
         conversation.assigned_agent
@@ -281,6 +307,22 @@ export function mountInbox(root, { me }) {
     ui.messages.scrollTop = ui.messages.scrollHeight;
   };
 
+  // Images and videos have no height until they load, so the scroll that runs
+  // right after render lands short and the newest bubble hides behind the
+  // composer. Re-pin whenever a media element settles, unless the agent has
+  // meanwhile scrolled up to read something.
+  let followTail = true;
+  ui.messages.addEventListener("scroll", () => {
+    followTail = isAtBottom();
+  });
+  ui.messages.addEventListener(
+    "load",
+    () => {
+      if (followTail) scrollToBottom();
+    },
+    true // capture: load does not bubble
+  );
+
   /**
    * Follows new messages only when the agent is already at the bottom. Yanking
    * the view down while they are reading older history is worse than missing a
@@ -291,10 +333,59 @@ export function mountInbox(root, { me }) {
     if (wasAtBottom) scrollToBottom();
   }
 
+  /**
+   * The window closing is the deadline that costs money — once it lapses only
+   * a paid template reopens the chat — so the pill warns before it happens
+   * rather than only reporting that it already did.
+   */
+  function sessionPillClass(conversation) {
+    if (!conversation.is_session_open) return "pill--closed";
+    const left = minutesUntil(conversation.session_expires_at);
+    if (left !== null && left <= 30) return "pill--urgent";
+    if (left !== null && left <= 120) return "pill--soon";
+    return "pill--open";
+  }
+
   function renderMessages() {
     clear(ui.messages);
-    for (const message of state.messages) ui.messages.append(messageBubble(message));
+
+    const unreadFrom = firstUnreadIndex();
+    let lastDay = null;
+
+    state.messages.forEach((message, index) => {
+      const day = dayKey(message.created_at);
+      if (day && day !== lastDay) {
+        ui.messages.append(el("div.daysep", {}, [el("span", {}, [dayLabel(message.created_at)])]));
+        lastDay = day;
+      }
+      if (index === unreadFrom) {
+        ui.messages.append(el("div.unreadsep", {}, [el("span", {}, ["Yahan se naye messages"])]));
+      }
+      ui.messages.append(messageBubble(message));
+    });
+
+    followTail = true;
     scrollToBottom();
+  }
+
+  /**
+   * Index of the first message in the unread run, or -1.
+   *
+   * The count is taken when the thread is opened, before it is marked read —
+   * otherwise the divider would vanish the instant the agent looked at it. It
+   * counts inbound messages from the end, which is what the server counts too.
+   */
+  function firstUnreadIndex() {
+    const unread = state.unreadAtOpen;
+    if (!unread) return -1;
+
+    let seen = 0;
+    for (let i = state.messages.length - 1; i >= 0; i--) {
+      if (state.messages[i].direction !== "in") continue;
+      seen += 1;
+      if (seen === unread) return i;
+    }
+    return -1;
   }
 
   function messageBubble(message) {
@@ -310,6 +401,7 @@ export function mountInbox(root, { me }) {
         mediaNode(message),
         message.body ? el("div.msg__text", {}, [message.body]) : null,
         failure ? el("div.msg__error", {}, [failure]) : null,
+        retryButton(message),
         el("div.msg__foot", {}, [
           author ? el("span.msg__author", {}, [author]) : null,
           el("span", {}, [stamp(message.created_at)]),
@@ -330,6 +422,33 @@ export function mountInbox(root, { me }) {
    * The panel is same-origin with the API and the media view is cookie
    * authenticated, so `src` works directly: no fetch, no blob, no header.
    */
+  /**
+   * "Dobara bhejein" under a failed outbound message.
+   *
+   * Only text can be replayed from what the panel holds: a failed attachment's
+   * media_id is not in the message payload, so that one has to be re-attached.
+   */
+  function retryButton(message) {
+    if (message.status !== "failed" || message.direction !== "out") return null;
+    if (message.kind !== "text" || !message.body) return null;
+
+    return el(
+      "button.msg__retry",
+      {
+        type: "button",
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          button.textContent = "Bhej rahe hain…";
+          const conversation = findConversation(state.activeId);
+          if (conversation) await sendText(conversation, message.body);
+          button.remove();
+        },
+      },
+      ["↻ Dobara bhejein"]
+    );
+  }
+
   /** Opens the viewer on this image, with the rest of the thread's images loaded. */
   function openImage(message) {
     const images = imagesInThread(state.messages);
@@ -397,6 +516,8 @@ export function mountInbox(root, { me }) {
   function renderComposer(conversation) {
     teardownFileSources?.();
     teardownFileSources = null;
+    teardownEmoji?.destroy();
+    teardownEmoji = null;
     clear(ui.composer);
     if (!conversation) return;
 
@@ -435,14 +556,19 @@ export function mountInbox(root, { me }) {
     }
 
     const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, ["📎"]);
+    const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, ["🙂"]);
 
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
+        el("div.composer__attach", {}, [emojiBtn]),
         textarea,
         el("button.btn.btn--primary", { type: "button", onclick: submit }, ["Send"]),
       ])
     );
+
+    teardownEmoji?.destroy();
+    teardownEmoji = bindEmojiPicker({ button: emojiBtn, textarea });
 
     // Files can arrive from the button, a drop anywhere on the thread, or a
     // paste — a screenshot straight from the clipboard is the fastest of the
