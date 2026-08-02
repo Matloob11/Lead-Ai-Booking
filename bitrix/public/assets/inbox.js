@@ -16,7 +16,6 @@
 import { catalog, inbox, asList } from "./api.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
-import { keepFrameSized } from "./frame.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
@@ -107,9 +106,10 @@ export function mountInbox(root, { me }) {
     clear(root).append(layout);
     connectSocket();
 
-    // Claim the portal's remaining height so the panel scrolls internally
-    // instead of pushing the Bitrix page into a scrollbar.
-    keepFrameSized();
+    // The frame's height is Bitrix's to decide, and the panel simply fills it.
+    // Asking for a taller frame (there is no API for "how much room do I have")
+    // meant guessing, and a guess that overshot pushed the portal page into a
+    // scrollbar that hid its own header — worse than a shorter panel.
   }
 
   async function loadConversations({ keepActive = true } = {}) {
