@@ -75,6 +75,54 @@ body {
   white-space: nowrap;
 }
 
+/* ------------------------------------------------------------------ icons */
+
+/* Icons sit on the text baseline and take the colour of whatever contains
+   them, so one drawing serves a grey tick and a blue one. */
+.icon {
+  display: inline-block;
+  vertical-align: -0.18em;
+  flex: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+
+.btn--icon {
+  padding: 8px;
+  line-height: 0;
+}
+
+.conv__kind {
+  vertical-align: -0.16em;
+  margin-right: 4px;
+  opacity: 0.75;
+}
+
+.msg__pending,
+.msg__sent-media,
+.msg__media-failed,
+.msg__retry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg__retry {
+  width: fit-content;
+}
+
+@media (max-width: 900px) {
+  /* Keep the send button usable when the composer gets tight. */
+  .btn--send .btn__text {
+    display: none;
+  }
+}
+
 /* -------------------------------------------------- numbers admin screen */
 
 .numrows {
@@ -548,6 +596,11 @@ body {
   word-break: break-word;
 }
 
+.msg__unsupported {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .msg__image,
 .msg__video {
   max-width: min(320px, 100%);
@@ -591,9 +644,9 @@ body {
 }
 
 .msg__doc-icon {
-  font-size: 22px;
-  line-height: 1;
   flex: none;
+  display: flex;
+  color: var(--navy);
 }
 
 .msg__doc-meta {
@@ -615,8 +668,8 @@ body {
 
 .msg__doc-dl {
   flex: none;
+  display: flex;
   color: var(--navy);
-  font-size: 16px;
 }
 
 /* Whole thread is a drop target while a file is being dragged over it. */
@@ -685,6 +738,15 @@ body {
   color: var(--muted);
 }
 
+.tick {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.tick .icon {
+  vertical-align: 0;
+}
+
 .tick--read {
   color: #2f7fd1;
 }
@@ -739,7 +801,9 @@ body {
 }
 
 .attach-menu__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   text-align: left;
   padding: 9px 10px;
@@ -776,11 +840,11 @@ body {
 }
 
 .attach__icon {
-  font-size: 34px;
-  line-height: 1;
   flex: none;
   width: 56px;
-  text-align: center;
+  display: grid;
+  place-items: center;
+  color: var(--navy);
 }
 
 .attach__meta {

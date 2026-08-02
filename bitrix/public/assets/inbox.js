@@ -21,15 +21,16 @@ import { openNumbersAdmin } from "./numbers-admin.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
 import { bindEmojiPicker } from "./emoji.js";
+import { icon, iconForKind } from "./icons.js";
 
 const PAGE_SIZE = 40;
 
 const STATUS_TICK = {
-  queued: { glyph: "🕘", label: "queued" },
-  sent: { glyph: "✓", label: "sent" },
-  delivered: { glyph: "✓✓", label: "delivered" },
-  read: { glyph: "✓✓", label: "read", className: "tick--read" },
-  failed: { glyph: "!", label: "failed", className: "tick--failed" },
+  queued: { name: "clock", label: "queued" },
+  sent: { name: "check", label: "sent" },
+  delivered: { name: "checkDouble", label: "delivered" },
+  read: { name: "checkDouble", label: "read", className: "tick--read" },
+  failed: { name: "alert", label: "failed", className: "tick--failed" },
 };
 
 export function mountInbox(root, { me }) {
@@ -77,9 +78,15 @@ export function mountInbox(root, { me }) {
       el("div.sidebar__top", {}, [
         el("div.sidebar__title", {}, ["WhatsApp"]),
         me.is_wa_admin
-          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Numbers ke naam aur agents" }, ["Numbers"])
+          ? el("button.btn.btn--ghost.btn--sm", { onclick: openNumbers, type: "button", title: "Numbers ke naam aur agents" }, [
+              icon("hash", { size: 15 }),
+              "Numbers",
+            ])
           : null,
-        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button" }, ["+ New"]),
+        el("button.btn.btn--primary.btn--sm", { onclick: openNewContact, type: "button", title: "Naya contact" }, [
+          icon("plus", { size: 15 }),
+          "New",
+        ]),
       ]),
       el("div.filter", {}, [ui.numberSelect, ui.search]),
       // List and status share one scroll box so the empty-state message sits
@@ -248,18 +255,8 @@ export function mountInbox(root, { me }) {
 
   const numberById = (id) => state.numbers.find((n) => String(n.id) === String(id));
 
-  const KIND_ICONS = {
-    image: "📷 ",
-    sticker: "📷 ",
-    video: "🎬 ",
-    audio: "🎤 ",
-    document: "📄 ",
-    location: "📍 ",
-    contacts: "👤 ",
-  };
-
   /** Marks a media preview in the list; plain text and templates get no icon. */
-  const kindIcon = (kind) => KIND_ICONS[String(kind || "").toLowerCase()] || "";
+  const kindIcon = (kind) => iconForKind(kind, { size: 13, className: "conv__kind" });
 
   function renderEmptyThread() {
     clear(ui.threadHeader);
@@ -294,7 +291,10 @@ export function mountInbox(root, { me }) {
           ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
           : null,
         state.me.is_wa_admin
-          ? el("button.btn.btn--ghost", { type: "button", onclick: () => openTransfer(conversation) }, ["Transfer"])
+          ? el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: () => openTransfer(conversation) }, [
+              icon("users", { size: 15 }),
+              "Transfer",
+            ])
           : null,
       ])
     );
@@ -399,17 +399,25 @@ export function mountInbox(root, { me }) {
     // on every one of their bubbles is noise.
     const author = outbound && message.sent_by && message.sent_by.id !== state.me.id ? message.sent_by.display_name : null;
 
+    const media = mediaNode(message);
+
     return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
       el("div.msg__bubble", {}, [
-        mediaNode(message),
+        media,
         message.body ? el("div.msg__text", {}, [message.body]) : null,
+        // Reactions, locations, contact cards and anything else we do not draw
+        // still arrived — an empty bubble reads as a broken panel, so say what
+        // it was instead of showing nothing.
+        !media && !message.body ? el("div.msg__unsupported", {}, [unsupportedLabel(message.kind)]) : null,
         failure ? el("div.msg__error", {}, [failure]) : null,
         retryButton(message),
         el("div.msg__foot", {}, [
           author ? el("span.msg__author", {}, [author]) : null,
           el("span", {}, [stamp(message.created_at)]),
           tick
-            ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [tick.glyph])
+            ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [
+                icon(tick.name, { size: 15 }),
+              ])
             : null,
         ]),
       ]),
@@ -448,7 +456,7 @@ export function mountInbox(root, { me }) {
           button.remove();
         },
       },
-      ["↻ Dobara bhejein"]
+      [icon("refresh", { size: 13 }), "Dobara bhejein"]
     );
   }
 
@@ -464,7 +472,7 @@ export function mountInbox(root, { me }) {
     if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
 
     if (message.media_failed) {
-      return el("div.msg__media-failed", {}, ["📎 Attachment available nahi hai"]);
+      return el("div.msg__media-failed", {}, [icon("alert", { size: 15 }), "Attachment available nahi hai"]);
     }
 
     if (!message.media_url) {
@@ -472,7 +480,10 @@ export function mountInbox(root, { me }) {
       // stored our side, so there is nothing to show back — saying it is still
       // downloading would be plainly wrong. Inbound is the real waiting case.
       if (message.direction === "out") {
-        return el("div.msg__sent-media", {}, [`${SENT_MEDIA_ICON[kind] || "📎"} ${SENT_MEDIA_LABEL[kind] || "File"} bhej di gayi`]);
+        return el("div.msg__sent-media", {}, [
+          iconForKind(kind, { size: 15 }) || icon("paperclip", { size: 15 }),
+          `${SENT_MEDIA_LABEL[kind] || "File"} bhej di gayi`,
+        ]);
       }
       return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Attachment aa raha hai…"]);
     }
@@ -500,26 +511,28 @@ export function mountInbox(root, { me }) {
     }
 
     return el("a.msg__doc", { href: message.media_url, target: "_blank", rel: "noopener", download: message.media_name || "" }, [
-      el("div.msg__doc-icon", {}, [docIcon(message.media_name, message.media_mime)]),
+      el("div.msg__doc-icon", {}, [icon("file", { size: 22 })]),
       el("div.msg__doc-meta", {}, [
         el("div.msg__doc-name", { title: message.media_name || "" }, [message.media_name || "Document"]),
         el("div.msg__doc-sub", {}, [docSubtitle(message)]),
       ]),
-      el("div.msg__doc-dl", { title: "Download" }, ["⤓"]),
+      el("div.msg__doc-dl", { title: "Download" }, [icon("download", { size: 17 })]),
     ]);
   }
 
-  const SENT_MEDIA_ICON = { image: "📷", sticker: "📷", video: "🎬", audio: "🎤", document: "📄" };
   const SENT_MEDIA_LABEL = { image: "Photo", sticker: "Sticker", video: "Video", audio: "Audio", document: "Document" };
 
-  const DOC_ICONS = { pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", ppt: "📙", pptx: "📙", zip: "🗜", csv: "📗", txt: "📄" };
+  const UNSUPPORTED_LABEL = {
+    location: "Location bheji gayi",
+    contacts: "Contact card bheja gaya",
+    reaction: "Reaction",
+    interactive: "Interactive message",
+    button: "Button reply",
+    system: "System message",
+  };
 
-  function docIcon(name = "", mime = "") {
-    const ext = String(name).split(".").pop()?.toLowerCase();
-    if (DOC_ICONS[ext]) return DOC_ICONS[ext];
-    if (String(mime).includes("pdf")) return "📕";
-    return "📄";
-  }
+  const unsupportedLabel = (kind) =>
+    UNSUPPORTED_LABEL[String(kind || "").toLowerCase()] || `[${kind || "unknown"}]`;
 
   function docSubtitle(message) {
     const ext = String(message.media_name || "").split(".").pop()?.toUpperCase();
@@ -571,15 +584,18 @@ export function mountInbox(root, { me }) {
       await sendText(conversation, body);
     }
 
-    const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, ["📎"]);
-    const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, ["🙂"]);
+    const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, [icon("paperclip", { size: 19 })]);
+    const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, [icon("smile", { size: 19 })]);
 
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
         el("div.composer__attach", {}, [emojiBtn]),
         textarea,
-        el("button.btn.btn--primary", { type: "button", onclick: submit }, ["Send"]),
+        el("button.btn.btn--primary.btn--send", { type: "button", onclick: submit, title: "Send" }, [
+          icon("send", { size: 17 }),
+          el("span.btn__text", {}, ["Send"]),
+        ]),
       ])
     );
 

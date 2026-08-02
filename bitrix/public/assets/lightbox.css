@@ -92,11 +92,11 @@
 .lb__nav {
   align-self: center;
   appearance: none;
+  display: grid;
+  place-items: center;
   border: 0;
   background: rgb(255 255 255 / 8%);
   color: #e8edf3;
-  font-size: 30px;
-  line-height: 1;
   width: 44px;
   height: 72px;
   cursor: pointer;

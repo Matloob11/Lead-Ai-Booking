@@ -8,6 +8,7 @@
 
 import { inbox } from "./api.js";
 import { el, clear, formatBytes, modal } from "./dom.js";
+import { icon } from "./icons.js";
 
 /** Meta Cloud API media limits, in bytes. */
 export const MEDIA_LIMITS = {
@@ -45,11 +46,11 @@ export function checkFile(file) {
   return null;
 }
 
-/** File-picker presets behind the 📎 button. */
+/** File-picker presets behind the attach button. */
 export const ATTACH_MENU = [
-  { key: "media", label: "📷  Photo ya Video", accept: "image/*,video/*" },
-  { key: "document", label: "📄  Document", accept: ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" },
-  { key: "audio", label: "🎤  Audio", accept: "audio/*" },
+  { key: "media", icon: "image", label: "Photo ya Video", accept: "image/*,video/*" },
+  { key: "document", icon: "file", label: "Document", accept: ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" },
+  { key: "audio", icon: "mic", label: "Audio", accept: "audio/*" },
 ];
 
 /**
@@ -165,13 +166,13 @@ function previewNode(file, kind) {
   }
 
   return el("div.attach__preview.attach__preview--file", {}, [
-    el("div.attach__icon", {}, [kind === "audio" ? "🎤" : "📄"]),
+    el("div.attach__icon", {}, [icon(kind === "audio" ? "mic" : "file", { size: 30 })]),
     meta,
   ]);
 }
 
 /**
- * Wires the 📎 button, drag & drop and clipboard paste onto one handler.
+ * Wires the attach button, drag & drop and clipboard paste onto one handler.
  * Returns a teardown so the listeners die with the composer.
  */
 export function bindFileSources({ button, dropZone, pasteTarget, onFile }) {
@@ -231,7 +232,7 @@ export function bindFileSources({ button, dropZone, pasteTarget, onFile }) {
   };
 }
 
-/** The small Photo/Document/Audio popup anchored to the 📎 button. */
+/** The small Photo/Document/Audio popup anchored to the attach button. */
 function attachMenu(button, pick) {
   let open = null;
 
@@ -262,7 +263,7 @@ function attachMenu(button, pick) {
               pick(entry.accept);
             },
           },
-          [entry.label]
+          [icon(entry.icon, { size: 17 }), entry.label]
         )
       )
     );

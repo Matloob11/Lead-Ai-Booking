@@ -7,6 +7,7 @@
  */
 
 import { el } from "./dom.js";
+import { icon } from "./icons.js";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 8;
@@ -34,22 +35,26 @@ export function openLightbox(images, startIndex = 0) {
   const download = el(
     "a.lb__btn",
     { title: "Download", download: "", target: "_blank", rel: "noopener" },
-    ["⤓"]
+    [icon("download", { size: 18 })]
   );
 
-  const prevBtn = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Pichli (←)", onclick: () => step(-1) }, ["‹"]);
-  const nextBtn = el("button.lb__nav.lb__nav--next", { type: "button", title: "Agli (→)", onclick: () => step(1) }, ["›"]);
+  const prevBtn = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Pichli (←)", onclick: () => step(-1) }, [
+    icon("chevronLeft", { size: 26 }),
+  ]);
+  const nextBtn = el("button.lb__nav.lb__nav--next", { type: "button", title: "Agli (→)", onclick: () => step(1) }, [
+    icon("chevronRight", { size: 26 }),
+  ]);
 
   const root = el("div.lb", { role: "dialog", "aria-modal": "true" }, [
     el("div.lb__bar", {}, [
       counter,
       el("div.lb__spacer"),
-      el("button.lb__btn", { type: "button", title: "Zoom out (−)", onclick: () => zoomBy(1 / STEP) }, ["−"]),
+      el("button.lb__btn", { type: "button", title: "Zoom out (−)", onclick: () => zoomBy(1 / STEP) }, [icon("minus")]),
       zoomLabel,
-      el("button.lb__btn", { type: "button", title: "Zoom in (+)", onclick: () => zoomBy(STEP) }, ["+"]),
-      el("button.lb__btn", { type: "button", title: "Reset (0)", onclick: reset }, ["⟲"]),
+      el("button.lb__btn", { type: "button", title: "Zoom in (+)", onclick: () => zoomBy(STEP) }, [icon("plus")]),
+      el("button.lb__btn", { type: "button", title: "Reset (0)", onclick: reset }, [icon("zoomReset")]),
       download,
-      el("button.lb__btn.lb__btn--close", { type: "button", title: "Band karein (Esc)", onclick: close }, ["✕"]),
+      el("button.lb__btn.lb__btn--close", { type: "button", title: "Band karein (Esc)", onclick: close }, [icon("close")]),
     ]),
     prevBtn,
     stage,
