@@ -122,6 +122,7 @@ def _store_inbound(number, message, contact_profiles):
             # Prefer the gateway's own hosted copy: it needs no credentials and
             # does not expire, unlike Meta's lookaside link.
             source_url=blob.get("filelink") or blob.get("url") or "",
+            fallback_url=blob.get("url", "") if blob.get("filelink") else "",
             mime_type=blob.get("mime_type", ""),
             file_name=blob.get("filename", ""),
             sha256=blob.get("sha256", ""),
@@ -171,7 +172,13 @@ def _store_inbound(number, message, contact_profiles):
     )
 
     if media and media.alots_media_id:
-        download_media.delay(media.pk, number.phone_number_id)
+        # Queued on commit, not now. This runs inside the webhook's transaction,
+        # and the worker is fast enough to look the asset up before that
+        # transaction lands — it then finds nothing, returns, and the
+        # attachment stays a placeholder forever.
+        transaction.on_commit(
+            lambda pk=media.pk, pnid=number.phone_number_id: download_media.delay(pk, pnid)
+        )
 
     from apps.inbox.events import publish_message
 

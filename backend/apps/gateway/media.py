@@ -131,20 +131,39 @@ def _resolve_via_api(client, media_id, phone_number_id):
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def download_media(self, asset_id, phone_number_id):
     asset = MediaAsset.objects.filter(pk=asset_id).first()
-    if not asset or asset.downloaded:
+    if not asset:
+        # Reachable only if the row is gone or not yet committed. It used to be
+        # the second case, and returning quietly meant a whole class of missing
+        # attachments looked like a task that had succeeded.
+        logger.warning("download_media: asset %s does not exist", asset_id)
+        return
+    if asset.downloaded:
         return
 
     try:
         with httpx.Client(timeout=settings.ALOTS_TIMEOUT) as client:
-            url = asset.source_url
-            if not url and asset.alots_media_id:
-                url = _resolve_via_api(client, asset.alots_media_id, phone_number_id)
-            if not url:
+            urls = [u for u in (asset.source_url, asset.fallback_url) if u]
+            if not urls and asset.alots_media_id:
+                resolved = _resolve_via_api(client, asset.alots_media_id, phone_number_id)
+                urls = [resolved] if resolved else []
+            if not urls:
                 asset.download_error = "No media URL in the webhook payload"
                 asset.save(update_fields=["download_error"])
                 return
 
-            content = _fetch(client, url)
+            # The gateway's copy first, Meta's as the second attempt. A miss on
+            # the first is routine — it 404s for stickers — and is not worth
+            # failing the download over while another link is in hand.
+            content = None
+            for index, url in enumerate(urls):
+                try:
+                    content = _fetch(client, url)
+                    break
+                except (httpx.HTTPError, MediaRejected) as exc:
+                    if index == len(urls) - 1:
+                        raise
+                    logger.info("Media source %s failed for asset %s (%s); trying the next",
+                                index + 1, asset_id, exc)
     except MediaRejected as exc:
         # A refused URL will never become acceptable, so do not retry it.
         logger.warning("Rejected media URL for asset %s: %s", asset_id, exc)

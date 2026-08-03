@@ -157,6 +157,13 @@ class MediaAsset(models.Model):
     # short-lived and does.
     source_url = models.TextField(blank=True)
 
+    # Meta's own link, kept as the second attempt. The gateway's copy is
+    # preferred because it needs no credentials and does not expire, but it is
+    # not always there — stickers in particular come back 404 — and Meta's
+    # still works for the few minutes right after the webhook, which is when
+    # the download runs.
+    fallback_url = models.TextField(blank=True)
+
     mime_type = models.CharField(max_length=128, blank=True)
     file_name = models.CharField(max_length=255, blank=True)
     size_bytes = models.PositiveBigIntegerField(default=0)
