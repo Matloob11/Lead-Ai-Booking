@@ -527,14 +527,23 @@ export function mountInbox(root, { me }) {
 
     const agents = Array.isArray(number?.agents) ? number.agents : [];
     const names = agents.map((a) => a.display_name).filter(Boolean);
-    const assignedText = names.length ? names.join(", ") : "Not assigned";
 
-    const customLabel = number?.label || (number?.title !== number?.phone_number ? number?.title : "");
-    const extraLabel = customLabel && !names.includes(customLabel) && customLabel !== number?.phone_number
-      ? ` (${customLabel})`
-      : "";
+    const customLabel = (number?.label || (number?.title !== number?.phone_number ? number?.title : "") || "").trim();
+    const isDistinctLabel = customLabel && customLabel !== rawPhone && customLabel !== phone;
 
-    return `${phone}${extraLabel} → ${assignedText}`;
+    if (names.length) {
+      const assignedText = names.join(", ");
+      if (isDistinctLabel && !names.includes(customLabel)) {
+        return `${phone} (${customLabel}) → ${assignedText}`;
+      }
+      return `${phone} → ${assignedText}`;
+    }
+
+    if (isDistinctLabel) {
+      return `${phone} → ${customLabel}`;
+    }
+
+    return `${phone} → Not assigned`;
   }
 
   function renderNumberFilter() {
