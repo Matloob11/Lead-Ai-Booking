@@ -22,6 +22,11 @@ export function onEvent(handler) {
   return () => eventHandlers.delete(handler);
 }
 
+/** Gets live client instance by session ID. */
+export function getClient(id) {
+  return clients.get(Number(id)) || null;
+}
+
 function emit(type, payload) {
   for (const handler of eventHandlers) {
     try {

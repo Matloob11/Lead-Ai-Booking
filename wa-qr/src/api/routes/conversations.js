@@ -1,0 +1,140 @@
+/**
+ * REST API Routes: Conversations and Messages
+ */
+
+import express from "express";
+import { q, one } from "../../db.js";
+
+const router = express.Router();
+
+// GET /api/conversations?session_id=&limit=&offset=
+router.get("/", async (req, res, next) => {
+  try {
+    const sessionId = req.query.session_id ? Number(req.query.session_id) : null;
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    let whereClause = "";
+    const params = [limit, offset];
+
+    if (sessionId) {
+      whereClause = "WHERE conv.session_id = $3";
+      params.push(sessionId);
+    }
+
+    const rows = await q(
+      `SELECT
+         conv.id,
+         conv.session_id,
+         conv.contact_id,
+         conv.is_group,
+         conv.subject,
+         conv.last_message_at,
+         conv.last_message_preview,
+         conv.last_message_kind,
+         conv.unread_count,
+         conv.created_at,
+         c.wa_id AS contact_wa_id,
+         c.profile_name AS contact_profile_name,
+         c.display_name AS contact_display_name
+       FROM qr_conversation conv
+       JOIN qr_contact c ON conv.contact_id = c.id
+       ${whereClause}
+       ORDER BY conv.last_message_at DESC NULLS LAST
+       LIMIT $1 OFFSET $2`,
+      params
+    );
+
+    const conversations = rows.map((r) => ({
+      id: Number(r.id),
+      session_id: Number(r.session_id),
+      is_group: r.is_group,
+      subject: r.subject,
+      last_message_at: r.last_message_at,
+      last_message_preview: r.last_message_preview,
+      last_message_kind: r.last_message_kind,
+      unread_count: r.unread_count,
+      contact: {
+        id: Number(r.contact_id),
+        wa_id: r.contact_wa_id,
+        name: r.contact_display_name || r.contact_profile_name || r.contact_wa_id,
+      },
+    }));
+
+    res.json(conversations);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/conversations/:id/messages?limit=&before=
+router.get("/:id/messages", async (req, res, next) => {
+  try {
+    const conversationId = Number(req.params.id);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
+    const before = req.query.before ? Number(req.query.before) : null;
+
+    let whereClause = "WHERE m.conversation_id = $1";
+    const params = [conversationId, limit];
+
+    if (before) {
+      whereClause += " AND m.id < $3";
+      params.push(before);
+    }
+
+    // Fetch descending for pagination
+    const rows = await q(
+      `SELECT
+         m.id,
+         m.conversation_id,
+         m.direction,
+         m.kind,
+         m.wamid,
+         m.body,
+         m.media_id,
+         m.reply_to_id,
+         m.reactions,
+         m.author_wa_id,
+         m.status,
+         m.error_detail,
+         m.created_at,
+         m.delivered_at,
+         m.read_at,
+         med.file_path AS media_file_path,
+         med.mime_type AS media_mime_type,
+         med.file_name AS media_file_name,
+         med.size_bytes AS media_size_bytes
+       FROM qr_message m
+       LEFT JOIN qr_media med ON m.media_id = med.id
+       ${whereClause}
+       ORDER BY m.id DESC
+       LIMIT $2`,
+      params
+    );
+
+    // Return in OLDEST-FIRST chronological order
+    const messages = rows.reverse().map((r) => ({
+      id: Number(r.id),
+      conversation_id: Number(r.conversation_id),
+      direction: r.direction,
+      kind: r.kind,
+      wamid: r.wamid,
+      body: r.body,
+      status: r.status,
+      error_detail: r.error_detail,
+      reply_to_id: r.reply_to_id ? Number(r.reply_to_id) : null,
+      reactions: r.reactions || {},
+      author_wa_id: r.author_wa_id,
+      created_at: r.created_at,
+      media_url: r.media_id ? `/api/media/${r.media_id}` : null,
+      media_name: r.media_file_name || null,
+      media_size: r.media_size_bytes || null,
+    }));
+
+    res.json(messages);
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
