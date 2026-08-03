@@ -8,8 +8,14 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     NODE_ENV=production
 
+# chromium-sandbox is not optional here. The `chromium` package alone does not
+# pull in the SUID sandbox helper under --no-install-recommends, and without it
+# Chromium refuses to start at all as a non-root user: "No usable sandbox!".
+# The usual answer found online is --no-sandbox, which is the opposite of what
+# is wanted — this process renders whatever a stranger sends.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
+      chromium-sandbox \
       fonts-liberation fonts-noto-color-emoji \
       ca-certificates \
       libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2 libgbm1 \

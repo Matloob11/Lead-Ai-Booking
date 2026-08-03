@@ -23,6 +23,16 @@ services:
     env_file: .env
     depends_on:
       postgres: {condition: service_healthy}
+    # Chromium's own sandbox needs to create a user namespace, and Docker's
+    # default seccomp filter refuses the syscall — "failed to move to new
+    # namespace: Operation not permitted". The usual answer is --no-sandbox,
+    # which trades away the sandbox that matters: this browser renders whatever
+    # a stranger sends, and Chromium's renderer sandbox is what contains that.
+    # Relaxing the outer filter to keep the inner one is the trade Puppeteer
+    # documents, and the container still runs as an unprivileged user with
+    # nothing but its own database to reach.
+    security_opt:
+      - seccomp:unconfined
     ports:
       # Bound to localhost: the panel shows a QR that links a phone, and that
       # is not something to expose to the internet by default.
