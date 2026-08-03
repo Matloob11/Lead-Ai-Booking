@@ -126,6 +126,20 @@ def serialize_message(message, request=None):
                 "direction": message.reply_to.direction,
                 "kind": message.reply_to.kind,
                 "body": message.reply_to.body[:120],
+                # WhatsApp names whoever wrote the quoted line, and without it
+                # two similar replies in a busy thread are impossible to tell
+                # apart. The customer for anything inbound; for our own side the
+                # agent who sent it, which is not always the one replying now.
+                "sender": (
+                    str(message.conversation.contact)
+                    if message.reply_to.direction == "in"
+                    else (
+                        message.reply_to.sent_by.display_name
+                        or message.reply_to.sent_by.get_username()
+                    )
+                    if message.reply_to.sent_by
+                    else "You"
+                ),
             }
             if message.reply_to_id
             else None

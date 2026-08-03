@@ -171,6 +171,11 @@ const ICONS = {
     ["polyline", { points: "15 17 20 12 15 7" }],
     ["path", { d: "M4 18v-2a4 4 0 0 1 4-4h12" }],
   ],
+  // Forward's mirror image: the arrow turns back on itself.
+  reply: [
+    ["polyline", { points: "9 17 4 12 9 7" }],
+    ["path", { d: "M20 18v-2a4 4 0 0 0-4-4H4" }],
+  ],
   moreVertical: [
     ["circle", { cx: 12, cy: 12, r: 1 }],
     ["circle", { cx: 12, cy: 5, r: 1 }],

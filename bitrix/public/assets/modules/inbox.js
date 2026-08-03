@@ -54,6 +54,9 @@ export function mountInbox(root, { me }) {
     messages: [],
     unreadAtOpen: 0,
     templates: new Map(), // numberId -> template[]
+    // The message the composer is currently answering, or null. Cleared on
+    // send and whenever the thread changes — a quote belongs to one chat.
+    replyTo: null,
     loadingThread: false,
     connection: "connecting",
   };
@@ -464,6 +467,8 @@ export function mountInbox(root, { me }) {
     // The profile describes one customer; carrying it into another chat would
     // show the wrong person beside the right messages.
     if (state.activeId !== id) closeContactPanel();
+    // A half-written reply belongs to the chat it was started in.
+    if (state.activeId !== id) state.replyTo = null;
     state.activeId = id;
     state.loadingThread = true;
     renderConversations();
@@ -955,6 +960,62 @@ export function mountInbox(root, { me }) {
     );
   }
 
+  /**
+   * The quoted line above a reply — in a bubble, and again in the composer
+   * while the reply is being written.
+   *
+   * One node for both so the agent sees exactly what the customer will. The
+   * server sends only a trimmed copy of the original (id, who wrote it, kind
+   * and the first 120 characters), which is all a quote ever shows.
+   */
+  function quotedNode(reply, { onCancel = null, clickable = true } = {}) {
+    if (!reply) return null;
+
+    const preview =
+      reply.body?.trim() || (reply.kind === "text" ? "" : unsupportedLabel(reply.kind));
+
+    return el(
+      "div.quoted",
+      {
+        class: reply.direction === "out" ? "quoted--mine" : "",
+        // Jumping to the original is what makes a quote worth reading in a long
+        // thread; in the composer there is nothing to jump to yet.
+        onclick: clickable && reply.id ? () => highlightMessage(reply.id) : null,
+        title: clickable && reply.id ? "Go to the original message" : "",
+      },
+      [
+        el("div.quoted__body", {}, [
+          el("div.quoted__who", {}, [reply.sender || (reply.direction === "out" ? "You" : "Customer")]),
+          el("div.quoted__text", {}, [
+            reply.kind && reply.kind !== "text" ? kindIcon(reply.kind) : null,
+            preview,
+          ]),
+        ]),
+        onCancel
+          ? el("button.quoted__x", { type: "button", title: "Cancel reply", onclick: onCancel }, [
+              icon("close", { size: 15 }),
+            ])
+          : null,
+      ]
+    );
+  }
+
+  /** Starts a reply to `message`, and puts the cursor where it is needed. */
+  function startReply(message) {
+    state.replyTo = {
+      id: message.id,
+      direction: message.direction,
+      kind: message.kind,
+      body: message.body || "",
+      sender:
+        message.direction === "in"
+          ? findConversation(state.activeId)?.contact?.name || "Customer"
+          : message.sent_by?.display_name || "You",
+    };
+    renderComposer(findConversation(state.activeId));
+    ui.composer.querySelector(".composer__input")?.focus();
+  }
+
   function messageBubble(message) {
     const outbound = message.direction === "out";
     const tick = outbound ? STATUS_TICK[message.status] : null;
@@ -985,6 +1046,12 @@ export function mountInbox(root, { me }) {
     const actionToolbar = el("div.msg__action-tools", {
       style: "display: flex; gap: 6px; margin-top: 4px; justify-content: flex-end; opacity: 0.8;",
     }, [
+      el("button.btn.btn--icon.btn--xs", {
+        type: "button",
+        title: "Reply to this message",
+        style: "padding: 2px 4px;",
+        onclick: () => startReply(message),
+      }, [icon("reply", { size: 13 })]),
       el("button.btn.btn--icon.btn--xs", {
         type: "button",
         title: message.is_starred ? "Unstar message" : "Star message",
@@ -1019,6 +1086,7 @@ export function mountInbox(root, { me }) {
     return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
       el("div.msg__bubble", {}, [
         forwardedTag,
+        quotedNode(message.reply_to),
         location,
         media,
         message.body ? el("div.msg__text", {}, [message.body]) : null,
@@ -1301,6 +1369,20 @@ export function mountInbox(root, { me }) {
 
     const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, [icon("smile", { size: 19 })]);
 
+    // The quote sits above the composer, not inside it, so a long quoted line
+    // wraps across the full width instead of squeezing the input.
+    if (state.replyTo) {
+      ui.composer.append(
+        quotedNode(state.replyTo, {
+          clickable: false,
+          onCancel: () => {
+            state.replyTo = null;
+            renderComposer(conversation);
+          },
+        })
+      );
+    }
+
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
@@ -1404,9 +1486,21 @@ export function mountInbox(root, { me }) {
   }
 
   async function sendText(conversation, body) {
-    const draft = appendOptimistic({ kind: "text", body });
+    // Taken before the await: the agent can cancel the quote, or start another
+    // reply, while this send is still in the air.
+    const replyTo = state.replyTo;
+    if (replyTo) {
+      state.replyTo = null;
+      renderComposer(conversation);
+    }
+
+    const draft = appendOptimistic({ kind: "text", body, reply_to: replyTo });
     try {
-      const real = await inbox.send(conversation.id, { kind: "text", body });
+      const real = await inbox.send(conversation.id, {
+        kind: "text",
+        body,
+        reply_to_id: replyTo?.id,
+      });
       replaceMessage(draft.id, real || { status: "sent" });
     } catch (error) {
       replaceMessage(draft.id, { status: "failed", body: `${body}\n\n⚠ ${error.message}` });

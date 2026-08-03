@@ -1363,3 +1363,85 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------------------ quoted reply */
+
+/* The bar above a reply, and the same bar above the composer while one is
+   being written. Both use this so the agent sees what the customer will. */
+.quoted {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 5px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border-left: 3px solid var(--ok);
+  background: rgba(0, 0, 0, 0.05);
+  font-size: 12.5px;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+/* A quote of our own message gets the other accent, the way WhatsApp tells
+   "you said" apart from "they said" without reading the name. */
+.quoted--mine {
+  border-left-color: var(--gold);
+}
+
+.quoted__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.quoted__who {
+  font-weight: 650;
+  color: var(--ok);
+  margin-bottom: 1px;
+}
+
+.quoted--mine .quoted__who {
+  color: var(--gold);
+}
+
+/* Two lines at most: a quote is a reminder of what was said, not a re-reading
+   of it. */
+.quoted__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  opacity: 0.85;
+  word-break: break-word;
+}
+
+.quoted__x {
+  flex: none;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.quoted__x:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* Above the composer it is a full-width strip, not part of a bubble. */
+.thread__composer > .quoted {
+  margin: 0 14px 6px;
+  cursor: default;
+  background: var(--menu-hover);
+}
+
+body[data-wa-theme="glass-dark"] .quoted {
+  background: rgba(255, 255, 255, 0.08);
+}
