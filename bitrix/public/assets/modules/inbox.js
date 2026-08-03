@@ -512,12 +512,29 @@ export function mountInbox(root, { me }) {
 
   /* ------------------------------------------------------------ rendering */
 
+  function formatPhoneDigits(numStr) {
+    if (!numStr) return "";
+    const cleaned = String(numStr).replace(/\D/g, "");
+    if (cleaned.length === 12 && cleaned.startsWith("971")) {
+      return `+971 ${cleaned.slice(3, 5)} ${cleaned.slice(5, 8)} ${cleaned.slice(8)}`;
+    }
+    return cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+  }
+
   function numberOptionLabel(number) {
-    const title = numberTitle(number);
+    const rawPhone = number?.phone_number || number?.id || "";
+    const phone = formatPhoneDigits(rawPhone) || rawPhone || "Number";
+
     const agents = Array.isArray(number?.agents) ? number.agents : [];
     const names = agents.map((a) => a.display_name).filter(Boolean);
     const assignedText = names.length ? names.join(", ") : "Not assigned";
-    return `${title} → ${assignedText}`;
+
+    const customLabel = number?.label || (number?.title !== number?.phone_number ? number?.title : "");
+    const extraLabel = customLabel && !names.includes(customLabel) && customLabel !== number?.phone_number
+      ? ` (${customLabel})`
+      : "";
+
+    return `${phone}${extraLabel} → ${assignedText}`;
   }
 
   function renderNumberFilter() {
