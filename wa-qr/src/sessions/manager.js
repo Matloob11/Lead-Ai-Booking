@@ -110,12 +110,7 @@ export async function listSessions() {
 export async function destroySession(id) {
   const sessionId = Number(id);
 
-  // Clear reconnect timer
-  if (reconnectTimers.has(sessionId)) {
-    clearTimeout(reconnectTimers.get(sessionId));
-    reconnectTimers.delete(sessionId);
-  }
-  reconnectAttempts.delete(sessionId);
+  cancelReconnect(sessionId);
 
   const client = clients.get(sessionId);
   if (client) {
@@ -128,15 +123,7 @@ export async function destroySession(id) {
     } catch {}
   }
 
-  // Delete LocalAuth directories
-  const paths = [
-    path.join(authRoot, `session-session-${sessionId}`),
-    path.join(authRoot, `session-${sessionId}`),
-  ];
-  for (const p of paths) {
-    await fs.rm(p, { recursive: true, force: true }).catch(() => {});
-  }
-
+  await clearAuthData(sessionId);
   await store.deleteSessionRecord(sessionId);
   emit("status", { sessionId, status: "disconnected", error: "Session destroyed" });
 }
@@ -256,7 +243,7 @@ async function initClient(sessionId) {
       console.error(
         `[wa-qr] CRITICAL REFUSAL: Session #${sessionId} linked number ${phoneDigits} is BLOCKED!`
       );
-      await handleBanned(sessionId, client, phoneDigits, err.message);
+      await refuseNumber(sessionId, client, phoneDigits, err.message);
       return;
     }
 
@@ -290,13 +277,21 @@ async function initClient(sessionId) {
 
   client.on("auth_failure", async (msg) => {
     const errorMsg = String(msg || "Auth failure");
+
+    // Stored credentials that no longer authenticate will never start working
+    // again, and reconnecting with them just fails the same way. Throwing them
+    // away is what lets the next attempt fall back to a fresh QR — otherwise
+    // the session sits at 'disconnected' for good and the only way out is to
+    // delete it by hand.
+    await clearAuthData(sessionId);
+
     await store.updateSession(sessionId, {
       status: "disconnected",
-      last_error: errorMsg,
-      last_seen_at: new Date(),
+      last_error: `${errorMsg} — the link was dropped, scan the QR again`,
     });
 
     emit("status", { sessionId, status: "disconnected", error: errorMsg });
+    scheduleReconnect(sessionId);
   });
 
   client.on("change_state", async () => {
@@ -305,8 +300,14 @@ async function initClient(sessionId) {
     });
   });
 
-  // RAW Inbound events for Agent 2
-  client.on("message", (message) => {
+  // RAW library objects for Agent 2 — normalising them is that side's job.
+  //
+  // `message_create`, not `message`: the latter only fires for incoming ones.
+  // On a QR-linked phone the agent replies from the handset as often as from
+  // the panel, and those replies have to reach the thread too or the history
+  // is half a conversation. The raw object carries `fromMe`, which is what
+  // tells the two apart downstream.
+  client.on("message_create", (message) => {
     emit("message", { sessionId, message });
   });
 
