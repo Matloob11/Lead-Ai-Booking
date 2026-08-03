@@ -1,0 +1,35 @@
+# Its own stack on its own ports. Nothing here is shared with deploy/ — this
+# service is meant to be startable and stoppable without touching the inbox.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: waqr
+      POSTGRES_USER: waqr
+      POSTGRES_PASSWORD: waqr
+    volumes:
+      - waqrdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waqr"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports:
+      # Bound to localhost: the panel shows a QR that links a phone, and that
+      # is not something to expose to the internet by default.
+      - "127.0.0.1:8300:8300"
+    volumes:
+      # Auth data and media. Losing this volume means every phone re-scans.
+      - ./data:/data
+
+volumes:
+  waqrdata:
