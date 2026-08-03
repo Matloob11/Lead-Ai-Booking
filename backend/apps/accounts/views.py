@@ -271,3 +271,22 @@ def access_request_resolve(request, pk):
         found.resolve(request.user)
 
     return Response({"ok": True})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_gate(request):
+    """Answers nginx's auth_request before it proxies the linked-devices panel.
+
+    That panel and its API have no authentication of their own — they were
+    written to sit on localhost, where being unreachable was the whole defence.
+    Publishing them under the main hostname takes that away, so the session
+    check moves here: nginx asks this endpoint on every request, forwards the
+    agent's cookie, and proxies nothing unless the answer is 200.
+
+    Admins only, because linking a phone and reading every chat on it is not an
+    ordinary agent's job.
+    """
+    if not request.user.has_admin_rights:
+        return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
+    return Response({"ok": True})

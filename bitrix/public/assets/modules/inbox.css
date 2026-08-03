@@ -1546,3 +1546,20 @@ body[data-wa-theme="glass-dark"] .quoted {
   margin: 4px 6px;
   background: var(--menu-line);
 }
+
+/* ------------------------------------------------------- linked devices */
+
+/* The QR channel is a whole panel of its own, so it gets the height of one
+   rather than a letterbox inside a dialog. */
+.linked-body {
+  padding: 0;
+}
+
+.linked-frame {
+  display: block;
+  width: 100%;
+  height: min(74vh, 680px);
+  border: 0;
+  border-radius: 8px;
+  background: var(--bg);
+}

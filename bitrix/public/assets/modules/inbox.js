@@ -169,6 +169,12 @@ export function mountInbox(root, { me }) {
         ])
       : null,
     me.is_wa_admin
+      ? el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
+          icon("smartphone", { size: 16 }),
+          "Linked devices",
+        ])
+      : null,
+    me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openRequests, type: "button" }, [
           icon("users", { size: 16 }),
           "New agent messages",
@@ -1538,6 +1544,25 @@ export function mountInbox(root, { me }) {
       templatesFor,
       onSent: () => openConversation(conversation.id),
     });
+  }
+
+  /**
+   * The QR-linked channel, opened inside the panel rather than in a tab.
+   *
+   * It is a separate service behind /qr/, which nginx will not proxy without a
+   * valid admin session — so this is a plain iframe with no token to pass. It
+   * is deliberately not part of the inbox: a QR-linked phone is a different
+   * kind of channel with different rules, and mixing the two screens would
+   * suggest otherwise.
+   */
+  function openLinkedDevices() {
+    const frame = el("iframe.linked-frame", {
+      src: "/qr/",
+      title: "Linked devices",
+      // The page shows a QR that links a phone; nothing else is allowed.
+      sandbox: "allow-scripts allow-same-origin allow-forms",
+    });
+    modal("Linked devices", el("div.modal__body.linked-body", {}, [frame]), { wide: true });
   }
 
   function openNumbers() {

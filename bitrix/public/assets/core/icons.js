@@ -176,6 +176,10 @@ const ICONS = {
     ["polyline", { points: "9 17 4 12 9 7" }],
     ["path", { d: "M20 18v-2a4 4 0 0 0-4-4H4" }],
   ],
+  smartphone: [
+    ["rect", { x: 5, y: 2, width: 14, height: 20, rx: 2 }],
+    ["path", { d: "M12 18h.01" }],
+  ],
   moreVertical: [
     ["circle", { cx: 12, cy: 12, r: 1 }],
     ["circle", { cx: 12, cy: 5, r: 1 }],
