@@ -30,3 +30,7 @@ node_modules/
 # OS
 Thumbs.db
 .DS_Store
+
+# Claude Code: settings.json is shared with the team; the .local one is personal
+# (per-machine allowlist entries) and stays out of the repo.
+.claude/settings.local.json
