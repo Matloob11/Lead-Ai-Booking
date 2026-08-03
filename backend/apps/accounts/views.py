@@ -28,14 +28,14 @@ def _serialize(agent):
 
     return {
         "id": agent.pk,
-        "bitrix_user_id": agent.bitrix_user_id,
+        "username": agent.username,
+        "email": agent.email or "",
+        "bitrix_user_id": agent.bitrix_user_id or "",
         "display_name": agent.display_name or agent.get_full_name() or agent.username,
         "avatar_url": agent.avatar_url,
-        # One flag for the panel; where the right came from is not its concern.
         "is_wa_admin": agent.has_admin_rights,
+        "role": "Administrator" if agent.has_admin_rights else "Agent",
         "numbers": [serialize_number(n) for n in agent.visible_numbers],
-        # What the gateway will forward, so the panel hides buttons that could
-        # only ever fail rather than showing an agent a dead control.
         "capabilities": {
             "read_receipts": settings.GATEWAY_SUPPORTS_READ_RECEIPTS,
             "typing_indicator": settings.GATEWAY_SUPPORTS_TYPING,
@@ -136,9 +136,14 @@ def bitrix_login(request):
 
 # Hands the panel its csrftoken cookie; every later POST depends on it.
 @ensure_csrf_cookie
-@api_view(["GET"])
+@api_view(["GET", "POST", "PATCH"])
 @permission_classes([IsAuthenticated])
 def me(request):
+    if request.method in ["POST", "PATCH"]:
+        display_name = str(request.data.get("display_name", "")).strip()
+        if display_name:
+            request.user.display_name = display_name[:150]
+            request.user.save(update_fields=["display_name"])
     return Response(_serialize(request.user))
 
 

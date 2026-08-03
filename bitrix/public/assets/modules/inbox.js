@@ -13,7 +13,7 @@
  *  - transfer is admin-only.
  */
 
-import { access, catalog, inbox, asList } from "../api/api.js";
+import { access, auth, catalog, inbox, asList } from "../api/api.js";
 import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "../core/bitrix-sso.js";
@@ -98,6 +98,10 @@ export function mountInbox(root, { me }) {
 
   const menuPanel = el("div.sidebar__menu", { hidden: true }, [
     slots.search,
+    el("button.btn.menu__item", { onclick: openProfile, type: "button" }, [
+      icon("user", { size: 16 }),
+      "My Profile",
+    ]),
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [
           icon("hash", { size: 16 }),
@@ -239,6 +243,86 @@ export function mountInbox(root, { me }) {
       ui.listStatus.textContent = `Could not load the list: ${error.message}`;
       console.error("[a7-wa] conversations failed:", error);
     }
+  }
+
+  function openProfile() {
+    const currentMe = state.me || me;
+    const initialName = currentMe.display_name || currentMe.username || "Agent";
+
+    const nameInput = el("input.wa-x-field", {
+      type: "text",
+      value: initialName,
+      placeholder: "Your display name",
+    });
+
+    const statusEl = el("div.wa-x-alert", { hidden: true });
+    const saveBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Save Profile"]);
+
+    const assignedNumbers = currentMe.numbers || state.numbers || [];
+    const numberPills = assignedNumbers.map((n) =>
+      el("div.na-chip", { style: "margin: 3px 4px 3px 0;" }, [
+        el("span.na-chip__name", {}, [`📱 ${n.title || n.phone_number}`]),
+      ])
+    );
+
+    const bodyNode = el("div.wa-x-modal-body.wa-x-profile-modal", {}, [
+      el("div.wa-x-profile-header", {}, [
+        el("div.conv__avatar.wa-x-profile-avatar", {}, [initials(initialName)]),
+        el("div.wa-x-profile-titles", {}, [
+          el("div.wa-x-profile-name", {}, [initialName]),
+          el("div.wa-x-profile-role", {}, [currentMe.role || (currentMe.is_wa_admin ? "Administrator" : "Agent")]),
+        ]),
+      ]),
+      el("div.wa-x-profile-section", {}, [
+        el("div.wa-x-label-head", {}, ["Bitrix Account ID"]),
+        el("div.wa-x-field-static", {}, [`Bitrix #${currentMe.bitrix_user_id || currentMe.id}`]),
+      ]),
+      el("div.wa-x-profile-section", { style: "margin-top: 12px;" }, [
+        el("div.wa-x-label-head", {}, ["Assigned WhatsApp Numbers"]),
+        el("div.wa-x-profile-numbers-list", {}, [
+          numberPills.length ? el("div.na-chips", {}, numberPills) : el("span.na-empty", {}, ["No numbers assigned yet"]),
+        ]),
+      ]),
+      el("label.wa-x-field-row", { style: "margin-top: 14px;" }, [
+        el("div.wa-x-label-head", {}, ["Display Name"]),
+        nameInput,
+      ]),
+      statusEl,
+      el("div.wa-x-modal-actions", {}, [saveBtn]),
+    ]);
+
+    const profileModal = modal("My Profile", bodyNode);
+
+    saveBtn.addEventListener("click", async () => {
+      const newName = nameInput.value.trim();
+      if (!newName) {
+        statusEl.textContent = "Please enter a valid display name.";
+        statusEl.className = "wa-x-alert";
+        statusEl.hidden = false;
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
+      statusEl.hidden = true;
+
+      try {
+        const updated = await auth.updateProfile({ display_name: newName });
+        state.me = updated;
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Profile";
+        statusEl.textContent = "Profile updated successfully!";
+        statusEl.className = "wa-x-alert wa-x-alert--ok";
+        statusEl.hidden = false;
+        setTimeout(() => profileModal.close(), 1200);
+      } catch (err) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Profile";
+        statusEl.textContent = err.message || "Failed to update profile.";
+        statusEl.className = "wa-x-alert";
+        statusEl.hidden = false;
+      }
+    });
   }
 
   /** The person behind the open chat. Renaming there renames them here too. */

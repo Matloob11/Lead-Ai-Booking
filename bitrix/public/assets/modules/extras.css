@@ -1346,3 +1346,81 @@ body[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
   background: rgba(22, 48, 82, 0.1) !important;
   color: #0f172a !important;
 }
+
+/* ==========================================================================
+   AGENT PROFILE MODAL STYLING
+   ========================================================================== */
+
+.wa-x-profile-modal {
+  padding: 16px 18px;
+}
+
+.wa-x-profile-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-profile-header {
+  border-bottom-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.wa-x-profile-avatar {
+  width: 48px !important;
+  height: 48px !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  border-radius: 50% !important;
+  flex: none;
+}
+
+.wa-x-profile-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-profile-name {
+  color: #ffffff !important;
+}
+
+.wa-x-profile-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: #10b981;
+  margin-top: 2px;
+}
+
+.wa-x-profile-section {
+  margin-bottom: 12px;
+}
+
+.wa-x-field-static {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-field-static {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #e2e8f0 !important;
+}
+
+.wa-x-alert--ok {
+  border-color: #a7f3d0 !important;
+  background: #ecfdf5 !important;
+  color: #047857 !important;
+}
+
+body[data-wa-theme="glass-dark"] .wa-x-alert--ok {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #6ee7b7 !important;
+}

@@ -10,6 +10,7 @@ import { apiFetch, csrfToken, SsoError } from "../core/bitrix-sso.js";
 
 export const auth = {
   me: () => apiFetch("/api/auth/me/"),
+  updateProfile: (data) => apiFetch("/api/auth/me/", { method: "POST", body: data }),
 };
 
 /**
