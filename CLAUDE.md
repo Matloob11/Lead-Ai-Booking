@@ -106,6 +106,26 @@ uncommitted changes, it is probably mid-edit somewhere else. Prefer adding a new
 module over widening an existing one, and say in the reply which shared files
 were touched so the user can pass it on.
 
+## About the permission allowlist
+
+`.claude/settings.json` pre-approves a deliberately small set: read-only git,
+`git add`/`commit`, and three checksum-and-syntax tools. Nothing else.
+
+`ssh`, `scp`, `curl`, `tar`, `find` and `ls` are **not** on it, and should not be
+added. Each of them takes an argument that runs something else — `find -exec`,
+`tar --to-command`, `curl -o` writing wherever it likes, `ssh host <anything>` —
+so allowing them would approve every command they can reach, which is all of
+them. That matters here more than in most repos: this codebase reads customer
+messages, webhook bodies, template text and uploaded filenames into the model's
+context, and all of it is written by people outside the company.
+
+For the same reason the deny list is a backstop, not a boundary. It only matches
+commands run locally; the same command inside `ssh …` is a different string. The
+boundary is that remote commands get looked at before they run.
+
+Use Glob, Grep and Read instead of `ls`/`find`/`cat` — they are faster, they do
+not need approval, and they cannot be turned into something else.
+
 ## Verifying
 
 The user asks for deep verification because features have shipped looking

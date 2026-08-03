@@ -12,21 +12,15 @@
       "Bash(git commit:*)",
       "Bash(node --check:*)",
       "Bash(md5sum:*)",
-      "Bash(ls:*)",
-      "Bash(find:*)",
       "Bash(wc:*)",
-      "Bash(diff:*)",
-      "Bash(curl -s:*)",
-      "Bash(curl -sS:*)",
-      "Bash(ssh -i \"$HOME/.ssh/hostinger_codex\":*)",
-      "Bash(scp -i \"$HOME/.ssh/hostinger_codex\":*)",
-      "Bash(tar -cf -:*)"
+      "Bash(diff:*)"
     ],
     "deny": [
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Read(**/*.pem)",
       "Read(**/id_rsa*)",
+      "Read(**/*.key)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(git reset --hard:*)",
