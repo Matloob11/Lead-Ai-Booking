@@ -121,7 +121,10 @@ def bitrix_login(request):
         },
     )
 
-    agent.display_name = full_name or agent.display_name
+    # The portal keeps the name current, but never over one the agent chose for
+    # themselves — that edit has to survive their next sign-in to mean anything.
+    if not agent.display_name_is_custom:
+        agent.display_name = full_name or agent.display_name
     agent.bitrix_portal = domain
     agent.avatar_url = profile.get("PERSONAL_PHOTO") or agent.avatar_url
     agent.is_bitrix_admin = _is_portal_admin(domain, auth_id)
@@ -143,7 +146,9 @@ def me(request):
         display_name = str(request.data.get("display_name", "")).strip()
         if display_name:
             request.user.display_name = display_name[:150]
-            request.user.save(update_fields=["display_name"])
+            # Marked so the next sign-in stops taking the portal's version.
+            request.user.display_name_is_custom = True
+            request.user.save(update_fields=["display_name", "display_name_is_custom"])
     return Response(_serialize(request.user))
 
 

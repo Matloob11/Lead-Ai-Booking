@@ -154,7 +154,9 @@ def serialize_quick_reply(reply):
 
 
 def serialize_shared_asset(asset, request=None):
-    url = asset.file.url if asset.file else ""
+    # Through the authenticated view, never MEDIA_URL: nothing serves /media/,
+    # so asset.file.url was a link to a 404.
+    url = reverse("inbox:shared-asset-download", args=[asset.pk]) if asset.file else ""
     if request and url:
         url = request.build_absolute_uri(url)
     return {

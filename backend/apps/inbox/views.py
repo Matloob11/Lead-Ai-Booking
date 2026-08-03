@@ -52,6 +52,28 @@ def _csv_safe(value):
     return f"'{text}" if text.startswith(FORMULA_LEADERS) else text
 
 
+# What the shared library accepts, and what each type counts as. An allowlist
+# rather than a blocklist: these files are uploaded by one colleague and opened
+# by another on the panel's own origin, so anything a browser might execute —
+# text/html, image/svg+xml — must not be storable in the first place.
+SHARED_ASSET_TYPES = {
+    "application/pdf": "document",
+    "application/msword": "document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "application/vnd.ms-excel": "document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+    "application/vnd.ms-powerpoint": "document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+    "text/plain": "document",
+    "text/csv": "document",
+    "image/jpeg": "image",
+    "image/png": "image",
+    "image/webp": "image",
+    "video/mp4": "video",
+    "video/3gpp": "video",
+}
+
+
 def _visible_conversations(user):
     """Every chat on every number the agent covers.
 
@@ -831,12 +853,21 @@ def shared_asset_list(request):
         if not title:
             title = file_obj.name
 
-        mime_type = file_obj.content_type or ""
-        kind = SharedAsset.Kind.DOCUMENT
-        if mime_type.startswith("image/"):
-            kind = SharedAsset.Kind.IMAGE
-        elif mime_type.startswith("video/"):
-            kind = SharedAsset.Kind.VIDEO
+        # The browser's Content-Type is the uploader's to choose, so the type
+        # is taken from an allowlist and the stored one is ours, not theirs.
+        # It also keeps text/html and image/svg+xml out: both execute script
+        # when a browser is persuaded to render them, and these files are
+        # served back to colleagues on the panel's own origin.
+        claimed = (file_obj.content_type or "").split(";")[0].strip().lower()
+        kind = SHARED_ASSET_TYPES.get(claimed)
+        if not kind:
+            return Response(
+                {
+                    "detail": "That file type cannot be shared. Use a PDF, an Office "
+                    "document, a JPEG/PNG/WebP image, or an MP4 video."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         asset = SharedAsset.objects.create(
             title=title[:255],
@@ -844,7 +875,7 @@ def shared_asset_list(request):
             file=file_obj,
             file_name=file_obj.name[:255],
             size_bytes=file_obj.size,
-            mime_type=mime_type[:128],
+            mime_type=claimed[:128],
             created_by=request.user,
         )
         return Response(serialize_shared_asset(asset, request), status=status.HTTP_201_CREATED)
@@ -859,6 +890,32 @@ def shared_asset_list(request):
         assets = assets.filter(Q(title__icontains=search) | Q(file_name__icontains=search))
 
     return Response([serialize_shared_asset(a, request) for a in assets])
+
+
+@api_view(["GET"])
+def shared_asset_download(request, pk):
+    """Hand back a shared file, to a signed-in colleague only.
+
+    MEDIA_URL is served by nothing — not nginx, not Django with DEBUG off — so
+    the library's own links pointed at a 404 and the file could never be opened
+    or sent. Routing it through here rather than opening /media/ keeps the
+    session check on the way in, and lets the response say plainly that this is
+    a download and not a page: an attachment, typed as bytes rather than as
+    whatever the uploader claimed, and sandboxed if a browser tries anyway.
+    """
+    asset = get_object_or_404(SharedAsset, pk=pk)
+    if not asset.file:
+        return Response({"detail": "That file is missing"}, status=status.HTTP_404_NOT_FOUND)
+
+    response = FileResponse(
+        asset.file.open("rb"),
+        content_type="application/octet-stream",
+        as_attachment=True,
+        filename=asset.file_name or f"asset-{asset.pk}",
+    )
+    response["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @api_view(["DELETE"])

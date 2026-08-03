@@ -282,15 +282,36 @@ def all_templates(request):
 
 @api_view(["POST"])
 def create_template(request):
-    """Create a new message template and submit to Meta for approval."""
+    """Create a new message template and submit to Meta for approval.
+
+    Admins only. A template is written to the company's own WhatsApp Business
+    account, is reviewed by Meta under that account's name, and a rejection
+    counts against it — so this is not something an agent does on their own
+    behalf, however harmless the wording looks.
+    """
     import re
     from apps.gateway.client import AlotsClient, AlotsError
 
-    waba_id = request.data.get("waba_business_id", "").strip()
+    denied = _require_admin(request)
+    if denied:
+        return denied
+
+    # Only a WABA the caller actually covers. Taking this id from the body
+    # unchecked would let anyone who can reach the endpoint write templates
+    # into any business account whose id they could guess or read elsewhere.
+    covered = set(
+        request.user.visible_numbers.exclude(waba_business_id="")
+        .values_list("waba_business_id", flat=True)
+    )
+
+    waba_id = str(request.data.get("waba_business_id", "")).strip()
+    if waba_id and waba_id not in covered:
+        return Response(
+            {"detail": "That WhatsApp Business account is not one of yours."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     if not waba_id:
-        first_num = request.user.visible_numbers.exclude(waba_business_id="").first()
-        if first_num:
-            waba_id = first_num.waba_business_id
+        waba_id = next(iter(sorted(covered)), "")
 
     if not waba_id:
         return Response(

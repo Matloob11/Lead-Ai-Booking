@@ -43,6 +43,31 @@ const ICONS = {
     ["path", { d: "M9 13h6M9 17h6" }],
   ],
 
+  // icon() returns null for a name it does not hold, and el() drops a null
+  // child — so a missing icon is not a fallback glyph, it is a button with
+  // nothing in it at all. These four were being asked for and rendered blank.
+  fileText: [
+    ["path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }],
+    ["path", { d: "M14 2v6h6" }],
+    ["path", { d: "M16 13H8M16 17H8M10 9H8" }],
+  ],
+
+  folder: [
+    ["path", { d: "M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" }],
+  ],
+
+  eye: [
+    ["path", { d: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" }],
+    ["circle", { cx: 12, cy: 12, r: 3 }],
+  ],
+
+  trash: [
+    ["path", { d: "M3 6h18" }],
+    ["path", { d: "M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" }],
+    ["path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }],
+    ["path", { d: "M10 11v6M14 11v6" }],
+  ],
+
   mic: [
     ["rect", { x: 9, y: 2, width: 6, height: 11, rx: 3 }],
     ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2" }],

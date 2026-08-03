@@ -16,6 +16,12 @@ class Agent(AbstractUser):
     bitrix_user_id = models.CharField(max_length=32, unique=True, null=True, blank=True, db_index=True)
     bitrix_portal = models.CharField(max_length=255, blank=True)
     display_name = models.CharField(max_length=255, blank=True)
+
+    # Set once the agent renames themselves in the panel. Sign-in refreshes the
+    # display name from the portal, which would otherwise undo that edit on the
+    # agent's very next visit and make the profile screen look broken.
+    display_name_is_custom = models.BooleanField(default=False)
+
     avatar_url = models.URLField(blank=True)
 
     # Distinct from is_staff/is_superuser, which govern the Django admin. This

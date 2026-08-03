@@ -1068,12 +1068,19 @@ export function mountInbox(root, { me }) {
           onSelectAsset: async (asset) => {
             if (!asset.url) return;
             try {
-              const res = await fetch(asset.url);
+              // The file is behind the session, and fetch resolves happily on a
+              // 404 — without this check the agent would "send" the error page
+              // as if it were the brochure.
+              const res = await fetch(asset.url, { credentials: "include" });
+              if (!res.ok) throw new Error(`the library returned HTTP ${res.status}`);
+
               const blob = await res.blob();
-              const file = new File([blob], asset.file_name || asset.title, { type: asset.mime_type || blob.type });
+              const file = new File([blob], asset.file_name || asset.title, {
+                type: asset.mime_type || blob.type,
+              });
               attachFile(conversation, file);
             } catch (err) {
-              alert(`Sending asset failed: ${err.message}`);
+              alert(`Could not send that file: ${err.message}`);
             }
           },
         });

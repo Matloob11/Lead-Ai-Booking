@@ -77,6 +77,14 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+    # The same mount web and worker get. Without it beat ran whatever code was
+    # baked into the image at the last build while the other two ran the
+    # deployed source — so it drifted quietly until an import it had never seen
+    # put it in a restart loop, taking the reminders and the hourly syncs with
+    # it. Three services running one codebase have to read it from one place.
+    volumes:
+      - ../backend:/app
+      - ../media:/app/media
     command: ["celery", "-A", "a7wa", "beat", "-l", "info"]
 
 volumes:
