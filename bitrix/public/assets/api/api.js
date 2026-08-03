@@ -6,7 +6,7 @@
  * means a contract change is a one-file edit.
  */
 
-import { apiFetch, csrfToken, SsoError } from "./bitrix-sso.js";
+import { apiFetch, csrfToken, SsoError } from "../core/bitrix-sso.js";
 
 export const auth = {
   me: () => apiFetch("/api/auth/me/"),

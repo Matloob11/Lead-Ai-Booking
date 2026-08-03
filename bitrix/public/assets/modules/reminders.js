@@ -4,8 +4,8 @@
  * preset + custom datetimepicker, WebAudio sound beep, and real-time toast alert on reminder.due.
  */
 
-import { el, clear, untilText, stamp, modal } from "./dom.js";
-import { getReminders, createReminder, markReminderDone, deleteReminder } from "./api-extras.js";
+import { el, clear, untilText, stamp, modal } from "../core/dom.js";
+import { getReminders, createReminder, markReminderDone, deleteReminder } from "../api/api-extras.js";
 
 function getActiveConversationId() {
   return (

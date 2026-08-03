@@ -3,7 +3,7 @@
  * Uses apiFetch from bitrix-sso.js to maintain session cookie + CSRF authentication.
  */
 
-import { apiFetch } from "./bitrix-sso.js";
+import { apiFetch } from "../core/bitrix-sso.js";
 
 /**
  * Search inbox messages.

@@ -4,7 +4,7 @@
  * Strictly uses SVG inline icons matching icons.js (NO EMOJIS).
  */
 
-import { el, clear } from "./dom.js";
+import { el, clear } from "../core/dom.js";
 import { mountSearch } from "./search.js";
 import { mountReminders } from "./reminders.js";
 import { mountButtons } from "./buttons.js";

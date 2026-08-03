@@ -6,9 +6,9 @@
  * instantly and locally instead of after a long upload the API will reject.
  */
 
-import { inbox } from "./api.js";
-import { el, clear, formatBytes, modal } from "./dom.js";
-import { icon } from "./icons.js";
+import { inbox } from "../api/api.js";
+import { el, clear, formatBytes, modal } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 
 /** Meta Cloud API media limits, in bytes. */
 export const MEDIA_LIMITS = {

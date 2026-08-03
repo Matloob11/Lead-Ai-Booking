@@ -12,8 +12,8 @@
  * recipient has to be asked for, and in which endpoint the send goes to.
  */
 
-import { inbox } from "./api.js";
-import { clear, debounce, el, formatBytes, modal } from "./dom.js";
+import { inbox } from "../api/api.js";
+import { clear, debounce, el, formatBytes, modal } from "../core/dom.js";
 
 const MAX_VISIBLE_BUTTONS = 3;
 

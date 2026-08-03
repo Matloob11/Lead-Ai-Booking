@@ -7,9 +7,9 @@
  * read those notes next to the screen where numbers are actually assigned.
  */
 
-import { access } from "./api.js";
-import { el, clear, modal, stamp } from "./dom.js";
-import { icon } from "./icons.js";
+import { access } from "../api/api.js";
+import { el, clear, modal, stamp } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 
 /**
  * Fills the whole panel for an agent who has no numbers.

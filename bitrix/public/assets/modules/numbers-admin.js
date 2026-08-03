@@ -12,8 +12,8 @@
  * highlighted.
  */
 
-import { catalog } from "./api.js";
-import { el, clear, debounce, modal } from "./dom.js";
+import { catalog } from "../api/api.js";
+import { el, clear, debounce, modal } from "../core/dom.js";
 
 const badge = (text, tone) => el("span.na-badge", { class: tone ? `na-badge--${tone}` : "" }, [text]);
 

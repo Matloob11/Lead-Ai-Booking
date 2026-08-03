@@ -14,10 +14,10 @@
  * profile does in WhatsApp, and the conversation stays visible behind it.
  */
 
-import { apiFetch } from "./bitrix-sso.js";
-import { clear, el, formatBytes, initials, stamp } from "./dom.js";
-import { icon } from "./icons.js";
-import { openLightbox } from "./lightbox.js";
+import { apiFetch } from "../core/bitrix-sso.js";
+import { clear, el, formatBytes, initials, stamp } from "../core/dom.js";
+import { icon } from "../core/icons.js";
+import { openLightbox } from "../core/lightbox.js";
 
 const IMAGE_KINDS = new Set(["image", "sticker"]);
 

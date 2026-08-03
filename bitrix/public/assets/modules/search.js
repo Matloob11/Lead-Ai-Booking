@@ -4,8 +4,8 @@
  * highlighting, keyboard navigation, and deep-link conversation opening.
  */
 
-import { el, clear, debounce, stamp } from "./dom.js";
-import { searchMessages } from "./api-extras.js";
+import { el, clear, debounce, stamp } from "../core/dom.js";
+import { searchMessages } from "../api/api-extras.js";
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, (ch) => ({

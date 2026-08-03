@@ -13,18 +13,18 @@
  *  - transfer is admin-only.
  */
 
-import { access, catalog, inbox, asList } from "./api.js";
+import { access, catalog, inbox, asList } from "../api/api.js";
 import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
-import { ensureSession } from "./bitrix-sso.js";
-import { imagesInThread, openLightbox } from "./lightbox.js";
+import { ensureSession } from "../core/bitrix-sso.js";
+import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
 import { openTemplateComposer } from "./template-composer.js";
-import { InboxSocket } from "./realtime.js";
-import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
-import { bindEmojiPicker } from "./emoji.js";
-import { icon, iconForKind } from "./icons.js";
+import { InboxSocket } from "../core/realtime.js";
+import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "../core/dom.js";
+import { bindEmojiPicker } from "../core/emoji.js";
+import { icon, iconForKind } from "../core/icons.js";
 
 const PAGE_SIZE = 40;
 

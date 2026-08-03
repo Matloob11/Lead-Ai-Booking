@@ -4,8 +4,8 @@
  * Enforces character limits, live counters, error handling without losing agent's input.
  */
 
-import { el, clear, modal } from "./dom.js";
-import { sendReplyButtons } from "./api-extras.js";
+import { el, clear, modal } from "../core/dom.js";
+import { sendReplyButtons } from "../api/api-extras.js";
 
 function getActiveConversationId() {
   return (
