@@ -359,6 +359,14 @@ export function mountInbox(root, { me }) {
 
   /* ------------------------------------------------------------ rendering */
 
+  function numberOptionLabel(number) {
+    const title = numberTitle(number);
+    const agents = Array.isArray(number?.agents) ? number.agents : [];
+    const names = agents.map((a) => a.display_name).filter(Boolean);
+    const assignedText = names.length ? names.join(", ") : "Not assigned";
+    return `${title} → ${assignedText}`;
+  }
+
   function renderNumberFilter() {
     clear(ui.numberSelect);
     // With a single number the filter is noise — the agent has no choice to make.
@@ -369,7 +377,7 @@ export function mountInbox(root, { me }) {
     ui.numberSelect.hidden = false;
     ui.numberSelect.append(el("option", { value: "" }, ["All numbers"]));
     for (const number of state.numbers) {
-      ui.numberSelect.append(el("option", { value: number.id }, [numberTitle(number)]));
+      ui.numberSelect.append(el("option", { value: number.id }, [numberOptionLabel(number)]));
     }
   }
 
