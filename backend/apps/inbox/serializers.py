@@ -29,17 +29,25 @@ def serialize_agent(agent):
 
 
 def serialize_number(number):
+    if isinstance(number, dict):
+        return number
+    title = getattr(number, "title", None)
+    if not title:
+        label = getattr(number, "label", "")
+        display_name = getattr(number, "display_name", "")
+        phone_number = getattr(number, "phone_number", "")
+        title = label or display_name or phone_number
     return {
-        "id": number.pk,
-        "phone_number": number.phone_number,
-        "phone_number_id": number.phone_number_id,
-        "waba_business_id": number.waba_business_id,
-        "label": number.label,
-        "display_name": number.display_name,
-        "title": number.title,
-        "quality_rating": number.quality_rating,
-        "verification_status": number.verification_status,
-        "webhook_configured": number.webhook_configured,
+        "id": getattr(number, "pk", getattr(number, "id", None)),
+        "phone_number": getattr(number, "phone_number", ""),
+        "phone_number_id": getattr(number, "phone_number_id", ""),
+        "waba_business_id": getattr(number, "waba_business_id", ""),
+        "label": getattr(number, "label", ""),
+        "display_name": getattr(number, "display_name", ""),
+        "title": title,
+        "quality_rating": getattr(number, "quality_rating", ""),
+        "verification_status": getattr(number, "verification_status", ""),
+        "webhook_configured": getattr(number, "webhook_configured", False),
     }
 
 
