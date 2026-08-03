@@ -19,6 +19,7 @@ import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
+import { openContactPanel, closeContactPanel } from "./contact-panel.js";
 import { openTemplateComposer } from "./template-composer.js";
 import { InboxSocket } from "./realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "./dom.js";
@@ -240,8 +241,24 @@ export function mountInbox(root, { me }) {
     }
   }
 
+  /** The person behind the open chat. Renaming there renames them here too. */
+  function openContact(conversation) {
+    openContactPanel(conversation.id, {
+      onSaved: (contact) => {
+        const known = findConversation(conversation.id);
+        if (known?.contact) known.contact.name = contact.name;
+        renderConversations();
+        renderThreadHeader(known || conversation);
+      },
+      onOpenConversation: (id) => openConversation(id),
+    });
+  }
+
   async function openConversation(id, { highlightMessageId } = {}) {
     if (state.loadingThread) return;
+    // The profile describes one customer; carrying it into another chat would
+    // show the wrong person beside the right messages.
+    if (state.activeId !== id) closeContactPanel();
     state.activeId = id;
     state.loadingThread = true;
     renderConversations();
@@ -445,7 +462,7 @@ export function mountInbox(root, { me }) {
     const left = untilText(conversation.session_expires_at);
 
     ui.threadHeader.append(
-      el("div.thread__who", {}, [
+      el("div.thread__who", { onclick: () => openContact(conversation), title: "Contact details" }, [
         el("div.conv__avatar", {}, [initials(conversation.contact?.name || conversation.contact?.wa_id)]),
         el("div", {}, [
           el("div.thread__name", {}, [conversation.contact?.name || conversation.contact?.wa_id || "—"]),

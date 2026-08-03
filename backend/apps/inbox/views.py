@@ -18,8 +18,10 @@ from . import services
 from .events import publish_conversation
 from .models import Conversation, Label, MediaAsset, Message, QuickReply, Reminder
 from .serializers import (
+    serialize_agent,
     serialize_conversation,
     serialize_message,
+    serialize_number,
     serialize_quick_reply,
     serialize_reminder,
 )
@@ -159,6 +161,34 @@ def contact_detail(request, pk):
         .order_by("-created_at")[:24]
     )
 
+    # Who is handling this chat, and how to reach them. An admin looking at a
+    # customer usually wants the agent, not just their name.
+    handler = conversation.assigned_agent
+    assigned_agent = None
+    if handler:
+        assigned_agent = {
+            **serialize_agent(handler),
+            "bitrix_user_id": handler.bitrix_user_id or "",
+            # What was assigned to them, not what they can see. An admin can
+            # see all 21, which answers a different question than "which
+            # number is this person's".
+            "numbers": [
+                {
+                    "id": a.number_id,
+                    "phone_number": a.number.phone_number,
+                    "title": a.number.title,
+                }
+                for a in handler.number_assignments.filter(is_active=True).select_related("number")
+            ],
+        }
+
+    # Every handover this chat has been through. The point of transferring with
+    # the history intact is that the next agent can see it, so who passed it to
+    # whom, and why, belongs on the profile rather than in a log file.
+    history = conversation.assignment_logs.select_related(
+        "from_agent", "to_agent", "changed_by"
+    )[:50]
+
     return Response(
         {
             "wa_id": contact.wa_id,
@@ -168,6 +198,19 @@ def contact_detail(request, pk):
             "notes": contact.notes,
             "first_seen_at": contact.created_at.isoformat(),
             "conversation": serialize_conversation(conversation),
+            "number": serialize_number(conversation.number),
+            "assigned_agent": assigned_agent,
+            "assignment_history": [
+                {
+                    "id": log.pk,
+                    "from_agent": serialize_agent(log.from_agent),
+                    "to_agent": serialize_agent(log.to_agent),
+                    "changed_by": serialize_agent(log.changed_by),
+                    "reason": log.reason,
+                    "created_at": log.created_at.isoformat(),
+                }
+                for log in history
+            ],
             "stats": {
                 "total": messages.count(),
                 "inbound": messages.filter(direction=Message.Direction.INBOUND).count(),
