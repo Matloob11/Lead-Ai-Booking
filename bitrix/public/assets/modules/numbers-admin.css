@@ -87,6 +87,10 @@
   transition: all 0.15s ease;
 }
 
+.na-row[hidden] {
+  display: none !important;
+}
+
 .na-head {
   grid-area: head;
   display: flex;

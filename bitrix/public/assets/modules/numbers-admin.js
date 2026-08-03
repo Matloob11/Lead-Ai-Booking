@@ -67,8 +67,10 @@ export function openNumbersAdmin({ onSaved } = {}) {
     for (const row of rows.values()) {
       const hit = !term || row.haystack().includes(term);
       const free = !onlyFree.checked || row.assignedCount() === 0;
-      row.node.hidden = !(hit && free);
-      if (!row.node.hidden) shown++;
+      const isVisible = hit && free;
+      row.node.hidden = !isVisible;
+      row.node.style.display = isVisible ? "" : "none";
+      if (isVisible) shown++;
     }
 
     const empty = [...rows.values()].filter((r) => r.assignedCount() === 0).length;
@@ -79,7 +81,7 @@ export function openNumbersAdmin({ onSaved } = {}) {
     );
   }
 
-  search.addEventListener("input", debounce(applyFilter, 150));
+  search.addEventListener("input", applyFilter);
   onlyFree.addEventListener("change", applyFilter);
 
   /* ----------------------------------------------------------------- row */
@@ -263,7 +265,7 @@ export function openNumbersAdmin({ onSaved } = {}) {
     rows.clear();
     const list = el("div.na-rows", {}, numbers.map(numberRow));
 
-    clear(body).append(
+    const children = [
       el("p.na-note", {}, [
         "Assign numbers to agents and set display names. Changes take effect across the inbox immediately after saving.",
       ]),
@@ -274,8 +276,10 @@ export function openNumbersAdmin({ onSaved } = {}) {
           ]),
       toolbar,
       summary,
-      list
-    );
+      list,
+    ].filter(Boolean);
+
+    clear(body).append(...children);
     applyFilter();
   }
 
