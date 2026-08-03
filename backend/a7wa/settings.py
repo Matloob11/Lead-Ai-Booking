@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "apps.catalog",
     "apps.inbox",
     "apps.gateway",
+    "apps.reports",
 ]
 
 MIDDLEWARE = [
