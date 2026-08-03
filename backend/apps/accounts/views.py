@@ -183,6 +183,13 @@ def access_request(request):
     from .models import AccessRequest
 
     message = str(request.data.get("message", "")).strip()[:2000]
+    # An empty request tells the admin nothing about who is asking or what for,
+    # and they cannot come back and ask — the sender is waiting on them.
+    if not message:
+        return Response(
+            {"detail": "Say which number you need, or who you work with."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     existing = AccessRequest.objects.filter(
         agent=request.user, status=AccessRequest.Status.PENDING
@@ -210,9 +217,9 @@ def access_request(request):
 def access_request_list(request):
     """Everyone waiting to be given a number. Admins only.
 
-    Returns open and resolved alike, newest first — an admin needs to see what
-    they have already dealt with. Pass ?status=pending for the open ones on
-    their own, which is what a badge should count.
+    Open requests only, newest first — that is the queue, and it is what the
+    badge counts. ?all=1 adds the ones already dealt with, for an admin who
+    wants the history; ?status= picks one state outright.
     """
     denied = _require_admin(request)
     if denied:
@@ -224,6 +231,8 @@ def access_request_list(request):
     wanted = request.GET.get("status", "")
     if wanted in AccessRequest.Status.values:
         queryset = queryset.filter(status=wanted)
+    elif request.GET.get("all") != "1":
+        queryset = queryset.filter(status=AccessRequest.Status.PENDING)
 
     return Response([_serialize_request(r) for r in queryset[:200]])
 
