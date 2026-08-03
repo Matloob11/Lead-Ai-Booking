@@ -12,8 +12,9 @@
  * recipient has to be asked for, and in which endpoint the send goes to.
  */
 
-import { inbox } from "../api/api.js";
+import { inbox, catalog } from "../api/api.js";
 import { clear, debounce, el, formatBytes, modal } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 
 const MAX_VISIBLE_BUTTONS = 3;
 
@@ -638,5 +639,306 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
   renderForm();
   renderPreview();
   loadTemplates();
+  return dialog;
+}
+
+export function openTemplateManager({ onUseTemplate } = {}) {
+  const body = el("div.modal__body.na", {}, [el("div.na-note", {}, ["Loading templates from Meta…"])]);
+  const dialog = modal("Templates Management Center", body, { wide: true });
+
+  let templates = [];
+  let filterStatus = "";
+  let searchTerm = "";
+
+  const search = el("input.na-search", {
+    type: "search",
+    placeholder: "Find template by name or text…",
+  });
+
+  const statusSelect = el("select.na-picker", { style: "width: 140px;" }, [
+    el("option", { value: "" }, ["All Statuses"]),
+    el("option", { value: "APPROVED" }, ["Approved"]),
+    el("option", { value: "PENDING" }, ["Pending"]),
+    el("option", { value: "REJECTED" }, ["Rejected"]),
+  ]);
+
+  const syncBtn = el("button.btn.btn--ghost.btn--sm", { type: "button" }, [
+    icon("refresh", { size: 14 }),
+    " Sync from Meta",
+  ]);
+
+  const createBtn = el("button.btn.btn--primary.btn--sm", { type: "button" }, [
+    icon("plus", { size: 14 }),
+    " Create New Template",
+  ]);
+
+  const summary = el("div.na-summary");
+  const listContainer = el("div.na-rows");
+
+  const toolbar = el("div.na-toolbar", { style: "align-items: center;" }, [
+    search,
+    statusSelect,
+    syncBtn,
+    createBtn,
+  ]);
+
+  search.addEventListener("input", () => {
+    searchTerm = search.value.trim().toLowerCase();
+    render();
+  });
+
+  statusSelect.addEventListener("change", () => {
+    filterStatus = statusSelect.value;
+    render();
+  });
+
+  syncBtn.addEventListener("click", async () => {
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Syncing…";
+    try {
+      await catalog.syncTemplates();
+      await fetchTemplates();
+    } catch (err) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      syncBtn.disabled = false;
+      syncBtn.replaceChildren(icon("refresh", { size: 14 }), " Sync from Meta");
+    }
+  });
+
+  createBtn.addEventListener("click", () => {
+    openCreateTemplateModal({
+      onCreated: async () => {
+        await fetchTemplates();
+      },
+    });
+  });
+
+  async function fetchTemplates() {
+    clear(body).append(el("div.na-note", {}, ["Loading templates from Meta…"]));
+    try {
+      templates = await catalog.allTemplates();
+      renderMain();
+    } catch (err) {
+      clear(body).append(el("div.alert", {}, [`Failed to load templates: ${err.message}`]));
+    }
+  }
+
+  function renderMain() {
+    clear(body).append(toolbar, summary, listContainer);
+    render();
+  }
+
+  function render() {
+    clear(listContainer);
+    const approvedCount = templates.filter((t) => t.status === "APPROVED").length;
+    const pendingCount = templates.filter((t) => t.status === "PENDING").length;
+    const rejectedCount = templates.filter((t) => t.status === "REJECTED").length;
+
+    const filtered = templates.filter((t) => {
+      const matchStatus = !filterStatus || t.status === filterStatus;
+      const matchText =
+        !searchTerm ||
+        t.name.toLowerCase().includes(searchTerm) ||
+        (t.body_text || "").toLowerCase().includes(searchTerm);
+      return matchStatus && matchText;
+    });
+
+    clear(summary).append(
+      `${templates.length} total templates · `,
+      el("span.tpl-stat-approved", { style: "color: #10b981; font-weight: 600;" }, [`${approvedCount} Approved`]),
+      " · ",
+      el("span.tpl-stat-pending", { style: "color: #f59e0b; font-weight: 600;" }, [`${pendingCount} Pending`]),
+      rejectedCount ? ` · ${rejectedCount} Rejected` : "",
+      searchTerm || filterStatus ? ` · showing ${filtered.length}` : ""
+    );
+
+    if (!filtered.length) {
+      listContainer.append(el("div.tplc-empty", {}, ["No templates match your filters."]));
+      return;
+    }
+
+    for (const t of filtered) {
+      const isApproved = t.status === "APPROVED";
+      const isPending = t.status === "PENDING";
+      const isRejected = t.status === "REJECTED";
+
+      const statusTone = isApproved ? "ok" : isPending ? "warn" : isRejected ? "bad" : "";
+      const statusLabel = isApproved ? "APPROVED" : isPending ? "PENDING (Under Meta Review)" : isRejected ? "REJECTED" : t.status;
+
+      const card = el("div.na-row.tpl-card", {}, [
+        el("div.na-head", {}, [
+          el("div.na-who", {}, [
+            el("div.na-title", {}, [t.name]),
+            el("div.na-phone", {}, [`Language: ${t.language} · Category: ${t.category}`]),
+          ]),
+          el("div.na-flags", {}, [
+            el("span.na-badge", { class: `na-badge--${statusTone}` }, [statusLabel]),
+          ]),
+        ]),
+        el("div.na-body", { style: "grid-template-columns: 1fr;" }, [
+          el("div.tplc-item__text", { style: "white-space: pre-wrap; font-size: 13px;" }, [t.body_text || "—"]),
+          t.footer_text ? el("div.tplc-bubble__footer", { style: "font-size: 11px; opacity: 0.7;" }, [t.footer_text]) : null,
+        ]),
+        el("div.na-foot", {}, [
+          isApproved
+            ? el("button.btn.btn--primary.btn--sm", {
+                type: "button",
+                onclick: () => {
+                  dialog.close();
+                  onUseTemplate?.(t);
+                },
+              }, ["Use in Chat"])
+            : el("span.na-status", {}, [isPending ? "Meta is reviewing this template (1-2 mins)" : "Template not available for sending"]),
+        ]),
+      ]);
+
+      listContainer.append(card);
+    }
+  }
+
+  fetchTemplates();
+  return dialog;
+}
+
+export function openCreateTemplateModal({ onCreated } = {}) {
+  const nameInput = el("input.field", {
+    type: "text",
+    placeholder: "e.g. property_viewing_offer",
+  });
+
+  const categorySelect = el("select.field", {}, [
+    el("option", { value: "MARKETING" }, ["MARKETING (Promotions, Offers, Re-engagement)"]),
+    el("option", { value: "UTILITY" }, ["UTILITY (Order updates, Appointments, Account alerts)"]),
+  ]);
+
+  const langSelect = el("select.field", {}, [
+    el("option", { value: "en" }, ["English (en)"]),
+    el("option", { value: "ar" }, ["Arabic (ar)"]),
+    el("option", { value: "ur" }, ["Urdu (ur)"]),
+  ]);
+
+  const headerInput = el("input.field", { type: "text", placeholder: "Header text (optional)" });
+  const bodyTextarea = el("textarea.field", { rows: 4, placeholder: "Hello {{1}}, thank you for contacting A7 Group. Your appointment is set for {{2}}." });
+  const footerInput = el("input.field", { type: "text", placeholder: "Footer text e.g. A7 Real Estate (optional)" });
+  const buttonsInput = el("input.field", { type: "text", placeholder: "Quick reply buttons comma separated e.g. Interested, Call Me" });
+
+  const addVar1 = el("button.btn.btn--ghost.btn--sm", { type: "button", style: "padding: 2px 8px; font-size: 11px;" }, ["+ {{1}}"]);
+  const addVar2 = el("button.btn.btn--ghost.btn--sm", { type: "button", style: "padding: 2px 8px; font-size: 11px;" }, ["+ {{2}}"]);
+
+  addVar1.addEventListener("click", () => {
+    bodyTextarea.value += " {{1}}";
+    updatePreview();
+  });
+  addVar2.addEventListener("click", () => {
+    bodyTextarea.value += " {{2}}";
+    updatePreview();
+  });
+
+  const nameHint = el("span", { style: "font-size: 11px; opacity: 0.7;" }, ["Format: lowercase and underscores only"]);
+
+  nameInput.addEventListener("input", () => {
+    nameInput.value = nameInput.value.toLowerCase().replace(/[^\w]+/g, "_");
+    nameHint.textContent = `Meta identifier: ${nameInput.value || "template_name"}`;
+    updatePreview();
+  });
+
+  headerInput.addEventListener("input", updatePreview);
+  bodyTextarea.addEventListener("input", updatePreview);
+  footerInput.addEventListener("input", updatePreview);
+
+  const previewBody = el("div.tplc-bubble");
+  const phoneFrame = el("div.tplc-phone", {}, [
+    el("div.tplc-phone__bar", {}, [
+      el("span.tplc-phone__avatar"),
+      el("div.tplc-phone__who", {}, [
+        el("div.tplc-phone__name", {}, ["Live Preview"]),
+        el("div.tplc-phone__sub", {}, ["WhatsApp Template"]),
+      ]),
+    ]),
+    el("div.tplc-phone__screen", {}, [el("div.tplc-out", {}, [previewBody])]),
+  ]);
+
+  function updatePreview() {
+    clear(previewBody);
+    if (headerInput.value.trim()) {
+      previewBody.append(el("div.tplc-bubble__header", {}, [headerInput.value.trim()]));
+    }
+    previewBody.append(el("div.tplc-bubble__body", {}, [bodyTextarea.value.trim() || "Your template message body text will appear here..."]));
+    if (footerInput.value.trim()) {
+      previewBody.append(el("div.tplc-bubble__footer", {}, [footerInput.value.trim()]));
+    }
+  }
+
+  const errorEl = el("div.alert", { hidden: true });
+  const submitBtn = el("button.btn.btn--primary", { type: "button" }, [
+    icon("send", { size: 14 }),
+    " Submit Template to Meta",
+  ]);
+
+  const leftForm = el("div.tplc-form", { style: "gap: 10px;" }, [
+    el("label.tplc-field", {}, [el("span", {}, ["Template Name"]), nameInput, nameHint]),
+    el("label.tplc-field", {}, [el("span", {}, ["Category"]), categorySelect]),
+    el("label.tplc-field", {}, [el("span", {}, ["Language"]), langSelect]),
+    el("label.tplc-field", {}, [el("span", {}, ["Header Text (Optional)"]), headerInput]),
+    el("label.tplc-field", {}, [
+      el("div", { style: "display: flex; justify-content: space-between; align-items: center;" }, [
+        el("span", {}, ["Body Text"]),
+        el("div", { style: "display: flex; gap: 4px;" }, [addVar1, addVar2]),
+      ]),
+      bodyTextarea,
+    ]),
+    el("label.tplc-field", {}, [el("span", {}, ["Footer Text (Optional)"]), footerInput]),
+    el("label.tplc-field", {}, [el("span", {}, ["Quick Reply Buttons (Comma separated, max 3)"]), buttonsInput]),
+    errorEl,
+    el("div.tplc-actions", {}, [submitBtn]),
+  ]);
+
+  const body = el("div.modal__body.tplc", {}, [leftForm, el("div.tplc-right", {}, [phoneFrame])]);
+  const dialog = modal("Create New WhatsApp Template", body, { wide: true });
+
+  updatePreview();
+
+  submitBtn.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    const bodyText = bodyTextarea.value.trim();
+
+    if (!name) {
+      errorEl.textContent = "Please enter a valid template name.";
+      errorEl.hidden = false;
+      return;
+    }
+    if (!bodyText) {
+      errorEl.textContent = "Please enter the template body text.";
+      errorEl.hidden = false;
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting to Meta…";
+    errorEl.hidden = true;
+
+    try {
+      await catalog.createTemplate({
+        name,
+        category: categorySelect.value,
+        language: langSelect.value,
+        header_text: headerInput.value.trim(),
+        body_text: bodyText,
+        footer_text: footerInput.value.trim(),
+        buttons: buttonsInput.value.trim(),
+      });
+
+      alert("Template submitted successfully to Meta! Status: PENDING (Meta usually approves in 1-2 minutes).");
+      dialog.close();
+      onCreated?.();
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitBtn.replaceChildren(icon("send", { size: 14 }), " Submit Template to Meta");
+      errorEl.textContent = err.message || "Failed to submit template to Meta.";
+      errorEl.hidden = false;
+    }
+  });
+
   return dialog;
 }

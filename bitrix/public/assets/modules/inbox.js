@@ -20,7 +20,7 @@ import { ensureSession } from "../core/bitrix-sso.js";
 import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
-import { openTemplateComposer } from "./template-composer.js";
+import { openTemplateComposer, openTemplateManager } from "./template-composer.js";
 import { InboxSocket } from "../core/realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "../core/dom.js";
 import { bindEmojiPicker } from "../core/emoji.js";
@@ -101,6 +101,10 @@ export function mountInbox(root, { me }) {
     el("button.btn.menu__item", { onclick: openProfile, type: "button" }, [
       icon("user", { size: 16 }),
       "My Profile",
+    ]),
+    el("button.btn.menu__item", { onclick: () => openTemplateManager(), type: "button" }, [
+      icon("file", { size: 16 }),
+      "Templates Center",
     ]),
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [

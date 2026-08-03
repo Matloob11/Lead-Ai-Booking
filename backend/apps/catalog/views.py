@@ -1,10 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Count, Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from apps.inbox.models import Conversation
 from apps.inbox.serializers import serialize_number
 
 from .models import NumberAssignment, WabaNumber, WaTemplate
@@ -34,16 +36,31 @@ def serialize_template(template):
     }
 
 
-def serialize_number_with_agents(number):
+def serialize_number_with_agents(number, template_counts=None, chat_counts=None):
     data = serialize_number(number)
+    # ``active_assignments`` when the caller prefetched it, so a page of twenty
+    # numbers is one query rather than twenty. Filtering the relation here
+    # instead would go back to the database for every row.
+    roster = getattr(number, "active_assignments", None)
+    if roster is None:
+        roster = number.assignments.filter(is_active=True).select_related("agent")
+
     data["agents"] = [
         {
             "agent_id": a.agent_id,
             "display_name": a.agent.display_name or a.agent.get_username(),
             "role": a.role,
         }
-        for a in number.assignments.filter(is_active=True).select_related("agent")
+        for a in roster
     ]
+    # A number with no approved templates cannot reopen a closed window, so it
+    # can only ever reply to customers who wrote first. That is a property of
+    # the number an admin has to know before handing it to an agent, and it is
+    # invisible everywhere else.
+    if template_counts is not None:
+        data["template_count"] = template_counts.get(number.waba_business_id, 0)
+    if chat_counts is not None:
+        data["conversation_count"] = chat_counts.get(number.pk, 0)
     return data
 
 
@@ -70,8 +87,27 @@ def number_list(request):
     # Admins get the assignment roster with each number, since that is the
     # screen they manage it from; agents just get their own numbers.
     if request.user.has_admin_rights:
-        numbers = WabaNumber.objects.filter(is_active=True).prefetch_related("assignments__agent")
-        return Response([serialize_number_with_agents(n) for n in numbers])
+        numbers = WabaNumber.objects.filter(is_active=True).prefetch_related(
+            Prefetch(
+                "assignments",
+                queryset=NumberAssignment.objects.filter(is_active=True).select_related("agent"),
+                to_attr="active_assignments",
+            )
+        )
+
+        # Counted once for the whole page rather than per row: templates belong
+        # to a WABA and several numbers share one.
+        template_counts = dict(
+            WaTemplate.objects.filter(status=WaTemplate.Status.APPROVED)
+            .values_list("waba_business_id")
+            .annotate(n=Count("pk"))
+        )
+        chat_counts = dict(
+            Conversation.objects.values_list("number_id").annotate(n=Count("pk"))
+        )
+        return Response(
+            [serialize_number_with_agents(n, template_counts, chat_counts) for n in numbers]
+        )
     return Response([serialize_number(n) for n in request.user.visible_numbers])
 
 
@@ -220,3 +256,124 @@ def set_agent_admin(request, pk):
     agent.is_wa_admin = bool(request.data.get("is_wa_admin"))
     agent.save(update_fields=["is_wa_admin"])
     return Response(serialize_agent_row(agent))
+
+
+@api_view(["GET"])
+def all_templates(request):
+    """List all templates (approved, pending, rejected) for the agent's WABAs."""
+    waba_ids = list(
+        request.user.visible_numbers.exclude(waba_business_id="")
+        .values_list("waba_business_id", flat=True)
+        .distinct()
+    )
+
+    templates = WaTemplate.objects.filter(waba_business_id__in=waba_ids)
+
+    wanted_status = request.GET.get("status", "").strip().upper()
+    if wanted_status and wanted_status in WaTemplate.Status.values:
+        templates = templates.filter(status=wanted_status)
+
+    search = request.GET.get("q", "").strip()
+    if search:
+        templates = templates.filter(name__icontains=search)
+
+    return Response([serialize_template(t) for t in templates])
+
+
+@api_view(["POST"])
+def create_template(request):
+    """Create a new message template and submit to Meta for approval."""
+    import re
+    from apps.gateway.client import AlotsClient, AlotsError
+
+    waba_id = request.data.get("waba_business_id", "").strip()
+    if not waba_id:
+        first_num = request.user.visible_numbers.exclude(waba_business_id="").first()
+        if first_num:
+            waba_id = first_num.waba_business_id
+
+    if not waba_id:
+        return Response(
+            {"detail": "No WhatsApp Business account found for your profile."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    raw_name = str(request.data.get("name", "")).strip()
+    clean_name = re.sub(r"[^\w]+", "_", raw_name.lower()).strip("_")
+    if not clean_name:
+        return Response(
+            {"detail": "Template name is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    category = str(request.data.get("category", "MARKETING")).strip().upper()
+    if category not in {"MARKETING", "UTILITY", "AUTHENTICATION"}:
+        category = "MARKETING"
+
+    language = str(request.data.get("language", "en")).strip() or "en"
+    body_text = str(request.data.get("body_text", "")).strip()
+    if not body_text:
+        return Response(
+            {"detail": "Body text is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    header_text = str(request.data.get("header_text", "")).strip()
+    footer_text = str(request.data.get("footer_text", "")).strip()
+    button_texts = request.data.get("buttons", [])
+    if isinstance(button_texts, str):
+        button_texts = [b.strip() for b in button_texts.split(",") if b.strip()]
+
+    components = []
+    if header_text:
+        components.append({"type": "HEADER", "format": "TEXT", "text": header_text})
+
+    components.append({"type": "BODY", "text": body_text})
+
+    if footer_text:
+        components.append({"type": "FOOTER", "text": footer_text})
+
+    if button_texts and isinstance(button_texts, list):
+        btn_list = []
+        for btn in button_texts[:3]:
+            btn_str = str(btn).strip()
+            if btn_str:
+                btn_list.append({"type": "QUICK_REPLY", "text": btn_str[:25]})
+        if btn_list:
+            components.append({"type": "BUTTONS", "buttons": btn_list})
+
+    payload = {
+        "name": clean_name,
+        "category": category,
+        "language": language,
+        "components": components,
+    }
+
+    try:
+        client = AlotsClient()
+        meta_res = client.create_template(waba_id, payload)
+        meta_id = str((meta_res or {}).get("id", ""))
+        initial_status = (meta_res or {}).get("status", WaTemplate.Status.PENDING).upper()
+        if initial_status not in WaTemplate.Status.values:
+            initial_status = WaTemplate.Status.PENDING
+
+        template, _ = WaTemplate.objects.update_or_create(
+            waba_business_id=waba_id,
+            name=clean_name,
+            language=language,
+            defaults={
+                "meta_template_id": meta_id,
+                "category": category,
+                "status": initial_status,
+                "components": components,
+                "synced_at": timezone.now(),
+            },
+        )
+        return Response(serialize_template(template), status=status.HTTP_201_CREATED)
+    except AlotsError as exc:
+        err_msg = str(exc)
+        if exc.payload and isinstance(exc.payload, dict):
+            err_detail = exc.payload.get("error", {}).get("message") or exc.payload.get("detail")
+            if err_detail:
+                err_msg = str(err_detail)
+        return Response({"detail": f"Meta template submission failed: {err_msg}"}, status=status.HTTP_400_BAD_REQUEST)

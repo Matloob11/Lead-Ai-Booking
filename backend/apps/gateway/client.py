@@ -99,6 +99,14 @@ class AlotsClient:
         body = self._request("GET", f"/{self.version}/{waba_business_id}/message_templates")
         return (body or {}).get("data", [])
 
+    def create_template(self, waba_business_id, payload):
+        """Submit a new message template to Meta for approval."""
+        return self._request(
+            "POST",
+            f"/{self.version}/{waba_business_id}/message_templates",
+            json=payload,
+        )
+
     # Messages -------------------------------------------------------------
     def send_raw(self, phone_number_id, payload):
         """Post a Meta Cloud API payload verbatim and return the response."""

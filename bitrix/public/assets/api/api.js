@@ -31,6 +31,15 @@ export const catalog = {
   // For an admin this also carries each number's assigned agents.
   numbers: () => apiFetch("/api/catalog/numbers/"),
   templates: (numberId) => apiFetch(`/api/catalog/numbers/${numberId}/templates/`),
+  allTemplates: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.status) query.set("status", params.status);
+    if (params.q) query.set("q", params.q);
+    const qs = query.toString();
+    return apiFetch(`/api/catalog/templates/all/${qs ? `?${qs}` : ""}`);
+  },
+  createTemplate: (data) => apiFetch("/api/catalog/templates/create/", { method: "POST", body: data }),
+  syncTemplates: () => apiFetch("/api/catalog/sync/", { method: "POST", body: { what: "templates" } }),
 
   /** Admin only. */
   agents: () => apiFetch("/api/catalog/agents/"),
