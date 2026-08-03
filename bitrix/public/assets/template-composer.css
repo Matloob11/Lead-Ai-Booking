@@ -466,3 +466,44 @@ body[data-wa-theme="glass-dark"] .tplc-btn {
     min-height: 220px;
   }
 }
+
+/* Warning that this customer already has a thread. Not an error — sending is
+   still allowed; it only makes the second thread a deliberate choice. */
+.tplc-dup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #fdf3e2;
+  border: 1px solid #f0dfbe;
+  color: #8a6d21;
+  font-size: 12.5px;
+}
+
+.tplc-dup[hidden] {
+  display: none;
+}
+
+/* The plate is amber whatever the theme does, so the button on it states its
+   own colours. It avoids the shared .btn classes entirely — the themes force
+   colours on those with !important, which would be unreadable here. */
+.tplc-dup__btn {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid rgb(206 160 70 / 55%);
+  color: #7a5f1b;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tplc-dup__btn:hover {
+  background: #fffaf0;
+  border-color: #c8a34a;
+}

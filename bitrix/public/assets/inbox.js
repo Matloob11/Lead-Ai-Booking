@@ -985,11 +985,40 @@ export function mountInbox(root, { me }) {
       mode: "new",
       numbers: state.numbers.map((n) => ({ ...n, title: numberTitle(n) })),
       templatesFor,
+      findExisting: findConversationByWaId,
+      onOpenExisting: (id) => openConversation(id),
       onSent: async (created) => {
         await loadConversations({ keepActive: false });
         if (created?.id) await openConversation(created.id);
       },
     });
+  }
+
+  /**
+   * Any existing thread with this customer, on any of our numbers.
+   *
+   * The server keeps one conversation per (our number, customer) and reuses it,
+   * so sending from the same number can never duplicate anything. What it does
+   * not stop is an agent picking a different one of our numbers, which opens a
+   * second thread with the same person — that is what the composer warns about.
+   */
+  async function findConversationByWaId(waId) {
+    const match = (c) => String(c.contact?.wa_id || "").endsWith(waId) || waId.endsWith(String(c.contact?.wa_id || ""));
+
+    let found = state.conversations.find(match);
+    if (!found) {
+      // The list only holds the first page, so ask the server before deciding
+      // there is no existing chat.
+      const payload = await inbox.conversations({ q: waId, limit: 10 });
+      found = asList(payload, "conversations").find(match);
+    }
+    if (!found) return null;
+
+    return {
+      id: found.id,
+      number_id: found.number_id,
+      number_title: numberTitle(numberById(found.number_id)),
+    };
   }
 
   function openTransfer(conversation) {

@@ -132,7 +132,7 @@ const buttonIcon = (type) => (BUTTON_ICON[type] || BUTTON_ICON.QUICK_REPLY)();
  * @param {function} options.templatesFor    (numberId) => Promise<template[]>
  * @param {function} options.onSent          (result) => void, after a send lands
  */
-export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent }) {
+export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting }) {
   const isNew = mode === "new";
 
   const state = {
@@ -158,10 +158,65 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
 
   const numberSelect = el(
     "select.field",
-    { onchange: () => { state.numberId = numberSelect.value; loadTemplates(); } },
+    // The warning's wording depends on which of our numbers is selected, so a
+    // change here has to re-evaluate it.
+    { onchange: () => { state.numberId = numberSelect.value; loadTemplates(); checkExisting(); } },
     numbers.map((n) => el("option", { value: n.id }, [n.title || n.phone_number]))
   );
   const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
+
+  /**
+   * Warns when the typed customer already has a thread.
+   *
+   * The server keeps one conversation per (our number, customer), so sending
+   * from the same number lands in the existing chat — but picking a different
+   * one of our numbers opens a second thread, which is how a customer ends up
+   * looking duplicated in the list. Saying so here is the only point where it
+   * can still be avoided.
+   */
+  const dupNotice = el("div.tplc-dup", { hidden: true });
+
+  const checkExisting = debounce(async () => {
+    if (!isNew || typeof findExisting !== "function") return;
+
+    const waId = phone.value.replace(/\D/g, "");
+    if (waId.length < 8) {
+      dupNotice.hidden = true;
+      return;
+    }
+
+    let found;
+    try {
+      found = await findExisting(waId);
+    } catch {
+      return; // a failed lookup must not block a legitimate new chat
+    }
+    if (phone.value.replace(/\D/g, "") !== waId) return; // typed on since
+
+    if (!found) {
+      dupNotice.hidden = true;
+      return;
+    }
+
+    const sameNumber = String(found.number_id) === String(state.numberId);
+    clear(dupNotice).append(
+      el("div", {}, [
+        sameNumber
+          ? "Is customer ki chat pehle se maujood hai — template usi chat mein chala jayega, nayi chat nahi banegi."
+          : `Is customer ki chat pehle se maujood hai, magar ${found.number_title} par. Doosre number se bhejne par alag chat banegi.`,
+      ]),
+      // Deliberately not .btn--ghost: the theme forces white text on that class
+      // with !important, which is invisible on this amber plate.
+      el("button.tplc-dup__btn", {
+        type: "button",
+        onclick: () => {
+          dialog.close();
+          onOpenExisting?.(found.id);
+        },
+      }, ["Wahi chat kholein"])
+    );
+    dupNotice.hidden = false;
+  }, 350);
 
   /* ---- right column: what they will see ------------------------------ */
 
@@ -545,6 +600,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
   phone.addEventListener("input", () => {
     phoneFrame.querySelector(".tplc-phone__name").textContent = recipientLabel();
     refreshSendState();
+    checkExisting();
   });
 
   const left = el("div.tplc-left", {}, [
@@ -552,6 +608,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
       ? el("div.tplc-recipient", {}, [
           el("label.tplc-field", {}, [el("span", {}, ["From"]), numberSelect]),
           el("label.tplc-field", {}, [el("span", {}, ["To"]), phone]),
+          dupNotice,
         ])
       : null,
     search,
