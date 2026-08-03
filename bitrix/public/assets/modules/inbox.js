@@ -502,6 +502,27 @@ export function mountInbox(root, { me }) {
     }
   }
 
+  /**
+   * Refetches the open thread and redraws it, without reopening the chat.
+   *
+   * What star, retry and send-location all want after the server has changed
+   * something: the bubbles again, not a fresh conversation. Going through
+   * openConversation would re-run mark-read, reset the unread divider and, when
+   * a thread is already loading, return without doing anything at all — three
+   * call sites were asking for this function and none of them existed.
+   */
+  async function loadMessages(id) {
+    if (!id) return;
+    try {
+      const payload = await inbox.messages(id, { limit: PAGE_SIZE });
+      state.messages = asList(payload, "messages");
+      if (payload?.conversation) upsertConversation(payload.conversation);
+      renderMessages();
+    } catch (error) {
+      console.error("[a7-wa] could not refresh the thread:", error);
+    }
+  }
+
   const findConversation = (id) => state.conversations.find((c) => c.id === id) || null;
 
   /**
