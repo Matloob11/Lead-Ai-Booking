@@ -137,6 +137,29 @@ export const inbox = {
 
     return { promise, abort: () => xhr.abort() };
   },
+
+  sharedAssets: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.q) query.set("q", params.q);
+    if (params.kind) query.set("kind", params.kind);
+    const qs = query.toString();
+    return apiFetch(`/api/inbox/shared-assets/${qs ? `?${qs}` : ""}`);
+  },
+
+  uploadSharedAsset(file, title) {
+    const form = new FormData();
+    form.append("file", file);
+    if (title) form.append("title", title);
+    return apiFetch("/api/inbox/shared-assets/", { method: "POST", body: form });
+  },
+
+  deleteSharedAsset(id) {
+    return apiFetch(`/api/inbox/shared-assets/${id}/`, { method: "DELETE" });
+  },
+
+  labels: () => apiFetch("/api/inbox/labels/"),
+  setFlags: (conversationId, flags) =>
+    apiFetch(`/api/inbox/conversations/${conversationId}/flags/`, { method: "POST", body: flags }),
 };
 
 /**

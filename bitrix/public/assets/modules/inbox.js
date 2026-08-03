@@ -21,6 +21,8 @@ import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
 import { openTemplateComposer, openTemplateManager } from "./template-composer.js";
+import { openSharedLibraryModal } from "./shared-library.js";
+import { notifyNewMessage, playChime, requestNotificationPermission, isSoundEnabled, setSoundEnabled, isDesktopEnabled, setDesktopEnabled } from "../core/notifications.js";
 import { InboxSocket } from "../core/realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "../core/dom.js";
 import { bindEmojiPicker } from "../core/emoji.js";
@@ -105,6 +107,23 @@ export function mountInbox(root, { me }) {
     el("button.btn.menu__item", { onclick: () => openTemplateManager(), type: "button" }, [
       icon("file", { size: 16 }),
       "Templates Center",
+    ]),
+    el("button.btn.menu__item", { onclick: () => openSharedLibraryModal(), type: "button" }, [
+      icon("folder", { size: 16 }),
+      "Shared Library",
+    ]),
+    el("button.btn.menu__item", {
+      onclick: async () => {
+        const soundOn = isSoundEnabled();
+        setSoundEnabled(!soundOn);
+        if (!soundOn) playChime();
+        await requestNotificationPermission();
+        alert(`Audio Chime: ${!soundOn ? "ENABLED (Soft chime on new message)" : "DISABLED"}`);
+      },
+      type: "button",
+    }, [
+      icon("bell", { size: 16 }),
+      "Sound & Notifications",
     ]),
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [
@@ -578,8 +597,20 @@ export function mountInbox(root, { me }) {
 
   function renderConversations() {
     clear(ui.list);
-    for (const conversation of state.conversations) {
+    const conversationsToDraw = state.tagFilter
+      ? state.conversations.filter((c) => (c.labels || []).some((l) => l.name === state.tagFilter))
+      : state.conversations;
+
+    for (const conversation of conversationsToDraw) {
       const open = conversation.is_session_open;
+      const labelsNode = conversation.labels?.length
+        ? el("div.conv__labels", { style: "display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;" }, [
+            ...conversation.labels.map((l) =>
+              el("span.conv__label-chip", { style: `background: ${l.colour}; color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600;` }, [l.name])
+            ),
+          ])
+        : null;
+
       ui.list.append(
         el(
           "li.conv",
@@ -608,6 +639,7 @@ export function mountInbox(root, { me }) {
                   ? el("span.badge", {}, [String(conversation.unread_count)])
                   : null,
               ]),
+              labelsNode,
               el("div.conv__meta", {}, [
                 el("span.dot", {
                   class: !open ? "dot--closed" : isClosingSoon(conversation) ? "dot--closing" : "dot--open",
@@ -1026,12 +1058,33 @@ export function mountInbox(root, { me }) {
       );
     }
 
-    const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach" }, [icon("paperclip", { size: 19 })]);
+    const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach File" }, [icon("paperclip", { size: 19 })]);
+    const libraryBtn = el("button.btn.btn--icon", {
+      type: "button",
+      title: "Shared Media & Document Library",
+      onclick: () => {
+        openSharedLibraryModal({
+          isPicker: true,
+          onSelectAsset: async (asset) => {
+            if (!asset.url) return;
+            try {
+              const res = await fetch(asset.url);
+              const blob = await res.blob();
+              const file = new File([blob], asset.file_name || asset.title, { type: asset.mime_type || blob.type });
+              attachFile(conversation, file);
+            } catch (err) {
+              alert(`Sending asset failed: ${err.message}`);
+            }
+          },
+        });
+      },
+    }, [icon("folder", { size: 19 })]);
     const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, [icon("smile", { size: 19 })]);
 
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
+        el("div.composer__attach", {}, [libraryBtn]),
         el("div.composer__attach", {}, [emojiBtn]),
         slots.composer,
         textarea,
@@ -1385,6 +1438,17 @@ export function mountInbox(root, { me }) {
 
   function onMessageNew({ message, conversation }) {
     const active = conversation?.id === state.activeId;
+
+    if (message?.direction === "in") {
+      notifyNewMessage({
+        contactName: conversation?.contact?.name || conversation?.contact?.wa_id || "Customer",
+        messageText: message.body || "New message received",
+        conversationId: conversation?.id,
+        onClick: () => {
+          if (conversation?.id) openConversation(conversation.id);
+        },
+      });
+    }
 
     if (active) {
       // An id we already hold means this is a re-push (a reaction changed, or

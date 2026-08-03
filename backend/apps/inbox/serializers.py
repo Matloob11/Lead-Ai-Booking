@@ -143,3 +143,20 @@ def serialize_quick_reply(reply):
         "body": reply.body,
         "is_shared": reply.owner_id is None,
     }
+
+
+def serialize_shared_asset(asset, request=None):
+    url = asset.file.url if asset.file else ""
+    if request and url:
+        url = request.build_absolute_uri(url)
+    return {
+        "id": asset.pk,
+        "title": asset.title,
+        "kind": asset.kind,
+        "url": url,
+        "file_name": asset.file_name,
+        "size_bytes": asset.size_bytes,
+        "mime_type": asset.mime_type,
+        "created_by": serialize_agent(asset.created_by),
+        "created_at": _iso(asset.created_at),
+    }

@@ -312,3 +312,28 @@ class AssignmentLog(models.Model):
 
     def __str__(self):
         return f"{self.conversation_id}: {self.from_agent} -> {self.to_agent}"
+
+
+class SharedAsset(models.Model):
+    """A shared media file (brochure, layout, payment plan) uploaded once
+    and available for all agents to send to any customer in 1 click."""
+
+    class Kind(models.TextChoices):
+        IMAGE = "image", "Image"
+        DOCUMENT = "document", "Document"
+        VIDEO = "video", "Video"
+
+    title = models.CharField(max_length=255)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.DOCUMENT)
+    file = models.FileField(upload_to="shared/%Y/%m/")
+    file_name = models.CharField(max_length=255, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    mime_type = models.CharField(max_length=128, blank=True)
+    created_by = models.ForeignKey("accounts.Agent", on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title

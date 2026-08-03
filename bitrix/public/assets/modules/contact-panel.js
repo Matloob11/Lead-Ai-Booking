@@ -15,6 +15,7 @@
  */
 
 import { apiFetch } from "../core/bitrix-sso.js";
+import { inbox } from "../api/api.js";
 import { clear, el, formatBytes, initials, stamp } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 import { openLightbox } from "../core/lightbox.js";
@@ -107,6 +108,7 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
     body.append(
       identity(data),
       editable(data),
+      tagPicker(data),
       handledBy(data),
       activity(data),
       history(data),
@@ -187,6 +189,61 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
       el("label.cp-field", {}, [el("span", {}, ["Name"]), name]),
       el("label.cp-field", {}, [el("span", {}, ["Notes"]), notes]),
       el("div.cp-note", {}, ["Only your team sees this. The customer never does."]),
+    ]);
+  }
+
+  function tagPicker(data) {
+    const container = el("div.cp-tags", { style: "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;" });
+    const conv = data.conversation || {};
+    let activeIds = new Set((conv.labels || []).map((l) => l.id));
+
+    async function loadTags() {
+      clear(container).append(el("span.cp-note", {}, ["Loading tags…"]));
+      try {
+        const allLabels = await inbox.labels();
+        renderTags(allLabels);
+      } catch (err) {
+        clear(container).append(el("span.cp-note", {}, [`Failed: ${err.message}`]));
+      }
+    }
+
+    function renderTags(allLabels) {
+      clear(container);
+      for (const label of allLabels) {
+        const isActive = activeIds.has(label.id);
+        const tagChip = el(
+          "button.cp-tag-chip",
+          {
+            type: "button",
+            style: `cursor: pointer; border: 1px solid ${label.colour}; background: ${isActive ? label.colour : "transparent"}; color: ${isActive ? "#fff" : label.colour}; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; transition: all 0.15s ease;`,
+            onclick: async () => {
+              if (isActive) {
+                activeIds.delete(label.id);
+              } else {
+                activeIds.add(label.id);
+              }
+              renderTags(allLabels);
+              try {
+                const updated = await inbox.setFlags(conversationId, { label_ids: [...activeIds] });
+                if (data.conversation) data.conversation.labels = updated.labels;
+                onSaved?.(data);
+              } catch (err) {
+                alert(`Tag update failed: ${err.message}`);
+              }
+            },
+          },
+          [label.name]
+        );
+        container.append(tagChip);
+      }
+    }
+
+    loadTags();
+
+    return el("section.cp-block", {}, [
+      el("h3.cp-block__title", {}, ["Customer Tags & Labels"]),
+      container,
+      el("div.cp-note", {}, ["Click tag to toggle on/off for this customer"]),
     ]);
   }
 

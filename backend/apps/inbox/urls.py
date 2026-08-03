@@ -30,6 +30,8 @@ urlpatterns = [
     path("search/", views.search, name="search"),
     path("messages/<int:pk>/retry/", views.retry, name="retry"),
     path("start/", views.start, name="start"),
+    path("shared-assets/", views.shared_asset_list, name="shared-asset-list"),
+    path("shared-assets/<int:pk>/", views.shared_asset_delete, name="shared-asset-delete"),
     path("media/upload/", views.media_upload, name="media-upload"),
     path("media/<int:pk>/", views.media_download, name="media-download"),
 ]

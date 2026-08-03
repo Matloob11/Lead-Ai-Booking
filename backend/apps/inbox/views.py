@@ -16,7 +16,7 @@ from apps.gateway.client import AlotsError
 
 from . import services
 from .events import publish_conversation
-from .models import Conversation, Label, MediaAsset, Message, QuickReply, Reminder
+from .models import Conversation, Label, MediaAsset, Message, QuickReply, Reminder, SharedAsset
 from .serializers import (
     serialize_agent,
     serialize_conversation,
@@ -24,6 +24,7 @@ from .serializers import (
     serialize_number,
     serialize_quick_reply,
     serialize_reminder,
+    serialize_shared_asset,
 )
 
 
@@ -816,3 +817,55 @@ def export(request, pk):
 
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@api_view(["GET", "POST"])
+@parser_classes([MultiPartParser])
+def shared_asset_list(request):
+    """Shared Media & Document Library for all agents."""
+    if request.method == "POST":
+        file_obj = request.FILES.get("file")
+        title = str(request.data.get("title", "")).strip()
+        if not file_obj:
+            return Response({"detail": "File is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not title:
+            title = file_obj.name
+
+        mime_type = file_obj.content_type or ""
+        kind = SharedAsset.Kind.DOCUMENT
+        if mime_type.startswith("image/"):
+            kind = SharedAsset.Kind.IMAGE
+        elif mime_type.startswith("video/"):
+            kind = SharedAsset.Kind.VIDEO
+
+        asset = SharedAsset.objects.create(
+            title=title[:255],
+            kind=kind,
+            file=file_obj,
+            file_name=file_obj.name[:255],
+            size_bytes=file_obj.size,
+            mime_type=mime_type[:128],
+            created_by=request.user,
+        )
+        return Response(serialize_shared_asset(asset, request), status=status.HTTP_201_CREATED)
+
+    search = request.GET.get("q", "").strip()
+    kind = request.GET.get("kind", "").strip().lower()
+
+    assets = SharedAsset.objects.all()
+    if kind in SharedAsset.Kind.values:
+        assets = assets.filter(kind=kind)
+    if search:
+        assets = assets.filter(Q(title__icontains=search) | Q(file_name__icontains=search))
+
+    return Response([serialize_shared_asset(a, request) for a in assets])
+
+
+@api_view(["DELETE"])
+def shared_asset_delete(request, pk):
+    asset = get_object_or_404(SharedAsset, pk=pk)
+    if not (request.user.has_admin_rights or asset.created_by_id == request.user.pk):
+        return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+    asset.file.delete(save=False)
+    asset.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
