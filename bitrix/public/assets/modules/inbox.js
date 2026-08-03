@@ -1282,36 +1282,65 @@ export function mountInbox(root, { me }) {
     };
   }
 
-  function openTransfer(conversation) {
-    const agentId = el("input.field", { type: "text", placeholder: "Agent ID" });
+  async function openTransfer(conversation) {
+    const agentSelect = el("select.field", {}, [el("option", { value: "" }, ["Loading agents…"])]);
     const reason = el("input.field", { type: "text", placeholder: "Reason (optional)" });
     const error = el("div.alert", { hidden: true });
-    const send = el("button.btn.btn--primary", { type: "button" }, ["Transfer"]);
+    const send = el("button.btn.btn--primary", { type: "button", disabled: true }, ["Transfer"]);
 
     const dialog = modal(
       "Chat transfer",
       el("div.modal__body", {}, [
         el("p.modal__note", {}, ["The full history moves with the chat. Nothing is deleted."]),
-        el("label.field__row", {}, [el("span", {}, ["New agent"]), agentId]),
+        el("label.field__row", {}, [el("span", {}, ["Select Agent"]), agentSelect]),
         el("label.field__row", {}, [el("span", {}, ["Reason"]), reason]),
         error,
         el("div.modal__actions", {}, [send]),
       ])
     );
 
+    try {
+      const agentsList = await catalog.agents();
+      clear(agentSelect);
+      const activeAgents = (agentsList || []).filter((a) => a.is_active !== false);
+
+      if (!activeAgents.length) {
+        agentSelect.append(el("option", { value: "" }, ["No active agents found"]));
+      } else {
+        agentSelect.append(el("option", { value: "" }, ["-- Select Agent --"]));
+        const currentAgentId = conversation?.assigned_agent?.id || conversation?.assigned_agent;
+        for (const agent of activeAgents) {
+          const isCurrent = String(agent.id) === String(currentAgentId);
+          agentSelect.append(
+            el("option", { value: agent.id }, [
+              `${agent.display_name || agent.username} ${isCurrent ? "(Current)" : ""}`,
+            ])
+          );
+        }
+        send.disabled = false;
+      }
+    } catch (err) {
+      clear(agentSelect).append(el("option", { value: "" }, ["Could not load agents"]));
+      error.hidden = false;
+      error.textContent = `Error loading agents: ${err.message}`;
+    }
+
     send.addEventListener("click", async () => {
-      if (!agentId.value.trim()) {
+      const selectedId = agentSelect.value;
+      if (!selectedId) {
         error.hidden = false;
-        error.textContent = "An agent ID is required.";
+        error.textContent = "Please select an agent to transfer the chat.";
         return;
       }
       send.disabled = true;
+      send.textContent = "Transferring…";
       try {
-        await inbox.assign(conversation.id, { agent_id: agentId.value.trim(), reason: reason.value.trim() || undefined });
+        await inbox.assign(conversation.id, { agent_id: selectedId, reason: reason.value.trim() || undefined });
         dialog.close();
         await loadConversations();
       } catch (err) {
         send.disabled = false;
+        send.textContent = "Transfer";
         error.hidden = false;
         error.textContent = err.message;
       }
