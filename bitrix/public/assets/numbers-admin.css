@@ -1,0 +1,393 @@
+/* Numbers admin — quiet, clean glass design.
+   Gentle tones, clear agent assignment chips with explicit Remove buttons. */
+
+.na {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(76vh, 700px);
+}
+
+.na-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------- toolbar */
+
+.na-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.na-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.na-search:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+.na-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.na-summary {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.na-summary strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.na-rows {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.na-row {
+  display: grid;
+  grid-template-areas:
+    "head"
+    "body"
+    "foot";
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  transition: all 0.15s ease;
+}
+
+.na-head {
+  grid-area: head;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.na-title {
+  font-size: 14px;
+  font-weight: 650;
+  word-break: break-word;
+}
+
+.na-phone {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.na-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.na-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.na-badge--warn {
+  border-color: #e6cfa8;
+  color: #8a5a00;
+}
+
+.na-badge--bad {
+  border-color: #e8b8b3;
+  color: var(--err);
+}
+
+.na-body {
+  grid-area: body;
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.6fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.na-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.na-field > span {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.na-input,
+.na-picker {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.na-input:focus,
+.na-picker:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+.na-picker:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.na-picker-wrap {
+  margin-top: 4px;
+}
+
+/* ----------------------------------------------------------------- chips */
+
+.na-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 30px;
+  align-items: center;
+}
+
+.na-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.na-chip__name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.na-chip__remove-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.na-chip__remove-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.na-empty {
+  padding: 4px 10px;
+  border: 1px dashed rgba(217, 119, 6, 0.4);
+  background: rgba(253, 230, 138, 0.15);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: #b45309;
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ foot */
+
+.na-foot {
+  grid-area: foot;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.na-status {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.na-status--ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.na-status--err {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.na-save {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.na-save--ready {
+  border-color: #10b981;
+  background: #10b981;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+  cursor: pointer;
+}
+
+.na-save--ready:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.na-save:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ------------------------------------------------------------ dark theme */
+
+body[data-wa-theme="glass-dark"] .na-row {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+body[data-wa-theme="glass-dark"] .na-head,
+body[data-wa-theme="glass-dark"] .na-foot {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-wa-theme="glass-dark"] .na-title,
+body[data-wa-theme="glass-dark"] .na-summary strong,
+body[data-wa-theme="glass-dark"] .na-input,
+body[data-wa-theme="glass-dark"] .na-picker,
+body[data-wa-theme="glass-dark"] .na-search {
+  color: #eef3f9;
+}
+
+body[data-wa-theme="glass-dark"] .na-input,
+body[data-wa-theme="glass-dark"] .na-picker,
+body[data-wa-theme="glass-dark"] .na-search,
+body[data-wa-theme="glass-dark"] .na-badge {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+body[data-wa-theme="glass-dark"] .na-chip {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #f1f5f9;
+}
+
+body[data-wa-theme="glass-dark"] .na-chip__remove-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+body[data-wa-theme="glass-dark"] .na-chip__remove-btn:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+/* Fix for OS native option elements in dark mode */
+body[data-wa-theme="glass-dark"] .na-picker option {
+  background: #0e1a2b !important;
+  color: #eef3f9 !important;
+  padding: 8px !important;
+}
+
+body[data-wa-theme="glass-dark"] .na-badge--warn {
+  border-color: rgba(232, 190, 120, 0.5);
+  color: #e8be78;
+}
+
+body[data-wa-theme="glass-dark"] .na-badge--bad {
+  border-color: rgba(232, 140, 130, 0.5);
+  color: #e88c82;
+}
+
+body[data-wa-theme="glass-dark"] .na-empty {
+  border-color: rgba(232, 190, 120, 0.4);
+  background: rgba(232, 190, 120, 0.08);
+  color: #e8be78;
+}
+
+body[data-wa-theme="glass-dark"] .na-save--ready {
+  background: rgba(46, 168, 131, 0.35) !important;
+  border-color: rgba(120, 235, 195, 0.5) !important;
+  color: #7ff0c6 !important;
+  box-shadow: 0 4px 14px rgba(46, 168, 131, 0.3) !important;
+}
+
+body[data-wa-theme="glass-dark"] .na-save--ready:hover {
+  background: rgba(46, 168, 131, 0.55) !important;
+  color: #ffffff !important;
+}
+
+/* ---------------------------------------------------------------- narrow */
+
+@media (max-width: 760px) {
+  .na-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
