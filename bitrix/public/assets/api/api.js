@@ -43,6 +43,8 @@ export const catalog = {
 
   /** Admin only. */
   agents: () => apiFetch("/api/catalog/agents/"),
+  setAgentAdmin: (agentId, isWaAdmin) =>
+    apiFetch(`/api/catalog/agents/${agentId}/admin/`, { method: "POST", body: { is_wa_admin: isWaAdmin } }),
 
   /** Renames a number. An empty label clears it and `title` falls back. */
   renameNumber: (numberId, label) =>
@@ -72,6 +74,29 @@ export const inbox = {
 
   sendTemplate: (conversationId, body) =>
     apiFetch(`/api/inbox/conversations/${conversationId}/send-template/`, { method: "POST", body }),
+
+  sendLocation: (conversationId, data) =>
+    apiFetch(`/api/inbox/conversations/${conversationId}/send-location/`, { method: "POST", body: data }),
+
+  forward: (messageId, conversationId) =>
+    apiFetch(`/api/inbox/messages/${messageId}/forward/`, { method: "POST", body: { conversation_id: conversationId } }),
+
+  retry: (messageId) =>
+    apiFetch(`/api/inbox/messages/${messageId}/retry/`, { method: "POST", body: {} }),
+
+  star: (messageId, starred) =>
+    apiFetch(`/api/inbox/messages/${messageId}/star/`, { method: "POST", body: { starred } }),
+
+  starredList: (conversationId) => {
+    const qs = conversationId ? `?conversation=${conversationId}` : "";
+    return apiFetch(`/api/inbox/starred/${qs}`);
+  },
+
+  quickReplies: () => apiFetch("/api/inbox/quick-replies/"),
+  createQuickReply: (data) => apiFetch("/api/inbox/quick-replies/", { method: "POST", body: data }),
+  deleteQuickReply: (id) => apiFetch(`/api/inbox/quick-replies/${id}/`, { method: "DELETE" }),
+
+  exportUrl: (conversationId, fmt = "txt") => `/api/inbox/conversations/${conversationId}/export/?fmt=${fmt}`,
 
   assign: (conversationId, body) =>
     apiFetch(`/api/inbox/conversations/${conversationId}/assign/`, { method: "POST", body }),

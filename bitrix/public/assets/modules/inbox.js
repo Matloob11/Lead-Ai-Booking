@@ -22,6 +22,11 @@ import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
 import { openTemplateComposer, openTemplateManager } from "./template-composer.js";
 import { openSharedLibraryModal } from "./shared-library.js";
+import { openLocationModal } from "./location-picker.js";
+import { openQuickRepliesModal, bindSlashAutocomplete } from "./quick-replies.js";
+import { openStarredMessagesModal } from "./starred-messages.js";
+import { openAgentsAdminModal } from "./agents-admin.js";
+import { openForwardModal } from "./forward-picker.js";
 import { notifyNewMessage, playChime, requestNotificationPermission, isSoundEnabled, setSoundEnabled, isDesktopEnabled, setDesktopEnabled } from "../core/notifications.js";
 import { InboxSocket } from "../core/realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "../core/dom.js";
@@ -112,6 +117,30 @@ export function mountInbox(root, { me }) {
       icon("folder", { size: 16 }),
       "Shared Library",
     ]),
+    el("button.btn.menu__item", {
+      onclick: () => openQuickRepliesModal({ isWaAdmin: me.is_wa_admin }),
+      type: "button",
+    }, [
+      icon("zap", { size: 16 }),
+      "Quick Replies",
+    ]),
+    el("button.btn.menu__item", {
+      onclick: () =>
+        openStarredMessagesModal({
+          conversationId: null,
+          onNavigateToMessage: (convId, msgId) => openConversation(convId, { highlightMessageId: msgId }),
+        }),
+      type: "button",
+    }, [
+      icon("star", { size: 16 }),
+      "Starred Messages",
+    ]),
+    me.is_wa_admin
+      ? el("button.btn.menu__item", { onclick: () => openAgentsAdminModal({ me }), type: "button" }, [
+          icon("userCheck", { size: 16 }),
+          "Agents & Panel Admins",
+        ])
+      : null,
     el("button.btn.menu__item", {
       onclick: async () => {
         const soundOn = isSoundEnabled();
@@ -703,7 +732,37 @@ export function mountInbox(root, { me }) {
         conversation.assigned_agent
           ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
           : null,
-        slots.topbar,
+        el("button.btn.btn--ghost.btn--sm", {
+          type: "button",
+          title: "Export chat record",
+          onclick: () => {
+            const expDialog = modal(
+              "Export Chat Record",
+              el("div.modal__body", {}, [
+                el("p.modal__note", {}, ["Download complete chat history as Text (.txt) or Spreadsheet (.csv):"]),
+                el("div.modal__actions", { style: "gap: 12px; justify-content: center; margin-top: 16px;" }, [
+                  el("button.btn.btn--primary", {
+                    type: "button",
+                    onclick: () => {
+                      expDialog.close();
+                      window.open(inbox.exportUrl(conversation.id, "txt"), "_blank");
+                    },
+                  }, [icon("fileText", { size: 15 }), " Download TXT"]),
+                  el("button.btn.btn--primary", {
+                    type: "button",
+                    onclick: () => {
+                      expDialog.close();
+                      window.open(inbox.exportUrl(conversation.id, "csv"), "_blank");
+                    },
+                  }, [icon("file", { size: 15 }), " Download CSV"]),
+                ]),
+              ])
+            );
+          },
+        }, [
+          icon("download", { size: 15 }),
+          "Export",
+        ]),
         state.me.is_wa_admin
           ? el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: () => openTransfer(conversation) }, [
               icon("users", { size: 15 }),
@@ -822,35 +881,140 @@ export function mountInbox(root, { me }) {
     return -1;
   }
 
+  function locationNode(message) {
+    if (message.kind !== "location" && !message.location) return null;
+    const loc = message.location || {};
+    const lat = loc.latitude;
+    const lng = loc.longitude;
+    const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+    return el("div.msg__location-card", {
+      style: "padding: 10px; background: rgba(0,0,0,0.18); border-radius: 8px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.08);",
+    }, [
+      el("div", { style: "display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px;" }, [
+        icon("mapPin", { size: 16 }),
+        loc.name || "Shared Location Pin",
+      ]),
+      loc.address ? el("div", { style: "font-size: 12px; opacity: 0.8; margin-top: 2px;" }, [loc.address]) : null,
+      el("a.msg__doc", {
+        href: mapsUrl,
+        target: "_blank",
+        rel: "noopener",
+        style: "margin-top: 6px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #25D366; text-decoration: none; font-weight: 600;",
+      }, [
+        icon("globe", { size: 14 }),
+        " Open in Google Maps",
+      ]),
+    ]);
+  }
+
+  function retryButton(message) {
+    if (message.status !== "failed" || message.direction !== "out") return null;
+
+    return el(
+      "button.msg__retry",
+      {
+        type: "button",
+        style: "margin-top: 6px;",
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          button.textContent = "Retrying…";
+          try {
+            await inbox.retry(message.id);
+            if (state.activeId) await loadMessages(state.activeId);
+          } catch (err) {
+            button.disabled = false;
+            button.replaceChildren(icon("refresh", { size: 13 }), " Retry");
+            alert(`Retry failed: ${err.message}`);
+          }
+        },
+      },
+      [icon("refresh", { size: 13 }), " Retry"]
+    );
+  }
+
   function messageBubble(message) {
     const outbound = message.direction === "out";
     const tick = outbound ? STATUS_TICK[message.status] : null;
     const failure = [message.error_code, message.error_detail].filter(Boolean).join(" · ");
-    // On a shared number the agent needs to see who replied, but their own name
-    // on every one of their bubbles is noise.
     const author = outbound && message.sent_by && message.sent_by.id !== state.me.id ? message.sent_by.display_name : null;
 
     const media = mediaNode(message);
+    const location = locationNode(message);
+
+    const forwardedTag = message.is_forwarded
+      ? el("div.msg__forwarded-tag", {
+          style: "font-size: 11px; font-style: italic; opacity: 0.75; display: flex; align-items: center; gap: 4px; margin-bottom: 4px;",
+        }, [
+          icon("forward", { size: 12 }),
+          "Forwarded",
+        ])
+      : null;
+
+    const starBadge = message.is_starred
+      ? el("span.msg__star-badge", {
+          title: "Starred message",
+          style: "color: #eab308; display: inline-flex; align-items: center; margin-left: 4px;",
+        }, [
+          icon("starFill", { size: 13 }),
+        ])
+      : null;
+
+    const actionToolbar = el("div.msg__action-tools", {
+      style: "display: flex; gap: 6px; margin-top: 4px; justify-content: flex-end; opacity: 0.8;",
+    }, [
+      el("button.btn.btn--icon.btn--xs", {
+        type: "button",
+        title: message.is_starred ? "Unstar message" : "Star message",
+        style: "padding: 2px 4px;",
+        onclick: async () => {
+          try {
+            await inbox.star(message.id, !message.is_starred);
+            message.is_starred = !message.is_starred;
+            if (state.activeId) await loadMessages(state.activeId);
+          } catch (err) {
+            alert(`Star action failed: ${err.message}`);
+          }
+        },
+      }, [icon(message.is_starred ? "starFill" : "star", { size: 13 })]),
+      el("button.btn.btn--icon.btn--xs", {
+        type: "button",
+        title: "Forward message",
+        style: "padding: 2px 4px;",
+        onclick: () => {
+          openForwardModal({
+            message,
+            conversations: state.conversations,
+            onForward: (conv) => {
+              const name = conv.contact?.name || conv.contact?.wa_id || "Customer";
+              alert(`Forwarded to ${name}`);
+            },
+          });
+        },
+      }, [icon("forward", { size: 13 })]),
+    ]);
 
     return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
       el("div.msg__bubble", {}, [
+        forwardedTag,
+        location,
         media,
         message.body ? el("div.msg__text", {}, [message.body]) : null,
-        // Reactions, locations, contact cards and anything else we do not draw
-        // still arrived — an empty bubble reads as a broken panel, so say what
-        // it was instead of showing nothing.
-        !media && !message.body ? el("div.msg__unsupported", {}, [unsupportedLabel(message.kind)]) : null,
+        !media && !location && !message.body ? el("div.msg__unsupported", {}, [unsupportedLabel(message.kind)]) : null,
         failure ? el("div.msg__error", {}, [failure]) : null,
         retryButton(message),
         el("div.msg__foot", {}, [
           author ? el("span.msg__author", {}, [author]) : null,
           el("span", {}, [stamp(message.created_at)]),
+          starBadge,
           tick
             ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [
                 icon(tick.name, { size: 15 }),
               ])
             : null,
         ]),
+        actionToolbar,
       ]),
       reactionsNode(message),
     ]);
@@ -1086,12 +1250,42 @@ export function mountInbox(root, { me }) {
         });
       },
     }, [icon("folder", { size: 19 })]);
+    const locationBtn = el("button.btn.btn--icon", {
+      type: "button",
+      title: "Send Location Pin",
+      onclick: () => {
+        openLocationModal({
+          onSendLocation: async (locData) => {
+            await inbox.sendLocation(conversation.id, locData);
+            if (state.activeId) await loadMessages(state.activeId);
+          },
+        });
+      },
+    }, [icon("mapPin", { size: 19 })]);
+
+    const quickReplyBtn = el("button.btn.btn--icon", {
+      type: "button",
+      title: "Quick Replies (Type / in message)",
+      onclick: () => {
+        openQuickRepliesModal({
+          isWaAdmin: state.me.is_wa_admin,
+          onSelectReply: (reply) => {
+            textarea.value += reply.body;
+            textarea.focus();
+            autoGrow(textarea);
+          },
+        });
+      },
+    }, [icon("zap", { size: 19 })]);
+
     const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, [icon("smile", { size: 19 })]);
 
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
         el("div.composer__attach", {}, [libraryBtn]),
+        el("div.composer__attach", {}, [locationBtn]),
+        el("div.composer__attach", {}, [quickReplyBtn]),
         el("div.composer__attach", {}, [emojiBtn]),
         slots.composer,
         textarea,
@@ -1101,6 +1295,12 @@ export function mountInbox(root, { me }) {
         ]),
       ])
     );
+
+    bindSlashAutocomplete({
+      textarea,
+      isWaAdmin: state.me.is_wa_admin,
+      onApply: () => autoGrow(textarea),
+    });
 
     teardownEmoji?.destroy();
     teardownEmoji = bindEmojiPicker({ button: emojiBtn, textarea });
