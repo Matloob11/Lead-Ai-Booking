@@ -27,9 +27,10 @@ import { openQuickRepliesModal, bindSlashAutocomplete } from "./quick-replies.js
 import { openStarredMessagesModal } from "./starred-messages.js";
 import { openAgentsAdminModal } from "./agents-admin.js";
 import { openForwardModal } from "./forward-picker.js";
+import { openReportsModal } from "./reports.js";
 import { notifyNewMessage, playChime, requestNotificationPermission, isSoundEnabled, setSoundEnabled, isDesktopEnabled, setDesktopEnabled } from "../core/notifications.js";
 import { InboxSocket } from "../core/realtime.js";
-import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, untilText, initials } from "../core/dom.js";
+import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, toast, untilText, initials } from "../core/dom.js";
 import { bindEmojiPicker } from "../core/emoji.js";
 import { icon, iconForKind } from "../core/icons.js";
 
@@ -120,6 +121,10 @@ export function mountInbox(root, { me }) {
       icon("folder", { size: 16 }),
       "Shared Library",
     ]),
+    el("button.btn.menu__item", { onclick: () => openReportsModal(), type: "button" }, [
+      icon("zap", { size: 16 }),
+      "Reports",
+    ]),
     el("button.btn.menu__item", {
       onclick: () => openQuickRepliesModal({ isWaAdmin: me.is_wa_admin }),
       type: "button",
@@ -150,7 +155,7 @@ export function mountInbox(root, { me }) {
         setSoundEnabled(!soundOn);
         if (!soundOn) playChime();
         await requestNotificationPermission();
-        alert(`Audio Chime: ${!soundOn ? "ENABLED (Soft chime on new message)" : "DISABLED"}`);
+        toast(`Sound ${!soundOn ? "on" : "off"} for new messages`);
       },
       type: "button",
     }, [
@@ -952,7 +957,7 @@ export function mountInbox(root, { me }) {
           } catch (err) {
             button.disabled = false;
             button.replaceChildren(icon("refresh", { size: 13 }), " Retry");
-            alert(`Retry failed: ${err.message}`);
+            toast(`Retry failed: ${err.message}`, "err");
           }
         },
       },
@@ -1043,44 +1048,55 @@ export function mountInbox(root, { me }) {
         ])
       : null;
 
-    const actionToolbar = el("div.msg__action-tools", {
-      style: "display: flex; gap: 6px; margin-top: 4px; justify-content: flex-end; opacity: 0.8;",
-    }, [
-      el("button.btn.btn--icon.btn--xs", {
+    /**
+     * Reply / star / forward for one message.
+     *
+     * Kept out of the bubble and revealed on hover: three buttons under every
+     * message tripled the visual weight of the thread and pushed the text
+     * apart, while the actions themselves are occasional. They stay reachable
+     * without a mouse — focus inside the row reveals it the same way.
+     */
+    const actionToolbar = el("div.msg__acts", {}, [
+      el("button.msg__act", {
         type: "button",
         title: "Reply to this message",
-        style: "padding: 2px 4px;",
         onclick: () => startReply(message),
-      }, [icon("reply", { size: 13 })]),
-      el("button.btn.btn--icon.btn--xs", {
+      }, [icon("reply", { size: 14 })]),
+
+      el("button.msg__act", {
         type: "button",
+        class: message.is_starred ? "msg__act--on" : "",
         title: message.is_starred ? "Unstar message" : "Star message",
-        style: "padding: 2px 4px;",
-        onclick: async () => {
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          const next = !message.is_starred;
+          button.disabled = true;
           try {
-            await inbox.star(message.id, !message.is_starred);
-            message.is_starred = !message.is_starred;
-            if (state.activeId) await loadMessages(state.activeId);
+            await inbox.star(message.id, next);
+            message.is_starred = next;
+            // Repaint this bubble only. Reloading the thread for a star threw
+            // away the scroll position and every other bubble's state.
+            replaceMessageById(message);
           } catch (err) {
-            alert(`Star action failed: ${err.message}`);
+            button.disabled = false;
+            toast(`Could not star the message: ${err.message}`, "err");
           }
         },
-      }, [icon(message.is_starred ? "starFill" : "star", { size: 13 })]),
-      el("button.btn.btn--icon.btn--xs", {
+      }, [icon(message.is_starred ? "starFill" : "star", { size: 14 })]),
+
+      el("button.msg__act", {
         type: "button",
         title: "Forward message",
-        style: "padding: 2px 4px;",
         onclick: () => {
           openForwardModal({
             message,
             conversations: state.conversations,
             onForward: (conv) => {
-              const name = conv.contact?.name || conv.contact?.wa_id || "Customer";
-              alert(`Forwarded to ${name}`);
+              toast(`Forwarded to ${conv.contact?.name || conv.contact?.wa_id || "the chat"}`);
             },
           });
         },
-      }, [icon("forward", { size: 13 })]),
+      }, [icon("forward", { size: 14 })]),
     ]);
 
     return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
@@ -1103,8 +1119,8 @@ export function mountInbox(root, { me }) {
               ])
             : null,
         ]),
-        actionToolbar,
       ]),
+      actionToolbar,
       reactionsNode(message),
     ]);
   }
@@ -1312,10 +1328,7 @@ export function mountInbox(root, { me }) {
     }
 
     const attachBtn = el("button.btn.btn--icon", { type: "button", title: "Attach File" }, [icon("paperclip", { size: 19 })]);
-    const libraryBtn = el("button.btn.btn--icon", {
-      type: "button",
-      title: "Shared Media & Document Library",
-      onclick: () => {
+    const openLibrary = () => {
         openSharedLibraryModal({
           isPicker: true,
           onSelectAsset: async (asset) => {
@@ -1333,29 +1346,22 @@ export function mountInbox(root, { me }) {
               });
               attachFile(conversation, file);
             } catch (err) {
-              alert(`Could not send that file: ${err.message}`);
+              toast(`Could not send that file: ${err.message}`, "err");
             }
           },
         });
-      },
-    }, [icon("folder", { size: 19 })]);
-    const locationBtn = el("button.btn.btn--icon", {
-      type: "button",
-      title: "Send Location Pin",
-      onclick: () => {
+    };
+
+    const openLocation = () => {
         openLocationModal({
           onSendLocation: async (locData) => {
             await inbox.sendLocation(conversation.id, locData);
             if (state.activeId) await loadMessages(state.activeId);
           },
         });
-      },
-    }, [icon("mapPin", { size: 19 })]);
+    };
 
-    const quickReplyBtn = el("button.btn.btn--icon", {
-      type: "button",
-      title: "Quick Replies (Type / in message)",
-      onclick: () => {
+    const openQuickReplies = () => {
         openQuickRepliesModal({
           isWaAdmin: state.me.is_wa_admin,
           onSelectReply: (reply) => {
@@ -1364,8 +1370,7 @@ export function mountInbox(root, { me }) {
             autoGrow(textarea);
           },
         });
-      },
-    }, [icon("zap", { size: 19 })]);
+    };
 
     const emojiBtn = el("button.btn.btn--icon", { type: "button", title: "Emoji" }, [icon("smile", { size: 19 })]);
 
@@ -1386,9 +1391,6 @@ export function mountInbox(root, { me }) {
     ui.composer.append(
       el("div.composer", {}, [
         el("div.composer__attach", {}, [attachBtn]),
-        el("div.composer__attach", {}, [libraryBtn]),
-        el("div.composer__attach", {}, [locationBtn]),
-        el("div.composer__attach", {}, [quickReplyBtn]),
         el("div.composer__attach", {}, [emojiBtn]),
         slots.composer,
         textarea,
@@ -1416,6 +1418,13 @@ export function mountInbox(root, { me }) {
       dropZone: ui.messages,
       pasteTarget: textarea,
       onFile: (file) => attachFile(conversation, file),
+      // Everything else that puts content into a message lives in the same
+      // menu, so the composer shows one "add" button rather than four.
+      extraItems: [
+        { icon: "folder", label: "Shared library", onSelect: openLibrary },
+        { icon: "mapPin", label: "Location pin", onSelect: openLocation },
+        { icon: "zap", label: "Quick reply", onSelect: openQuickReplies },
+      ],
     });
 
     textarea.focus();

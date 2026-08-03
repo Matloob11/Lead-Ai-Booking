@@ -782,7 +782,6 @@ body {
 /* ------------------------------------------------------------ emoji */
 
 .emoji {
-  color: var(--ink);
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
@@ -791,8 +790,9 @@ body {
   max-height: 260px;
   overflow-y: auto;
   padding: 8px;
-  background: #fff;
-  border: 1px solid var(--line);
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+  border: 1px solid var(--menu-line);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
 }
@@ -823,7 +823,7 @@ body {
 }
 
 .emoji__item:hover {
-  background: #f2f5f8;
+  background: var(--menu-hover);
 }
 
 .thread__messages {
@@ -1085,15 +1085,15 @@ body {
 }
 
 .attach-menu {
-  color: var(--ink);
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 30;
   min-width: 190px;
   padding: 4px;
-  background: #fff;
-  border: 1px solid var(--line);
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+  border: 1px solid var(--menu-line);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
 }
@@ -1114,7 +1114,7 @@ body {
 }
 
 .attach-menu__item:hover {
-  background: #f2f5f8;
+  background: var(--menu-hover);
 }
 
 .attach__preview {
@@ -1444,4 +1444,105 @@ body {
 
 body[data-wa-theme="glass-dark"] .quoted {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* --------------------------------------------------- per-message actions */
+
+/* Reply / star / forward. Hidden until the message is hovered or something
+   inside the row takes focus — three buttons under every bubble tripled the
+   thread's visual weight for actions that are used occasionally. Reserving
+   the height keeps the bubbles from shifting when they appear. */
+.msg__acts {
+  display: flex;
+  gap: 2px;
+  height: 26px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.msg:hover .msg__acts,
+.msg:focus-within .msg__acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* A starred message keeps its marker visible even when not hovered — that is
+   state, not an action. */
+.msg__acts:has(.msg__act--on) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg__act {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.msg__act:hover {
+  background: var(--menu-hover, #f2f5f8);
+  color: var(--ink);
+}
+
+.msg__act:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.msg__act--on {
+  color: #eab308;
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ toasts */
+
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  max-width: 78vw;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: #16202e;
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 30%);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.toast--err {
+  background: #a12a22;
+}
+
+.toast--out {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* Divider between "attach a file" and the other ways to add content. */
+.attach-menu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--menu-line);
 }

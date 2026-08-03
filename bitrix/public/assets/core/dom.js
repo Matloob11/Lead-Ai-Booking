@@ -148,3 +148,32 @@ export function initials(name) {
   if (!parts.length) return "#";
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
+
+/**
+ * Brief confirmation or failure notice, bottom-centre.
+ *
+ * Replaces window.alert for things the agent does not have to acknowledge —
+ * a forward that went through, a star that did not. alert() blocks the whole
+ * frame and has to be dismissed, which is far too much ceremony for feedback
+ * the agent will glance at once.
+ *
+ * @param {"ok"|"err"} [kind]
+ */
+export function toast(message, kind = "ok") {
+  let host = document.querySelector(".toasts");
+  if (!host) {
+    host = el("div.toasts");
+    document.body.append(host);
+  }
+
+  const node = el("div.toast", { class: `toast--${kind}` }, [String(message)]);
+  host.append(node);
+
+  // Fade out first, then remove — the class change drives the CSS transition.
+  setTimeout(() => {
+    node.classList.add("toast--out");
+    setTimeout(() => node.remove(), 250);
+  }, kind === "err" ? 4200 : 2400);
+
+  return node;
+}

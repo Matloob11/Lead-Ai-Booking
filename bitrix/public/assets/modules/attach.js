@@ -175,7 +175,7 @@ function previewNode(file, kind) {
  * Wires the attach button, drag & drop and clipboard paste onto one handler.
  * Returns a teardown so the listeners die with the composer.
  */
-export function bindFileSources({ button, dropZone, pasteTarget, onFile }) {
+export function bindFileSources({ button, dropZone, pasteTarget, onFile, extraItems = [] }) {
   const input = el("input", { type: "file", hidden: true });
   document.body.append(input);
 
@@ -190,7 +190,7 @@ export function bindFileSources({ button, dropZone, pasteTarget, onFile }) {
     input.click();
   };
 
-  const menu = attachMenu(button, pick);
+  const menu = attachMenu(button, pick, extraItems);
 
   const onDragOver = (event) => {
     if (!event.dataTransfer?.types?.includes("Files")) return;
@@ -233,7 +233,7 @@ export function bindFileSources({ button, dropZone, pasteTarget, onFile }) {
 }
 
 /** The small Photo/Document/Audio popup anchored to the attach button. */
-function attachMenu(button, pick) {
+function attachMenu(button, pick, extraItems = []) {
   let open = null;
 
   const close = () => {
@@ -250,22 +250,42 @@ function attachMenu(button, pick) {
     event.preventDefault();
     if (open) return close();
 
+    // Anything else that puts content into a message — the shared library, a
+    // location pin, a saved reply — belongs in this menu too. One button in the
+    // composer instead of four, and the grouping matches how an agent thinks
+    // about it: "add something".
+    const fileItems = ATTACH_MENU.map((entry) =>
+      el(
+        "button.attach-menu__item",
+        {
+          type: "button",
+          onclick: () => {
+            close();
+            pick(entry.accept);
+          },
+        },
+        [icon(entry.icon, { size: 17 }), entry.label]
+      )
+    );
+
+    const extras = extraItems.map((entry) =>
+      el(
+        "button.attach-menu__item",
+        {
+          type: "button",
+          onclick: () => {
+            close();
+            entry.onSelect?.();
+          },
+        },
+        [icon(entry.icon, { size: 17 }), entry.label]
+      )
+    );
+
     open = el(
       "div.attach-menu",
       {},
-      ATTACH_MENU.map((entry) =>
-        el(
-          "button.attach-menu__item",
-          {
-            type: "button",
-            onclick: () => {
-              close();
-              pick(entry.accept);
-            },
-          },
-          [icon(entry.icon, { size: 17 }), entry.label]
-        )
-      )
+      [...fileItems, ...(extras.length ? [el("div.attach-menu__sep")] : []), ...extras]
     );
 
     button.parentElement.append(open);
