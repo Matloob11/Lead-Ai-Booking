@@ -13,7 +13,8 @@
  *  - transfer is admin-only.
  */
 
-import { catalog, inbox, asList } from "./api.js";
+import { access, catalog, inbox, asList } from "./api.js";
+import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "./bitrix-sso.js";
 import { imagesInThread, openLightbox } from "./lightbox.js";
@@ -90,12 +91,23 @@ export function mountInbox(root, { me }) {
    * "W…" — and companion modules append their own into this bar too, so it
    * only gets tighter. A name and a menu is all the bar holds now.
    */
+  // Count of agents waiting for a number; the badge is the only nudge an admin
+  // gets, so it is filled in as soon as the list is known.
+  const requestsBadge = el("span.badge.menu__badge", { hidden: true });
+
   const menuPanel = el("div.sidebar__menu", { hidden: true }, [
     slots.search,
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [
           icon("hash", { size: 16 }),
           "Numbers",
+        ])
+      : null,
+    me.is_wa_admin
+      ? el("button.btn.menu__item", { onclick: openRequests, type: "button" }, [
+          icon("users", { size: 16 }),
+          "New agent messages",
+          requestsBadge,
         ])
       : null,
     el("button.btn.menu__item", { onclick: openNewContact, type: "button" }, [
@@ -182,6 +194,15 @@ export function mountInbox(root, { me }) {
     // one round trip; the catalog call is only the fallback.
     state.numbers = asList(me.numbers, "numbers");
     if (!state.numbers.length) state.numbers = asList(await catalog.numbers(), "numbers");
+
+    // With no number there is nothing to show and no chat to open, so the
+    // panel becomes a way to ask for one instead of an empty list.
+    if (!state.numbers.length) {
+      root.className = "";
+      renderNoNumbersScreen(root, { me, onAssigned: () => window.location.reload() });
+      return;
+    }
+
     renderNumberFilter();
     await loadConversations();
 
@@ -189,6 +210,7 @@ export function mountInbox(root, { me }) {
     clear(root).append(layout);
     connectSocket();
     publishApi();
+    if (me.is_wa_admin) refreshRequestCount();
 
     // The frame's height is Bitrix's to decide, and the panel simply fills it.
     // Asking for a taller frame (there is no API for "how much room do I have")
@@ -940,6 +962,24 @@ export function mountInbox(root, { me }) {
     });
   }
 
+  function openRequests() {
+    openAccessRequests({ onOpenNumbers: openNumbers });
+    // Reading them is the acknowledgement; the count refreshes from the server
+    // rather than being cleared optimistically.
+    setTimeout(refreshRequestCount, 500);
+  }
+
+  /** Keeps the menu badge honest. Silent on failure — it is only a hint. */
+  async function refreshRequestCount() {
+    try {
+      const pending = asList(await access.list(), "requests").filter((r) => r.status !== "resolved");
+      requestsBadge.textContent = String(pending.length);
+      requestsBadge.hidden = pending.length === 0;
+    } catch {
+      requestsBadge.hidden = true;
+    }
+  }
+
   function openNewContact() {
     openTemplateComposer({
       mode: "new",
@@ -1061,6 +1101,12 @@ export function mountInbox(root, { me }) {
     // The closing warning carries the conversation, and the panel derives the
     // warning state from it — so re-sends of the same warning are harmless.
     if (event === "session.closing") return onConversationChanged(data.conversation);
+
+    // A new agent asked for a number. Only admins can act on it.
+    if (event === "access.requested") {
+      if (state.me.is_wa_admin) refreshRequestCount();
+      return;
+    }
     console.debug("[a7-wa] unhandled ws event:", event, data);
   }
 

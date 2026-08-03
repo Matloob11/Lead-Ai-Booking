@@ -12,6 +12,20 @@ export const auth = {
   me: () => apiFetch("/api/auth/me/"),
 };
 
+/**
+ * An agent with no number assigned cannot do anything in the panel, so instead
+ * of an empty inbox they get to say which number they need. Admins read those
+ * notes and act on them from the same place they do the assigning.
+ */
+export const access = {
+  request: (message) => apiFetch("/api/accounts/access-request/", { method: "POST", body: { message } }),
+
+  /** Admin only. */
+  list: () => apiFetch("/api/accounts/access-requests/"),
+
+  resolve: (id) => apiFetch(`/api/accounts/access-requests/${id}/resolve/`, { method: "POST", body: {} }),
+};
+
 export const catalog = {
   // For an admin this also carries each number's assigned agents.
   numbers: () => apiFetch("/api/catalog/numbers/"),
