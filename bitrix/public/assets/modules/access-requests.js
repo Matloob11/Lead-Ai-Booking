@@ -20,28 +20,28 @@ import { icon } from "../core/icons.js";
 export function renderNoNumbersScreen(host, { me, onAssigned }) {
   const note = el("textarea.field.access__note", {
     rows: 4,
-    placeholder: "Maslan: mujhe 971555484423 assign kar dein — main Damac Hills 2 par kaam kar raha hoon.",
+    placeholder: "Example: Please assign 971555484423 to me — I manage the Damac Hills 2 property portfolio.",
   });
 
   const status = el("div.access__status");
-  const send = el("button.btn.btn--primary", { type: "button" }, [icon("send", { size: 15 }), "Request bhejein"]);
+  const send = el("button.btn.btn--primary", { type: "button" }, [icon("send", { size: 15 }), "Send request"]);
 
   send.addEventListener("click", async () => {
     const message = note.value.trim();
     if (!message) {
       status.className = "access__status access__status--err";
-      status.textContent = "Pehle likhein ke aap ko kaunsa number chahiye.";
+      status.textContent = "Please enter which number you require.";
       return;
     }
 
     send.disabled = true;
     status.className = "access__status";
-    status.textContent = "Bhej rahe hain…";
+    status.textContent = "Sending request…";
     try {
       await access.request(message);
       note.value = "";
       status.className = "access__status access__status--ok";
-      status.textContent = "Aap ki request admin ko chali gayi. Number milte hi ye page khud khul jayega.";
+      status.textContent = "Your request was submitted to the administrator. This page will automatically update once a number is assigned.";
     } catch (error) {
       status.className = "access__status access__status--err";
       status.textContent = error.message;
@@ -54,17 +54,17 @@ export function renderNoNumbersScreen(host, { me, onAssigned }) {
     el("div.access", {}, [
       el("div.access__card", {}, [
         el("div.access__icon", {}, [icon("hash", { size: 26 })]),
-        el("h2.access__title", {}, ["Aap ko abhi koi WhatsApp number assign nahi hua"]),
+        el("h2.access__title", {}, ["No WhatsApp number assigned yet"]),
         el("p.access__lead", {}, [
-          `${me.display_name || "Aap"} — number assign hone tak yahan koi chat nazar nahi aayegi. ` +
-            "Neeche likh dein ke aap ko kaunsa number chahiye; admin ko ye foran pahunch jayega.",
+          `${me.display_name || "Agent"} — no conversations will be visible until a number is assigned to your account. ` +
+            "Please specify below which number you require so an administrator can assist you.",
         ]),
         note,
         el("div.access__actions", {}, [send]),
         status,
         el("button.btn.btn--ghost.access__recheck", { type: "button", onclick: onAssigned }, [
           icon("refresh", { size: 14 }),
-          "Number mil gaya? Dobara check karein",
+          "Number assigned? Recheck now",
         ]),
       ]),
     ])
@@ -77,7 +77,7 @@ export function renderNoNumbersScreen(host, { me, onAssigned }) {
  * @param {{onOpenNumbers: () => void}} options
  */
 export function openAccessRequests({ onOpenNumbers } = {}) {
-  const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Load ho raha hai…"])]);
+  const body = el("div.modal__body", {}, [el("div.thread__hint", {}, ["Loading requests…"])]);
   const dialog = modal("New agent messages", body, { wide: true });
 
   load();
@@ -87,25 +87,25 @@ export function openAccessRequests({ onOpenNumbers } = {}) {
     try {
       requests = await access.list();
     } catch (error) {
-      clear(body).append(el("div.alert", {}, [`Load nahi hua: ${error.message}`]));
+      clear(body).append(el("div.alert", {}, [`Could not load: ${error.message}`]));
       return;
     }
 
     if (!requests.length) {
-      clear(body).append(el("div.thread__hint", {}, ["Koi request nahi — sab agents ke paas number hai."]));
+      clear(body).append(el("div.thread__hint", {}, ["No pending requests — all agents have numbers assigned."]));
       return;
     }
 
     clear(body).append(
       el("p.modal__note", {}, [
-        "Ye wo agents hain jinhon ne number maanga hai. Number dene ke liye Numbers screen kholein.",
+        "These agents have requested a WhatsApp number. Open Numbers Management to assign a number.",
       ]),
       el("div.reqs", {}, requests.map(row))
     );
   }
 
   function row(request) {
-    const done = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["Ho gaya"]);
+    const done = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["Mark resolved"]);
     const card = el("div.req", {}, [
       el("div.req__head", {}, [
         el("div.req__who", {}, [request.agent?.display_name || `Agent #${request.agent?.id ?? "?"}`]),
@@ -114,7 +114,7 @@ export function openAccessRequests({ onOpenNumbers } = {}) {
       el("div.req__msg", {}, [request.message || ""]),
       el("div.req__actions", {}, [
         el("button.btn.btn--primary.btn--sm", { type: "button", onclick: () => { dialog.close(); onOpenNumbers?.(); } }, [
-          "Number assign karein",
+          "Assign number",
         ]),
         done,
       ]),
