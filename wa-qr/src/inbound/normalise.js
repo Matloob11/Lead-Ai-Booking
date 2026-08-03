@@ -37,11 +37,19 @@ export function kindOf(message) {
 /**
  * One inbound message, in Meta's `messages` shape.
  *
- * `media` is passed in already downloaded rather than fetched here: this
- * function stays pure so it can be tested without a phone attached, and the
- * caller decides whether a 40 MB video is worth pulling.
+ * `media` and `quotedId` are passed in rather than read off the message: both
+ * need an await to obtain — `downloadMedia()` and `getQuotedMessage()` — and
+ * this function stays synchronous and pure so it can be tested with no phone
+ * attached. It also leaves the caller deciding whether a 40 MB video is worth
+ * pulling.
+ *
+ * @param {object}  message
+ * @param {string}  [options.contactName]  the sender's WhatsApp profile name
+ * @param {object}  [options.media]        an already-downloaded attachment
+ * @param {string}  [options.quotedId]     `_serialized` id of the quoted
+ *                                         message, from getQuotedMessage()
  */
-export function inboundMessage(message, { contactName = "", media = null } = {}) {
+export function inboundMessage(message, { contactName = "", media = null, quotedId = "" } = {}) {
   const kind = kindOf(message);
   const from = toWaId(message.from);
 
@@ -79,9 +87,12 @@ export function inboundMessage(message, { contactName = "", media = null } = {})
     };
   }
 
-  // A quoted message is named by id, exactly as Meta names it.
-  if (message.hasQuotedMsg && message._quotedId) {
-    out.context = { id: message._quotedId };
+  // A quoted message is named by id, exactly as Meta names it. The library
+  // only offers hasQuotedMsg plus an async getter, so the id arrives from the
+  // caller; without it a reply would still be stored, just not joined to what
+  // it answers.
+  if (quotedId) {
+    out.context = { id: quotedId };
   }
 
   return {

@@ -26,8 +26,7 @@ const out = {
     type: "chat",
     body: "quoting the first one",
     hasQuotedMsg: true,
-    _quotedId: "false_971509998887@c.us_QRPROBE1",
-  }), number),
+  }, { quotedId: "false_971509998887@c.us_QRPROBE1" }), number),
 
   reaction: envelope(inboundReaction({
     senderId: "971509998887@c.us",

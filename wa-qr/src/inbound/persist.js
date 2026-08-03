@@ -68,8 +68,23 @@ async function processMessageEvent(sessionId, message) {
     contactName = contact.name || contact.pushname || "";
   } catch {}
 
+  // Which message this one answers, if any.
+  //
+  // The library gives `hasQuotedMsg` and an async getter, and nothing else —
+  // there is no id on the message to read, so it has to be fetched, and it has
+  // to happen before the payload is built because the payload carries it.
+  let quotedId = "";
+  if (message.hasQuotedMsg) {
+    try {
+      const quoted = await message.getQuotedMessage();
+      quotedId = quoted?.id?._serialized || "";
+    } catch (err) {
+      console.warn("[wa-qr] could not read the quoted message:", err.message);
+    }
+  }
+
   // Generate normalized Meta payload
-  const metaPayload = inboundMessage(message, { contactName, media: mediaRecord });
+  const metaPayload = inboundMessage(message, { contactName, media: mediaRecord, quotedId });
 
   const direction = message.fromMe ? "out" : "in";
   const kind = kindOf(message);
@@ -82,12 +97,11 @@ async function processMessageEvent(sessionId, message) {
       ? toWaId(message.from)
       : toWaId(message.to);
 
-  // Quote lookup
+  // A miss here is normal: the quoted message may predate this session, in
+  // which case the reply is stored without being joined to what it answers.
   let replyToId = null;
-  if (message.hasQuotedMsg && message._quotedId) {
-    const parent = await one(`SELECT id FROM qr_message WHERE wamid = $1`, [
-      message._quotedId,
-    ]);
+  if (quotedId) {
+    const parent = await one(`SELECT id FROM qr_message WHERE wamid = $1`, [quotedId]);
     if (parent) replyToId = Number(parent.id);
   }
 

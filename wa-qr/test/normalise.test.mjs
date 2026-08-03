@@ -114,8 +114,8 @@ check("a quote is named by id, the way Meta names it", () => {
     type: "chat",
     body: "yes please",
     hasQuotedMsg: true,
-    _quotedId: "false_971501234567@c.us_QUOTED",
-  });
+    hasQuotedMsg: true,
+  }, { quotedId: "false_971501234567@c.us_QUOTED" });
   assert.equal(out.messages[0].context.id, "false_971501234567@c.us_QUOTED");
 });
 
