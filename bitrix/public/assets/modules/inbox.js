@@ -256,31 +256,100 @@ export function mountInbox(root, { me }) {
     });
 
     const statusEl = el("div.wa-x-alert", { hidden: true });
-    const saveBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, ["Save Profile"]);
+    const saveBtn = el("button.wa-x-btn.wa-x-btn--primary", { type: "button" }, [
+      icon("check", { size: 14 }),
+      "Save Profile",
+    ]);
 
     const assignedNumbers = currentMe.numbers || state.numbers || [];
-    const numberPills = assignedNumbers.map((n) =>
-      el("div.na-chip", { style: "margin: 3px 4px 3px 0;" }, [
-        el("span.na-chip__name", {}, [`📱 ${n.title || n.phone_number}`]),
-      ])
-    );
+
+    const formatPhone = (numStr) => {
+      if (!numStr) return "";
+      const cleaned = String(numStr).replace(/\D/g, "");
+      if (cleaned.length === 12 && cleaned.startsWith("971")) {
+        return `+971 ${cleaned.slice(3, 5)} ${cleaned.slice(5, 8)} ${cleaned.slice(8)}`;
+      }
+      return cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+    };
+
+    const numberPills = assignedNumbers.map((n) => {
+      const phoneDigits = n.phone_number || (typeof n === "string" ? n : "");
+      const phoneFormatted = formatPhone(phoneDigits);
+      const titleLabel = n.title && n.title !== phoneDigits ? ` (${n.title})` : "";
+      return el("div.na-chip.wa-x-profile-num-chip", { style: "margin: 3px 4px 3px 0;" }, [
+        icon("phone", { size: 14 }),
+        el("span.na-chip__name", {}, [`${phoneFormatted || n.title || "Unknown"}${titleLabel}`]),
+      ]);
+    });
+
+    // Calculate WhatsApp System statistics
+    const totalConversations = state.conversations?.length || 0;
+    const totalUnread = (state.conversations || []).reduce((acc, c) => acc + (c.unread_count || 0), 0);
+    const openWindowsCount = (state.conversations || []).filter((c) => c.is_session_open).length;
+
+    const statsGrid = el("div.wa-x-profile-stats-grid", {}, [
+      el("div.wa-x-profile-stat-card", {}, [
+        el("div.wa-x-stat-icon", {}, [icon("phone", { size: 16 })]),
+        el("div.wa-x-stat-val", {}, [String(assignedNumbers.length)]),
+        el("div.wa-x-stat-lbl", {}, ["Assigned Numbers"]),
+      ]),
+      el("div.wa-x-profile-stat-card", {}, [
+        el("div.wa-x-stat-icon", {}, [icon("messageSquare", { size: 16 })]),
+        el("div.wa-x-stat-val", {}, [String(totalConversations)]),
+        el("div.wa-x-stat-lbl", {}, ["Active Chats"]),
+      ]),
+      el("div.wa-x-profile-stat-card", {}, [
+        el("div.wa-x-stat-icon", {}, [icon("bell", { size: 16 })]),
+        el("div.wa-x-stat-val", {}, [String(totalUnread)]),
+        el("div.wa-x-stat-lbl", {}, ["Unread Messages"]),
+      ]),
+      el("div.wa-x-profile-stat-card", {}, [
+        el("div.wa-x-stat-icon", {}, [icon("clock", { size: 16 })]),
+        el("div.wa-x-stat-val", {}, [String(openWindowsCount)]),
+        el("div.wa-x-stat-lbl", {}, ["Open 24h Windows"]),
+      ]),
+    ]);
+
+    const systemFeatures = el("div.wa-x-profile-features", {}, [
+      el("div.wa-x-feature-tag", {}, [icon("check", { size: 12 }), "WhatsApp Business API"]),
+      el("div.wa-x-feature-tag", {}, [icon("check", { size: 12 }), "Interactive Reply Buttons"]),
+      el("div.wa-x-feature-tag", {}, [icon("check", { size: 12 }), "Bitrix CRM Realtime Sync"]),
+      el("div.wa-x-feature-tag", {}, [icon("check", { size: 12 }), "Media & Document Messaging"]),
+    ]);
 
     const bodyNode = el("div.wa-x-modal-body.wa-x-profile-modal", {}, [
       el("div.wa-x-profile-header", {}, [
         el("div.conv__avatar.wa-x-profile-avatar", {}, [initials(initialName)]),
         el("div.wa-x-profile-titles", {}, [
-          el("div.wa-x-profile-name", {}, [initialName]),
-          el("div.wa-x-profile-role", {}, [currentMe.role || (currentMe.is_wa_admin ? "Administrator" : "Agent")]),
+          el("div.wa-x-profile-name-row", {}, [
+            el("span.wa-x-profile-name", {}, [initialName]),
+            el("span.wa-x-online-badge", {}, [icon("check", { size: 12 }), "Online"]),
+          ]),
+          el("div.wa-x-profile-role", {}, [
+            icon("shield", { size: 12 }),
+            currentMe.role || (currentMe.is_wa_admin ? "Administrator" : "Agent"),
+          ]),
         ]),
       ]),
       el("div.wa-x-profile-section", {}, [
-        el("div.wa-x-label-head", {}, ["Bitrix Account ID"]),
-        el("div.wa-x-field-static", {}, [`Bitrix #${currentMe.bitrix_user_id || currentMe.id}`]),
-      ]),
-      el("div.wa-x-profile-section", { style: "margin-top: 12px;" }, [
         el("div.wa-x-label-head", {}, ["Assigned WhatsApp Numbers"]),
         el("div.wa-x-profile-numbers-list", {}, [
           numberPills.length ? el("div.na-chips", {}, numberPills) : el("span.na-empty", {}, ["No numbers assigned yet"]),
+        ]),
+      ]),
+      el("div.wa-x-profile-section", { style: "margin-top: 14px;" }, [
+        el("div.wa-x-label-head", {}, ["System Statistics"]),
+        statsGrid,
+      ]),
+      el("div.wa-x-profile-section", { style: "margin-top: 14px;" }, [
+        el("div.wa-x-label-head", {}, ["System Capabilities"]),
+        systemFeatures,
+      ]),
+      el("div.wa-x-profile-section", { style: "margin-top: 14px;" }, [
+        el("div.wa-x-label-head", {}, ["Bitrix Account Info"]),
+        el("div.wa-x-field-static", {}, [
+          icon("user", { size: 14 }),
+          ` Bitrix #${currentMe.bitrix_user_id || currentMe.id} — ${currentMe.bitrix_portal || "Bitrix24 Portal"}`,
         ]),
       ]),
       el("label.wa-x-field-row", { style: "margin-top: 14px;" }, [
@@ -310,14 +379,14 @@ export function mountInbox(root, { me }) {
         const updated = await auth.updateProfile({ display_name: newName });
         state.me = updated;
         saveBtn.disabled = false;
-        saveBtn.textContent = "Save Profile";
+        saveBtn.replaceChildren(icon("check", { size: 14 }), "Save Profile");
         statusEl.textContent = "Profile updated successfully!";
         statusEl.className = "wa-x-alert wa-x-alert--ok";
         statusEl.hidden = false;
         setTimeout(() => profileModal.close(), 1200);
       } catch (err) {
         saveBtn.disabled = false;
-        saveBtn.textContent = "Save Profile";
+        saveBtn.replaceChildren(icon("check", { size: 14 }), "Save Profile");
         statusEl.textContent = err.message || "Failed to update profile.";
         statusEl.className = "wa-x-alert";
         statusEl.hidden = false;
