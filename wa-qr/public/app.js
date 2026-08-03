@@ -106,6 +106,28 @@ function formatBytes(bytes) {
 
 const withPlus = (digits) => (digits ? `+${String(digits).replace(/\D/g, "")}` : "");
 
+/**
+ * One shape for a session, whichever the server sends.
+ *
+ * /api/sessions returns camelCase (phoneNumber, lastError, lastSeenAt) while
+ * /api/sessions/:id/qr returns snake_case (qr_data_url) — the two disagree
+ * inside the same service. Reading both here keeps the panel working through
+ * that, and through it being settled either way later.
+ */
+function normaliseSession(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    id: row.id,
+    label: row.label || "",
+    status: row.status || "",
+    phone_number: row.phone_number ?? row.phoneNumber ?? "",
+    last_error: row.last_error ?? row.lastError ?? "",
+    last_seen_at: row.last_seen_at ?? row.lastSeenAt ?? null,
+    qr_data_url: row.qr_data_url ?? row.qrDataUrl ?? "",
+  };
+}
+
 /* ------------------------------------------------------------------ status */
 
 const STATUS = {
@@ -186,7 +208,7 @@ function fail(message) {
 
 async function loadSessions() {
   try {
-    state.sessions = asList(await api("/api/sessions"), "sessions");
+    state.sessions = asList(await api("/api/sessions"), "sessions").map(normaliseSession);
     state.error = "";
   } catch (error) {
     state.error = error.message;
@@ -277,11 +299,14 @@ async function linkPhone() {
 
 async function disconnect(session) {
   const name = session.label || withPlus(session.phone_number) || `phone #${session.id}`;
-  if (!window.confirm(`Disconnect ${name}? It will stop receiving messages until it is linked again.`)) {
+  // Worded as removal because that is what the server does: DELETE logs the
+  // phone out, wipes its auth data and drops the row. Calling it "disconnect"
+  // would suggest the card stays behind, and it does not.
+  if (!window.confirm(`Remove ${name}? It will be logged out and has to be linked again from scratch.`)) {
     return;
   }
   try {
-    await api(`/api/sessions/${session.id}/disconnect`, { method: "POST" });
+    await api(`/api/sessions/${session.id}`, { method: "DELETE" });
     if (String(state.sessionId) === String(session.id)) state.sessionId = null;
     await loadSessions();
     go("sessions");
@@ -352,11 +377,16 @@ function renderQr() {
     if (data.status === "ready") {
       stopped = true;
       stopTimers();
+      // The number is not on this route — it only answers {status, qr_data_url}
+      // — so the sessions have to be refetched before it can be named. Without
+      // the await the card still holds the empty number it was linked with and
+      // the screen says "Connected" to nobody in particular.
+      status.textContent = "Connected";
+      await loadSessions();
       // Nothing left to scan, so the code goes rather than sitting there
       // inviting a second phone at a session that already has one.
       clear(frame).replaceWith(connected(data));
       status.textContent = "";
-      loadSessions();
       return;
     }
 
@@ -442,10 +472,11 @@ function renderChats() {
 function conversationTitle(conversation) {
   return (
     conversation.subject ||
+    // What the server already resolved: display name, else profile name, else
+    // the number. The separate fields are read too in case it stops doing that.
+    conversation.contact?.name ||
     conversation.contact?.display_name ||
     conversation.contact?.profile_name ||
-    conversation.display_name ||
-    conversation.profile_name ||
     withPlus(conversation.contact?.wa_id || conversation.wa_id) ||
     `Chat #${conversation.id}`
   );
@@ -569,15 +600,15 @@ function bubble(message, conversation) {
     node.append(el("div.msg__author", {}, [withPlus(message.author_wa_id)]));
   }
 
-  if (message.reply_to) {
-    node.append(
-      el("div.msg__quote", {}, [
-        message.reply_to.body || `[${message.reply_to.kind || "message"}]`,
-      ])
-    );
+  // The server names the quoted message by id rather than embedding it, so the
+  // text has to be found among the ones already loaded. A quote to something
+  // older than this page is still worth marking, just without the words.
+  const quoted = quotedFor(message);
+  if (quoted !== null) {
+    node.append(el("div.msg__quote", {}, [quoted]));
   }
 
-  if (message.media_id) node.append(attachment(message));
+  if (message.media_url || message.media_id) node.append(attachment(message));
 
   if (message.body) node.append(el("div.msg__body", {}, [message.body]));
   else if (!message.media_id) node.append(el("div.msg__body", {}, [`[${message.kind || "message"}]`]));
@@ -607,8 +638,18 @@ function bubble(message, conversation) {
   return node;
 }
 
+/** The words of the message this one answers, "" if unknown, null if none. */
+function quotedFor(message) {
+  if (message.reply_to) return message.reply_to.body || `[${message.reply_to.kind || "message"}]`;
+  if (!message.reply_to_id) return null;
+
+  const target = state.messages.find((m) => String(m.id) === String(message.reply_to_id));
+  if (!target) return "Replying to an earlier message";
+  return target.body || `[${target.kind || "message"}]`;
+}
+
 function attachment(message) {
-  const url = `/api/media/${message.media_id}`;
+  const url = message.media_url || `/api/media/${message.media_id}`;
   const mime = message.media_mime || message.mime_type || "";
   const isImage = mime.startsWith("image/") || ["image", "sticker"].includes(message.kind);
 
