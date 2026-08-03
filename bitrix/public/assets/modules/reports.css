@@ -1,0 +1,283 @@
+/* Reports Dashboard Styling */
+
+.rep-modal {
+  width: 900px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.rep-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.rep-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.rep-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.rep-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.rep-tab.active {
+  color: #25d366;
+  background: rgba(37, 211, 102, 0.12);
+  border-color: rgba(37, 211, 102, 0.3);
+  font-weight: 600;
+}
+
+.rep-range {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rep-range-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rep-range-btn.active {
+  background: #25d366;
+  color: #0b141a;
+  font-weight: 600;
+}
+
+.rep-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Stat Cards */
+.rep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rep-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.rep-card--warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.rep-card__val {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.rep-card__lbl {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 2px;
+}
+
+.rep-card__sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 4px;
+}
+
+/* Response time card */
+.rep-card--lg {
+  grid-column: span 2;
+  background: rgba(37, 211, 102, 0.05);
+  border-color: rgba(37, 211, 102, 0.2);
+}
+
+/* Chart */
+.rep-chart-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.rep-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rep-chart-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.rep-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rep-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.rep-dot--in {
+  background: #3b82f6;
+}
+
+.rep-dot--out {
+  background: #25d366;
+}
+
+/* Tables */
+.rep-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.rep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.rep-table th {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  user-select: none;
+}
+
+.rep-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rep-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.rep-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.rep-chip--amber {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.rep-chip--green {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.rep-chip--red {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* Problem Cards */
+.rep-prob-sec {
+  margin-bottom: 20px;
+}
+
+.rep-prob-head {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rep-prob-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.rep-prob-card--red {
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.rep-prob-card--grey {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rep-prob-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.rep-prob-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.rep-prob-meaning {
+  font-size: 13px;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+.rep-prob-example {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}

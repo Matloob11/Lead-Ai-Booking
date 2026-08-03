@@ -27,6 +27,14 @@ export const access = {
   resolve: (id) => apiFetch(`/api/accounts/access-requests/${id}/resolve/`, { method: "POST", body: {} }),
 };
 
+export const reports = {
+  summary: (days = 7) => apiFetch(`/api/reports/summary/?days=${days}`),
+  agents: (days = 7) => apiFetch(`/api/reports/agents/?days=${days}`),
+  numbers: (days = 7) => apiFetch(`/api/reports/numbers/?days=${days}`),
+  failures: (days = 7) => apiFetch(`/api/reports/failures/?days=${days}`),
+  templates: (days = 7) => apiFetch(`/api/reports/templates/?days=${days}`),
+};
+
 export const catalog = {
   // For an admin this also carries each number's assigned agents.
   numbers: () => apiFetch("/api/catalog/numbers/"),
