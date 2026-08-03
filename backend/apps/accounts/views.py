@@ -140,3 +140,115 @@ def bitrix_login(request):
 @permission_classes([IsAuthenticated])
 def me(request):
     return Response(_serialize(request.user))
+
+
+# Access requests
+# ---------------------------------------------------------------------------
+
+
+def _serialize_request(access_request):
+    agent = access_request.agent
+    return {
+        "id": access_request.pk,
+        "agent": {
+            "id": agent.pk,
+            "display_name": agent.display_name or agent.get_username(),
+            "bitrix_user_id": agent.bitrix_user_id or "",
+        },
+        "message": access_request.message,
+        "status": access_request.status,
+        "created_at": access_request.created_at.isoformat(),
+    }
+
+
+def _require_admin(request):
+    if not request.user.has_admin_rights:
+        return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def access_request(request):
+    """Ask an admin for a number to work.
+
+    Any signed-in agent may send one — the people who need it are exactly the
+    ones with nothing assigned, so this cannot be gated on having a number.
+
+    Sending again while a request is still open edits that request rather than
+    filing another: pressing the button twice should not put the same person in
+    an admin's list twice, and a second attempt usually means they thought of a
+    better way to say it.
+    """
+    from .models import AccessRequest
+
+    message = str(request.data.get("message", "")).strip()[:2000]
+
+    existing = AccessRequest.objects.filter(
+        agent=request.user, status=AccessRequest.Status.PENDING
+    ).first()
+
+    if existing:
+        if message and message != existing.message:
+            existing.message = message
+            existing.save(update_fields=["message"])
+        created = existing
+    else:
+        created = AccessRequest.objects.create(agent=request.user, message=message)
+
+    payload = _serialize_request(created)
+
+    from apps.inbox.events import publish_to_admins
+
+    publish_to_admins("access.requested", {"request": payload})
+
+    return Response(payload, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def access_request_list(request):
+    """Everyone waiting to be given a number. Admins only.
+
+    Returns open and resolved alike, newest first — an admin needs to see what
+    they have already dealt with. Pass ?status=pending for the open ones on
+    their own, which is what a badge should count.
+    """
+    denied = _require_admin(request)
+    if denied:
+        return denied
+
+    from .models import AccessRequest
+
+    queryset = AccessRequest.objects.select_related("agent")
+    wanted = request.GET.get("status", "")
+    if wanted in AccessRequest.Status.values:
+        queryset = queryset.filter(status=wanted)
+
+    return Response([_serialize_request(r) for r in queryset[:200]])
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def access_request_resolve(request, pk):
+    """Mark a request as dealt with. Admins only.
+
+    Deliberately grants nothing: access is the number assignment, made on the
+    Numbers screen. This only clears the request from the queue, so resolving
+    one by mistake costs a click rather than someone's access.
+    """
+    denied = _require_admin(request)
+    if denied:
+        return denied
+
+    from .models import AccessRequest
+
+    try:
+        found = AccessRequest.objects.get(pk=pk)
+    except AccessRequest.DoesNotExist:
+        return Response({"detail": "No such request"}, status=status.HTTP_404_NOT_FOUND)
+
+    if found.status != AccessRequest.Status.RESOLVED:
+        found.resolve(request.user)
+
+    return Response({"ok": True})

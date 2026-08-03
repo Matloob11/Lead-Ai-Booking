@@ -1,7 +1,7 @@
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
-from .events import group_for_agent, group_for_number
+from .events import group_for_admins, group_for_agent, group_for_number
 
 
 class InboxConsumer(AsyncJsonWebsocketConsumer):
@@ -33,4 +33,8 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
         # Plus a channel of their own, for anything addressed to this agent
         # rather than to everyone watching a number.
         groups.append(group_for_agent(user.pk))
+        # Admins also hear what belongs to no number, such as an agent with
+        # nothing assigned asking for access.
+        if user.has_admin_rights:
+            groups.append(group_for_admins())
         return groups

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Agent
+from .models import AccessRequest, Agent
 
 
 @admin.register(Agent)
@@ -26,3 +26,11 @@ class AgentAdmin(UserAdmin):
             },
         ),
     )
+
+
+@admin.register(AccessRequest)
+class AccessRequestAdmin(admin.ModelAdmin):
+    list_display = ["agent", "status", "created_at", "resolved_at", "resolved_by"]
+    list_filter = ["status"]
+    search_fields = ["agent__display_name", "agent__username", "message"]
+    readonly_fields = ["created_at"]

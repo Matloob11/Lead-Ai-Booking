@@ -25,16 +25,36 @@ def group_for_agent(agent_id):
     return f"wa.agent.{agent_id}"
 
 
-def publish_to_agent(agent_id, event, data):
+ADMIN_GROUP = "wa.admins"
+
+
+def group_for_admins():
+    """Everyone administering the panel, whichever numbers they happen to hold.
+
+    Number groups cannot carry this: an access request belongs to no number,
+    and the agent making it has none.
+    """
+    return ADMIN_GROUP
+
+
+def _send(group, event, data):
     layer = get_channel_layer()
     if layer is None:
         return
     try:
         async_to_sync(layer.group_send)(
-            group_for_agent(agent_id), {"type": "inbox.event", "event": event, "data": data}
+            group, {"type": "inbox.event", "event": event, "data": data}
         )
     except Exception:  # noqa: BLE001 - a dead socket must not fail the caller
-        logger.exception("Failed to publish %s to agent %s", event, agent_id)
+        logger.exception("Failed to publish %s to %s", event, group)
+
+
+def publish_to_agent(agent_id, event, data):
+    _send(group_for_agent(agent_id), event, data)
+
+
+def publish_to_admins(event, data):
+    _send(ADMIN_GROUP, event, data)
 
 
 def publish(conversation, event, data):

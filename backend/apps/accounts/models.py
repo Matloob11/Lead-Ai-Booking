@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 
 
 class Agent(AbstractUser):
@@ -53,3 +55,58 @@ class Agent(AbstractUser):
             assignments__agent=self,
             assignments__is_active=True,
         ).distinct()
+
+
+class AccessRequest(models.Model):
+    """An agent asking to be given a number to work.
+
+    Agents arrive through Bitrix with nothing assigned — the panel cannot know
+    which number is theirs — so their first sight of it is an empty inbox. This
+    is the way out of that: they say who they are, an admin sees it without
+    being told separately, and assigns them a number.
+
+    Resolving does not grant anything. It only marks that an admin has dealt
+    with the request; the grant itself is the number assignment.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RESOLVED = "resolved", "Resolved"
+
+    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name="access_requests")
+    message = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        Agent,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_access_requests",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # One open request per agent. Pressing the button twice should not
+            # put the same person in an admin's list twice.
+            models.UniqueConstraint(
+                fields=["agent"],
+                condition=Q(status="pending"),
+                name="one_pending_access_request_per_agent",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.agent} ({self.status})"
+
+    def resolve(self, by):
+        self.status = self.Status.RESOLVED
+        self.resolved_at = timezone.now()
+        self.resolved_by = by
+        self.save(update_fields=["status", "resolved_at", "resolved_by"])
+        return self
