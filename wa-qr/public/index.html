@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A7 · Linked Phones</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <!--
+      The panel for the QR-linked channel. Served by this service itself, not by
+      the Bitrix placement — this is an operator's screen, not an agent's, and it
+      is deliberately reachable without the portal so a phone can be re-linked
+      when the portal is the thing that is broken.
+
+      Plain ES modules on purpose: the main panel is built the same way, and
+      "deploy" means copying a folder rather than running a build.
+    -->
+    <header class="top">
+      <div class="top__brand">
+        <span class="top__mark">A7</span>
+        <span>
+          <span class="top__name">Linked Phones</span>
+          <span class="top__sub">QR-linked WhatsApp channel</span>
+        </span>
+      </div>
+      <nav class="top__nav" id="nav"></nav>
+    </header>
+
+    <main id="root" class="main">
+      <div class="loading">Loading…</div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

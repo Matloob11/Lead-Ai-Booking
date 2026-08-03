@@ -1,0 +1,662 @@
+/* wa-qr panel.
+   One stylesheet, no framework — the same rule the main panel follows, so
+   deploying stays "copy the folder". */
+
+:root {
+  --navy: #0e2a47;
+  --navy-soft: #17395e;
+  --gold: #c8a34a;
+  --ink: #1c2430;
+  --muted: #667485;
+  --line: #e2e8f0;
+  --bg: #f6f8fa;
+  --card: #fff;
+  --ok: #17825a;
+  --ok-soft: #e6f2ec;
+  --warn: #a05a17;
+  --warn-soft: #fdf0e3;
+  --err: #c2382f;
+  --err-soft: #fdecea;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ------------------------------------------------------------------- top */
+
+.top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.top__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top__mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--navy);
+  font-weight: 800;
+}
+
+.top__name {
+  display: block;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.top__sub {
+  display: block;
+  font-size: 11.5px;
+  opacity: 0.7;
+}
+
+.top__nav {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.tab.is-active {
+  background: var(--gold);
+  color: var(--navy);
+  font-weight: 650;
+}
+
+.tab[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ main */
+
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 20px 18px 32px;
+}
+
+.page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.page__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.page__hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.loading,
+.empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--navy-soft);
+}
+
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.btn--ghost:hover {
+  background: var(--line);
+}
+
+.btn--danger {
+  background: transparent;
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.btn--danger:hover {
+  background: var(--err-soft);
+}
+
+.alert {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------- sessions */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card__label {
+  font-size: 15px;
+  font-weight: 650;
+  word-break: break-word;
+}
+
+.card__phone {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card__seen {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.chip--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.chip--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip--err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.chip--plain {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.card__why {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+/* --------------------------------------------------------------------- QR */
+
+.qr {
+  max-width: 560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  text-align: center;
+}
+
+.qr__frame {
+  display: grid;
+  place-items: center;
+  width: 320px;
+  height: 320px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.qr__img {
+  width: 288px;
+  height: 288px;
+  image-rendering: pixelated;
+}
+
+.qr__pending {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.qr__status {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.qr__steps {
+  margin: 0;
+  padding-left: 20px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* The warning sits with the QR, not in a footnote. Somebody about to scan is
+   the only person who can still decide not to, and a permanent ban on a
+   verified number cannot be undone afterwards. */
+.qr__warning {
+  padding: 12px 14px;
+  border: 1px solid var(--err);
+  border-radius: 10px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.qr__warning b {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.qr__connected {
+  display: grid;
+  place-items: center;
+  width: 320px;
+  height: 320px;
+  border-radius: 16px;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 17px;
+  font-weight: 650;
+  padding: 20px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ chats */
+
+.chats {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.convs {
+  border-right: 1px solid var(--line);
+  background: var(--card);
+  overflow-y: auto;
+}
+
+.conv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conv:hover {
+  background: var(--bg);
+}
+
+.conv.is-active {
+  background: var(--bg);
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.conv__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 650;
+  font-size: 13.5px;
+}
+
+.conv__name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv__when {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.conv__last {
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.conv__unread {
+  grid-column: 2;
+  justify-self: end;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.chip--group {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.thread__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+.thread__name {
+  font-weight: 650;
+}
+
+.thread__sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.thread__messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg);
+}
+
+.msg {
+  max-width: min(560px, 78%);
+  align-self: flex-start;
+  padding: 7px 10px 5px;
+  border-radius: 10px 10px 10px 2px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  word-break: break-word;
+}
+
+.msg--out {
+  align-self: flex-end;
+  border-radius: 10px 10px 2px 10px;
+  background: #e7f6ec;
+  border-color: #cfe9d8;
+}
+
+.msg__author {
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--navy-soft);
+}
+
+/* The bar above a reply, naming what it answers. */
+.msg__quote {
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--gold);
+  border-radius: 4px;
+  background: rgba(14, 42, 71, 0.05);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg__body {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+}
+
+.msg__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.msg__thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  cursor: zoom-in;
+}
+
+.msg__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  background: rgba(14, 42, 71, 0.06);
+  color: inherit;
+  text-decoration: none;
+  font-size: 12.5px;
+}
+
+.msg__file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg__file-size {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.msg__reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.reaction {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 12px;
+}
+
+.msg--failed {
+  border-color: var(--err);
+}
+
+.msg__error {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--err);
+}
+
+.composer {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+}
+
+.composer__input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  resize: none;
+  max-height: 120px;
+}
+
+.composer__input:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+.composer--locked {
+  color: var(--muted);
+  font-size: 12.5px;
+  justify-content: center;
+  align-items: center;
+}
+
+/* A 1366×768 laptop is the smallest screen this is used on; below that the
+   list and the thread stop fitting side by side. */
+@media (max-width: 900px) {
+  .chats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .convs {
+    max-height: 34vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
