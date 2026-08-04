@@ -135,6 +135,18 @@ export async function sendOutboundMessage({
       sentMsg = await client.sendMessage(formattedTo, body, sendOptions);
     }
 
+    // sendMessage can come back empty when the library gives up inside itself
+    // rather than throwing. Reading .id off that produced "Cannot read
+    // properties of undefined", which is what the agent saw printed in the
+    // chat where the message should have been.
+    if (!sentMsg) {
+      throw new Error(
+        "WhatsApp accepted nothing back for this message. The number may not be " +
+          "on WhatsApp, or the phone may have just dropped off — check that it " +
+          "is still linked."
+      );
+    }
+
     const wamid = sentMsg.id?._serialized || String(sentMsg.id || "");
 
     // 5. Update DB status='sent' + wamid on success
