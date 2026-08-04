@@ -60,6 +60,10 @@ function formatSession(row) {
       chatsDone: Number(row.history_chats_done || 0),
       chatsTotal: Number(row.history_chats_total || 0),
       messages: Number(row.history_messages || 0),
+      // Both ends of the run. The panel needs the start to say how much longer
+      // this will take, and "12 of 84" without that is a number somebody has to
+      // watch for a while before it means anything.
+      startedAt: row.history_started_at || null,
       finishedAt: row.history_finished_at || null,
     },
   };

@@ -12,6 +12,7 @@
   --ink: #1c2430;
   --muted: #667485;
   --line: #e2e8f0;
+  --line-soft: #eef2f6;
   --bg: #f6f8fa;
   --card: #fff;
   --ok: #17825a;
@@ -20,10 +21,59 @@
   --warn-soft: #fdf0e3;
   --err: #c2382f;
   --err-soft: #fdecea;
+
+  /* Outbound bubbles and the accents that go with them. Named rather than
+     repeated: the dark theme moves all three together. */
+  --mine: #e7f6ec;
+  --mine-line: #cfe9d8;
+
+  /* One ramp, so nothing invents its own shadow. */
+  --lift-1: 0 1px 2px rgba(14, 42, 71, 0.06);
+  --lift-2: 0 2px 8px rgba(14, 42, 71, 0.08);
+  --lift-3: 0 18px 46px rgba(14, 42, 71, 0.3);
+
+  --radius: 12px;
+  --radius-sm: 9px;
+
+  /* Fast enough not to be in the way. Anything slower reads as lag on a panel
+     that repaints itself every five seconds. */
+  --quick: 130ms ease;
+
+  --scroll-thumb: rgb(14 42 71 / 18%);
+  --scroll-thumb-hover: rgb(14 42 71 / 34%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Thin, faint, and the theme's own colour — matching the inbox this sits in.
+   Firefox takes the two keywords; the WebKit rules below do the same job with a
+   transparent border so the thumb keeps its distance from the edge. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
 }
 
 /* #root is in the chain too: without a height of its own it is auto, and the
@@ -40,7 +90,17 @@ body {
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
+}
+
+/* One visible focus ring for everything, and only for the keyboard. The old
+   rules removed the outline and tinted a border instead, which left nothing at
+   all on buttons — they have no border to tint. */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* ------------------------------------------------------------------ shell */
@@ -50,7 +110,7 @@ body {
   /* Both tracks are minmax(0, …) so neither can be pushed past the frame by
      its own content — a long contact name or a wide bubble would otherwise
      force a horizontal scrollbar under the whole panel. */
-  grid-template-columns: minmax(0, clamp(240px, 32%, 320px)) minmax(0, 1fr);
+  grid-template-columns: minmax(0, clamp(250px, 32%, 330px)) minmax(0, 1fr);
   /* minmax(0, 1fr) rather than 100%: an implicit auto row would grow to fit the
      message list, and the columns would then resolve against that grown row
      instead of the frame. */
@@ -68,11 +128,11 @@ body {
 
 .side {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--card);
 }
 
 .side__top {
@@ -80,92 +140,174 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
-  background: var(--navy);
+  padding: 12px 14px;
+  /* A little depth on the one bar that names the screen. */
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-soft) 100%);
   color: #fff;
 }
 
 .side__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 650;
   font-size: 14px;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.side__title svg {
+  flex: none;
+  opacity: 0.85;
+}
+
 .side__top .btn--ghost {
-  border-color: rgba(255, 255, 255, 0.32);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
 .side__top .btn--ghost:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.42);
 }
 
 .side__filters {
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 /* An import takes minutes, and a chat list still filling in looks exactly like
    one that is missing chats. This is the difference, said plainly. */
 .side__importing {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
   background: var(--warn-soft);
   font-size: 12px;
   line-height: 1.5;
 }
 
+.side__importing::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  /* It is still running; a still dot beside "importing" reads as stalled. */
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
 .side__importing-row {
   color: var(--ink);
+  font-weight: 600;
   word-break: break-word;
 }
 
 .side__importing-note {
   margin-top: 2px;
   color: var(--muted);
+  font-weight: 400;
+}
+
+/* The search box carries its magnifier inside, so the row stays one field
+   rather than a field with a decoration beside it. */
+.side__search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.side__search-wrap svg {
+  position: absolute;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.side__search-wrap .side__search {
+  padding-left: 34px;
 }
 
 .side__phones,
 .side__search {
   width: 100%;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 9px 11px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
   color: var(--ink);
   font: inherit;
   font-size: 13px;
+  transition: border-color var(--quick), background var(--quick);
+}
+
+.side__phones:hover,
+.side__search:hover {
+  border-color: #cbd5e1;
 }
 
 .side__phones:focus,
 .side__search:focus {
   outline: none;
   border-color: var(--navy-soft);
+  background: var(--card);
+  box-shadow: 0 0 0 3px rgba(23, 57, 94, 0.1);
+}
+
+/* The native arrow is grey-on-grey in the dark theme; this one follows --muted. */
+.side__phones {
+  appearance: none;
+  padding-right: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 16px) 52%, calc(100% - 11px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 
 /* Its own scroll, so the list moves without taking the sidebar's head with it. */
 .convs {
   min-height: 0;
   overflow-y: auto;
+  padding: 6px;
   background: var(--card);
 }
 
+/* No dividers. A hovered or open chat is a soft plate; the rest is quiet, which
+   is what stops a long list from reading as a table. */
 .conv {
-  display: block;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 9px 10px;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background var(--quick);
+}
+
+.conv + .conv {
+  margin-top: 2px;
 }
 
 .conv:hover {
@@ -174,7 +316,22 @@ body {
 
 .conv.is-active {
   background: var(--bg);
-  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+/* The rail marks the open chat without moving anything: inset, not a border. */
+.conv.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--gold);
+}
+
+.conv__body {
+  min-width: 0;
 }
 
 .conv__line {
@@ -190,7 +347,7 @@ body {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  font-weight: 650;
+  font-weight: 640;
   font-size: 13.5px;
 }
 
@@ -204,10 +361,12 @@ body {
   flex: none;
   font-size: 11px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .conv__last {
   min-width: 0;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -215,33 +374,69 @@ body {
   font-size: 12.5px;
 }
 
+/* An unread chat is the one thing in the list worth pulling the eye. */
+.conv.has-unread .conv__name,
+.conv.has-unread .conv__last {
+  color: var(--ink);
+  font-weight: 660;
+}
+
 .conv__unread {
   flex: none;
-  min-width: 18px;
+  min-width: 19px;
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--ok);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.5;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .conv__phone {
-  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
   font-size: 11px;
   color: var(--muted);
 }
 
-.chip--group {
+.conv__phone svg {
   flex: none;
-  padding: 0 6px;
-  border-radius: 4px;
+  opacity: 0.8;
+}
+
+/* --------------------------------------------------------------- avatars */
+
+/* Hue comes from the name, set inline, so the same chat is the same colour on
+   every repaint. Only the hue travels — how strong it is belongs to the theme. */
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: hsl(var(--hue, 210) 46% 92%);
+  color: hsl(var(--hue, 210) 52% 32%);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+
+.avatar--sm {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.avatar--group {
   background: var(--navy);
   color: #fff;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
 }
 
 /* ---------------------------------------------------------------- thread */
@@ -255,9 +450,20 @@ body {
 }
 
 .thread__head {
-  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--card);
+  box-shadow: var(--lift-1);
+  /* Above the message list, so a bubble scrolling under it stays under it. */
+  position: relative;
+  z-index: 1;
+}
+
+.thread__who {
+  min-width: 0;
 }
 
 .thread__name {
@@ -265,6 +471,7 @@ body {
   align-items: center;
   gap: 6px;
   font-weight: 650;
+  font-size: 14.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -274,16 +481,24 @@ body {
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Its own scroll, so the header and the composer stay put. */
 .thread__messages {
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 16px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  /* A very faint weave, so the bubbles sit on something rather than on a flat
+     grey. Two gradients, no image file to serve. */
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(14, 42, 71, 0.045) 1px, transparent 0);
+  background-size: 22px 22px;
 }
 
 .thread__foot {
@@ -298,30 +513,64 @@ body {
   color: var(--muted);
 }
 
+/* An empty screen should say what would fill it, not just that it is empty. */
 .empty--thread {
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 10px;
   grid-row: 1 / -1;
   height: 100%;
+}
+
+.empty__art {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: var(--lift-1);
+}
+
+.empty__title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.empty__note {
+  max-width: 34ch;
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 /* --------------------------------------------------------------- messages */
 
 .msg {
-  max-width: min(560px, 82%);
+  position: relative;
+  max-width: min(560px, 78%);
   align-self: flex-start;
-  padding: 7px 10px 5px;
-  border-radius: 10px 10px 10px 2px;
+  padding: 7px 11px 6px;
+  border-radius: 12px 12px 12px 4px;
   background: var(--card);
   border: 1px solid var(--line);
+  box-shadow: var(--lift-1);
   word-break: break-word;
+}
+
+/* Only the first of a run gets the tail, so a burst of messages reads as one
+   turn in the conversation rather than as several. */
+.msg + .msg {
+  margin-top: 2px;
 }
 
 .msg--out {
   align-self: flex-end;
-  border-radius: 10px 10px 2px 10px;
-  background: #e7f6ec;
-  border-color: #cfe9d8;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--mine);
+  border-color: var(--mine-line);
 }
 
 .msg--failed {
@@ -336,16 +585,23 @@ body {
 }
 
 .msg__quote {
-  margin-bottom: 4px;
-  padding: 4px 8px;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 5px;
+  padding: 5px 9px;
   border-left: 3px solid var(--gold);
-  border-radius: 4px;
+  border-radius: 5px;
   background: rgba(14, 42, 71, 0.05);
   font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.msg__quote svg {
+  flex: none;
+  opacity: 0.7;
 }
 
 .msg__body {
@@ -357,35 +613,66 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
-  margin-top: 2px;
+  gap: 4px;
+  margin-top: 3px;
   font-size: 10.5px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ticks, the way a phone shows them: one sent, two delivered, two blue read. */
+.msg__tick {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.msg__tick--read {
+  color: #3aa5f1;
+}
+
+.msg__tick--failed {
+  color: var(--err);
 }
 
 .msg__thumb {
   display: block;
   max-width: 100%;
-  max-height: 260px;
-  border-radius: 6px;
-  margin-bottom: 4px;
+  max-height: 280px;
+  border-radius: 8px;
+  margin-bottom: 5px;
   cursor: zoom-in;
+  transition: filter var(--quick);
+}
+
+.msg__thumb:hover {
+  filter: brightness(0.94);
 }
 
 .msg__file {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-bottom: 4px;
-  border-radius: 6px;
+  gap: 9px;
+  padding: 9px 11px;
+  margin-bottom: 5px;
+  border-radius: 8px;
   background: rgba(14, 42, 71, 0.06);
   color: inherit;
   text-decoration: none;
   font-size: 12.5px;
+  transition: background var(--quick);
+}
+
+.msg__file:hover {
+  background: rgba(14, 42, 71, 0.11);
+}
+
+.msg__file svg {
+  flex: none;
+  color: var(--navy-soft);
 }
 
 .msg__file-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -393,6 +680,7 @@ body {
 
 .msg__file-size {
   flex: none;
+  margin-left: auto;
   color: var(--muted);
   font-size: 11px;
 }
@@ -401,14 +689,15 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  margin-top: 3px;
+  margin-top: 4px;
 }
 
 .reaction {
-  padding: 0 6px;
+  padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--card);
+  box-shadow: var(--lift-1);
   font-size: 12px;
 }
 
@@ -419,9 +708,9 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
-  padding: 5px 7px;
-  border-radius: 6px;
+  margin-top: 5px;
+  padding: 6px 8px;
+  border-radius: 7px;
   background: var(--err-soft);
 }
 
@@ -437,7 +726,7 @@ body {
 
 .msg__retry {
   flex: none;
-  padding: 2px 9px;
+  padding: 2px 10px;
   border: 1px solid var(--err);
   border-radius: 999px;
   background: transparent;
@@ -446,6 +735,7 @@ body {
   font-size: 11.5px;
   font-weight: 650;
   cursor: pointer;
+  transition: background var(--quick), color var(--quick);
 }
 
 .msg__retry:hover {
@@ -467,40 +757,80 @@ body {
 
 .composer {
   display: flex;
-  gap: 8px;
-  padding: 10px 14px;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 11px 16px;
 }
 
 .composer__input {
   flex: 1;
   min-width: 0;
-  padding: 9px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 20px;
   background: var(--bg);
   color: inherit;
   font: inherit;
+  font-size: 13.5px;
   resize: none;
   max-height: 120px;
+  transition: border-color var(--quick), box-shadow var(--quick);
 }
 
 .composer__input:focus {
   outline: none;
   border-color: var(--navy-soft);
+  background: var(--card);
+  box-shadow: 0 0 0 3px rgba(23, 57, 94, 0.1);
+}
+
+/* Round, so it reads as the one action on the bar rather than a second field. */
+.composer__send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--quick), transform var(--quick);
+}
+
+.composer__send:hover:not(:disabled) {
+  background: var(--navy-soft);
+}
+
+.composer__send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.composer__send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .composer--locked {
   justify-content: center;
   align-items: center;
+  gap: 8px;
   color: var(--muted);
   font-size: 12.5px;
   text-align: center;
 }
 
+.composer--locked svg {
+  flex: none;
+  color: var(--warn);
+}
+
 .composer__error {
-  margin: 8px 14px 0;
-  padding: 7px 10px;
-  border-radius: 8px;
+  margin: 9px 16px 0;
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--err);
   font-size: 12.5px;
@@ -511,16 +841,18 @@ body {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 14px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--navy);
   color: #fff;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--quick), border-color var(--quick), color var(--quick);
 }
 
 .btn:hover {
@@ -544,7 +876,8 @@ body {
 }
 
 .btn--ghost:hover {
-  background: var(--line);
+  background: var(--bg);
+  border-color: #cbd5e1;
 }
 
 .btn--danger {
@@ -558,12 +891,16 @@ body {
 }
 
 .alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--err);
   font-size: 13px;
+  line-height: 1.5;
   word-break: break-word;
 }
 
@@ -579,24 +916,37 @@ body {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgba(14, 42, 71, 0.45);
+  background: rgba(14, 42, 71, 0.5);
+  backdrop-filter: blur(2px);
+  animation: dlg-in 140ms ease;
+}
+
+@keyframes dlg-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .dlg__box {
-  width: min(420px, 100%);
+  width: min(430px, 100%);
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px 18px;
-  border-radius: 12px;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border-radius: 14px;
   background: var(--card);
   color: var(--ink);
-  box-shadow: 0 18px 46px rgba(14, 42, 71, 0.3);
+  box-shadow: var(--lift-3);
+  animation: box-in 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes box-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
 
 .dlg__box--wide {
-  width: min(620px, 100%);
+  width: min(640px, 100%);
 }
 
 .dlg__head {
@@ -608,23 +958,26 @@ body {
 
 .dlg__title {
   margin: 0;
-  font-size: 16px;
+  font-size: 16.5px;
+  font-weight: 660;
 }
 
 .dlg__x {
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 20px;
-  line-height: 1;
   cursor: pointer;
+  transition: background var(--quick), color var(--quick);
 }
 
 .dlg__x:hover {
   background: var(--bg);
+  color: var(--ink);
 }
 
 .dlg__body {
@@ -632,7 +985,7 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 13px;
 }
 
 .dlg__row {
@@ -652,24 +1005,29 @@ body {
 .dlg__field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   font-size: 12.5px;
+  font-weight: 600;
   color: var(--muted);
 }
 
 .dlg__input {
-  padding: 9px 11px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--ink);
   font: inherit;
   font-size: 13.5px;
+  font-weight: 400;
+  transition: border-color var(--quick), box-shadow var(--quick);
 }
 
 .dlg__input:focus {
   outline: none;
   border-color: var(--navy-soft);
+  background: var(--card);
+  box-shadow: 0 0 0 3px rgba(23, 57, 94, 0.1);
 }
 
 .dlg__actions {
@@ -688,18 +1046,31 @@ body {
 .card {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 12px;
+  gap: 8px;
+  padding: 13px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg);
+  transition: border-color var(--quick), box-shadow var(--quick);
+}
+
+.card:hover {
+  border-color: #cbd5e1;
+  box-shadow: var(--lift-2);
 }
 
 .card__top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+}
+
+.card__id {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
 }
 
 .card__label {
@@ -712,6 +1083,7 @@ body {
 .card__seen {
   font-size: 12px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .card__actions {
@@ -724,17 +1096,136 @@ body {
   color: var(--muted);
 }
 
+.card__history--busy {
+  display: grid;
+  gap: 6px;
+}
+
+.card__history-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------- the history import */
+
+.imp {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.imp__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.imp__headline {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.imp__spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--line);
+  border-top-color: var(--navy-soft);
+  border-radius: 50%;
+  animation: imp-spin 0.9s linear infinite;
+}
+
+.imp__spinner--sm {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+
+/* Finished and failed both stop turning — a spinner that never stops is how a
+   screen says "still working" long after it has given up. */
+.imp__spinner--done,
+.imp__spinner--failed {
+  animation: none;
+  border-color: var(--ok, #1f9d55);
+  border-top-color: var(--ok, #1f9d55);
+}
+
+.imp__spinner--failed {
+  border-color: var(--err);
+  border-top-color: var(--err);
+}
+
+@keyframes imp-spin {
+  to { transform: rotate(360deg); }
+}
+
+.imp__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.imp__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--navy-soft);
+  transition: width 0.4s ease;
+}
+
+/* Before the chat list has been counted there is no fraction to show, and a bar
+   sitting at zero for half a minute reads as nothing happening. */
+.imp__bar--waiting .imp__fill {
+  width: 35%;
+  animation: imp-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes imp-sweep {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+.imp__detail {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.imp__eta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.imp__note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imp__spinner,
+  .imp__bar--waiting .imp__fill {
+    animation: none;
+  }
+}
+
 .thread__older {
   align-self: center;
-  margin: 2px auto 10px;
-  padding: 5px 14px;
+  margin: 2px auto 12px;
+  padding: 6px 15px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--card);
   color: var(--muted);
   font: inherit;
   font-size: 12px;
+  box-shadow: var(--lift-1);
   cursor: pointer;
+  transition: color var(--quick), border-color var(--quick);
 }
 
 .thread__older:hover:not(:disabled) {
@@ -748,8 +1239,8 @@ body {
 }
 
 .card__why {
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--err);
   font-size: 12px;
@@ -759,12 +1250,27 @@ body {
 
 .chip {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 9px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A live phone gets a dot that breathes; the rest are flat, so "ready" is the
+   one status that stands out in a list of them. */
+.chip--ok::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2.4s ease-in-out infinite;
 }
 
 .chip--ok {
@@ -787,12 +1293,24 @@ body {
   color: var(--muted);
 }
 
+.chip--group {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* --------------------------------------------------------------------- QR */
 
 .qr {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   text-align: center;
 }
@@ -805,17 +1323,21 @@ body {
   height: 296px;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #fff;
+  box-shadow: var(--lift-2);
 }
 
 .qr__connected {
+  flex-direction: column;
+  gap: 10px;
   border: 0;
   background: var(--ok-soft);
   color: var(--ok);
   font-size: 16px;
   font-weight: 650;
   padding: 20px;
+  box-shadow: none;
 }
 
 /* Never below 288: a smaller code is harder for a phone camera to read. */
@@ -841,20 +1363,32 @@ body {
   text-align: left;
   color: var(--muted);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.qr__steps li::marker {
+  color: var(--gold);
+  font-weight: 700;
 }
 
 /* The warning sits with the code, not in a footnote. Somebody about to scan is
    the only person who can still decide not to, and a ban cannot be undone. */
 .qr__warning {
-  padding: 9px 11px;
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
   border: 1px solid var(--err);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--err);
   font-size: 12.5px;
   line-height: 1.45;
   text-align: left;
+}
+
+.qr__warning svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 .qr__warning b {
@@ -876,17 +1410,37 @@ body {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+
+  .msg {
+    max-width: 88%;
+  }
+}
+
+/* Somebody who asked the system to stop moving things means it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ------------------------------------------------------------------ dark
 
    Follows the inbox that frames this page: app.js copies its data-wa-theme
-   onto this document's body, because a separate document inherits nothing. */
+   onto this document's body, because a separate document inherits nothing.
+
+   Only surfaces that paint their own background state a colour here. Forcing
+   --ink white across the board is what once turned every pale plate in the
+   inbox into white-on-white. */
 
 body[data-wa-theme="glass-dark"] {
   --ink: #e9edef;
   --muted: #8fa3b8;
   --line: rgba(255, 255, 255, 0.14);
+  --line-soft: rgba(255, 255, 255, 0.08);
   --bg: #0f1a26;
   --card: #17293c;
   --navy: #0b1622;
@@ -897,16 +1451,44 @@ body[data-wa-theme="glass-dark"] {
   --warn-soft: rgba(160, 90, 23, 0.25);
   --err: #ff8a80;
   --err-soft: rgba(194, 56, 47, 0.22);
-}
 
-body[data-wa-theme="glass-dark"] .msg--out {
-  background: #14442f;
-  border-color: #1d5d41;
+  --mine: #14442f;
+  --mine-line: #1d5d41;
+
+  --lift-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --lift-2: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --lift-3: 0 18px 46px rgba(0, 0, 0, 0.55);
+
+  --scroll-thumb: rgb(255 255 255 / 22%);
+  --scroll-thumb-hover: rgb(255 255 255 / 40%);
 }
 
 body[data-wa-theme="glass-dark"] .msg__quote,
 body[data-wa-theme="glass-dark"] .msg__file {
   background: rgba(255, 255, 255, 0.08);
+}
+
+body[data-wa-theme="glass-dark"] .msg__file:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* The weave has to lighten the surface here, not darken it. */
+body[data-wa-theme="glass-dark"] .thread__messages {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+}
+
+/* Pale-tinted discs go dark-tinted, or the initials sit white on near-white. */
+body[data-wa-theme="glass-dark"] .avatar {
+  background: hsl(var(--hue, 210) 34% 26%);
+  color: hsl(var(--hue, 210) 62% 82%);
+}
+
+body[data-wa-theme="glass-dark"] .side__phones:hover,
+body[data-wa-theme="glass-dark"] .side__search:hover,
+body[data-wa-theme="glass-dark"] .btn--ghost:hover,
+body[data-wa-theme="glass-dark"] .card:hover {
+  border-color: rgba(255, 255, 255, 0.26);
 }
 
 /* A QR has to stay black on white to be readable. */

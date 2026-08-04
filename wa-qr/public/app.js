@@ -11,6 +11,8 @@
  * the company, so it is only ever a text node.
  */
 
+import { icon, initials, hueFor } from "./icons.js";
+
 const POLL_CHAT_MS = 5000;   // no socket on this service; the list is polled
 const POLL_QR_MS = 3000;     // the code itself rotates roughly every 20 seconds
 const MAX_BODY = 4096;
@@ -160,7 +162,7 @@ function dialog({ title, body, actions = [], wide = false }) {
   const box = el("div.dlg__box", { class: wide ? "dlg__box--wide" : "" }, [
     el("div.dlg__head", {}, [
       el("h2.dlg__title", {}, [title]),
-      el("button.dlg__x", { type: "button", title: "Close" }, ["×"]),
+      el("button.dlg__x", { type: "button", title: "Close" }, [icon("close", { size: 16 })]),
     ]),
     body,
     actions.length ? el("div.dlg__actions", {}, actions) : null,
@@ -307,10 +309,18 @@ const ui = {
 const layout = el("div.app", {}, [
   el("aside.side", {}, [
     el("div.side__top", {}, [
-      el("div.side__title", {}, ["Linked phones"]),
-      el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: openPhones }, ["Manage"]),
+      el("div.side__title", {}, [icon("phone", { size: 16 }), "Linked phones"]),
+      el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: openPhones }, [
+        icon("link", { size: 13 }),
+        "Manage",
+      ]),
     ]),
-    el("div.side__filters", {}, [ui.phoneSelect, ui.search]),
+    el("div.side__filters", {}, [
+      ui.phoneSelect,
+      // The magnifier lives inside the field rather than beside it, so the row
+      // stays one control.
+      el("div.side__search-wrap", {}, [icon("search", { size: 15 }), ui.search]),
+    ]),
     ui.importing,
     ui.convs,
   ]),
@@ -353,6 +363,74 @@ async function loadMe() {
   } catch {}
 }
 
+/** "about 4 minutes", "less than a minute", "about 1 hour 10 min". */
+function humanDuration(ms) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return "less than a minute";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `about ${hours} hour${hours === 1 ? "" : "s"}${rest ? ` ${rest} min` : ""}`;
+}
+
+/**
+ * Where each phone's import was when this page first saw it.
+ *
+ * The rate is measured from here rather than from the run's own start, and that
+ * is the whole point. Everything before the first chat — connecting, and
+ * reading a list of four hundred chats out of the handset — lands inside the
+ * elapsed time of chat number one, so dividing by the run's start says "about
+ * 2 hours 21 min" for a phone that is nine minutes from finishing. Watching
+ * the counter move instead measures only the part that is still to happen.
+ */
+const importSeen = new Map();
+
+/** Seconds per chat, measured on this phone, or null until it is worth having. */
+function ratePerChat(session) {
+  const key = String(session.id);
+  const done = session.history?.chatsDone || 0;
+  const now = Date.now();
+  const seen = importSeen.get(key);
+
+  // First sight, or a new run that started the count again.
+  if (!seen || done < seen.done) {
+    importSeen.set(key, { done, at: now });
+    return null;
+  }
+
+  const chats = done - seen.done;
+  const elapsed = now - seen.at;
+  // Deliberately not updated here: this is called several times per repaint,
+  // and moving the mark on each call would measure a fraction of a second.
+  return chats >= 3 && elapsed >= 10_000 ? elapsed / chats : null;
+}
+
+/**
+ * How much longer the import has to run.
+ *
+ * Measured rather than guessed at: chats differ enormously — one holds four
+ * messages and the next holds nine thousand — so a fixed per-chat figure would
+ * be wrong for every phone.
+ *
+ * "" until there is something worth dividing by. A countdown that opens at two
+ * hours and drops to nine minutes is worse than no countdown.
+ */
+function etaFor(session) {
+  const { chatsDone: done, chatsTotal: total } = session.history || {};
+  if (!total || done >= total) return "";
+
+  const perChat = ratePerChat(session);
+  return perChat ? humanDuration(perChat * (total - done)) : "";
+}
+
+/** How far along, 0..1, or null while the total is still unknown. */
+function historyFraction(history) {
+  const { chatsDone: done, chatsTotal: total } = history || {};
+  if (!total) return null;
+  return Math.min(1, done / total);
+}
+
 /**
  * What the history import is doing, in a sentence, or "" when there is nothing
  * to say. A phone that finished importing months ago does not need to mention
@@ -361,16 +439,19 @@ async function loadMe() {
 function historyNote(session) {
   const h = session.history || {};
   if (h.status === "running") {
-    return h.chatsTotal
-      ? `Importing history — ${h.chatsDone} of ${h.chatsTotal} chats`
-      : "Importing history — reading the chat list";
+    if (!h.chatsTotal) return "Reading the chat list…";
+    const eta = etaFor(session);
+    return `Importing chats — ${h.chatsDone} of ${h.chatsTotal}${eta ? `, ${eta} left` : ""}`;
   }
-  if (h.status === "failed") return `History import stopped: ${h.error || "unknown reason"}`;
-  if (h.status === "pending") return "History import queued";
+  if (h.status === "failed") return `The import stopped: ${h.error || "reason unknown"}`;
+  if (h.status === "pending") return "The import is about to start";
   return "";
 }
 
-const isImporting = (session) => (session.history || {}).status === "running";
+const isImporting = (session) => {
+  const status = (session.history || {}).status;
+  return status === "running" || status === "pending";
+};
 
 async function loadConversations() {
   const query = state.phoneFilter ? `?session_id=${encodeURIComponent(state.phoneFilter)}` : "";
@@ -544,39 +625,67 @@ function paintConversations() {
 
   for (const conversation of rows) {
     const phone = sessionById(conversation.session_id);
+    const title = conversationTitle(conversation);
     ui.convs.append(
       el(
         "button.conv",
         {
           type: "button",
-          class: String(conversation.id) === String(state.conversationId) ? "is-active" : "",
+          class: [
+            String(conversation.id) === String(state.conversationId) ? "is-active" : "",
+            conversation.unread_count ? "has-unread" : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
           onclick: () => selectConversation(conversation.id),
         },
         [
-          el("div.conv__line", {}, [
-            el("span.conv__name", {}, [
-              conversation.is_group ? el("span.chip--group", {}, ["Group"]) : null,
-              el("span", {}, [conversationTitle(conversation)]),
+          avatarFor(conversation, title),
+          el("div.conv__body", {}, [
+            el("div.conv__line", {}, [
+              el("span.conv__name", {}, [
+                conversation.is_group ? el("span.chip--group", {}, ["Group"]) : null,
+                el("span", {}, [title]),
+              ]),
+              el("span.conv__when", {}, [stamp(conversation.last_message_at)]),
             ]),
-            el("span.conv__when", {}, [stamp(conversation.last_message_at)]),
-          ]),
-          el("div.conv__line", {}, [
-            el("span.conv__last", {}, [
-              conversation.last_message_preview ||
-                (conversation.last_message_kind ? `[${conversation.last_message_kind}]` : ""),
+            el("div.conv__line", {}, [
+              el("span.conv__last", {}, [
+                conversation.last_message_preview ||
+                  (conversation.last_message_kind ? `[${conversation.last_message_kind}]` : ""),
+              ]),
+              conversation.unread_count
+                ? el("span.conv__unread", {}, [String(conversation.unread_count)])
+                : null,
             ]),
-            conversation.unread_count
-              ? el("span.conv__unread", {}, [String(conversation.unread_count)])
+            // Only worth naming while more than one phone is in the list.
+            !state.phoneFilter && phone
+              ? el("div.conv__phone", {}, [icon("phone", { size: 11 }), sessionName(phone)])
               : null,
           ]),
-          // Only worth naming while more than one phone is in the list.
-          !state.phoneFilter && phone
-            ? el("div.conv__phone", {}, [sessionName(phone)])
-            : null,
         ]
       )
     );
   }
+}
+
+/**
+ * The disc beside a chat.
+ *
+ * Keyed on the wa_id rather than the name: a contact who is saved later stops
+ * being "+971…" and becomes "Ahmed", and the colour should not change with it.
+ * A group is the one case that skips the colour entirely — it is not a person.
+ */
+function avatarFor(conversation, title, { small = false } = {}) {
+  const classes = ["div.avatar", small ? "avatar--sm" : "", conversation.is_group ? "avatar--group" : ""]
+    .filter(Boolean)
+    .join(".");
+
+  if (conversation.is_group) {
+    return el(classes, { "aria-hidden": "true" }, [icon("users", { size: small ? 15 : 17 })]);
+  }
+  const key = conversationWaId(conversation) || title;
+  return el(classes, { style: `--hue: ${hueFor(key)}`, "aria-hidden": "true" }, [initials(title)]);
 }
 
 async function selectConversation(id) {
@@ -662,7 +771,15 @@ function renderThread({ keepScroll = false } = {}) {
   const conversation = activeConversation();
 
   if (!conversation) {
-    clear(ui.thread).append(el("div.empty.empty--thread", {}, ["Select a chat on the left."]));
+    clear(ui.thread).append(
+      el("div.empty.empty--thread", {}, [
+        el("div.empty__art", {}, [icon("chat", { size: 30, stroke: 1.4 })]),
+        el("div.empty__title", {}, ["No chat open"]),
+        el("div.empty__note", {}, [
+          "Pick a conversation on the left to read it and reply.",
+        ]),
+      ])
+    );
     return;
   }
 
@@ -676,12 +793,15 @@ function renderThread({ keepScroll = false } = {}) {
   const messages = messagesNode(conversation);
   const phone = sessionById(conversation.session_id);
 
+  const title = conversationTitle(conversation);
+
   clear(ui.thread).append(
     el("header.thread__head", {}, [
+      avatarFor(conversation, title, { small: true }),
       el("div.thread__who", {}, [
         el("div.thread__name", {}, [
           conversation.is_group ? el("span.chip--group", {}, ["Group"]) : null,
-          conversationTitle(conversation),
+          title,
         ]),
         el("div.thread__sub", {}, [
           conversation.is_group
@@ -727,6 +847,7 @@ function attachment(message) {
   }
 
   return el("a.msg__file", { href: url, target: "_blank", rel: "noopener" }, [
+    icon("file", { size: 17 }),
     el("span.msg__file-name", {}, [message.media_name || message.file_name || message.kind || "File"]),
     el("span.msg__file-size", {}, [formatBytes(message.media_size ?? message.size_bytes)]),
   ]);
@@ -791,7 +912,9 @@ function bubble(message, conversation) {
   }
 
   const quoted = quotedFor(message);
-  if (quoted !== null) node.append(el("div.msg__quote", {}, [quoted]));
+  if (quoted !== null) {
+    node.append(el("div.msg__quote", {}, [icon("reply", { size: 12 }), quoted]));
+  }
 
   if (message.media_url || message.media_id) node.append(attachment(message));
 
@@ -805,7 +928,7 @@ function bubble(message, conversation) {
   node.append(
     el("div.msg__meta", {}, [
       stamp(message.created_at),
-      outbound && message.status ? ` · ${message.status}` : "",
+      outbound ? deliveryTick(message.status) : null,
     ])
   );
 
@@ -819,10 +942,39 @@ function bubble(message, conversation) {
   return node;
 }
 
+/**
+ * What a phone shows beside a message it sent: one tick queued or sent, two
+ * delivered, two blue read.
+ *
+ * The word was printed here before ("· delivered"), which is both longer than
+ * the message half the time and a vocabulary the agent has to learn. The ticks
+ * are the ones they already know from WhatsApp itself; the word stays on the
+ * title, for anyone who wants it.
+ */
+function deliveryTick(status) {
+  const TICKS = {
+    queued: { name: "clock", label: "Queued" },
+    sent: { name: "check", label: "Sent" },
+    delivered: { name: "checkDouble", label: "Delivered" },
+    read: { name: "checkDouble", label: "Read", modifier: "msg__tick--read" },
+    failed: { name: "alert", label: "Not sent", modifier: "msg__tick--failed" },
+  };
+
+  const tick = TICKS[status];
+  if (!tick) return null;
+
+  return el(
+    "span.msg__tick",
+    { class: tick.modifier || "", title: tick.label },
+    [icon(tick.name, { size: 13, stroke: 2 })]
+  );
+}
+
 function composer(conversation) {
   const phone = sessionById(conversation.session_id);
   if (phone && phone.status !== "ready") {
     return el("div.composer.composer--locked", {}, [
+      icon("alert", { size: 15 }),
       `${sessionName(phone)} is ${statusOf(phone.status).text.toLowerCase()} — messages cannot be sent until it is ready.`,
     ]);
   }
@@ -832,15 +984,25 @@ function composer(conversation) {
     placeholder: "Write a message…",
     maxlength: String(MAX_BODY),
   });
-  const send = el("button.btn", { type: "button" }, ["Send"]);
+  // Round and iconic rather than a labelled button: it is the only action on
+  // the bar, and the label was competing with the box beside it for the eye.
+  const send = el("button.composer__send", { type: "button", title: "Send  ·  Enter" }, [
+    icon("send", { size: 17 }),
+  ]);
   const problem = el("div.composer__error", { hidden: true });
+
+  /** Puts the button back the way it was — it has an icon, not a caption. */
+  const showSending = (busy) => {
+    send.disabled = busy;
+    send.title = busy ? "Sending…" : "Send  ·  Enter";
+    clear(send).append(icon(busy ? "clock" : "send", { size: 17 }));
+  };
 
   async function submit() {
     const body = input.value.trim();
     if (!body) return;
 
-    send.disabled = true;
-    send.textContent = "Sending…";
+    showSending(true);
     problem.hidden = true;
     try {
       await api("api/send", {
@@ -859,8 +1021,7 @@ function composer(conversation) {
       // Messages only, so the cursor stays in the box the agent is still using.
       paintMessages();
     } catch (error) {
-      send.disabled = false;
-      send.textContent = "Send";
+      showSending(false);
       problem.hidden = false;
       clear(problem).append(error.message);
     }
@@ -926,12 +1087,39 @@ function openPhones() {
           el("div.card__seen", {}, [
             session.last_seen_at ? `Last seen ${fullStamp(session.last_seen_at)}` : "Never connected",
           ]),
-          historyNote(session)
-            ? el("div.card__history", {}, [historyNote(session)])
+          // A spinner beside the words while it runs, and a bar under them —
+          // "12 of 84" alone is a number somebody has to watch for a while
+          // before they can tell whether anything is moving.
+          isImporting(session)
+            ? el("div.card__history.card__history--busy", {}, [
+                el("div.card__history-line", {}, [
+                  el("span.imp__spinner.imp__spinner--sm"),
+                  el("span", {}, [historyNote(session)]),
+                ]),
+                // No inline width while the total is still unknown: an inline
+                // style outranks the stylesheet, so `width:0%` would silently
+                // flatten the sweeping bar that says "counting" back to an
+                // empty one that says "nothing is happening".
+                el(
+                  "div.imp__bar",
+                  { class: historyFraction(session.history) === null ? "imp__bar--waiting" : "" },
+                  [
+                    el("div.imp__fill", {
+                      style:
+                        historyFraction(session.history) === null
+                          ? null
+                          : `width:${Math.round(historyFraction(session.history) * 100)}%`,
+                    }),
+                  ]
+                ),
+              ])
             : el("div.card__history", {}, [
-                `History imported${
-                  session.history?.messages ? ` — ${session.history.messages} messages` : ""
-                }`,
+                historyNote(session) ||
+                  `History imported${
+                    session.history?.messages
+                      ? ` — ${session.history.messages.toLocaleString()} messages`
+                      : ""
+                  }`,
               ]),
           // Shown in full, never truncated: this is the sentence that explains
           // why a number stopped working, and it is the only one there is.
@@ -957,6 +1145,16 @@ function openPhones() {
 
   loadSessions().then(paint);
   paint();
+
+  // Redrawn while it is open, so an import in progress counts up in front of
+  // whoever is watching it. It stops itself once the dialog is gone rather than
+  // being unsubscribed — the dialog can be closed by the X, the backdrop,
+  // Escape, or by "Link a phone" replacing it, and only one of those is an
+  // event anything here could listen for.
+  const repaint = setInterval(() => {
+    if (!listNode.isConnected) return clearInterval(repaint);
+    if (state.sessions.some(isImporting)) paint();
+  }, 3000);
 }
 
 async function linkPhone(phonesDialog) {
@@ -1007,6 +1205,99 @@ async function disconnect(session, done) {
   }
 }
 
+/* ------------------------------------------------------------ import panel */
+
+/**
+ * What the dialog turns into the moment a phone is linked.
+ *
+ * Scanning the code is not the end of setting a phone up — the months of
+ * conversation already on it still have to be read across, and that takes
+ * minutes. Without this the dialog said "Connected" and closed onto a chat list
+ * that filled in slowly for no visible reason, which reads as a broken import
+ * rather than one still running.
+ *
+ * It says what is happening, how far along it is and how much longer it will
+ * take, and it says plainly that the window can be closed — the import is on
+ * the server and does not need anybody watching it.
+ */
+function importPanel(sessionId, close) {
+  const spinner = el("span.imp__spinner");
+  const headline = el("div.imp__headline", {}, ["Reading your WhatsApp — please wait"]);
+  const fill = el("div.imp__fill");
+  const bar = el("div.imp__bar", {}, [fill]);
+  const detail = el("div.imp__detail", {}, ["Getting ready…"]);
+  const eta = el("div.imp__eta");
+  const closeButton = el("button.btn.btn--ghost", { type: "button", onclick: close }, [
+    "Close and keep working",
+  ]);
+
+  const panel = el("div.imp", {}, [
+    el("div.imp__top", {}, [spinner, headline]),
+    bar,
+    detail,
+    eta,
+    el("p.imp__note", {}, [
+      "Your chats are being copied from the phone into this inbox, six months back. " +
+        "They appear in the list on the left as they arrive, and stay here whether or " +
+        "not the phone remains connected.",
+    ]),
+    el("div.dlg__actions", {}, [closeButton]),
+  ]);
+
+  let timer = null;
+  const stop = () => timer && clearInterval(timer);
+  panel.stop = stop;
+
+  async function tick() {
+    await loadSessions();
+    renderPhoneSelect();
+
+    const session = sessionById(sessionId);
+    const history = session?.history || {};
+    const fraction = historyFraction(history);
+
+    if (history.status === "done") {
+      stop();
+      spinner.classList.add("imp__spinner--done");
+      headline.textContent = "Your WhatsApp is ready";
+      fill.style.width = "100%";
+      detail.textContent = history.messages
+        ? `${history.messages.toLocaleString()} messages imported from ${history.chatsTotal} chats.`
+        : "Everything on this phone was already here.";
+      eta.textContent = "";
+      clear(closeButton).append("Open the inbox");
+      refresh({ keepScroll: false });
+      return;
+    }
+
+    if (history.status === "failed") {
+      stop();
+      spinner.classList.add("imp__spinner--failed");
+      headline.textContent = "The import stopped early";
+      detail.textContent = history.error || "The reason was not recorded.";
+      eta.textContent = "It will pick up again the next time this phone connects.";
+      return;
+    }
+
+    // The bar is indeterminate until the chat list has been counted, because a
+    // width of zero for the first half-minute looks like nothing is happening.
+    bar.classList.toggle("imp__bar--waiting", fraction === null);
+    fill.style.width = fraction === null ? "" : `${Math.round(fraction * 100)}%`;
+
+    detail.textContent = !history.chatsTotal
+      ? "Reading the list of chats on this phone…"
+      : `Chat ${history.chatsDone} of ${history.chatsTotal}` +
+        (history.messages ? ` · ${history.messages.toLocaleString()} messages so far` : "");
+
+    const left = session ? etaFor(session) : "";
+    eta.textContent = left ? `${left} left` : "Working out how long this will take…";
+  }
+
+  tick();
+  timer = setInterval(tick, 3000);
+  return panel;
+}
+
 /* ---------------------------------------------------------------- QR dialog */
 
 async function openQr(id) {
@@ -1023,29 +1314,32 @@ async function openQr(id) {
   const status = el("div.qr__status", {}, ["Starting up…"]);
   const problem = el("div.alert", { hidden: true });
 
-  const d = dialog({
-    title: "Link a phone",
-    body: el("div.qr", {}, [
-      // Before the code, not after it. Somebody about to scan is the last
-      // person who can decide not to, and a ban cannot be undone.
-      el("div.qr__warning", {}, [
-        el("b", {}, ["Only link a number kept for this purpose."]),
-        "Numbers on the WhatsApp Business Platform must not be linked here — a ban is permanent.",
-      ]),
-      frame,
-      status,
-      problem,
-      el("ol.qr__steps", {}, [
-        el("li", {}, ["Open WhatsApp on the phone."]),
-        el("li", {}, ["Go to Settings, then Linked devices."]),
-        el("li", {}, ["Tap Link a device and scan the code above."]),
-      ]),
+  const body = el("div.qr", {}, [
+    // Before the code, not after it. Somebody about to scan is the last
+    // person who can decide not to, and a ban cannot be undone.
+    el("div.qr__warning", {}, [
+      el("b", {}, ["Only link a number kept for this purpose."]),
+      "Numbers on the WhatsApp Business Platform must not be linked here — a ban is permanent.",
     ]),
-  });
+    frame,
+    status,
+    problem,
+    el("ol.qr__steps", {}, [
+      el("li", {}, ["Open WhatsApp on the phone."]),
+      el("li", {}, ["Go to Settings, then Linked devices."]),
+      el("li", {}, ["Tap Link a device and scan the code above."]),
+    ]),
+  ]);
+
+  const d = dialog({ title: "Link a phone", body });
 
   let shown = "";
   let timer = null;
-  const stop = () => timer && clearInterval(timer);
+  let panel = null;
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    panel?.stop?.();
+  };
   d.node.addEventListener("dismiss", stop);
 
   async function poll() {
@@ -1069,12 +1363,23 @@ async function openQr(id) {
       await loadSessions();
       renderPhoneSelect();
       const session = sessionById(id);
-      clear(frame).append(
+
+      // Scanning the code is not the end of it. The dialog stays open and turns
+      // into the import, because the months of conversation on this phone are
+      // still being read across and a chat list filling in slowly with no
+      // explanation reads as something broken.
+      panel = importPanel(id, () => {
+        stop();
+        d.close();
+      });
+      clear(body).append(
         el("div.qr__connected", {}, [
-          withPlus(session?.phone_number) ? `Connected as ${withPlus(session.phone_number)}` : "Connected",
-        ])
+          withPlus(session?.phone_number)
+            ? `Connected as ${withPlus(session.phone_number)}`
+            : "Connected",
+        ]),
+        panel
       );
-      status.textContent = "";
       refresh({ keepScroll: false });
       return;
     }
