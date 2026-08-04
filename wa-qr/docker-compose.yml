@@ -40,6 +40,10 @@ services:
     volumes:
       # Auth data and media. Losing this volume means every phone re-scans.
       - ./data:/data
+      # The panel is static files with no build step, so it is mounted rather
+      # than baked in: a change to it should be a copy and a reload, not a
+      # rebuild of an image whose slowest layer is a browser.
+      - ./public:/app/public:ro
 
 volumes:
   waqrdata:
