@@ -59,47 +59,50 @@ export async function resolveContactWaId({ client = null, jid = "", message = nu
     return { waId: toWaId(jid), lid: "", isLid: false };
   }
 
-  // Method A: the contact record, which usually knows the number behind a LID.
+  // Ask WhatsApp itself. This is the only thing that actually knows which
+  // number is behind a LinkedID, and it is tried before anything else.
   //
-  // contact.number arrives formatted — "+92 316 6753715" — so it is reduced to
-  // digits before being judged. Testing the raw value against a digits-only
-  // pattern rejected every real number it was given and fell through silently
-  // to storing the LinkedID as though it were a phone number.
-  if (message && typeof message.getContact === "function") {
+  // getContact() is deliberately not trusted here. On an outbound message it
+  // returns *our own* contact, not the customer's — the log showed it handing
+  // back the linked phone's own number while resolving the customer's chat —
+  // and its `.number` field is itself sometimes another LinkedID. Believing
+  // either produced a contact that looked like a phone number, could not be
+  // dialled, and appeared beside the same person's real chat as a duplicate.
+  //
+  // Each step says what it found. Two rounds of reasoning about why a LinkedID
+  // kept being stored produced two wrong answers, because every path out of
+  // here was silent — a null client, an empty result and a thrown error all
+  // looked identical from the outside.
+  if (!client) {
+    console.warn(`[wa-qr] no live client for ${jid} — cannot ask WhatsApp for the number`);
+  } else if (typeof client.getContactLidAndPhone !== "function") {
+    console.warn("[wa-qr] this whatsapp-web.js has no getContactLidAndPhone");
+  } else {
     try {
-      const contact = await message.getContact();
-      const fromNumber = toWaId(contact?.number);
-      if (fromNumber.length >= 7) {
-        return {
-          waId: fromNumber,
-          lid: isLid ? jid : contact?.id?.server === "lid" ? contact.id._serialized : "",
-          isLid,
-        };
+      const res = await client.getContactLidAndPhone([jid]);
+      const pn = res?.[0]?.pn || "";
+      const resolvedWaId = toWaId(pn);
+      if (resolvedWaId) {
+        return { waId: resolvedWaId, lid: res[0].lid || lid, isLid: true };
       }
-      if (contact?.id?.server === "c.us" && contact.id.user) {
-        return { waId: toWaId(contact.id.user), lid: isLid ? jid : "", isLid };
-      }
+      console.warn(`[wa-qr] WhatsApp returned no number for ${jid}: ${JSON.stringify(res)}`);
     } catch (err) {
-      console.warn("[wa-qr] getContact() could not name the sender:", err.message);
+      console.warn(`[wa-qr] getContactLidAndPhone(${jid}) threw: ${err.message}`);
     }
   }
 
-  // Method B: Call client.getContactLidAndPhone([jid])
-  if (client && typeof client.getContactLidAndPhone === "function") {
+  // Last resort: the message's own contact, but only when it is demonstrably
+  // the party being resolved. The check is the whole point — without it this
+  // returns the sender, which on anything we sent is ourselves.
+  if (message && typeof message.getContact === "function") {
     try {
-      const res = await client.getContactLidAndPhone([jid]);
-      if (Array.isArray(res) && res[0]) {
-        const pn = res[0].pn || "";
-        const retLid = res[0].lid || lid;
-        if (pn) {
-          const resolvedWaId = toWaId(pn);
-          if (resolvedWaId) {
-            return { waId: resolvedWaId, lid: retLid, isLid: true };
-          }
-        }
+      const contact = await message.getContact();
+      const sameParty = contact?.id?._serialized === jid;
+      if (sameParty && contact.id.server === "c.us" && contact.id.user) {
+        return { waId: toWaId(contact.id.user), lid, isLid };
       }
     } catch (err) {
-      console.warn("[wa-qr] client.getContactLidAndPhone failed:", err.message);
+      console.warn(`[wa-qr] getContact() for ${jid} threw: ${err.message}`);
     }
   }
 
