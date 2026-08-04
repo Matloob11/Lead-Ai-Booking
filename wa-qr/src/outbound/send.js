@@ -98,7 +98,39 @@ export async function sendOutboundMessage({
     throw new Error(errorMsg);
   }
 
-  const formattedTo = isGroup ? to : `${recipientWaId}@c.us`;
+  let formattedTo = isGroup ? to : `${recipientWaId}@c.us`;
+
+  // Make WhatsApp look the recipient up before sending to them.
+  //
+  // WhatsApp now addresses people by LinkedID internally, and its own script
+  // throws "No LID for user" when asked to send to someone whose pairing it
+  // has not fetched — which is every contact we have only ever received from.
+  // getNumberId both forces that lookup and answers the question worth asking
+  // first: is this number on WhatsApp at all. Without it sendMessage returned
+  // nothing, silently, and the agent saw a failed bubble with no reason on it.
+  if (!isGroup) {
+    try {
+      const wid = await client.getNumberId(recipientWaId);
+      if (!wid) {
+        const errorMsg = `+${recipientWaId} is not on WhatsApp.`;
+        await q(`UPDATE qr_message SET status = 'failed', error_detail = $1 WHERE id = $2`, [
+          errorMsg,
+          messageId,
+        ]);
+        throw new Error(errorMsg);
+      }
+      formattedTo = wid._serialized || formattedTo;
+
+      // Populates the LinkedID pairing WhatsApp is about to ask itself for.
+      if (typeof client.getContactLidAndPhone === "function") {
+        await client.getContactLidAndPhone([formattedTo]).catch(() => {});
+      }
+    } catch (err) {
+      if (err.message.endsWith("is not on WhatsApp.")) throw err;
+      console.warn(`[wa-qr] could not look up ${recipientWaId}: ${err.message}`);
+    }
+  }
+
   const sendOptions = {};
 
   // Quote handling

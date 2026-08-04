@@ -326,6 +326,34 @@ async function initClient(sessionId) {
 
   try {
     await client.initialize();
+
+    // WhatsApp Web's own errors, which until now went nowhere.
+    //
+    // Everything this service does inside the browser is a page evaluation,
+    // and when WhatsApp's script throws, the evaluation comes back undefined
+    // with the reason left on a console we were not reading. That is how a
+    // send could fail with nothing anywhere to say why.
+    client.pupPage?.on("pageerror", (err) => {
+      console.warn(`[wa-qr] WhatsApp page error (#${sessionId}): ${err.message}`);
+    });
+    client.pupPage?.on("console", async (msg) => {
+      if (msg.type() !== "error") return;
+      // The interesting half of a WhatsApp error is an object, and printing
+      // the console text alone renders it "[object Object]".
+      const parts = await Promise.all(
+        msg.args().map((a) => a.jsonValue().catch(() => null))
+      ).catch(() => []);
+      const detail = parts.filter(Boolean).map((p) => JSON.stringify(p)).join(" ");
+      console.warn(
+        `[wa-qr] WhatsApp console (#${sessionId}): ${msg.text().slice(0, 200)} ${detail.slice(0, 400)}`
+      );
+    });
+
+    // Which request WhatsApp's server refused, and with what.
+    client.pupPage?.on("response", async (res) => {
+      if (res.status() < 400) return;
+      console.warn(`[wa-qr] WhatsApp HTTP ${res.status()} (#${sessionId}) ${res.url().slice(0, 160)}`);
+    });
   } catch (err) {
     console.error(`[wa-qr] client initialization error for #${sessionId}:`, err);
     await store.updateSession(sessionId, {
