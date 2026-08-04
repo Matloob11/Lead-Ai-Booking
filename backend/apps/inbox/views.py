@@ -589,6 +589,49 @@ def start(request):
     return Response(serialize_conversation(conversation), status=status.HTTP_201_CREATED)
 
 
+@api_view(["GET"])
+def lookup(request):
+    """Every chat this agent has with a given phone number.
+
+    Written for the CRM tab: Bitrix hands over a lead's phone numbers, and the
+    tab has to say, for each one, whether a conversation already exists and
+    whether it can be written in right now.
+
+    A number can have more than one answer. ``unique_conversation_per_number``
+    is per (our number, customer), so the same customer messaged from two of our
+    numbers is deliberately two threads, and the tab has to offer both rather
+    than pick one.
+
+    ``numbers`` comes back alongside because of the case that matters most: no
+    conversation, or none with an open window. Then the only way to reach the
+    person is a template on one of the numbers this agent covers, and the tab
+    needs to know which those are without a second request.
+    """
+    raw = request.GET.get("phone", "")
+    wa_id = "".join(ch for ch in raw if ch.isdigit())
+    if not wa_id:
+        return Response({"detail": "A phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Matched on the tail rather than exactly. Bitrix stores what somebody
+    # typed — "+971 55 548 4423", "0555484423", "971555484423" — and WhatsApp
+    # knows one form. The last nine digits are the part that does not change.
+    tail = wa_id[-9:]
+
+    conversations = (
+        _visible_conversations(request.user)
+        .filter(contact__wa_id__endswith=tail)
+        .order_by("-last_message_at")
+    )
+
+    return Response(
+        {
+            "phone": wa_id,
+            "conversations": [serialize_conversation(c) for c in conversations],
+            "numbers": [serialize_number(n) for n in request.user.visible_numbers],
+        }
+    )
+
+
 @api_view(["POST"])
 def assign(request, pk):
     if not request.user.has_admin_rights:

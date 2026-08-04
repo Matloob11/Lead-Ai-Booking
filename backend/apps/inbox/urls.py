@@ -28,6 +28,9 @@ urlpatterns = [
     path("reminders/", views.reminders, name="reminder-list"),
     path("reminders/<int:pk>/", views.reminder_detail, name="reminder-detail"),
     path("search/", views.search, name="search"),
+    # Bitrix hands over a lead's phone numbers; this says which of them this
+    # agent already has a chat with, and on which of our numbers.
+    path("lookup/", views.lookup, name="lookup"),
     path("messages/<int:pk>/retry/", views.retry, name="retry"),
     path("start/", views.start, name="start"),
     path("shared-assets/", views.shared_asset_list, name="shared-asset-list"),
