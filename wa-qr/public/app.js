@@ -231,16 +231,21 @@ function renderSessions() {
   const page = el("div.page");
   const list = el("div.cards");
 
+  // Filtered rather than passed straight through: el() drops a null child, but
+  // the DOM's own append() writes the string "null" onto the page, which is
+  // what a screen with no error to report was showing.
   page.append(
-    el("div.page__head", {}, [
-      el("div", {}, [
-        el("h1.page__title", {}, ["Linked phones"]),
-        el("p.page__hint", {}, ["Phones connected by scanning a QR code, separate from the Business Platform numbers."]),
+    ...[
+      el("div.page__head", {}, [
+        el("div", {}, [
+          el("h1.page__title", {}, ["Linked phones"]),
+          el("p.page__hint", {}, ["Phones connected by scanning a QR code, separate from the Business Platform numbers."]),
+        ]),
+        el("button.btn", { type: "button", onclick: linkPhone }, ["Link a phone"]),
       ]),
-      el("button.btn", { type: "button", onclick: linkPhone }, ["Link a phone"]),
-    ]),
-    state.error ? el("div.alert", {}, [state.error]) : null,
-    list
+      state.error ? el("div.alert", {}, [state.error]) : null,
+      list,
+    ].filter(Boolean)
   );
 
   clear(root).append(page);

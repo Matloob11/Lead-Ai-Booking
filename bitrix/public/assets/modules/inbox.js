@@ -1559,8 +1559,11 @@ export function mountInbox(root, { me }) {
     const frame = el("iframe.linked-frame", {
       src: "/qr/",
       title: "Linked devices",
-      // The page shows a QR that links a phone; nothing else is allowed.
-      sandbox: "allow-scripts allow-same-origin allow-forms",
+      // allow-modals is not decoration: without it a sandboxed frame answers
+      // prompt() with null and confirm() with false, immediately and silently.
+      // That reads as "the user cancelled", so linking a phone returned before
+      // it started and removing one did nothing, with no error either way.
+      sandbox: "allow-scripts allow-same-origin allow-forms allow-modals",
     });
     modal("Linked devices", el("div.modal__body.linked-body", {}, [frame]), { wide: true });
   }
