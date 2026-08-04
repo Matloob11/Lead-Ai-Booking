@@ -95,7 +95,36 @@
           setStep("session", "done");
 
           if (typeof window.BX24.isAdmin === "function" && window.BX24.isAdmin()) {
-            ensurePlacement().then((r) => console.info("[a7-wa] LEFT_MENU:", r.status));
+            // The menu item, and the tab on every CRM record.
+            //
+            // The CRM tabs are registered from here rather than from their own
+            // page, because their own page cannot run until the tab exists to
+            // open it — the tab was written, deployed and served, and never
+            // appeared in a single lead, because nothing had told Bitrix it was
+            // there. install.html can do it too, but nobody opens install.html;
+            // an admin opens this panel every day.
+            //
+            // One at a time: Bitrix answers concurrent placement writes with
+            // lock errors often enough that the parallel version reports
+            // failures for placements it has in fact bound.
+            (async () => {
+              const CRM_TABS = [
+                "CRM_LEAD_DETAIL_TAB",
+                "CRM_DEAL_DETAIL_TAB",
+                "CRM_CONTACT_DETAIL_TAB",
+                "CRM_COMPANY_DETAIL_TAB",
+              ];
+              const menu = await ensurePlacement();
+              console.info("[a7-wa] LEFT_MENU:", menu.status);
+
+              // Its own directory, so ensurePlacement binds the CRM handler
+              // rather than this page.
+              const handler = new URL("./crm/", window.location.href).href;
+              for (const placement of CRM_TABS) {
+                const r = await ensurePlacement({ placement, title: "WhatsApp", handler });
+                console.info(`[a7-wa] ${placement}:`, r.status);
+              }
+            })().catch((e) => console.warn("[a7-wa] placement registration:", e));
           }
 
           step = "inbox";
