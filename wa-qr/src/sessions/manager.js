@@ -52,6 +52,16 @@ function formatSession(row) {
     lastError: row.last_error || "",
     lastSeenAt: row.last_seen_at || null,
     createdAt: row.created_at || null,
+    // What the history import is doing, so the panel can say so rather than
+    // looking finished while it is still reading months off the handset.
+    history: {
+      status: row.history_status || "pending",
+      error: row.history_error || "",
+      chatsDone: Number(row.history_chats_done || 0),
+      chatsTotal: Number(row.history_chats_total || 0),
+      messages: Number(row.history_messages || 0),
+      finishedAt: row.history_finished_at || null,
+    },
   };
 }
 
@@ -111,8 +121,19 @@ export async function listSessions() {
   return rows.map(formatSession);
 }
 
-/** Destroys a session, logs out, deletes auth files and DB record. */
-export async function destroySession(id) {
+/**
+ * Unlinks the phone and keeps every word it ever carried.
+ *
+ * This used to delete the session row, and the row is what conversations hang
+ * off — so disconnecting a phone took its whole history down by cascade. That
+ * is the exact outcome importing the history exists to prevent: an agent who
+ * wanted a customer off the books only had to press Disconnect.
+ *
+ * So the phone is logged out, its credentials are thrown away, and the row
+ * stays exactly where it is. Scanning again on the same row picks the same
+ * conversations back up and reads only what was missed.
+ */
+export async function disconnectSession(id) {
   const sessionId = Number(id);
 
   cancelReconnect(sessionId);
@@ -129,8 +150,41 @@ export async function destroySession(id) {
   }
 
   await clearAuthData(sessionId);
-  await store.deleteSessionRecord(sessionId);
-  emit("status", { sessionId, status: "disconnected", error: "Session destroyed" });
+  await store.updateSession(sessionId, {
+    status: "disconnected",
+    qr_data_url: "",
+    last_error: "Disconnected by an administrator. Scan the QR again to relink — the chats are kept.",
+    last_seen_at: new Date(),
+  });
+
+  emit("status", { sessionId, status: "disconnected", error: "" });
+  return formatSession(await store.getSessionById(sessionId));
+}
+
+/**
+ * Starts a disconnected phone up again so it can show a QR.
+ *
+ * A deliberate disconnect cancels the reconnect timer — it has to, or the
+ * service would simply undo it — and that leaves nothing to produce a code
+ * when somebody wants the phone back. Nothing did, and "Show QR" sat waiting
+ * for a code that was never going to be generated.
+ */
+export async function relinkSession(id) {
+  const sessionId = Number(id);
+  const row = await store.getSessionById(sessionId);
+  if (!row) return null;
+  if (row.status === "banned") {
+    throw new Error("This number was refused and cannot be linked here.");
+  }
+
+  if (!clients.has(sessionId)) {
+    await store.updateSession(sessionId, { status: "initialising", last_error: "" });
+    initClient(sessionId).catch((err) => {
+      console.error(`[wa-qr] failed to relink session #${sessionId}:`, err);
+    });
+  }
+
+  return formatSession(await store.getSessionById(sessionId));
 }
 
 /** Every place a session's auth data is thrown away. */
@@ -253,6 +307,28 @@ async function initClient(sessionId) {
     }
 
     reconnectAttempts.delete(sessionId);
+
+    // The same number, arriving on a second row.
+    //
+    // "Link a phone" always opens a fresh row, so scanning a number that is
+    // already known leaves its months of conversation on the old one and starts
+    // an empty one beside it. Neither half is the whole chat. The old row's
+    // contents are moved onto this one — which is the row holding the live
+    // credentials — and the emptied row goes.
+    //
+    // It also has to happen before the number is written here at all:
+    // qr_session.phone_number is unique, and the old row is still holding it.
+    const twin = await store.getSessionByPhoneNumber(phoneDigits);
+    if (twin && Number(twin.id) !== sessionId) {
+      console.info(
+        `[wa-qr] ${phoneDigits} is already known as session #${twin.id} — ` +
+          `moving its chats onto #${sessionId}`
+      );
+      await store.adoptHistoryFrom(twin.id, sessionId);
+      await clearAuthData(Number(twin.id));
+      cancelReconnect(Number(twin.id));
+      clients.delete(Number(twin.id));
+    }
 
     await store.updateSession(sessionId, {
       status: "ready",

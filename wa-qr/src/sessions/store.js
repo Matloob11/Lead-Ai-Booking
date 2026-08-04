@@ -14,7 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { q, one } from "../db.js";
+import { q, one, tx } from "../db.js";
 
 const PENDING_PREFIX = "pending-";
 
@@ -65,6 +65,13 @@ const UPDATABLE = new Set([
   "qr_data_url",
   "last_error",
   "last_seen_at",
+  "history_status",
+  "history_error",
+  "history_started_at",
+  "history_finished_at",
+  "history_chats_total",
+  "history_chats_done",
+  "history_messages",
 ]);
 
 /** Dynamically updates fields for a session. */
@@ -87,7 +94,68 @@ export async function updateSession(id, fields = {}) {
   return one(sql, params);
 }
 
-/** Deletes a session record. */
-export async function deleteSessionRecord(id) {
+/**
+ * Deletes a session record — and, by cascade, every conversation on it.
+ *
+ * Reachable from exactly one place: the merge below, after everything worth
+ * keeping has already been moved off the row. Nothing in the API calls it, and
+ * nothing should. A linked phone is disconnected, never deleted; the reason the
+ * history is imported at all is that it must outlive whoever was carrying the
+ * handset.
+ */
+async function deleteSessionRecord(id) {
   await q(`DELETE FROM qr_session WHERE id = $1`, [id]);
+}
+
+/**
+ * Moves everything a phone accumulated onto the row that now holds that phone.
+ *
+ * Scanning "Link a phone" with a number that is already known opens a second,
+ * empty row for it — and the months of conversation stay on the first one,
+ * where nobody is looking. Rather than leave two halves of one number's history
+ * side by side, the older row's contents are moved across and the emptied row
+ * dropped.
+ *
+ * The import watermark comes across too. Without it the freshly linked row
+ * would look like a first link and read six months back out of the handset for
+ * messages that are already sitting in the rows it just inherited.
+ *
+ * One thing is knowingly lost: if an agent is already assigned to the new row,
+ * the old row's *retired* assignments for that same agent go with it. Which
+ * agent held the number when is worth keeping, but not at the price of a second
+ * live assignment the unique index would refuse anyway.
+ */
+export async function adoptHistoryFrom(oldId, newId) {
+  const from = Number(oldId);
+  const to = Number(newId);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
+
+  await tx(async (client) => {
+    await client.query(`UPDATE qr_conversation SET session_id = $2 WHERE session_id = $1`, [from, to]);
+    await client.query(`UPDATE qr_event SET session_id = $2 WHERE session_id = $1`, [from, to]);
+
+    await client.query(
+      `UPDATE qr_session_agent AS a SET session_id = $2
+        WHERE a.session_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM qr_session_agent AS n
+             WHERE n.session_id = $2 AND n.agent_id = a.agent_id AND n.is_active)`,
+      [from, to]
+    );
+
+    await client.query(
+      `UPDATE qr_session AS n SET
+         label               = CASE WHEN n.label = '' THEN o.label ELSE n.label END,
+         history_status      = o.history_status,
+         history_finished_at = o.history_finished_at,
+         history_messages    = o.history_messages
+       FROM qr_session AS o
+       WHERE n.id = $2 AND o.id = $1`,
+      [from, to]
+    );
+  });
+
+  // Outside the transaction: the row is empty now, and a cascade that finds
+  // nothing to cascade to cannot take anything with it.
+  await deleteSessionRecord(from);
 }

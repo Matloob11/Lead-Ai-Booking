@@ -14,6 +14,7 @@
 const POLL_CHAT_MS = 5000;   // no socket on this service; the list is polled
 const POLL_QR_MS = 3000;     // the code itself rotates roughly every 20 seconds
 const MAX_BODY = 4096;
+const PAGE = 40;             // messages per request, going back through a thread
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -275,11 +276,13 @@ const statusOf = (value) => STATUS[value] || { chip: "chip--plain", text: value 
 const root = document.getElementById("root");
 
 const state = {
+  me: { agent_id: null, is_admin: false },
   sessions: [],
   phoneFilter: "",        // "" is every phone
   conversations: [],
   conversationId: null,
   messages: [],
+  canLoadOlder: false,
   search: "",
   listError: "",
   threadError: "",
@@ -297,6 +300,7 @@ const ui = {
   phoneSelect: el("select.field.side__phones"),
   search: el("input.side__search", { type: "search", placeholder: "Search chats" }),
   convs: el("div.convs"),
+  importing: el("div.side__importing", { hidden: true }),
   thread: el("section.thread"),
 };
 
@@ -307,6 +311,7 @@ const layout = el("div.app", {}, [
       el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: openPhones }, ["Manage"]),
     ]),
     el("div.side__filters", {}, [ui.phoneSelect, ui.search]),
+    ui.importing,
     ui.convs,
   ]),
   ui.thread,
@@ -335,6 +340,38 @@ async function loadSessions() {
   }
 }
 
+/**
+ * Whether this agent may link and unlink phones.
+ *
+ * Asked once at boot. A failure leaves the answer at "no", which shows fewer
+ * buttons than it should rather than more — and the ones it would hide are the
+ * ones the server refuses anyway.
+ */
+async function loadMe() {
+  try {
+    state.me = await api("api/me");
+  } catch {}
+}
+
+/**
+ * What the history import is doing, in a sentence, or "" when there is nothing
+ * to say. A phone that finished importing months ago does not need to mention
+ * it every time the panel repaints.
+ */
+function historyNote(session) {
+  const h = session.history || {};
+  if (h.status === "running") {
+    return h.chatsTotal
+      ? `Importing history — ${h.chatsDone} of ${h.chatsTotal} chats`
+      : "Importing history — reading the chat list";
+  }
+  if (h.status === "failed") return `History import stopped: ${h.error || "unknown reason"}`;
+  if (h.status === "pending") return "History import queued";
+  return "";
+}
+
+const isImporting = (session) => (session.history || {}).status === "running";
+
 async function loadConversations() {
   const query = state.phoneFilter ? `?session_id=${encodeURIComponent(state.phoneFilter)}` : "";
   try {
@@ -350,20 +387,46 @@ async function loadConversations() {
   }
 }
 
+/** Oldest first, which is reading order. */
+const inReadingOrder = (rows) =>
+  rows.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
 async function loadMessages(id) {
   try {
-    const payload = await api(`api/conversations/${id}/messages`);
-    // Oldest first, which is reading order. Sorted here for the same reason the
-    // conversations are: the route does not promise an order, and a thread that
-    // renders backwards is worse than one that loads a moment later.
-    state.messages = asList(payload, "messages").sort(
-      (a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0)
-    );
+    const payload = await api(`api/conversations/${id}/messages?limit=${PAGE}`);
+    // Sorted here for the same reason the conversations are: the route does not
+    // promise an order, and a thread that renders backwards is worse than one
+    // that loads a moment later.
+    state.messages = inReadingOrder(asList(payload, "messages"));
+    // A full page means there is probably another one behind it.
+    state.canLoadOlder = state.messages.length >= PAGE;
     state.threadError = "";
   } catch (error) {
     state.threadError = error.message;
     state.messages = [];
+    state.canLoadOlder = false;
   }
+}
+
+/**
+ * The page before the one on screen.
+ *
+ * Worth having now that a linked phone's own history is imported: a chat can
+ * hold six months of conversation, and until this the panel could only ever
+ * show the last forty messages of it — the import would have been real and
+ * invisible at the same time.
+ */
+async function loadOlderMessages() {
+  const oldest = state.messages[0];
+  if (!oldest || !state.conversationId) return 0;
+
+  const payload = await api(
+    `api/conversations/${state.conversationId}/messages?limit=${PAGE}&before=${oldest.id}`
+  );
+  const older = inReadingOrder(asList(payload, "messages"));
+  state.canLoadOlder = older.length >= PAGE;
+  state.messages = [...older, ...state.messages];
+  return older.length;
 }
 
 async function refresh({ keepScroll = true } = {}) {
@@ -425,6 +488,19 @@ function renderPhoneSelect() {
   // A phone that has just been removed leaves the filter pointing at nothing.
   ui.phoneSelect.value = state.sessions.some((s) => String(s.id) === String(chosen)) ? chosen : "";
   state.phoneFilter = ui.phoneSelect.value;
+
+  // Said out loud while it runs, because it takes minutes and a chat list that
+  // is still filling in looks like a chat list that is missing chats.
+  const busy = state.sessions.filter(isImporting);
+  ui.importing.hidden = !busy.length;
+  if (busy.length) {
+    clear(ui.importing).append(
+      ...busy.map((session) =>
+        el("div.side__importing-row", {}, [`${sessionName(session)}: ${historyNote(session)}`])
+      ),
+      el("div.side__importing-note", {}, ["Older chats appear as they are read."])
+    );
+  }
 }
 
 function conversationTitle(conversation) {
@@ -523,6 +599,51 @@ async function selectConversation(id) {
  * and the caret went with them. Nothing above or below the message list
  * changes between polls, so nothing above or below it is touched.
  */
+/**
+ * The scrolling middle of the thread: whatever is loaded, plus the way back to
+ * what is not.
+ */
+function messagesNode(conversation) {
+  const messages = el("div.thread__messages");
+  if (state.canLoadOlder) messages.append(olderButton());
+  for (const message of state.messages) messages.append(bubble(message, conversation));
+  if (!state.messages.length) {
+    messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
+  }
+  if (state.threadError) messages.append(el("div.alert", {}, [state.threadError]));
+  return messages;
+}
+
+/** Loads the previous page and leaves the reader looking at the same message. */
+function olderButton() {
+  const button = el("button.thread__older", { type: "button" }, ["Load earlier messages"]);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Loading…";
+
+    const box = ui.thread.querySelector(".thread__messages");
+    const heightBefore = box?.scrollHeight ?? 0;
+    const topBefore = box?.scrollTop ?? 0;
+
+    try {
+      const added = await loadOlderMessages();
+      paintMessages({ keepScroll: true });
+
+      // Everything just added sits above what the reader was looking at, so
+      // leaving scrollTop alone would jump them backwards by exactly that much.
+      const grown = ui.thread.querySelector(".thread__messages");
+      if (grown && added) grown.scrollTop = topBefore + (grown.scrollHeight - heightBefore);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Load earlier messages";
+      button.after(el("div.alert", {}, [error.message]));
+    }
+  });
+
+  return button;
+}
+
 function paintMessages({ keepScroll = true } = {}) {
   const conversation = activeConversation();
   const previous = ui.thread.querySelector(".thread__messages");
@@ -532,13 +653,7 @@ function paintMessages({ keepScroll = true } = {}) {
     previous.scrollTop + previous.clientHeight >= previous.scrollHeight - 60;
   const keptTop = previous.scrollTop;
 
-  const messages = el("div.thread__messages");
-  for (const message of state.messages) messages.append(bubble(message, conversation));
-  if (!state.messages.length) {
-    messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
-  }
-  if (state.threadError) messages.append(el("div.alert", {}, [state.threadError]));
-
+  const messages = messagesNode(conversation);
   previous.replaceWith(messages);
   messages.scrollTop = !keepScroll || wasAtBottom ? messages.scrollHeight : keptTop;
 }
@@ -558,13 +673,7 @@ function renderThread({ keepScroll = false } = {}) {
     !previous || previous.scrollTop + previous.clientHeight >= previous.scrollHeight - 60;
   const keptTop = previous?.scrollTop ?? 0;
 
-  const messages = el("div.thread__messages");
-  for (const message of state.messages) messages.append(bubble(message, conversation));
-  if (!state.messages.length) {
-    messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
-  }
-  if (state.threadError) messages.append(el("div.alert", {}, [state.threadError]));
-
+  const messages = messagesNode(conversation);
   const phone = sessionById(conversation.session_id);
 
   clear(ui.thread).append(
@@ -780,9 +889,16 @@ function openPhones() {
     body: el("div.dlg__body", {}, [
       el("div.dlg__row", {}, [
         el("p.dlg__text", {}, [
-          "Phones connected by scanning a QR code, separate from the Business Platform numbers.",
+          "Phones connected by scanning a QR code, separate from the Business Platform numbers. ",
+          "Everything on a phone when it is linked is imported and kept here, and stays here " +
+            "whether or not the phone remains connected.",
         ]),
-        el("button.btn", { type: "button", onclick: () => linkPhone(d) }, ["Link a phone"]),
+        // Linking and unlinking are an administrator's decisions, and the server
+        // says so with a 403. Drawing the buttons for an agent would only offer
+        // them a refusal.
+        state.me.is_admin
+          ? el("button.btn", { type: "button", onclick: () => linkPhone(d) }, ["Link a phone"])
+          : null,
       ]),
       listNode,
     ]),
@@ -810,18 +926,29 @@ function openPhones() {
           el("div.card__seen", {}, [
             session.last_seen_at ? `Last seen ${fullStamp(session.last_seen_at)}` : "Never connected",
           ]),
+          historyNote(session)
+            ? el("div.card__history", {}, [historyNote(session)])
+            : el("div.card__history", {}, [
+                `History imported${
+                  session.history?.messages ? ` — ${session.history.messages} messages` : ""
+                }`,
+              ]),
           // Shown in full, never truncated: this is the sentence that explains
           // why a number stopped working, and it is the only one there is.
           session.last_error ? el("div.card__why", {}, [session.last_error]) : null,
           el("div.card__actions", {}, [
-            session.status === "ready"
+            session.status === "ready" || !state.me.is_admin
               ? null
               : el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: () => openQr(session.id) }, [
                   "Show QR",
                 ]),
-            el("button.btn.btn--danger.btn--sm", { type: "button", onclick: () => disconnect(session, paint) }, [
-              "Disconnect",
-            ]),
+            state.me.is_admin
+              ? el(
+                  "button.btn.btn--danger.btn--sm",
+                  { type: "button", onclick: () => disconnect(session, paint) },
+                  ["Disconnect"]
+                )
+              : null,
           ]),
         ])
       );
@@ -855,18 +982,22 @@ async function linkPhone(phonesDialog) {
 }
 
 async function disconnect(session, done) {
-  // Worded as removal because that is what the server does: DELETE logs the
-  // phone out, wipes its auth data and drops the row.
+  // Worded as unlinking because that is now all it is. Nothing this button does
+  // reaches the conversations: the row stays, the chats stay, and scanning the
+  // same row again picks the phone back up where it left off.
   const sure = await askConfirm({
     title: "Disconnect this phone",
-    message: `${sessionName(session)} will be logged out and has to be linked again from scratch. Its chat history is kept.`,
+    message:
+      `${sessionName(session)} will be logged out and has to be scanned again to reconnect. ` +
+      "Every chat, message and file already imported is kept, and reconnecting reads only " +
+      "what arrived while it was away.",
     confirmLabel: "Disconnect",
     danger: true,
   });
   if (!sure) return;
 
   try {
-    await api(`api/sessions/${session.id}`, { method: "DELETE" });
+    await api(`api/sessions/${session.id}/disconnect`, { method: "POST" });
     await loadSessions();
     renderPhoneSelect();
     done?.();
@@ -878,8 +1009,15 @@ async function disconnect(session, done) {
 
 /* ---------------------------------------------------------------- QR dialog */
 
-function openQr(id) {
+async function openQr(id) {
   if (!id) return;
+
+  // A phone that was disconnected on purpose has no client behind it and no
+  // reconnect timer either — cancelling that timer is what makes a deliberate
+  // disconnect stick. So nothing would ever produce a code, and this dialog
+  // would wait for one for ever. Asking for the client back first is what turns
+  // "Show QR" into something that happens.
+  await api(`api/sessions/${id}/relink`, { method: "POST" }).catch(() => {});
 
   const frame = el("div.qr__frame", {}, [el("div.qr__pending", {}, ["Waiting for a code…"])]);
   const status = el("div.qr__status", {}, ["Starting up…"]);
@@ -971,7 +1109,7 @@ function openQr(id) {
 
 async function boot() {
   applyTheme();
-  await Promise.all([loadSessions(), loadConversations()]);
+  await Promise.all([loadMe(), loadSessions(), loadConversations()]);
 
   clear(root).append(layout);
   renderPhoneSelect();

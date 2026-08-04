@@ -39,14 +39,35 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-// DELETE /api/sessions/:id
-router.delete("/:id", async (req, res, next) => {
+// POST /api/sessions/:id/disconnect
+//
+// There is deliberately no DELETE. A phone is unlinked, never removed: the row
+// is what every conversation on it hangs from, and dropping it would take the
+// history with it by cascade — which is precisely what an agent wanting a
+// customer off the books would reach for. Admins only, for the same reason.
+router.post("/:id/disconnect", async (req, res, next) => {
   try {
     if (refuseNonAdmin(req, res)) return;
-    await manager.destroySession(req.params.id);
-    res.status(204).end();
+
+    const session = await manager.getSession(req.params.id);
+    if (!session) return res.status(404).json({ detail: "Session not found" });
+
+    res.json(await manager.disconnectSession(session.id));
   } catch (err) {
     next(err);
+  }
+});
+
+// POST /api/sessions/:id/relink — start a disconnected phone up for a new scan.
+router.post("/:id/relink", async (req, res) => {
+  try {
+    if (refuseNonAdmin(req, res)) return;
+
+    const session = await manager.relinkSession(req.params.id);
+    if (!session) return res.status(404).json({ detail: "Session not found" });
+    res.json(session);
+  } catch (err) {
+    res.status(400).json({ detail: err.message });
   }
 });
 

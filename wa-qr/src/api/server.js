@@ -37,6 +37,13 @@ export function startApi(port = 8300) {
   // what is wrong far more clearly than an empty screen would.
   app.use("/api", attachIdentity);
 
+  // Who nginx says this is. The panel asks because some of what it draws is
+  // admin-only — the buttons that link and unlink a phone — and a button that
+  // is only going to answer 403 is worse than no button at all.
+  app.get("/api/me", (req, res) => {
+    res.json({ agent_id: req.identity.agentId, is_admin: req.identity.isAdmin });
+  });
+
   // Routes
   app.use("/api/sessions", sessionsRouter);
   app.use("/api/conversations", conversationsRouter);

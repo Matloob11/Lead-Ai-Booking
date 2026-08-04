@@ -125,8 +125,13 @@ router.get("/:id/messages", async (req, res, next) => {
     let whereClause = "WHERE m.conversation_id = $1";
     const params = [conversationId, limit];
 
+    // "Older than that one" in the order the thread is actually read in, which
+    // since the history import is no longer the order rows were written in: an
+    // imported message is months old and carries a brand-new id. Row-value
+    // comparison keeps the cursor and the sort agreeing on what "before" means.
     if (before) {
-      whereClause += " AND m.id < $3";
+      whereClause +=
+        " AND (m.created_at, m.id) < (SELECT created_at, id FROM qr_message WHERE id = $3)";
       params.push(before);
     }
 
@@ -155,7 +160,7 @@ router.get("/:id/messages", async (req, res, next) => {
        FROM qr_message m
        LEFT JOIN qr_media med ON m.media_id = med.id
        ${whereClause}
-       ORDER BY m.id DESC
+       ORDER BY m.created_at DESC, m.id DESC
        LIMIT $2`,
       params
     );

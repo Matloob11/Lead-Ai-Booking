@@ -41,12 +41,17 @@ async function main() {
   const { startApi } = await import("./api/server.js");
   const { restoreSessions } = await import("./sessions/manager.js");
   const { startPersistence } = await import("./inbound/persist.js");
+  const { startHistoryImport } = await import("./inbound/backfill.js");
 
   // Before the sessions, not after: the manager emits into a set of handlers,
   // and an event that arrives with nothing subscribed is simply dropped. A
   // phone that reconnects during startup would otherwise deliver whatever it
   // had been holding into an empty room.
   startPersistence();
+
+  // Same reason, and one more: this one subscribes to `ready`, which every
+  // restored phone fires within seconds of restoreSessions() being called.
+  startHistoryImport();
 
   await restoreSessions();
   startApi(config.port);
