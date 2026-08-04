@@ -36,13 +36,35 @@ HOST="root@187.127.123.235"
 KEY="C:/Users/Matloob/.ssh/hostinger_codex"
 SITE="https://wa.srv1802669.hstgr.cloud"
 
+# The server's host keys, pinned next to this script.
+#
+# These calls used to run with StrictHostKeyChecking=no, which accepts any key
+# the far end offers — including a different one tomorrow. That is the whole of
+# a man-in-the-middle: somebody between this laptop and the VPS answers as the
+# VPS, and ssh says nothing. The private key is never disclosed by that (public
+# key auth does not send it) but everything else is: what `sync` and `push`
+# upload, what `sql` returns, and — the one that matters most here — what `sum`
+# says a deployed file's checksum is. A deploy "verified" over an unauthenticated
+# channel is not verified at all.
+#
+# accept-new rather than yes: a fresh clone with an empty file still works, but
+# a key that *changes* is a fatal error rather than a shrug. The three keys in
+# ops/known_hosts were captured from the server and matched against the ones
+# already trusted in the operator's own ~/.ssh/known_hosts, recorded long before.
+KNOWN_HOSTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/known_hosts"
+SSH_OPTS=(
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o UserKnownHostsFile="$KNOWN_HOSTS"
+)
+
 # The only two places anything is allowed to happen.
 QR_DIR="/opt/a7-wa/wa-qr"
 APP_DIR="/opt/a7-wa/deploy"
 
 die() { echo "wa.sh: $*" >&2; exit 2; }
 
-remote() { ssh.exe -i "C:/Users/Matloob/.ssh/hostinger_codex" -o BatchMode=yes -o StrictHostKeyChecking=no "$HOST" "$@"; }
+remote() { ssh.exe -i "$KEY" "${SSH_OPTS[@]}" "$HOST" "$@"; }
 
 # The compose directory for a stack name, refusing anything else outright.
 stack_dir() {
@@ -123,7 +145,7 @@ case "$cmd" in
     local_path="${1:-}"; remote_path="${2:-}"
     [[ -f "$local_path" ]] || die "no such local file: '$local_path'"
     check_remote_path "$remote_path"
-    scp.exe -i "C:/Users/Matloob/.ssh/hostinger_codex" -o BatchMode=yes -o StrictHostKeyChecking=no "$local_path" "$HOST:$remote_path"
+    scp.exe -i "$KEY" "${SSH_OPTS[@]}" "$local_path" "$HOST:$remote_path"
     echo "pushed $(md5sum "$local_path" | cut -d' ' -f1)  ->  $remote_path"
     remote "md5sum '$remote_path'"
     ;;

@@ -1,0 +1,443 @@
+:root {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border-color: #e2e8f0;
+  --primary-color: #25d366;
+  --primary-hover: #1da851;
+  --accent-blue: #0284c7;
+  --accent-bg: #f0f9ff;
+  --badge-open-bg: #dcfce7;
+  --badge-open-text: #166534;
+  --badge-closed-bg: #fef3c7;
+  --badge-closed-text: #92400e;
+  --danger-bg: #fee2e2;
+  --danger-text: #991b1b;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 14px;
+  min-height: 100vh;
+  padding: 12px;
+}
+
+.crm-app {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+/* Brand & Header */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand__mark {
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(37, 211, 102, 0.3);
+}
+
+.brand__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.brand__sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Boot & Loading State */
+.boot-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Header Bar */
+.crm-header {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.crm-header__title {
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.crm-header__badge {
+  background: var(--accent-bg);
+  color: var(--accent-blue);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.crm-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.btn--primary {
+  background: var(--primary-color);
+  color: #ffffff;
+  border: none;
+}
+
+.btn--primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn--secondary {
+  background: #f1f5f9;
+  color: var(--text-secondary);
+}
+
+.btn--sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* Phone Section & Card List */
+.phone-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.phone-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.phone-number-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-number-title__icon {
+  color: var(--primary-color);
+}
+
+.conversations-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conversation-card {
+  background: #fafafa;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.conversation-card:hover {
+  background: #ffffff;
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.conversation-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.conversation-card__channel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-card__last-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 450px;
+}
+
+.conversation-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.badge--open {
+  background: var(--badge-open-bg);
+  color: var(--badge-open-text);
+}
+
+.badge--closed {
+  background: var(--badge-closed-bg);
+  color: var(--badge-closed-text);
+}
+
+.badge--unread {
+  background: var(--primary-color);
+  color: #ffffff;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+/* Empty State & Alerts */
+.empty-state {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.empty-state__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.alert-card {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid #fca5a5;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* Inline Thread View */
+.thread-view {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  height: 520px;
+  box-shadow: var(--shadow-sm);
+}
+
+.thread-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+}
+
+.thread-header__title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.thread-messages {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message-bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  position: relative;
+  word-wrap: break-word;
+}
+
+.message-bubble--inbound {
+  align-self: flex-start;
+  background: #ffffff;
+  color: var(--text-primary);
+  border-bottom-left-radius: 2px;
+  box-shadow: var(--shadow-sm);
+}
+
+.message-bubble--outbound {
+  align-self: flex-end;
+  background: #e2f7cb;
+  color: #0f172a;
+  border-bottom-right-radius: 2px;
+  box-shadow: var(--shadow-sm);
+}
+
+.message-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: 4px;
+}
+
+.thread-composer {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+  background: #ffffff;
+  display: flex;
+  gap: 10px;
+  /* So a refusal from the gateway can take a line of its own below the box
+     rather than squeezing the Send button off the end of the row. */
+  flex-wrap: wrap;
+}
+
+/* Meta's refusals are the useful part of a failed send — "outside the 24 hour
+   window", "per-customer marketing limit" — so they get room to be read, next
+   to the box, where an alert() would have been swallowed by the placement
+   iframe without ever appearing. */
+.thread-composer__error {
+  flex-basis: 100%;
+  color: #c0392b;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.thread-composer__input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  resize: none;
+  height: 42px;
+  outline: none;
+}
+
+.thread-composer__input:focus {
+  border-color: var(--primary-color);
+}
