@@ -38,23 +38,18 @@ async function main() {
     );
   }
 
-  // Each of these is a separate piece of work; see the handover notes. Until
-  // they land, the service starts, migrates and serves nothing, which is a
-  // truthful state to be in rather than a crash.
-  const { startApi } = await import("./api/server.js").catch(() => ({}));
-  const { restoreSessions } = await import("./sessions/manager.js").catch(() => ({}));
+  const { startApi } = await import("./api/server.js");
+  const { restoreSessions } = await import("./sessions/manager.js");
+  const { startPersistence } = await import("./inbound/persist.js");
 
-  if (restoreSessions) {
-    await restoreSessions();
-  } else {
-    console.warn("[wa-qr] sessions/manager.js not built yet — no phone will connect");
-  }
+  // Before the sessions, not after: the manager emits into a set of handlers,
+  // and an event that arrives with nothing subscribed is simply dropped. A
+  // phone that reconnects during startup would otherwise deliver whatever it
+  // had been holding into an empty room.
+  startPersistence();
 
-  if (startApi) {
-    startApi(config.port);
-  } else {
-    console.warn("[wa-qr] api/server.js not built yet — nothing is being served");
-  }
+  await restoreSessions();
+  startApi(config.port);
 }
 
 // A phone connection that dies takes its Chromium with it; without this the

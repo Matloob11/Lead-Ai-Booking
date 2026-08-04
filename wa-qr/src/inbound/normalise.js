@@ -30,6 +30,78 @@ export function toWaId(serialised) {
   return String(serialised || "").split("@")[0].replace(/\D/g, "");
 }
 
+/**
+ * Resolves a WhatsApp JID (whether @c.us, @g.us, or @lid) to a real phone number wa_id.
+ * If the JID is @lid, queries whatsapp-web.js Contact/Client to retrieve the real phone number.
+ */
+export async function resolveContactWaId({ client = null, jid = "", message = null } = {}) {
+  if (!jid) return { waId: "", lid: "", isLid: false };
+
+  // 1. Group chats -> wa_id is group ID (digits from @g.us)
+  if (jid.endsWith("@g.us")) {
+    return { waId: toWaId(jid), lid: "", isLid: false };
+  }
+
+  // 2. Ignore broadcasts, status, newsletters
+  if (
+    jid.includes("status@broadcast") ||
+    jid.endsWith("@newsletter") ||
+    jid.endsWith("@broadcast")
+  ) {
+    return { waId: "", lid: "", isLid: false };
+  }
+
+  const isLid = jid.endsWith("@lid");
+  const lid = isLid ? jid : "";
+
+  // Standard @c.us format
+  if (!isLid && jid.endsWith("@c.us")) {
+    return { waId: toWaId(jid), lid: "", isLid: false };
+  }
+
+  // Method A: Check if message.getContact() gives a contact object with .number
+  if (message && typeof message.getContact === "function") {
+    try {
+      const contact = await message.getContact();
+      if (contact?.number && /^\d{7,15}$/.test(contact.number)) {
+        return {
+          waId: contact.number,
+          lid: isLid ? jid : (contact.id?.server === "lid" ? contact.id._serialized : ""),
+          isLid,
+        };
+      }
+      if (contact?.id?.server === "c.us" && contact.id.user) {
+        return { waId: contact.id.user, lid: isLid ? jid : "", isLid };
+      }
+    } catch (err) {
+      console.warn("[wa-qr] contact.getContact() resolution failed:", err.message);
+    }
+  }
+
+  // Method B: Call client.getContactLidAndPhone([jid])
+  if (client && typeof client.getContactLidAndPhone === "function") {
+    try {
+      const res = await client.getContactLidAndPhone([jid]);
+      if (Array.isArray(res) && res[0]) {
+        const pn = res[0].pn || "";
+        const retLid = res[0].lid || lid;
+        if (pn) {
+          const resolvedWaId = toWaId(pn);
+          if (resolvedWaId) {
+            return { waId: resolvedWaId, lid: retLid, isLid: true };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[wa-qr] client.getContactLidAndPhone failed:", err.message);
+    }
+  }
+
+  // Fallback: extract digits
+  const extracted = toWaId(jid);
+  return { waId: extracted, lid: isLid ? jid : "", isLid, resolutionFailed: isLid };
+}
+
 export function kindOf(message) {
   return KIND[message?.type] || "unknown";
 }
@@ -48,10 +120,20 @@ export function kindOf(message) {
  * @param {object}  [options.media]        an already-downloaded attachment
  * @param {string}  [options.quotedId]     `_serialized` id of the quoted
  *                                         message, from getQuotedMessage()
+ * @param {string}  [options.waId]         the sender's real phone number, from
+ *                                         resolveContactWaId(). Required for a
+ *                                         @lid chat, where message.from is a
+ *                                         LinkedID and not a number at all.
  */
-export function inboundMessage(message, { contactName = "", media = null, quotedId = "" } = {}) {
+export function inboundMessage(
+  message,
+  { contactName = "", media = null, quotedId = "", waId = "" } = {}
+) {
   const kind = kindOf(message);
-  const from = toWaId(message.from);
+  // Both fields, not just the contact: the receiving side keys on
+  // messages[0].from, so leaving a LinkedID there would recreate the very row
+  // the resolution exists to avoid.
+  const from = waId || toWaId(message.from);
 
   const out = {
     from,

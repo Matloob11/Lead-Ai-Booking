@@ -289,4 +289,16 @@ def admin_gate(request):
     """
     if not request.user.has_admin_rights:
         return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
-    return Response({"ok": True})
+
+    # Who this is, on the way back out. nginx keeps these with auth_request_set
+    # and passes them to the service it is guarding, which otherwise sees a
+    # proxied request with no idea whose it is — and would have to be told to
+    # trust something the browser sent, which is not a thing to trust.
+    #
+    # A client cannot forge them: nginx overwrites both headers on every
+    # proxied request from this response, whatever arrived.
+    answer = Response({"ok": True})
+    answer["X-WA-Agent-Id"] = str(request.user.pk)
+    answer["X-WA-Agent-Name"] = request.user.display_name or request.user.get_username()
+    answer["X-WA-Is-Admin"] = "1" if request.user.has_admin_rights else "0"
+    return answer

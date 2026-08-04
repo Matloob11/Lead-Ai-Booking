@@ -179,4 +179,20 @@ check("the envelope is indistinguishable from a Cloud webhook", () => {
   assert.ok(Array.isArray(value.contacts));
 });
 
+check("a resolved number replaces the LinkedID in both places", () => {
+  // A @lid chat: message.from is a LinkedID, not a phone number at all.
+  const out = inboundMessage(
+    { from: "280908645044375@lid", id: { _serialized: "x" }, type: "chat", body: "hi" },
+    { contactName: "Matloob Bhai", waId: "923166753715" }
+  );
+
+  assert.equal(out.messages[0].from, "923166753715");
+  assert.equal(out.contacts[0].wa_id, "923166753715");
+});
+
+check("without a resolved number it still falls back to the jid", () => {
+  const out = inboundMessage({ from: "971501234567@c.us", id: { _serialized: "x" }, type: "chat" });
+  assert.equal(out.messages[0].from, "971501234567");
+});
+
 console.log(`\n  ${passed} checks passed`);

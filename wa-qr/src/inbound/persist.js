@@ -2,10 +2,11 @@
  * Event Persistence and DB Synchronisation
  */
 
-import { onEvent } from "../sessions/manager.js";
+import { onEvent, getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
 import {
   toWaId,
+  resolveContactWaId,
   kindOf,
   inboundMessage,
   inboundReaction,
@@ -48,6 +49,57 @@ async function processMessageEvent(sessionId, message) {
   const wamid = message.id?._serialized || String(message.id || "");
   if (!wamid) return;
 
+  const fromJid = message.from || "";
+  const toJid = message.to || "";
+  const remoteJid = message.id?.remote || "";
+
+  // Filter out Broadcasts, Statuses, Newsletters
+  if (
+    fromJid.includes("status@broadcast") ||
+    toJid.includes("status@broadcast") ||
+    remoteJid.includes("status@broadcast") ||
+    fromJid.endsWith("@newsletter") ||
+    toJid.endsWith("@newsletter") ||
+    fromJid.endsWith("@broadcast") ||
+    toJid.endsWith("@broadcast")
+  ) {
+    console.info(`[wa-qr] Ignoring status/newsletter/broadcast message event (${fromJid || remoteJid})`);
+    return;
+  }
+
+  const client = getClient(sessionId);
+
+  // Fetch contact info & resolve wa_id
+  let contactName = "";
+  try {
+    const contact = await message.getContact();
+    contactName = contact.name || contact.pushname || "";
+  } catch {}
+
+  const direction = message.fromMe ? "out" : "in";
+  const kind = kindOf(message);
+  const body = message.body || "";
+  const isGroup = Boolean(message.from?.endsWith("@g.us"));
+  const rawTargetJid = isGroup
+    ? message.from
+    : direction === "in"
+      ? message.from
+      : message.to;
+
+  const resolvedContact = await resolveContactWaId({ client, jid: rawTargetJid, message });
+  const contactWaId = resolvedContact.waId;
+
+  if (!contactWaId) {
+    console.warn(`[wa-qr] Could not resolve valid contact wa_id for JID ${rawTargetJid}, skipping message persistence.`);
+    return;
+  }
+
+  let authorWaId = "";
+  if (isGroup && (message.author || message.from)) {
+    const resolvedAuthor = await resolveContactWaId({ client, jid: message.author || message.from, message });
+    authorWaId = resolvedAuthor.waId;
+  }
+
   // Insert raw event record first
   const eventRow = await one(
     `INSERT INTO qr_event (session_id, kind, payload, status)
@@ -61,18 +113,7 @@ async function processMessageEvent(sessionId, message) {
   // Process media if present
   const mediaRecord = message.hasMedia ? await processInboundMedia(message) : null;
 
-  // Fetch contact info
-  let contactName = "";
-  try {
-    const contact = await message.getContact();
-    contactName = contact.name || contact.pushname || "";
-  } catch {}
-
   // Which message this one answers, if any.
-  //
-  // The library gives `hasQuotedMsg` and an async getter, and nothing else —
-  // there is no id on the message to read, so it has to be fetched, and it has
-  // to happen before the payload is built because the payload carries it.
   let quotedId = "";
   if (message.hasQuotedMsg) {
     try {
@@ -84,18 +125,12 @@ async function processMessageEvent(sessionId, message) {
   }
 
   // Generate normalized Meta payload
-  const metaPayload = inboundMessage(message, { contactName, media: mediaRecord, quotedId });
-
-  const direction = message.fromMe ? "out" : "in";
-  const kind = kindOf(message);
-  const body = message.body || "";
-  const isGroup = Boolean(message.from?.endsWith("@g.us"));
-  const authorWaId = isGroup ? toWaId(message.author || message.from) : "";
-  const contactWaId = isGroup
-    ? toWaId(message.from)
-    : direction === "in"
-      ? toWaId(message.from)
-      : toWaId(message.to);
+  const metaPayload = inboundMessage(message, {
+    contactName,
+    media: mediaRecord,
+    quotedId,
+    waId: contactWaId,
+  });
 
   // A miss here is normal: the quoted message may predate this session, in
   // which case the reply is stored without being joined to what it answers.
@@ -169,6 +204,20 @@ async function processMessageEvent(sessionId, message) {
 async function processReactionEvent(sessionId, reaction) {
   if (!reaction) return;
 
+  const senderJid = reaction.senderId || "";
+  if (
+    senderJid.includes("status@broadcast") ||
+    senderJid.endsWith("@newsletter") ||
+    senderJid.endsWith("@broadcast")
+  ) {
+    return;
+  }
+
+  const client = getClient(sessionId);
+  const resolvedSender = await resolveContactWaId({ client, jid: senderJid });
+  const senderWaId = resolvedSender.waId || toWaId(senderJid);
+  if (!senderWaId) return;
+
   const eventRow = await one(
     `INSERT INTO qr_event (session_id, kind, payload, status)
      VALUES ($1, 'reaction', $2, 'pending') RETURNING *`,
@@ -178,9 +227,11 @@ async function processReactionEvent(sessionId, reaction) {
   const session = await store.getSessionById(sessionId);
   const phoneNumber = store.visibleNumber(session);
   const metaPayload = inboundReaction(reaction);
+  if (metaPayload.messages && metaPayload.messages[0]) {
+    metaPayload.messages[0].from = senderWaId;
+  }
 
   const targetWamid = reaction.msgId?._serialized || String(reaction.msgId || "");
-  const senderWaId = toWaId(reaction.senderId);
   const emoji = reaction.reaction || "";
 
   if (targetWamid) {
@@ -210,6 +261,19 @@ async function processReactionEvent(sessionId, reaction) {
 
 async function processAckEvent(sessionId, message, ack) {
   if (!message) return;
+
+  const fromJid = message.from || "";
+  const toJid = message.to || "";
+  if (
+    fromJid.includes("status@broadcast") ||
+    toJid.includes("status@broadcast") ||
+    fromJid.endsWith("@newsletter") ||
+    toJid.endsWith("@newsletter") ||
+    fromJid.endsWith("@broadcast") ||
+    toJid.endsWith("@broadcast")
+  ) {
+    return;
+  }
 
   const eventRow = await one(
     `INSERT INTO qr_event (session_id, kind, payload, status)
