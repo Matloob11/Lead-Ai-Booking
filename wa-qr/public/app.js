@@ -438,19 +438,33 @@ function historyFraction(history) {
  */
 function historyNote(session) {
   const h = session.history || {};
-  if (h.status === "running") {
-    if (!h.chatsTotal) return "Reading the chat list…";
+
+  // An import only happens over a live connection, so a phone that is not
+  // connected is not importing however recently its row said it was. The row
+  // lags: the run notices the phone has gone at its next chat, and until then
+  // the card claimed to be reading chats off a phone that had been disconnected
+  // for a quarter of an hour.
+  const live = session.status === "ready";
+
+  if (h.status === "running" || h.status === "pending") {
+    if (!live) {
+      return h.chatsTotal
+        ? `Import paused at ${h.chatsDone} of ${h.chatsTotal} chats — it continues when this phone reconnects`
+        : "Import paused — it continues when this phone reconnects";
+    }
+    if (h.status === "pending" || !h.chatsTotal) return "Reading the chat list…";
     const eta = etaFor(session);
     return `Importing chats — ${h.chatsDone} of ${h.chatsTotal}${eta ? `, ${eta} left` : ""}`;
   }
+
   if (h.status === "failed") return `The import stopped: ${h.error || "reason unknown"}`;
-  if (h.status === "pending") return "The import is about to start";
   return "";
 }
 
+/** Whether to draw a spinner: something is actually moving right now. */
 const isImporting = (session) => {
   const status = (session.history || {}).status;
-  return status === "running" || status === "pending";
+  return session.status === "ready" && (status === "running" || status === "pending");
 };
 
 async function loadConversations() {

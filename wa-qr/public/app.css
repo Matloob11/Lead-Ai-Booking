@@ -1246,6 +1246,11 @@ body {
   font-size: 12px;
   line-height: 1.45;
   word-break: break-word;
+  /* A backstop, not the fix. Errors are cut to a sentence before they are
+     stored now, but a phone's card must never again be forty lines of Chromium
+     stack trace with the buttons pushed off the bottom of the dialog. */
+  max-height: 5.5em;
+  overflow-y: auto;
 }
 
 .chip {

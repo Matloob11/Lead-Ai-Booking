@@ -41,6 +41,39 @@ function emit(type, payload) {
   }
 }
 
+/**
+ * One sentence an agent can act on, from whatever the library threw.
+ *
+ * `last_error` is printed in full on the phone's card, because it is the only
+ * explanation of why a number stopped working. That is right when the error is
+ * a sentence and wrong when it is Chromium's launch failure: forty lines of
+ * stack trace, a Puppeteer troubleshooting URL and two copies of the same
+ * message, filling the card and burying the one fact worth having.
+ *
+ * The whole thing still goes to the log. Only what the screen shows is cut.
+ */
+function readableError(error) {
+  const text = String(error?.message || error || "").trim();
+  if (!text) return "";
+
+  if (/profile appears to be in use|SingletonLock/i.test(text)) {
+    return (
+      "The browser could not start: a previous run left this phone's profile " +
+      "locked. Restarting the service clears it."
+    );
+  }
+  if (/Failed to launch the browser process/i.test(text)) {
+    return "The browser this phone runs inside could not start. See the service log.";
+  }
+  if (/Execution context was destroyed|Target closed|Session closed/i.test(text)) {
+    return "The connection to WhatsApp Web was lost.";
+  }
+
+  // Anything else: its first line, which is where a real message lives.
+  const first = text.split("\n")[0].trim();
+  return first.length > 200 ? `${first.slice(0, 197)}…` : first;
+}
+
 function formatSession(row) {
   if (!row) return null;
   return {
@@ -69,8 +102,59 @@ function formatSession(row) {
   };
 }
 
+/** The three files Chromium uses to claim a profile for itself. */
+const PROFILE_LOCKS = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+
+/**
+ * Throws away profile locks left behind by the container this one replaced.
+ *
+ * Chromium claims a profile with these three files and releases them when it
+ * shuts down. It never gets to shut down here: rebuilding the image recreates
+ * the container, which kills the process, and the claim survives on the mounted
+ * volume. The next start then refuses every profile — "the profile appears to
+ * be in use by another Chromium process on another computer" — and every linked
+ * phone sits disconnected with a page of stack trace where its status should
+ * be. That happened after every single rebuild today.
+ *
+ * Safe precisely because of when it runs: this process has just started and has
+ * not launched a browser yet, so nothing of ours holds a profile and any claim
+ * on disk is by definition stale. Only the three lock files go — the session
+ * data beside them is what saves every phone from scanning again.
+ */
+async function clearStaleProfileLocks() {
+  let entries = [];
+  try {
+    entries = await fs.readdir(authRoot, { withFileTypes: true });
+  } catch {
+    return; // nothing linked yet
+  }
+
+  let cleared = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    for (const name of PROFILE_LOCKS) {
+      const target = path.join(authRoot, entry.name, name);
+      // `rm` and not `unlink`: SingletonSocket is a symlink, and on a volume
+      // written by a container that no longer exists it may dangle.
+      const gone = await fs
+        .rm(target, { force: true })
+        .then(() => true)
+        .catch(() => false);
+      if (gone) cleared += 1;
+    }
+  }
+
+  if (cleared) {
+    console.info(`[wa-qr] cleared ${cleared} stale Chromium profile lock(s) from the last run`);
+  }
+}
+
 /** Restores all existing sessions from DB on startup (except banned ones). */
 export async function restoreSessions() {
+  // Before any client is built, or the first one to start takes the lock error
+  // and the rest queue up behind it.
+  await clearStaleProfileLocks();
+
   const allSessions = await store.listAllSessions();
   const activeSessions = allSessions.filter((s) => s.status !== "banned");
 
@@ -359,7 +443,7 @@ async function initClient(sessionId) {
     const current = await store.getSessionById(sessionId);
     if (current?.status === "banned") return;
 
-    const errorMsg = String(reason || "Disconnected");
+    const errorMsg = readableError(reason) || "Disconnected";
     await store.updateSession(sessionId, {
       status: "disconnected",
       last_error: errorMsg,
@@ -445,12 +529,16 @@ async function initClient(sessionId) {
       console.warn(`[wa-qr] WhatsApp HTTP ${res.status()} (#${sessionId}) ${res.url().slice(0, 160)}`);
     });
   } catch (err) {
+    // The whole thing to the log, one sentence to the screen. This is where
+    // Chromium's launch failure arrives, and it is forty lines long.
     console.error(`[wa-qr] client initialization error for #${sessionId}:`, err);
+    const errorMsg = readableError(err);
     await store.updateSession(sessionId, {
       status: "disconnected",
-      last_error: err.message,
+      last_error: errorMsg,
     });
-    emit("status", { sessionId, status: "disconnected", error: err.message });
+    emit("status", { sessionId, status: "disconnected", error: errorMsg });
+    scheduleReconnect(sessionId);
   }
 }
 
