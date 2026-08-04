@@ -1,6 +1,9 @@
-/* wa-qr panel.
-   One stylesheet, no framework — the same rule the main panel follows, so
-   deploying stays "copy the folder". */
+/* wa-qr panel — laid out like the inbox it sits beside.
+   One stylesheet, no framework, so deploying stays "copy the folder".
+
+   Every height here is a percentage or a grid track, never a vh: this page runs
+   inside an iframe, and vh measures the outer window, so a `100vh` column is
+   taller than the frame and its bottom — the composer — falls off the end. */
 
 :root {
   --navy: #0e2a47;
@@ -23,376 +26,119 @@
   box-sizing: border-box;
 }
 
+/* #root is in the chain too: without a height of its own it is auto, and the
+   grid's `height: 100%` then resolves against nothing — the sidebar stopped
+   at the height of its own contents while the thread filled the frame. */
 html,
-body {
+body,
+#root {
   height: 100%;
 }
 
 body {
   margin: 0;
-  display: flex;
-  flex-direction: column;
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
 }
 
-/* ------------------------------------------------------------------- top */
+/* ------------------------------------------------------------------ shell */
 
-.top {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 18px;
-  background: var(--navy);
-  color: #fff;
-}
-
-.top__brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.top__mark {
+.app {
   display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--gold);
-  color: var(--navy);
-  font-weight: 800;
-}
-
-.top__name {
-  display: block;
-  font-weight: 650;
-  line-height: 1.2;
-}
-
-.top__sub {
-  display: block;
-  font-size: 11.5px;
-  opacity: 0.7;
-}
-
-.top__nav {
-  display: flex;
-  gap: 6px;
-}
-
-.tab {
-  padding: 6px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.tab:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.tab.is-active {
-  background: var(--gold);
-  color: var(--navy);
-  font-weight: 650;
-}
-
-.tab[disabled] {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ------------------------------------------------------------------ main */
-
-.main {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.page {
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 20px 18px 32px;
-}
-
-.page__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.page__title {
-  margin: 0;
-  font-size: 18px;
-}
-
-.page__hint {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.loading,
-.empty {
-  padding: 28px;
-  text-align: center;
-  color: var(--muted);
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: var(--navy);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn:hover {
-  background: var(--navy-soft);
-}
-
-.btn[disabled] {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.btn--ghost {
-  background: transparent;
-  border-color: var(--line);
-  color: var(--ink);
-}
-
-.btn--ghost:hover {
-  background: var(--line);
-}
-
-.btn--danger {
-  background: transparent;
-  border-color: var(--err);
-  color: var(--err);
-}
-
-.btn--danger:hover {
-  background: var(--err-soft);
-}
-
-.alert {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--err-soft);
-  color: var(--err);
-  font-size: 13px;
-  word-break: break-word;
-}
-
-/* --------------------------------------------------------------- sessions */
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--card);
-}
-
-.card__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.card__label {
-  font-size: 15px;
-  font-weight: 650;
-  word-break: break-word;
-}
-
-.card__phone {
-  font-size: 12.5px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.card__seen {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.card__actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.chip {
-  flex: none;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.chip--ok {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.chip--warn {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
-.chip--err {
-  background: var(--err-soft);
-  color: var(--err);
-}
-
-.chip--plain {
-  background: var(--line);
-  color: var(--muted);
-}
-
-.card__why {
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--err-soft);
-  color: var(--err);
-  font-size: 12px;
-  line-height: 1.45;
-  word-break: break-word;
-}
-
-/* --------------------------------------------------------------------- QR */
-
-.qr {
-  max-width: 560px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  align-items: center;
-  text-align: center;
-}
-
-.qr__frame {
-  display: grid;
-  place-items: center;
-  width: 320px;
-  height: 320px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: #fff;
-}
-
-.qr__img {
-  width: 288px;
-  height: 288px;
-  image-rendering: pixelated;
-}
-
-.qr__pending {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.qr__status {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.qr__steps {
-  margin: 0;
-  padding-left: 20px;
-  text-align: left;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-/* The warning sits with the QR, not in a footnote. Somebody about to scan is
-   the only person who can still decide not to, and a permanent ban on a
-   verified number cannot be undone afterwards. */
-.qr__warning {
-  padding: 12px 14px;
-  border: 1px solid var(--err);
-  border-radius: 10px;
-  background: var(--err-soft);
-  color: var(--err);
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: left;
-}
-
-.qr__warning b {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.qr__connected {
-  display: grid;
-  place-items: center;
-  width: 320px;
-  height: 320px;
-  border-radius: 16px;
-  background: var(--ok-soft);
-  color: var(--ok);
-  font-size: 17px;
-  font-weight: 650;
-  padding: 20px;
-  text-align: center;
-}
-
-/* ------------------------------------------------------------------ chats */
-
-.chats {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  /* Both tracks are minmax(0, …) so neither can be pushed past the frame by
+     its own content — a long contact name or a wide bubble would otherwise
+     force a horizontal scrollbar under the whole panel. */
+  grid-template-columns: minmax(0, clamp(240px, 32%, 320px)) minmax(0, 1fr);
+  /* minmax(0, 1fr) rather than 100%: an implicit auto row would grow to fit the
+     message list, and the columns would then resolve against that grown row
+     instead of the frame. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
-  min-height: 0;
+  overflow: hidden;
+  background: var(--card);
 }
 
-.convs {
+.boot-error {
+  padding: 24px;
+}
+
+/* --------------------------------------------------------------- sidebar */
+
+.side {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.side__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.side__title {
+  font-weight: 650;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side__top .btn--ghost {
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #fff;
+}
+
+.side__top .btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.side__filters {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.side__phones,
+.side__search {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.side__phones:focus,
+.side__search:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+/* Its own scroll, so the list moves without taking the sidebar's head with it. */
+.convs {
+  min-height: 0;
   overflow-y: auto;
+  background: var(--card);
 }
 
 .conv {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 8px;
+  display: block;
   width: 100%;
-  padding: 10px 12px;
+  padding: 9px 12px;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
@@ -411,29 +157,37 @@ body {
   box-shadow: inset 3px 0 0 var(--gold);
 }
 
+.conv__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .conv__name {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   font-weight: 650;
   font-size: 13.5px;
 }
 
-.conv__name span {
+.conv__name > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .conv__when {
+  flex: none;
   font-size: 11px;
   color: var(--muted);
-  white-space: nowrap;
 }
 
 .conv__last {
-  grid-column: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -442,8 +196,7 @@ body {
 }
 
 .conv__unread {
-  grid-column: 2;
-  justify-self: end;
+  flex: none;
   min-width: 18px;
   padding: 1px 6px;
   border-radius: 999px;
@@ -454,7 +207,14 @@ body {
   text-align: center;
 }
 
+.conv__phone {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .chip--group {
+  flex: none;
   padding: 0 6px;
   border-radius: 4px;
   background: var(--navy);
@@ -464,45 +224,71 @@ body {
   letter-spacing: 0.04em;
 }
 
+/* ---------------------------------------------------------------- thread */
+
 .thread {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
+  background: var(--bg);
 }
 
 .thread__head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--card);
 }
 
 .thread__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .thread__sub {
   color: var(--muted);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
+/* Its own scroll, so the header and the composer stay put. */
 .thread__messages {
-  flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--bg);
 }
 
+.thread__foot {
+  border-top: 1px solid var(--line);
+  background: var(--card);
+}
+
+.empty,
+.loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty--thread {
+  display: grid;
+  place-items: center;
+  grid-row: 1 / -1;
+  height: 100%;
+}
+
+/* --------------------------------------------------------------- messages */
+
 .msg {
-  max-width: min(560px, 78%);
+  max-width: min(560px, 82%);
   align-self: flex-start;
   padding: 7px 10px 5px;
   border-radius: 10px 10px 10px 2px;
@@ -518,6 +304,10 @@ body {
   border-color: #cfe9d8;
 }
 
+.msg--failed {
+  border-color: var(--err);
+}
+
 .msg__author {
   margin-bottom: 2px;
   font-size: 11.5px;
@@ -525,7 +315,6 @@ body {
   color: var(--navy-soft);
 }
 
-/* The bar above a reply, naming what it answers. */
 .msg__quote {
   margin-bottom: 4px;
   padding: 4px 8px;
@@ -603,23 +392,63 @@ body {
   font-size: 12px;
 }
 
-.msg--failed {
-  border-color: var(--err);
+/* One line about the failure and the way out of it. The library's own errors
+   are stack traces with a bundle URL in them; the whole thing is on the title
+   attribute, and what is printed is the first sentence. */
+.msg__failure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--err-soft);
 }
 
 .msg__error {
-  margin-top: 3px;
+  flex: 1;
+  min-width: 0;
+  color: var(--err);
   font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg__retry {
+  flex: none;
+  padding: 2px 9px;
+  border: 1px solid var(--err);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.msg__retry:hover {
+  background: var(--err);
+  color: #fff;
+}
+
+.msg__retry[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.msg__error-note {
+  font-size: 11px;
   color: var(--err);
 }
 
+/* --------------------------------------------------------------- composer */
+
 .composer {
-  flex: none;
   display: flex;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid var(--line);
-  background: var(--card);
 }
 
 .composer__input {
@@ -641,22 +470,398 @@ body {
 }
 
 .composer--locked {
-  color: var(--muted);
-  font-size: 12.5px;
   justify-content: center;
   align-items: center;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
 }
 
-/* A 1366×768 laptop is the smallest screen this is used on; below that the
-   list and the thread stop fitting side by side. */
-@media (max-width: 900px) {
-  .chats {
+.composer__error {
+  margin: 8px 14px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--navy-soft);
+}
+
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn--sm {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.btn--ghost:hover {
+  background: var(--line);
+}
+
+.btn--danger {
+  background: transparent;
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.btn--danger:hover {
+  background: var(--err-soft);
+}
+
+.alert {
+  margin: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------- dialogs
+
+   Own dialogs rather than window.prompt/confirm: Chrome refuses both inside a
+   cross-origin iframe, which is exactly how this panel is framed. */
+
+.dlg {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(14, 42, 71, 0.45);
+}
+
+.dlg__box {
+  width: min(420px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 18px 46px rgba(14, 42, 71, 0.3);
+}
+
+.dlg__box--wide {
+  width: min(620px, 100%);
+}
+
+.dlg__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dlg__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.dlg__x {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dlg__x:hover {
+  background: var(--bg);
+}
+
+.dlg__body {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dlg__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dlg__text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dlg__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.dlg__input {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.dlg__input:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+.dlg__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------ phone cards */
+
+.cards {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card__label {
+  font-size: 14.5px;
+  font-weight: 650;
+  word-break: break-word;
+}
+
+.card__phone,
+.card__seen {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.card__why {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.chip {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.chip--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.chip--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip--err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.chip--plain {
+  background: var(--line);
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------------- QR */
+
+.qr {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  text-align: center;
+}
+
+.qr__frame,
+.qr__connected {
+  display: grid;
+  place-items: center;
+  width: 296px;
+  height: 296px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.qr__connected {
+  border: 0;
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 16px;
+  font-weight: 650;
+  padding: 20px;
+}
+
+/* Never below 288: a smaller code is harder for a phone camera to read. */
+.qr__img {
+  width: 288px;
+  height: 288px;
+  image-rendering: pixelated;
+}
+
+.qr__pending {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.qr__status {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qr__steps {
+  margin: 0;
+  padding-left: 20px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* The warning sits with the code, not in a footnote. Somebody about to scan is
+   the only person who can still decide not to, and a ban cannot be undone. */
+.qr__warning {
+  padding: 9px 11px;
+  border: 1px solid var(--err);
+  border-radius: 10px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.qr__warning b {
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* --------------------------------------------------------------- narrow */
+
+/* Only once the thread would be too narrow to read. Bitrix gives the iframe
+   about 759px, which is comfortably two panes. */
+@media (max-width: 640px) {
+  .app {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 40%) minmax(0, 60%);
   }
 
-  .convs {
-    max-height: 34vh;
+  .side {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+}
+
+/* ------------------------------------------------------------------ dark
+
+   Follows the inbox that frames this page: app.js copies its data-wa-theme
+   onto this document's body, because a separate document inherits nothing. */
+
+body[data-wa-theme="glass-dark"] {
+  --ink: #e9edef;
+  --muted: #8fa3b8;
+  --line: rgba(255, 255, 255, 0.14);
+  --bg: #0f1a26;
+  --card: #17293c;
+  --navy: #0b1622;
+  --navy-soft: #24405e;
+  --ok: #4fd1a1;
+  --ok-soft: rgba(23, 130, 90, 0.22);
+  --warn: #e0a95f;
+  --warn-soft: rgba(160, 90, 23, 0.25);
+  --err: #ff8a80;
+  --err-soft: rgba(194, 56, 47, 0.22);
+}
+
+body[data-wa-theme="glass-dark"] .msg--out {
+  background: #14442f;
+  border-color: #1d5d41;
+}
+
+body[data-wa-theme="glass-dark"] .msg__quote,
+body[data-wa-theme="glass-dark"] .msg__file {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* A QR has to stay black on white to be readable. */
+body[data-wa-theme="glass-dark"] .qr__frame {
+  background: #fff;
 }
