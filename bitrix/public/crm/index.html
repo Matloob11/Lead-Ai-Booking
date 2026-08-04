@@ -7,19 +7,19 @@
     <link rel="stylesheet" href="./crm-tab.css" />
   </head>
   <body>
-    <main id="root" class="crm-app">
-      <div class="card boot-card">
-        <div class="brand">
-          <div class="brand__mark">A7</div>
-          <div>
-            <div class="brand__name">WhatsApp Inbox</div>
-            <div class="brand__sub">Bitrix24 CRM Detail Tab</div>
-          </div>
-        </div>
-        <div class="loading-state" id="boot-status">
-          <span class="spinner"></span>
-          <span id="boot-status-text">Loading Bitrix CRM Tab…</span>
-        </div>
+    <!--
+      Handler for the four CRM detail tabs. It lists this record's phone numbers
+      and says, for each, whether a WhatsApp chat already exists — and the icon
+      opens the panel on that chat, inside Bitrix, through
+      BX24.openApplication.
+
+      No thread, no composer. Answering a customer needs templates, the 24-hour
+      window and the rest of the conversation, all of which live in the panel.
+    -->
+    <main id="root">
+      <div class="loading-state">
+        <span class="spinner"></span>
+        <span>Looking for WhatsApp chats…</span>
       </div>
     </main>
     <script type="module" src="./crm-tab.js"></script>

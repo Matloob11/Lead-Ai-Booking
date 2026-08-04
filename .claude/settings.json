@@ -38,6 +38,7 @@
       "Bash(bash ops/wa.sh get:*)",
       "Bash(bash ops/wa.sh push:*)",
       "Bash(bash ops/wa.sh sync:*)",
+      "Bash(bash ops/wa.sh panel:*)",
       "Bash(bash ops/wa.sh build:*)",
       "Bash(bash ops/wa.sh restart:*)",
       "Bash(bash ops/wa.sh up:*)",

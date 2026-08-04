@@ -24,6 +24,7 @@
 #   ops/wa.sh get /app/assets/x.js        fetch from the public site
 #   ops/wa.sh push local remote           copy one file to the server
 #   ops/wa.sh sync src /opt/a7-wa/wa-qr   copy a directory to the server
+#   ops/wa.sh panel [stale…]              publish bitrix/public to /opt/a7-wa/panel
 #   ops/wa.sh build qr app                rebuild an image
 #   ops/wa.sh restart qr app              restart services
 #   ops/wa.sh up qr app                   recreate a service (after a build)
@@ -163,6 +164,37 @@ case "$cmd" in
     # failure this project keeps having: three services reading one mount, and
     # one of them running last week's code.
     remote "find '$remote_dir/$(basename "$local_dir")' -name '*.js' | sort | xargs md5sum" | head -40
+    ;;
+
+  panel)
+    # The Bitrix panel, deployed the way bitrix/deploy/deploy-panel.sh means to.
+    #
+    # That script uses rsync, which is not on every machine this repo is worked
+    # from — it is absent from Git Bash on Windows, where it fails at the point
+    # of copying and leaves the panel half-old. tar over a pipe is the fallback
+    # CLAUDE.md names, and it is what this does.
+    #
+    # No arguments. Source and destination are both fixed, so this cannot be
+    # pointed at anything else, and the only thing it can do is publish the
+    # panel that lives in this repo.
+    src="$(cd "$(dirname "${BASH_SOURCE[0]}")/../bitrix/public" && pwd)"
+    [[ -d "$src" ]] || die "bitrix/public is missing"
+
+    # --delete has no tar equivalent, so files removed from the repo are named
+    # and removed on their own. A leftover nobody references is not harmless
+    # here: /app/assets/bitrix-sso.js survived a folder move that way, and
+    # install.html went on loading the stale copy for weeks.
+    stale=""
+    for f in "$@"; do
+      [[ "$f" =~ ^[A-Za-z0-9._/-]+$ ]] || die "refusing an unusual name: '$f'"
+      [[ "$f" != *..* ]]               || die "refusing '..' in: '$f'"
+      stale="$stale /opt/a7-wa/panel/$f"
+    done
+
+    tar -cf - -C "$src" . | remote "tar -xf - -C /opt/a7-wa/panel --overwrite"
+    [[ -z "$stale" ]] || remote "rm -f $stale && echo 'removed:$stale'"
+    remote "chown -R www-data:www-data /opt/a7-wa/panel && nginx -t && systemctl reload nginx"
+    echo "published $src -> /opt/a7-wa/panel"
     ;;
 
   build)
