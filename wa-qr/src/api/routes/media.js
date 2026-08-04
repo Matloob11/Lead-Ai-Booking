@@ -6,6 +6,7 @@ import express from "express";
 import path from "node:path";
 import { mediaRoot } from "../../config.js";
 import { one } from "../../db.js";
+import { visibleSessionIds } from "../identity.js";
 
 const router = express.Router();
 
@@ -17,6 +18,24 @@ router.get("/:id", async (req, res, next) => {
 
     if (!row || !row.downloaded || !row.file_path) {
       return res.status(404).json({ detail: "Media file not found or not downloaded" });
+    }
+
+    // An attachment belongs to the phone whose thread it arrived on. Ids here
+    // count up just like conversation ids do, so without this check the photo a
+    // customer sent one agent is readable by every other agent in the building.
+    const allowed = await visibleSessionIds(req.identity);
+    if (allowed !== null) {
+      const owner = await one(
+        `SELECT conv.session_id
+           FROM qr_message m
+           JOIN qr_conversation conv ON m.conversation_id = conv.id
+          WHERE m.media_id = $1
+          LIMIT 1`,
+        [mediaId]
+      );
+      if (!owner || !allowed.includes(Number(owner.session_id))) {
+        return res.status(404).json({ detail: "Media file not found or not downloaded" });
+      }
     }
 
     const absolutePath = path.join(mediaRoot, row.file_path);

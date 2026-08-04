@@ -59,22 +59,28 @@ export async function resolveContactWaId({ client = null, jid = "", message = nu
     return { waId: toWaId(jid), lid: "", isLid: false };
   }
 
-  // Method A: Check if message.getContact() gives a contact object with .number
+  // Method A: the contact record, which usually knows the number behind a LID.
+  //
+  // contact.number arrives formatted — "+92 316 6753715" — so it is reduced to
+  // digits before being judged. Testing the raw value against a digits-only
+  // pattern rejected every real number it was given and fell through silently
+  // to storing the LinkedID as though it were a phone number.
   if (message && typeof message.getContact === "function") {
     try {
       const contact = await message.getContact();
-      if (contact?.number && /^\d{7,15}$/.test(contact.number)) {
+      const fromNumber = toWaId(contact?.number);
+      if (fromNumber.length >= 7) {
         return {
-          waId: contact.number,
-          lid: isLid ? jid : (contact.id?.server === "lid" ? contact.id._serialized : ""),
+          waId: fromNumber,
+          lid: isLid ? jid : contact?.id?.server === "lid" ? contact.id._serialized : "",
           isLid,
         };
       }
       if (contact?.id?.server === "c.us" && contact.id.user) {
-        return { waId: contact.id.user, lid: isLid ? jid : "", isLid };
+        return { waId: toWaId(contact.id.user), lid: isLid ? jid : "", isLid };
       }
     } catch (err) {
-      console.warn("[wa-qr] contact.getContact() resolution failed:", err.message);
+      console.warn("[wa-qr] getContact() could not name the sender:", err.message);
     }
   }
 
@@ -97,8 +103,21 @@ export async function resolveContactWaId({ client = null, jid = "", message = nu
     }
   }
 
-  // Fallback: extract digits
+  // Nothing knew the number. For a plain @c.us that is fine — the jid is the
+  // number. For a LinkedID it is not: the digits are an internal id, and
+  // storing them as a phone number makes a chat that looks real, cannot be
+  // replied to, and sits beside the same person's real chat as a duplicate.
+  //
+  // It is still stored rather than dropped, because losing the customer's
+  // message is worse than holding it under a name we cannot dial — but it says
+  // so out loud instead of failing quietly.
   const extracted = toWaId(jid);
+  if (isLid) {
+    console.warn(
+      `[wa-qr] could not resolve ${jid} to a phone number — the chat will be ` +
+        `stored under the LinkedID and cannot be replied to`
+    );
+  }
   return { waId: extracted, lid: isLid ? jid : "", isLid, resolutionFailed: isLid };
 }
 

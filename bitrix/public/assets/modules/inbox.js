@@ -1555,8 +1555,21 @@ export function mountInbox(root, { me }) {
    * kind of channel with different rules, and mixing the two screens would
    * suggest otherwise.
    */
+  /**
+   * The QR channel, filling the panel rather than floating over it.
+   *
+   * Deliberately not modal(): that sizes itself in vh, and the panel is
+   * already inside Bitrix's own iframe, where vh measures the outer window and
+   * not the room actually available — so the dialog ran off the bottom with
+   * the composer below the fold. This covers the panel's own surface instead,
+   * which is a size the browser can be sure of.
+   *
+   * It is a whole screen of its own, not a dialog: a QR-linked phone is a
+   * different channel with different rules, and it has a chat list, threads
+   * and a composer of its own.
+   */
   function openLinkedDevices() {
-    const frame = el("iframe.linked-frame", {
+    const frame = el("iframe.linked__frame", {
       src: "/qr/",
       title: "Linked devices",
       // allow-modals is not decoration: without it a sandboxed frame answers
@@ -1565,7 +1578,31 @@ export function mountInbox(root, { me }) {
       // it started and removing one did nothing, with no error either way.
       sandbox: "allow-scripts allow-same-origin allow-forms allow-modals",
     });
-    modal("Linked devices", el("div.modal__body.linked-body", {}, [frame]), { wide: true });
+
+    const close = () => {
+      document.removeEventListener("keydown", onKey, true);
+      screen.remove();
+    };
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      close();
+    };
+
+    const screen = el("section.linked", {}, [
+      el("header.linked__bar", {}, [
+        icon("smartphone", { size: 17 }),
+        el("span.linked__title", {}, ["Linked devices"]),
+        el("span.linked__note", {}, ["QR-linked phones, separate from the Business Platform numbers"]),
+        el("button.btn.btn--icon.linked__close", { type: "button", title: "Back to the inbox", onclick: close }, [
+          icon("close", { size: 18 }),
+        ]),
+      ]),
+      frame,
+    ]);
+
+    document.addEventListener("keydown", onKey, true);
+    root.append(screen);
   }
 
   function openNumbers() {

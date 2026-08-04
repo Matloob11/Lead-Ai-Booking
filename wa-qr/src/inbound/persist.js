@@ -14,6 +14,7 @@ import {
 } from "./normalise.js";
 import { processInboundMedia } from "./media.js";
 import { emitWebhook } from "../webhook/emit.js";
+import { config } from "../config.js";
 import { q, one } from "../db.js";
 
 /** Subscribes to events from session manager and processes them. */
@@ -64,6 +65,18 @@ async function processMessageEvent(sessionId, message) {
     toJid.endsWith("@broadcast")
   ) {
     console.info(`[wa-qr] Ignoring status/newsletter/broadcast message event (${fromJid || remoteJid})`);
+    return;
+  }
+
+  // Groups, when they are not wanted — checked on both ends because an
+  // outbound message to a group carries the group in `to`, not in `from`.
+  // Dropped here rather than hidden later: the phone belongs to a person and
+  // brings their family and neighbourhood threads with it, and none of that is
+  // the company's to store.
+  if (
+    config.ignoreGroups &&
+    (fromJid.endsWith("@g.us") || toJid.endsWith("@g.us") || remoteJid.endsWith("@g.us"))
+  ) {
     return;
   }
 

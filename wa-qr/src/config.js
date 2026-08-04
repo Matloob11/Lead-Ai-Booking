@@ -18,6 +18,17 @@ export const config = {
   /** Numbers already on the WhatsApp Business Platform. See guardNumber. */
   blockedNumbers: new Set(list("BLOCKED_NUMBERS")),
 
+  /**
+   * Whether group chats are kept at all.
+   *
+   * This is a sales inbox: a chat is one customer an agent is answering. A
+   * linked phone also belongs to a person, and carries their family groups and
+   * neighbourhood threads, which are neither the company's business to store
+   * nor useful to an agent looking for a customer. Off by default; set
+   * IGNORE_GROUPS=false if a group is ever worth keeping.
+   */
+  ignoreGroups: String(process.env.IGNORE_GROUPS ?? "true").toLowerCase() !== "false",
+
   // Empty until the two halves are joined; see README, "Joining it up".
   webhookUrl: process.env.WEBHOOK_URL || "",
   webhookToken: process.env.WEBHOOK_TOKEN || "",

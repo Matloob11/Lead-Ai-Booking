@@ -9,7 +9,7 @@ const { MessageMedia, Location } = pkg;
 import { mediaRoot } from "../config.js";
 import { getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
-import { toWaId } from "../inbound/normalise.js";
+import { toWaId, resolveContactWaId } from "../inbound/normalise.js";
 import { q, one } from "../db.js";
 
 export async function sendOutboundMessage({
@@ -34,8 +34,27 @@ export async function sendOutboundMessage({
     throw new Error("Session is invalid or banned");
   }
 
-  const recipientWaId = toWaId(to);
+  const client = getClient(sessionId);
   const isGroup = String(to).endsWith("@g.us");
+
+  let recipientWaId = toWaId(to);
+
+  // If 'to' is LID JID or a 15-digit number (LID digits), resolve phone number via client
+  if (String(to).endsWith("@lid") || (recipientWaId.length > 14 && !isGroup)) {
+    if (client) {
+      const lidJid = String(to).endsWith("@lid") ? to : `${recipientWaId}@lid`;
+      const resolved = await resolveContactWaId({ client, jid: lidJid });
+      if (resolved?.waId && resolved.waId.length <= 14) {
+        recipientWaId = resolved.waId;
+      }
+    }
+  }
+
+  // If recipientWaId is still invalid LID digits (>14 digits for individual chat)
+  if (recipientWaId.length > 14 && !isGroup) {
+    const errorMsg = `Cannot send to LID: could not resolve phone number for ${to}`;
+    throw new Error(errorMsg);
+  }
 
   // 1. Get or create Contact
   const contactRow = await one(
@@ -70,7 +89,6 @@ export async function sendOutboundMessage({
   const messageId = Number(msgRow.id);
 
   // 4. Fetch Client instance
-  const client = getClient(sessionId);
   if (!client) {
     const errorMsg = "WhatsApp client is not connected for this session";
     await q(`UPDATE qr_message SET status = 'failed', error_detail = $1 WHERE id = $2`, [

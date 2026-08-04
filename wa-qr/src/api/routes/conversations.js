@@ -1,25 +1,52 @@
 /**
  * REST API Routes: Conversations and Messages
+ *
+ * Scoped by phone, not by who answered. An agent assigned to a number sees
+ * every conversation on it — see sessions/assignments.js for why.
  */
 
 import express from "express";
 import { q, one } from "../../db.js";
+import { visibleSessionIds } from "../identity.js";
+import { sessionIdsForAgent } from "../../sessions/assignments.js";
 
 const router = express.Router();
 
-// GET /api/conversations?session_id=&limit=&offset=
+// GET /api/conversations?session_id=&agent_id=&limit=&offset=
 router.get("/", async (req, res, next) => {
   try {
     const sessionId = req.query.session_id ? Number(req.query.session_id) : null;
     const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
     const offset = Math.max(0, Number(req.query.offset || 0));
 
+    // What the caller is allowed to see, before anything they asked for.
+    const allowed = await visibleSessionIds(req.identity);
+
+    // `agent_id` narrows the view to one agent's phones. It is a filter an
+    // admin uses to look at somebody's work — it can only ever subtract from
+    // `allowed`, never reach past it.
+    let scope = allowed;
+    if (req.query.agent_id) {
+      const theirs = await sessionIdsForAgent(req.query.agent_id);
+      scope = allowed === null ? theirs : allowed.filter((id) => theirs.includes(id));
+    }
+
+    if (sessionId !== null) {
+      const permitted = scope === null || scope.includes(sessionId);
+      // Nothing here, rather than "not allowed": whether a phone exists is
+      // itself something only the people who hold it need to know.
+      if (!permitted) return res.json([]);
+      scope = [sessionId];
+    }
+
+    if (scope !== null && !scope.length) return res.json([]);
+
     let whereClause = "";
     const params = [limit, offset];
 
-    if (sessionId) {
-      whereClause = "WHERE conv.session_id = $3";
-      params.push(sessionId);
+    if (scope !== null) {
+      whereClause = "WHERE conv.session_id = ANY($3::bigint[])";
+      params.push(scope);
     }
 
     const rows = await q(
@@ -73,6 +100,17 @@ router.get("/:id/messages", async (req, res, next) => {
     const conversationId = Number(req.params.id);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
     const before = req.query.before ? Number(req.query.before) : null;
+
+    // The list above is scoped, but a conversation id is guessable — it counts
+    // up from 1. Without this an agent could read any thread on any phone in
+    // the building by typing a different number.
+    const owner = await one(`SELECT session_id FROM qr_conversation WHERE id = $1`, [
+      conversationId,
+    ]);
+    const allowed = await visibleSessionIds(req.identity);
+    if (!owner || (allowed !== null && !allowed.includes(Number(owner.session_id)))) {
+      return res.status(404).json({ detail: "Conversation not found" });
+    }
 
     let whereClause = "WHERE m.conversation_id = $1";
     const params = [conversationId, limit];

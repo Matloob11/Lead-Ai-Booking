@@ -5,6 +5,7 @@
 import express from "express";
 import path from "node:path";
 
+import { attachIdentity } from "./identity.js";
 import sessionsRouter from "./routes/sessions.js";
 import conversationsRouter from "./routes/conversations.js";
 import sendRouter from "./routes/send.js";
@@ -29,6 +30,12 @@ export function startApi(port = 8300) {
   app.get("/healthz", (req, res) => {
     res.json({ status: "ok" });
   });
+
+  // Everything under /api is somebody's private conversation, so nothing there
+  // is served until nginx has said who is asking. The static panel below is
+  // left open: it holds no data of its own, and a 401 on its first fetch says
+  // what is wrong far more clearly than an empty screen would.
+  app.use("/api", attachIdentity);
 
   // Routes
   app.use("/api/sessions", sessionsRouter);

@@ -1549,17 +1549,61 @@ body[data-wa-theme="glass-dark"] .quoted {
 
 /* ------------------------------------------------------- linked devices */
 
-/* The QR channel is a whole panel of its own, so it gets the height of one
-   rather than a letterbox inside a dialog. */
-.linked-body {
-  padding: 0;
+/* A screen of its own, filling the panel. Sized from its parent rather than in
+   vh: this panel already sits inside Bitrix's iframe, where vh is the outer
+   window's height, so anything measured in it hangs off the bottom and takes
+   the composer with it. */
+.linked {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
 }
 
-.linked-frame {
-  display: block;
+.linked__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+}
+
+.linked__title {
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.linked__note {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linked__close {
+  flex: none;
+}
+
+/* flex:1 with min-height:0 — without the second, a flex child refuses to
+   shrink below its content and pushes the composer out of sight again. */
+.linked__frame {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: min(74vh, 680px);
   border: 0;
-  border-radius: 8px;
   background: var(--bg);
+}
+
+@media (max-width: 720px) {
+  .linked__note {
+    display: none;
+  }
 }
