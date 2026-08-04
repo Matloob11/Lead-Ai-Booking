@@ -56,6 +56,67 @@ Then open `http://127.0.0.1:8300/` and scan the QR with the phone you are
 linking. The session survives restarts — the auth data is a volume, not
 something to re-scan for every deploy.
 
+## Who may see what
+
+More than one phone can be linked, and each one belongs to somebody. The rules
+are the Cloud side's rules, on purpose — `catalog.NumberAssignment` and
+`qr_session_agent` are the same idea in two databases:
+
+- An **admin** sees every phone and every conversation.
+- An **agent** sees the phones assigned to them, and then **every** conversation
+  on those phones — not only the ones they answered. The agent gives that number
+  to the customer themselves, and a colleague covering for them is normal.
+- An assignment is ownership, not a filter. It decides which *phones* an agent
+  can reach at all.
+- Removing an agent sets `is_active = false`. Nothing is deleted: who held a
+  number in March is the question asked in September.
+
+Agents are not stored here. They live in Django's `accounts_agent`, and
+`qr_session_agent.agent_id` carries that id without resolving it — one place
+creates an agent, so there is one truth about who exists.
+
+### Identity comes from nginx
+
+This service has no login. nginx authenticates the caller against Django and
+states the answer in two headers:
+
+```
+X-WA-Agent-Id: 5      accounts_agent.id of the signed-in agent
+X-WA-Is-Admin: 1      "1" when that agent has admin rights
+```
+
+`proxy_set_header` **must** set both on every proxied request. It replaces
+rather than appends, which is the point: nothing downstream can tell a header
+nginx wrote from one a browser typed, so if the client's own copy survived, any
+agent could send `X-WA-Is-Admin: 1` and become one.
+
+A request to `/api` without them is answered `401`. That is deliberate — the
+service cannot tell who is asking, and everything behind it is somebody's
+private conversation. Until nginx is wired, the panel loads and its first fetch
+returns 401.
+
+### The endpoints that carry it
+
+```
+GET  /api/sessions                         each session, plus agents: [{agent_id, role}]
+PUT  /api/sessions/:id/agents              {agents: [{agent_id, role}]} — replaces the roster
+GET  /api/sessions/:id/agents              the roster alone
+GET  /api/conversations?session_id=&agent_id=
+GET  /api/conversations/:id/messages
+```
+
+`PUT` replaces rather than merges, so the screen sends the state it wants and
+never has to work out what changed — the same contract as
+`PUT /api/catalog/numbers/{id}/agents/`. `role` is `primary` or `backup`.
+
+Assigning, creating and destroying a phone are admin-only. `agent_id` on the
+conversations list is a lens for looking at one agent's work; it can only narrow
+what the caller may already see, never widen it.
+
+The list of agents to choose from is Django's:
+`GET /api/catalog/agents/`, same origin as the panel, so the admin's own session
+authenticates it. This service never fetches it and holds no credential for it.
+
 ## Joining it up (later, not now)
 
 1. Add a `channel_type` to `catalog.WabaNumber` — `cloud` or `qr`.

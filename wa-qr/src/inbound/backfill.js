@@ -32,7 +32,9 @@ import { onEvent, getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
 import { resolveContactWaId } from "./normalise.js";
 import { storeMessage } from "./persist.js";
+import { processInboundMedia } from "./media.js";
 import { config } from "../config.js";
+import { q } from "../db.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -174,6 +176,8 @@ export async function runBackfill(sessionId) {
       await sleep(CHAT_PAUSE_MS);
     }
 
+    await retryFailedMedia(client, id);
+
     await store.updateSession(id, {
       history_status: "done",
       history_finished_at: new Date(),
@@ -188,6 +192,65 @@ export async function runBackfill(sessionId) {
   } finally {
     running.delete(id);
   }
+}
+
+/**
+ * A second go at attachments that did not come down.
+ *
+ * A message and its file are stored separately, and a failed download leaves
+ * the message perfectly readable with a qr_media row that holds only the reason
+ * it is empty. That is the right shape — losing the message because its
+ * photograph would not download would be worse — but it means a fault in
+ * downloading is invisible in the thread and permanent without this.
+ *
+ * There was such a fault, and it caught every attachment this account has ever
+ * received: downloadMedia looked the message up by a field this build does not
+ * set. The messages are already stored and the unique index will not let the
+ * import write them again, so nothing short of asking for the files by name
+ * would have recovered them.
+ *
+ * Only within the media window, and only files that failed — a message stored
+ * deliberately without its attachment is not a fault to repair.
+ */
+async function retryFailedMedia(client, sessionId) {
+  const broken = await q(
+    `SELECT m.id AS message_id, m.wamid, med.id AS media_id
+       FROM qr_message m
+       JOIN qr_media med ON med.id = m.media_id
+       JOIN qr_conversation c ON c.id = m.conversation_id
+      WHERE c.session_id = $1
+        AND med.downloaded = FALSE
+        AND med.download_error <> ''
+        AND m.created_at >= now() - ($2::bigint || ' milliseconds')::interval
+        AND m.wamid IS NOT NULL
+      ORDER BY m.created_at DESC
+      LIMIT 2000`,
+    [sessionId, MEDIA_WINDOW_MS]
+  );
+
+  if (!broken.length) return;
+  console.info(`[wa-qr] #${sessionId} retrying ${broken.length} attachment(s) that did not download`);
+
+  let recovered = 0;
+  for (const row of broken) {
+    try {
+      const message = await client.getMessageById(row.wamid);
+      if (!message?.hasMedia) continue;
+
+      const media = await processInboundMedia(message);
+      if (!media?.downloaded) continue;
+
+      // Pointed at the new row rather than repairing the old one: the failed
+      // row is the record that this file once could not be fetched, and that is
+      // worth keeping next to the one that says it eventually could.
+      await q(`UPDATE qr_message SET media_id = $1 WHERE id = $2`, [media.id, row.message_id]);
+      recovered += 1;
+    } catch (error) {
+      console.warn(`[wa-qr] could not recover media for ${row.wamid}: ${error.message}`);
+    }
+  }
+
+  console.info(`[wa-qr] #${sessionId} recovered ${recovered} of ${broken.length} attachment(s)`);
 }
 
 /**

@@ -6,10 +6,22 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { config, mediaRoot } from "../config.js";
+import { messageId } from "./normalise.js";
 import { one } from "../db.js";
 
 export async function processInboundMedia(message) {
   if (!message || !message.hasMedia) return null;
+
+  // downloadMedia() looks the message back up in the page by
+  // `this.id._serialized`, and on this build that field does not exist — the id
+  // arrives under a minified name. So it looked up `undefined`, and WhatsApp's
+  // own code threw a one-letter error that arrived here as
+  // "downloadMedia failed: r". Every attachment on this account failed that
+  // way, all 2,644 of them, and the row said so quietly in download_error while
+  // the message itself stored fine.
+  if (message.id && typeof message.id._serialized !== "string") {
+    message.id._serialized = messageId(message.id);
+  }
 
   try {
     const media = await message.downloadMedia().catch((err) => {

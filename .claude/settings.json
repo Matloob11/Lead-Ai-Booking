@@ -11,9 +11,40 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(node --check:*)",
+      "Bash(bash -n:*)",
       "Bash(md5sum:*)",
       "Bash(wc:*)",
-      "Bash(diff:*)"
+      "Bash(diff:*)",
+
+      "Bash(bash ops/wa.sh ps:*)",
+      "Bash(bash ops/wa.sh logs:*)",
+      "Bash(bash ops/wa.sh sql:*)",
+      "Bash(bash ops/wa.sh sum:*)",
+      "Bash(bash ops/wa.sh get:*)",
+      "Bash(bash ops/wa.sh push:*)",
+      "Bash(bash ops/wa.sh sync:*)",
+      "Bash(bash ops/wa.sh build:*)",
+      "Bash(bash ops/wa.sh restart:*)",
+      "Bash(bash ops/wa.sh up:*)",
+      "Bash(bash ops/wa.sh unlock:*)",
+      "Bash(bash ops/wa.sh django-check:*)",
+
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+
+      "mcp__serena__find_symbol",
+      "mcp__serena__find_declaration",
+      "mcp__serena__find_implementations",
+      "mcp__serena__find_referencing_symbols",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__get_diagnostics_for_file",
+      "mcp__serena__list_memories",
+      "mcp__serena__read_memory",
+
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "mcp__plugin_playwright_playwright__browser_network_requests"
     ],
     "deny": [
       "Read(**/.env)",

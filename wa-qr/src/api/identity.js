@@ -21,6 +21,8 @@
  * private conversation.
  */
 
+import { sessionIdsForAgent } from "../sessions/assignments.js";
+
 const AGENT_HEADER = "x-wa-agent-id";
 const ADMIN_HEADER = "x-wa-is-admin";
 
@@ -68,8 +70,6 @@ export function refuseNonAdmin(req, res) {
 export async function visibleSessionIds(identity) {
   if (identity?.isAdmin) return null;
   if (!identity?.agentId) return [];
-
-  const { sessionIdsForAgent } = await import("../sessions/assignments.js");
   return sessionIdsForAgent(identity.agentId);
 }
 

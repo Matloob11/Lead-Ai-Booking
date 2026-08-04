@@ -162,12 +162,20 @@ export async function disconnectSession(id) {
 }
 
 /**
- * Starts a disconnected phone up again so it can show a QR.
+ * Starts a phone that is not connected, whatever is standing in its way.
  *
- * A deliberate disconnect cancels the reconnect timer — it has to, or the
- * service would simply undo it — and that leaves nothing to produce a code
- * when somebody wants the phone back. Nothing did, and "Show QR" sat waiting
- * for a code that was never going to be generated.
+ * Two things end up here. A deliberate disconnect cancels the reconnect timer —
+ * it has to, or the service would simply undo it — so nothing was left to
+ * produce a code when somebody wanted the phone back, and "Show QR" waited for
+ * one that was never going to be generated.
+ *
+ * The other is a client that has a live Chromium and is still not working: a
+ * session can sit at 'authenticated' indefinitely when WhatsApp Web's own load
+ * stalls, and one did, for twenty minutes, with no way out of it from the
+ * panel. So a client that exists is not taken as a client that is doing
+ * anything — only 'ready' is. Anything else is thrown away and started again,
+ * which is exactly what the operator would otherwise be restarting the whole
+ * service to achieve.
  */
 export async function relinkSession(id) {
   const sessionId = Number(id);
@@ -176,13 +184,15 @@ export async function relinkSession(id) {
   if (row.status === "banned") {
     throw new Error("This number was refused and cannot be linked here.");
   }
+  if (row.status === "ready" && clients.has(sessionId)) return formatSession(row);
 
-  if (!clients.has(sessionId)) {
-    await store.updateSession(sessionId, { status: "initialising", last_error: "" });
-    initClient(sessionId).catch((err) => {
-      console.error(`[wa-qr] failed to relink session #${sessionId}:`, err);
-    });
-  }
+  cancelReconnect(sessionId);
+  await store.updateSession(sessionId, { status: "initialising", last_error: "" });
+
+  // initClient destroys whatever is already there before it starts.
+  initClient(sessionId).catch((err) => {
+    console.error(`[wa-qr] failed to relink session #${sessionId}:`, err);
+  });
 
   return formatSession(await store.getSessionById(sessionId));
 }
