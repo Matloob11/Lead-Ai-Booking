@@ -374,6 +374,38 @@ async function refresh({ keepScroll = true } = {}) {
     await loadMessages(state.conversationId);
     // Only the messages: a poll must not take the composer with it.
     paintMessages({ keepScroll });
+    // Whatever arrived during this poll landed in a thread somebody has open.
+    await markRead(state.conversationId);
+  }
+}
+
+/**
+ * Clears the badge on the chat that is open in front of somebody.
+ *
+ * Only while this page is on screen. The panel polls whether or not anyone is
+ * looking at it, so a chat left open in a background tab would otherwise have
+ * every message that arrived overnight marked read before the agent saw a
+ * single one — which is exactly what went wrong in the main inbox, and for
+ * exactly this reason.
+ *
+ * The local count goes first so the number disappears the moment the chat is
+ * opened rather than at the next poll five seconds later. The server's answer
+ * is not read back: the next poll carries the real count, and if this call
+ * failed that count is the honest one to show.
+ */
+async function markRead(id) {
+  if (!id || document.visibilityState !== "visible") return;
+
+  const conversation = state.conversations.find((c) => String(c.id) === String(id));
+  if (!conversation?.unread_count) return;
+
+  conversation.unread_count = 0;
+  paintConversations();
+
+  try {
+    await api(`api/conversations/${id}/read`, { method: "POST" });
+  } catch (error) {
+    console.warn("[wa-qr] could not mark the chat read:", error.message);
   }
 }
 
@@ -478,6 +510,7 @@ async function selectConversation(id) {
   paintConversations();
   await loadMessages(id);
   renderThread();
+  await markRead(id);
 }
 
 /* ------------------------------------------------------------------ thread */
@@ -946,6 +979,10 @@ async function boot() {
   renderThread();
 
   poller = setInterval(() => refresh(), POLL_CHAT_MS);
+
+  // Coming back to the tab is the moment the open chat is genuinely being read;
+  // everything that arrived while it was hidden was deliberately left counted.
+  document.addEventListener("visibilitychange", () => markRead(state.conversationId));
 }
 
 boot().catch((error) => {

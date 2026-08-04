@@ -94,6 +94,23 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+/**
+ * Whether this caller may touch one conversation, by id.
+ *
+ * The list route is scoped, but a conversation id is guessable — it counts up
+ * from 1. Without this an agent could read any thread on any phone in the
+ * building by typing a different number. Answering 404 rather than 403 keeps
+ * whether the conversation exists at all to the people who hold the phone.
+ */
+async function reachable(req, conversationId) {
+  const owner = await one(`SELECT session_id FROM qr_conversation WHERE id = $1`, [
+    conversationId,
+  ]);
+  if (!owner) return false;
+  const allowed = await visibleSessionIds(req.identity);
+  return allowed === null || allowed.includes(Number(owner.session_id));
+}
+
 // GET /api/conversations/:id/messages?limit=&before=
 router.get("/:id/messages", async (req, res, next) => {
   try {
@@ -101,14 +118,7 @@ router.get("/:id/messages", async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
     const before = req.query.before ? Number(req.query.before) : null;
 
-    // The list above is scoped, but a conversation id is guessable — it counts
-    // up from 1. Without this an agent could read any thread on any phone in
-    // the building by typing a different number.
-    const owner = await one(`SELECT session_id FROM qr_conversation WHERE id = $1`, [
-      conversationId,
-    ]);
-    const allowed = await visibleSessionIds(req.identity);
-    if (!owner || (allowed !== null && !allowed.includes(Number(owner.session_id)))) {
+    if (!(await reachable(req, conversationId))) {
       return res.status(404).json({ detail: "Conversation not found" });
     }
 
@@ -170,6 +180,36 @@ router.get("/:id/messages", async (req, res, next) => {
     }));
 
     res.json(messages);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/conversations/:id/read — the chat is open in front of somebody.
+ *
+ * Nothing cleared this before, so the badge only ever counted upwards and a
+ * chat the agent was reading kept a number beside it.
+ *
+ * There is no matching "mark unread". The count answers one question — what
+ * has arrived that nobody has looked at — and the next inbound message rebuilds
+ * it anyway.
+ */
+router.post("/:id/read", async (req, res, next) => {
+  try {
+    const conversationId = Number(req.params.id);
+
+    if (!(await reachable(req, conversationId))) {
+      return res.status(404).json({ detail: "Conversation not found" });
+    }
+
+    const row = await one(
+      `UPDATE qr_conversation SET unread_count = 0 WHERE id = $1
+       RETURNING id, unread_count`,
+      [conversationId]
+    );
+
+    res.json({ id: Number(row.id), unread_count: Number(row.unread_count) });
   } catch (err) {
     next(err);
   }
