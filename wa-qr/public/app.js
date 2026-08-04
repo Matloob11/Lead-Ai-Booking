@@ -44,6 +44,17 @@ function el(spec, props = {}, children = []) {
 
 const clear = (node) => (node.replaceChildren(), node);
 
+/**
+ * Where this panel's own API lives, whatever it is being served under.
+ *
+ * On the VPS nginx publishes the service at /qr/, so an absolute "/api/…"
+ * would leave for the host root and land on the Django backend instead —
+ * a different application that knows nothing about these routes. Resolving
+ * against the document's own base keeps every call inside whatever prefix the
+ * page was reached by, including plain localhost during development.
+ */
+const apiBase = new URL("./", document.baseURI);
+
 async function api(path, { method = "GET", body } = {}) {
   const init = { method, headers: { Accept: "application/json" } };
   if (body !== undefined) {
@@ -51,7 +62,8 @@ async function api(path, { method = "GET", body } = {}) {
     init.body = JSON.stringify(body);
   }
 
-  const response = await fetch(path, init);
+  const url = new URL(path.replace(/^\//, ""), apiBase);
+  const response = await fetch(url, init);
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     // The server's own words are worth more than a status code here: refusing
@@ -649,7 +661,9 @@ function quotedFor(message) {
 }
 
 function attachment(message) {
-  const url = message.media_url || `/api/media/${message.media_id}`;
+  // Same reason as the api() base: an absolute path would leave the /qr/
+  // prefix behind and ask the wrong application for the file.
+  const url = message.media_url || new URL(`api/media/${message.media_id}`, apiBase).href;
   const mime = message.media_mime || message.mime_type || "";
   const isImage = mime.startsWith("image/") || ["image", "sticker"].includes(message.kind);
 
