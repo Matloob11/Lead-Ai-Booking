@@ -1,0 +1,268 @@
+/*
+ * Styles for newchat.js — the New chat dialog, the risk chip, the Safety
+ * screen and the chat-list filter strip.
+ *
+ * Its own file and its own prefixes (nc-, ncf-, sfty-, risk) because app.css
+ * and safety.css belong to other sessions. Every variable used here is declared
+ * in app.css, so both themes follow without a second set of rules.
+ */
+
+/* ------------------------------------------------------------- risk chip */
+
+.risk {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.risk--ok {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.risk--watch {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.risk--high {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+body[data-wa-theme="glass-dark"] .risk--ok { color: #6ee7b7; }
+body[data-wa-theme="glass-dark"] .risk--watch { color: #fcd34d; }
+body[data-wa-theme="glass-dark"] .risk--high { color: #fca5a5; }
+
+/* --------------------------------------------------------- new chat dialog */
+
+.nc {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-width: 0;
+}
+
+.nc__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nc__field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.nc__body {
+  resize: vertical;
+  min-height: 78px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.nc__note {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.nc__note--ok { color: #047857; }
+.nc__note--bad { color: #b91c1c; }
+
+body[data-wa-theme="glass-dark"] .nc__note--ok { color: #6ee7b7; }
+body[data-wa-theme="glass-dark"] .nc__note--bad { color: #fca5a5; }
+
+/* The phone's risk, next to the phone that carries it — this is the moment the
+   agent is deciding, so this is where the warning has to be. */
+.nc__risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(127, 127, 127, 0.07);
+}
+
+.nc__risk:empty {
+  display: none;
+}
+
+.nc__risk.risk--watch { border-color: rgba(245, 158, 11, 0.4); }
+.nc__risk.risk--high { border-color: rgba(239, 68, 68, 0.42); }
+
+.nc__risk-why {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.nc__risk-more {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.nc__start {
+  flex: none;
+}
+
+/* --------------------------------------------------------- safety screen */
+
+.sfty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  /* Bounded: this page is framed twice over, so a dialog that grows with its
+     content runs off the bottom of a window it cannot measure. */
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.sfty__intro,
+.sfty__foot {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.sfty__foot {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.sfty__phone {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.sfty__phone.is-focus {
+  border-color: var(--brand, #25d366);
+}
+
+.sfty__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sfty__name {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.sfty__reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sfty__reason {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(239, 68, 68, 0.1);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sfty__reason--calm {
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--muted);
+}
+
+.sfty__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+.sfty__fig {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.sfty__val {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sfty__title {
+  margin-top: 1px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sfty__why {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.sfty__note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------- filter strip */
+
+.ncf {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.ncf__btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 11px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ncf__btn:hover {
+  color: var(--ink);
+}
+
+.ncf__btn.is-on {
+  border-color: var(--brand, #25d366);
+  background: rgba(37, 211, 102, 0.14);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ncf__btn--safety {
+  margin-left: auto;
+}

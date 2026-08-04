@@ -12,6 +12,45 @@ import * as store from "../sessions/store.js";
 import { messageId,
   toWaId, resolveContactWaId } from "../inbound/normalise.js";
 import { q, one } from "../db.js";
+import {
+  assertNewContactLimit,
+  assertBulkGuard,
+  enforcePacingDelay,
+} from "./throttle.js";
+
+/**
+ * Applies the safety limits, but only to a conversation nobody answered.
+ *
+ * The distinction is the whole design. Replying to a customer who wrote to you
+ * is not what gets a WhatsApp number banned, and a limit that slowed it down
+ * would be paid for on every message of every day while preventing nothing.
+ * Sending to people who never wrote is the entire risk, so it carries the
+ * entire cost: a daily cap, a check that the same words are not going out to
+ * person after person, and a pause before the very first message to somebody
+ * new.
+ *
+ * The pause is only on a conversation with nothing in it at all. Once a thread
+ * exists, a follow-up in it is still counted and still capped, but it is not
+ * made to wait — an agent typing a second line to the same person should not
+ * watch the send button hang.
+ */
+async function guardInitiated({ sessionId, conversationId, body }) {
+  const state = await one(
+    `SELECT
+       EXISTS (SELECT 1 FROM qr_message
+                WHERE conversation_id = $1 AND direction = 'in')  AS answered,
+       EXISTS (SELECT 1 FROM qr_message
+                WHERE conversation_id = $1)                       AS has_any`,
+    [conversationId]
+  );
+
+  // They wrote first, or they have written since. Nothing to limit.
+  if (state?.answered) return;
+
+  await assertNewContactLimit(sessionId);
+  await assertBulkGuard(body);
+  if (!state?.has_any) await enforcePacingDelay(sessionId);
+}
 
 /**
  * The absolute path of an attachment, provided it is one of ours.
@@ -102,6 +141,19 @@ export async function sendOutboundMessage({
     [sessionId, contactId, isGroup, isGroup ? recipientWaId : "", body.slice(0, 200), kind]
   );
   const conversationId = Number(convRow.id);
+
+  // 2b. The safety limits, and only where they belong.
+  //
+  // Answering somebody who wrote to you is not what gets a number banned, and
+  // a limit that slowed that down would be paid for every hour of every day
+  // while preventing nothing. Pushing messages at people who never wrote is
+  // the entire risk, so that is what is counted, paced and capped.
+  //
+  // Here rather than in the route that starts a chat, because /api/send takes
+  // any number and creates the conversation itself — so every guard living in
+  // /api/newchat could be walked straight past by sending to a new number
+  // through the ordinary send.
+  await guardInitiated({ sessionId, conversationId, body });
 
   // 3. Create qr_message row FIRST with status='queued' and wamid=NULL
   const msgRow = await one(

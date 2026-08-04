@@ -22,9 +22,23 @@ import {
   threadHeadExtras,
 } from "./thread-extras.js";
 import { createComposer } from "./composer.js";
+// Who works which phone, and how those phones are behaving. It also says why
+// the panel is empty when it is — installed on import, so this is one line for
+// both halves of it.
+import { openPhonesAdmin } from "./phones-admin.js";
 // The band across the top warning that a number is being used the way banned
 // numbers are used. Its own module, and its own file, for the same reason.
 import { installSafetyBanner } from "./safety.js";
+// Starting a conversation, and the screens that say what starting one costs.
+// Same arrangement again: it owns its own dialogs and takes one-line hooks.
+import {
+  filterStrip,
+  installNewChat,
+  kindLabel,
+  newChatButton,
+  passesFilters,
+  riskChipFor,
+} from "./newchat.js";
 
 const POLL_CHAT_MS = 5000;   // no socket on this service; the list is polled
 const POLL_QR_MS = 3000;     // the code itself rotates roughly every 20 seconds
@@ -327,6 +341,9 @@ const layout = el("div.app", {}, [
         icon("link", { size: 13 }),
         "Manage",
       ]),
+      // Messaging somebody who has not written first — the one action on this
+      // screen that can get a number banned, so it carries its own warnings.
+      newChatButton(),
     ]),
     el("div.side__filters", {}, [
       ui.phoneSelect,
@@ -334,6 +351,9 @@ const layout = el("div.app", {}, [
       // stays one control.
       el("div.side__search-wrap", {}, [icon("search", { size: 15 }), ui.search]),
     ]),
+    // Unread / mine / Safety — "what have I not dealt with" is a different
+    // question from the search box's "find me this chat".
+    filterStrip(),
     ui.importing,
     ui.convs,
   ]),
@@ -627,8 +647,10 @@ function conversationTitle(conversation) {
 const conversationWaId = (conversation) => conversation.contact?.wa_id || conversation.wa_id || "";
 
 function visibleConversations() {
-  if (!state.search) return state.conversations;
-  return state.conversations.filter((c) =>
+  // The strip's own filters first, then the text search.
+  const rows = state.conversations.filter(passesFilters);
+  if (!state.search) return rows;
+  return rows.filter((c) =>
     `${conversationTitle(c)} ${c.last_message_preview || ""}`.toLowerCase().includes(state.search)
   );
 }
@@ -678,8 +700,10 @@ function paintConversations() {
             ]),
             el("div.conv__line", {}, [
               el("span.conv__last", {}, [
-                conversation.last_message_preview ||
-                  (conversation.last_message_kind ? `[${conversation.last_message_kind}]` : ""),
+                // A photo with no caption reads as "Photo", not "[image]" —
+                // and the kinds this panel does not model yet say so in words
+                // rather than as "[unknown]".
+                conversation.last_message_preview || kindLabel(conversation.last_message_kind),
               ]),
               conversation.unread_count
                 ? el("span.conv__unread", {}, [String(conversation.unread_count)])
@@ -1064,7 +1088,16 @@ function openPhones() {
         // says so with a 403. Drawing the buttons for an agent would only offer
         // them a refusal.
         state.me.is_admin
-          ? el("button.btn", { type: "button", onclick: () => linkPhone(d) }, ["Link a phone"])
+          ? el("div.dlg__row", {}, [
+              el("button.btn.btn--ghost", {
+                type: "button",
+                onclick: () => {
+                  d.close();
+                  openPhonesAdmin({ dialog, askConfirm, onChanged: () => refresh({ keepScroll: false }) });
+                },
+              }, ["Agents and reports"]),
+              el("button.btn", { type: "button", onclick: () => linkPhone(d) }, ["Link a phone"]),
+            ])
           : null,
       ]),
       listNode,
@@ -1089,6 +1122,10 @@ function openPhones() {
                 : null,
             ]),
             el("span.chip", { class: look.chip }, [look.text]),
+            // How close this number is to being banned, beside whether it is
+            // connected. The two are not the same question and a card that
+            // answers only the first is the one an agent reads.
+            riskChipFor(session.id),
           ]),
           el("div.card__seen", {}, [
             session.last_seen_at ? `Last seen ${fullStamp(session.last_seen_at)}` : "Never connected",
@@ -1432,6 +1469,13 @@ async function boot() {
     sessionById, sessionName, avatarFor,
     loadMessages, loadOlderMessages, paintMessages, selectConversation,
   }).then(renderThread);
+
+  // Fills the New chat button and the filter strip, both of which are already
+  // in the shell as empty containers, and loads the risk figures behind them.
+  installNewChat({
+    el, clear, api, asList, icon, dialog, withPlus, state,
+    sessionName, paintConversations, refresh, selectConversation,
+  }).then(paintConversations);
 
   clear(root).append(layout);
 

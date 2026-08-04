@@ -14,6 +14,8 @@ import uploadRouter from "./routes/upload.js";
 import actionsRouter from "./routes/actions.js";
 import messagesRouter from "./routes/messages.js";
 import riskRouter from "./routes/risk.js";
+import newchatRouter from "./routes/newchat.js";
+import contactsRouter from "./routes/contacts.js";
 
 export function startApi(port = 8300) {
   const app = express();
@@ -57,6 +59,8 @@ export function startApi(port = 8300) {
   app.use("/api/actions", actionsRouter);
   app.use("/api/messages", messagesRouter);
   app.use("/api/risk", riskRouter);
+  app.use("/api/newchat", newchatRouter);
+  app.use("/api/contacts", contactsRouter);
 
   // Static UI files (served for Agent 3's UI)
   app.use(express.static(path.resolve("public")));
