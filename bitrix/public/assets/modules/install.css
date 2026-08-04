@@ -1,0 +1,111 @@
+/*
+ * The install screen's placement table.
+ *
+ * Its own file rather than more rules in panel.css: this page is opened once by
+ * an administrator and never by an agent, and it should not be able to change
+ * how the inbox looks. Every colour comes from panel.css's variables so both
+ * themes follow without a second set of rules.
+ */
+
+.card--wide {
+  max-width: 760px;
+}
+
+.pl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 4px;
+}
+
+.pl__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line, #e4e7ec);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--card, #fff);
+}
+
+/* The left edge carries the state, so the three cases are told apart before a
+   word is read. */
+.pl__row[data-state="bound"] { border-left-color: #10b981; }
+.pl__row[data-state="missing"] { border-left-color: #d1d5db; }
+.pl__row[data-state="elsewhere"] { border-left-color: #f59e0b; }
+
+.pl__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pl__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pl__name code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pl__state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pl__state--bound {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.pl__state--missing {
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--muted, #667085);
+}
+
+.pl__state--elsewhere {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.pl__what {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #667085);
+}
+
+.pl__handler {
+  margin-top: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted, #667085);
+  /* A handler is a URL and URLs do not wrap on their own; without this the card
+     grows a horizontal scrollbar and the button leaves the screen. */
+  overflow-wrap: anywhere;
+}
+
+.pl__stale {
+  margin-top: 4px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  font-size: 11px;
+  color: #b45309;
+  overflow-wrap: anywhere;
+}
+
+.btn--sm {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12px;
+}

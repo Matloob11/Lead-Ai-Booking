@@ -28,9 +28,11 @@ alag rehta hai.
 | File | Kya hai |
 |------|---------|
 | `public/index.html` | LEFT_MENU placement handler — SSO boot + connection diagnostics. Chat UI yahin aayegi. |
-| `public/install.html` | Install handler — `placement.bind(LEFT_MENU)` + `installFinish()`. Unbind button bhi isi par. |
-| `public/assets/bitrix-sso.js` | BX24 load/init, `getAuth`/`refreshAuth`, `ensurePlacement`, session bootstrap, CSRF-aware `apiFetch`. |
-| `public/assets/panel.css` | Shell styling (navy/gold). |
+| `public/install.html` | Install handler — paanchon placements bind karta hai, `placement.get` se asli haalat dikhata hai, har row ka apna unbind. |
+| `public/crm/index.html` | CRM detail-tab handler — chaaron CRM placements isi par khulte hain. |
+| `public/assets/core/bitrix-sso.js` | BX24 load/init, `getAuth`/`refreshAuth`, `ensurePlacement`, session bootstrap, CSRF-aware `apiFetch`. |
+| `public/assets/modules/panel.css` | Shell styling (navy/gold). |
+| `public/assets/modules/install.css` | Sirf install screen ki placement table. |
 | `deploy/a7-wa-panel.location.conf` | nginx `location /app/` block — haath se `a7-wa.conf` mein daalna hai. |
 | `deploy/deploy-panel.sh` | `public/` ko `/opt/a7-wa/panel/` par rsync karta hai. |
 
@@ -61,11 +63,13 @@ Other → Local application* (self-hosted 26.x mein *Integrations → Other* bhi
 | Handler path (Application URL) | `https://wa.srv1802669.hstgr.cloud/app/` |
 | Initial installation path | `https://wa.srv1802669.hstgr.cloud/app/install.html` |
 | Menu item / icon | optional — asli item `placement.bind` se aata hai |
-| Scope | `placement`, `user` |
+| Scope | `placement`, `user`, `crm` |
 
 - `placement` ke bagair `placement.bind` fail karega (`ACCESS_DENIED`).
 - `user` is liye ke backend `AUTH_ID` ko portal par `user.current` call se verify
   karta hai — yehi cheez token ko forge hone se rokti hai.
+- `crm` sirf CRM tabs ke liye. Tab isi se lead/deal/contact/company ka `PHONE`
+  field parhta hai. Iske bagair tab bind to ho jata hai magar khali rehta hai.
 
 Save karne par Bitrix **Client ID (`client_id`)** aur **Client secret** dikhata hai.
 Ye dono **backend session ko `.env` ke zariye** dein — chat/commit mein na likhein.
@@ -90,8 +94,66 @@ wo `LEFT_MENU` bind kar ke `installFinish()` call karega. Left menu refresh par
 | Scope | `crm, placement, user` |
 | Placement | `#282` — `LEFT_MENU` → `https://wa.srv1802669.hstgr.cloud/app/` |
 
-`crm` scope Bitrix ke form mein by-default chuna hua tha aur chip se hataya nahi ja
-saka. App ise kabhi use nahi karta; agli baar form khulne par hata dena behtar hai.
+**`crm` scope ab zaroori hai — hatana nahi.** Yahan pehle likha tha ke app ise
+kabhi use nahi karta aur agli baar form khulne par hata dena behtar hai. Wo CRM
+tabs se pehle ki baat thi; ab tab isi scope se numbers parhta hai.
+
+---
+
+## CRM detail tabs
+
+Left menu ke ilawa, app har CRM detail screen par ek **WhatsApp** tab lagata hai.
+Tab us record ke phone numbers uthata hai, `/api/inbox/lookup/` se poochta hai ke
+un numbers se koi chat pehle se hai ya nahi, aur jawab wahin dikha deta hai — bina
+agent ko inbox tak jaane ke.
+
+| Placement | Kahan | Handler |
+| --- | --- | --- |
+| `CRM_LEAD_DETAIL_TAB` | Lead | `…/app/crm/` |
+| `CRM_DEAL_DETAIL_TAB` | Deal | `…/app/crm/` |
+| `CRM_CONTACT_DETAIL_TAB` | Contact | `…/app/crm/` |
+| `CRM_COMPANY_DETAIL_TAB` | Company | `…/app/crm/` |
+
+Chaaron ka handler **ek hi** page hai. Page `BX24.placement.info()` se pooch leta
+hai ke wo kis screen par khula hai, aur usi hisab se `crm.lead.get`,
+`crm.deal.get`, `crm.contact.get` ya `crm.company.get` chalata hai. Deal ke paas
+apna phone nahi hota — wo apne juday hue contact ya company se number leta hai.
+
+### Scope
+
+`crm` chahiye, aur `placement` bind karne ke liye. Ye dono app ke Bitrix form
+mein hain (ooper wali table dekhein).
+
+### Lagana aur hatana
+
+`…/app/install.html` kholein. Wahan paanchon placements ki ek list hai — har row
+apni asli haalat `placement.get` se parh kar dikhati hai, na ke us se jo abhi bind
+call ne kaha:
+
+- **Bound** — isi handler par laga hua hai
+- **Not bound** — laga hua nahi
+- **Bound elsewhere** — kisi purane handler URL par laga hai (app ki jagah badli
+  thi). Row us purane URL ka naam bhi leti hai.
+
+Har row ka apna **Bind** / **Unbind** button hai. Sirf CRM tabs hatana aur left
+menu rakhna — ya ulta — isi tarah hota hai.
+
+> `ensurePlacement()` bind se pehle usi placement ke purane handler ko unbind
+> karta hai. Is liye app ka URL badalne ke baad `install.html` dobara khol lena
+> kaafi hai: purani binding khud saaf ho jati hai, warna har lead mein ek marra
+> hua tab reh jata.
+
+### Jo tab nahi kar sakta
+
+- **Record par koi phone nahi** — tab yehi kehta hai. Lookup chalta hi nahi.
+- **Deal par koi contact ya company juda nahi** — same, alag jumle ke saath.
+- **Number kisi bhi format mein** — lookup aakhri **9 hindson** par match karta
+  hai, is liye `+971 55 548 4423` aur `0555484423` ek hi chat par pahunchte hain.
+- **Number jis se koi chat nahi** — tab wo numbers dikhata hai jin par is agent
+  ka access hai, taake wahan se baat shuru ki ja sake.
+- **Doosre agent ki chat** — nazar nahi aayegi. `/api/inbox/lookup/` sirf
+  `visible_numbers` par scoped conversations lauta ta hai, yani wohi numbers jo
+  is agent ko assign hain.
 
 ---
 

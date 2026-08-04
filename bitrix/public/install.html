@@ -4,19 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A7 WhatsApp Inbox — install</title>
-    <link rel="stylesheet" href="./assets/panel.css" />
+    <link rel="stylesheet" href="./assets/modules/panel.css" />
+    <link rel="stylesheet" href="./assets/modules/install.css" />
   </head>
   <body>
     <!--
-      Install handler for the Bitrix24 local application. Bitrix loads this once
-      when the app is installed; it binds the LEFT_MENU placement (the "WhatsApp"
-      item in the portal's main menu) and then reports the install as finished.
+      Install handler for the Bitrix24 local application.
 
-      Re-running it is harmless — an already-bound placement is treated as success.
-      The Unbind button removes the menu item without uninstalling the app.
+      Bitrix runs this once when it installs the app. It binds five placements —
+      the left-menu item, and a WhatsApp tab on the four CRM detail screens — and
+      then reports the install as finished.
+
+      Re-running it is the normal repair path and is safe: every row reads its
+      real state from `placement.get` first, and binding is skipped when the
+      handler already matches. A handler pointing at an older URL is unbound
+      before the new one goes on, so changing where this app is served does not
+      leave a dead tab behind in every lead.
+
+      Each row unbinds on its own. Removing the CRM tabs while keeping the menu
+      item is a thing an admin actually wants, and one "remove everything"
+      button would make that impossible.
     -->
     <main class="boot">
-      <section class="card">
+      <section class="card card--wide">
         <div class="brand">
           <div class="brand__mark">A7</div>
           <div>
@@ -25,59 +35,192 @@
           </div>
         </div>
 
-        <h1 id="title"><span class="spinner"></span>Menu item register ho raha hai…</h1>
-        <p id="subtitle">LEFT_MENU placement bind kiya ja raha hai.</p>
+        <h1 id="title"><span class="spinner"></span>Registering the app…</h1>
+        <p id="subtitle">Binding the placements this app needs.</p>
+
+        <div id="rows" class="pl"></div>
         <div id="result"></div>
       </section>
     </main>
 
     <script type="module">
-      import { loadBX24, callBitrix } from "./assets/bitrix-sso.js";
+      import { loadBX24, callBitrix, ensurePlacement } from "./assets/core/bitrix-sso.js";
 
-      const PLACEMENT = "LEFT_MENU";
-      const TITLE = "WhatsApp";
-      // The placement opens this directory's index.html — keep the handler URL
-      // derived from where this page is served so staging never points at prod.
-      const HANDLER = new URL(".", window.location.href).href;
+      /**
+       * Every placement this app owns.
+       *
+       * `handler` is resolved against this page, so a staging copy binds to
+       * staging and production to production — the one mistake that is invisible
+       * until an agent in one portal opens a tab served by the other.
+       */
+      const HERE = new URL(".", window.location.href).href;
+      const CRM_HANDLER = new URL("./crm/", HERE).href;
+
+      const PLACEMENTS = [
+        {
+          placement: "LEFT_MENU",
+          title: "WhatsApp",
+          handler: HERE,
+          what: "The WhatsApp item in the portal's main menu.",
+        },
+        {
+          placement: "CRM_LEAD_DETAIL_TAB",
+          title: "WhatsApp",
+          handler: CRM_HANDLER,
+          what: "A WhatsApp tab on every lead, showing the chats this agent has with that lead's numbers.",
+        },
+        {
+          placement: "CRM_DEAL_DETAIL_TAB",
+          title: "WhatsApp",
+          handler: CRM_HANDLER,
+          what: "The same tab on a deal, reading the numbers from the contact or company attached to it.",
+        },
+        {
+          placement: "CRM_CONTACT_DETAIL_TAB",
+          title: "WhatsApp",
+          handler: CRM_HANDLER,
+          what: "The same tab on a contact.",
+        },
+        {
+          placement: "CRM_COMPANY_DETAIL_TAB",
+          title: "WhatsApp",
+          handler: CRM_HANDLER,
+          what: "The same tab on a company.",
+        },
+      ];
 
       const els = {
         title: document.getElementById("title"),
         subtitle: document.getElementById("subtitle"),
+        rows: document.getElementById("rows"),
         result: document.getElementById("result"),
       };
 
-      const escape = (value) =>
-        String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+      /**
+       * Nodes, never innerHTML.
+       *
+       * A placement's handler is a URL from the portal's own records and a
+       * Bitrix error message is text from a server this app does not own —
+       * neither belongs in a string that gets parsed as markup.
+       */
+      function el(spec, props = {}, children = []) {
+        const [tag, ...classes] = spec.split(".");
+        const node = document.createElement(tag || "div");
+        if (classes.length) node.className = classes.join(" ");
+        for (const [key, value] of Object.entries(props)) {
+          if (value === undefined || value === null || value === false) continue;
+          if (key.startsWith("on") && typeof value === "function") {
+            node.addEventListener(key.slice(2).toLowerCase(), value);
+          } else if (key in node) node[key] = value;
+          else node.setAttribute(key, value);
+        }
+        for (const child of [children].flat()) {
+          if (child === null || child === undefined || child === false) continue;
+          node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+        }
+        return node;
+      }
 
-      function ok(message, note) {
-        els.title.textContent = message;
-        els.subtitle.textContent = note;
-        els.result.innerHTML = `
-          <dl class="facts">
-            <div><dt>Placement</dt><dd>${escape(PLACEMENT)}</dd></div>
-            <div><dt>Menu title</dt><dd>${escape(TITLE)}</dd></div>
-            <div><dt>Handler</dt><dd>${escape(HANDLER)}</dd></div>
-          </dl>
-          <button class="btn btn--ghost" id="unbind">Menu item hatayein (unbind)</button>`;
-        document.getElementById("unbind").addEventListener("click", unbind);
+      const clear = (node) => (node.replaceChildren(), node);
+
+      /** What the portal says is bound right now, as `placement -> [handler]`. */
+      async function boundNow() {
+        const rows = (await callBitrix("placement.get")) || [];
+        const map = new Map();
+        for (const row of rows) {
+          if (!map.has(row.placement)) map.set(row.placement, []);
+          map.get(row.placement).push(row.handler);
+        }
+        return map;
+      }
+
+      /**
+       * Draws one row per placement from the portal's own answer.
+       *
+       * Read back rather than assumed. "Bound" printed straight after a
+       * successful bind call is a claim about a request, not about the portal —
+       * and the two came apart often enough while this was being written that
+       * the difference is the reason this screen exists.
+       */
+      async function paint() {
+        let bound;
+        try {
+          bound = await boundNow();
+        } catch (error) {
+          return fail(error);
+        }
+
+        clear(els.rows);
+        for (const spec of PLACEMENTS) {
+          const handlers = bound.get(spec.placement) || [];
+          const isOurs = handlers.includes(spec.handler);
+          const stale = handlers.filter((h) => h !== spec.handler);
+
+          const state = isOurs ? "bound" : handlers.length ? "elsewhere" : "missing";
+          const label = { bound: "Bound", elsewhere: "Bound elsewhere", missing: "Not bound" }[state];
+
+          const act = el("button.btn.btn--ghost.btn--sm", {
+            type: "button",
+            onclick: () => (isOurs ? unbind(spec) : bind(spec)),
+          }, [isOurs ? "Unbind" : "Bind"]);
+
+          els.rows.append(
+            el("div.pl__row", { "data-state": state }, [
+              el("div.pl__main", {}, [
+                el("div.pl__name", {}, [
+                  el("code", {}, [spec.placement]),
+                  el("span.pl__state", { class: `pl__state--${state}` }, [label]),
+                ]),
+                el("div.pl__what", {}, [spec.what]),
+                el("div.pl__handler", {}, [spec.handler]),
+                // Named, because this is the row that explains a tab opening the
+                // wrong page after the app was moved.
+                ...stale.map((h) =>
+                  el("div.pl__stale", {}, [`Also bound to an older handler: ${h}`])
+                ),
+              ]),
+              act,
+            ])
+          );
+        }
       }
 
       function fail(error) {
-        els.title.textContent = "Install fail ho gaya";
-        els.subtitle.textContent = "App ki settings check karein (scope mein `placement` hona zaroori hai).";
-        els.result.innerHTML = `
-          <div class="alert">
-            <div class="alert__title">${escape(error?.message || "Unknown error")}</div>
-            <div class="alert__code">code: ${escape(error?.code || error?.name || "unknown")}</div>
-            ${error?.detail ? `<pre>${escape(JSON.stringify(error.detail, null, 2))}</pre>` : ""}
-          </div>`;
+        els.title.textContent = "The app could not be registered";
+        // `placement` is what binding needs; `crm` is what the CRM tab reads a
+        // lead's phone numbers with. A tab that binds and then cannot read
+        // anything is the harder failure to diagnose, so both are named here.
+        els.subtitle.textContent =
+          "Check the app's settings — its scope must include `placement` and `crm`.";
+        clear(els.result).append(
+          el("div.alert", {}, [
+            el("div.alert__title", {}, [error?.message || "Unknown error"]),
+            el("div.alert__code", {}, [`code: ${error?.code || error?.name || "unknown"}`]),
+          ])
+        );
         console.error("[a7-wa] install failed:", error);
       }
 
-      async function unbind() {
+      async function bind(spec) {
         try {
-          await callBitrix("placement.unbind", { PLACEMENT, HANDLER });
-          els.result.innerHTML = `<p>Menu item hata diya gaya. Wapas lagane ke liye ye page dobara kholein.</p>`;
+          // ensurePlacement, not placement.bind: it clears an older handler for
+          // the same placement first, which is what stops a moved app from
+          // leaving a dead tab in every lead in the portal.
+          const result = await ensurePlacement(spec);
+          if (result.status === "failed") throw result.error;
+          await paint();
+        } catch (error) {
+          fail(error);
+        }
+      }
+
+      async function unbind(spec) {
+        try {
+          await callBitrix("placement.unbind", {
+            PLACEMENT: spec.placement,
+            HANDLER: spec.handler,
+          });
+          await paint();
         } catch (error) {
           fail(error);
         }
@@ -86,19 +229,27 @@
       async function install() {
         try {
           await loadBX24();
-          try {
-            await callBitrix("placement.bind", { PLACEMENT, HANDLER, TITLE });
-            ok("WhatsApp menu item lag gaya", "Left menu refresh karein — item wahan nazar aayega.");
-          } catch (error) {
-            // Binding the same handler twice is the normal re-install path.
-            // Bitrix reports it as a generic ERROR_CORE, so the message — not
-            // the code — is what identifies it ("Handler already binded").
-            if (/alread|exist/i.test(`${error.code} ${error.message}`)) {
-              ok("Menu item pehle se maujood hai", "Kuch badalna nahi para — placement already bound thi.");
-            } else {
-              throw error;
-            }
+
+          const results = [];
+          for (const spec of PLACEMENTS) {
+            // One at a time. Bitrix answers concurrent placement writes with
+            // lock errors often enough that the parallel version reported
+            // failures for placements that had in fact been bound.
+            results.push(await ensurePlacement(spec));
           }
+
+          const broken = results.filter((r) => r.status === "failed");
+          if (broken.length === results.length) throw broken[0].error;
+
+          els.title.textContent = broken.length
+            ? "Registered, with something missing"
+            : "The app is registered";
+          els.subtitle.textContent = broken.length
+            ? "Some placements could not be bound. Their rows below say which, and each can be retried on its own."
+            : "The menu item and the four CRM tabs are bound. Refresh the portal to see them.";
+
+          await paint();
+
           if (typeof window.BX24.installFinish === "function") window.BX24.installFinish();
         } catch (error) {
           fail(error);

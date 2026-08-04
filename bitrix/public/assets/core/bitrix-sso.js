@@ -152,9 +152,18 @@ export function callBitrix(method, params = {}) {
  * URL, which orphans the old binding.
  *
  * Never throws: a missing menu item must not stop the inbox from loading.
+ *
+ * `handler` defaults to the directory this page is served from, which is right
+ * for LEFT_MENU — the menu item opens the page doing the binding. The CRM tabs
+ * are the case that needs it stated: they open `/app/crm/`, a different
+ * directory, and deriving the handler would have bound all five placements to
+ * whichever page happened to be running.
  */
-export async function ensurePlacement({ placement = "LEFT_MENU", title = "WhatsApp" } = {}) {
-  const handler = new URL(".", window.location.href).href;
+export async function ensurePlacement({
+  placement = "LEFT_MENU",
+  title = "WhatsApp",
+  handler = new URL(".", window.location.href).href,
+} = {}) {
   try {
     const bound = await callBitrix("placement.get");
     const existing = (bound || []).filter((row) => row.placement === placement);
