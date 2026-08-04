@@ -53,6 +53,27 @@ export function messageId(id) {
 }
 
 /**
+ * Puts the id back where whatsapp-web.js expects to find it.
+ *
+ * Every method that goes back to the page for more — downloadMedia,
+ * getQuotedMessage, react, forward, delete — passes `this.id._serialized`
+ * through to `Msg.get(...)`. On this build that field does not exist, so each
+ * of them looks up `undefined`, gets nothing, and dies inside WhatsApp's own
+ * minified code as a one-letter error with no clue in it.
+ *
+ * It has cost three separate features so far: every message stored under the
+ * id "[object Object]", every attachment failing to download, and 763 replies
+ * losing the link to the message they answered. Setting it once, on the way in,
+ * is cheaper than remembering it at each of the call sites.
+ */
+export function ensureSerialized(message) {
+  if (message?.id && typeof message.id._serialized !== "string") {
+    message.id._serialized = messageId(message.id);
+  }
+  return message;
+}
+
+/**
  * Resolves a WhatsApp JID (whether @c.us, @g.us, or @lid) to a real phone number wa_id.
  * If the JID is @lid, queries whatsapp-web.js Contact/Client to retrieve the real phone number.
  */

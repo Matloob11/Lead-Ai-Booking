@@ -5,6 +5,7 @@
 import { onEvent, getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
 import {
+  ensureSerialized,
   messageId,
   toWaId,
   resolveContactWaId,
@@ -95,6 +96,11 @@ export async function storeMessage(sessionId, message, options = {}) {
   const live = !historical;
 
   if (!message) return { stored: false };
+
+  // Before anything asks the library for more about this message. Everything
+  // that does — the quoted message, the attachment, a reaction — looks itself
+  // up by `id._serialized`, which this build does not set.
+  ensureSerialized(message);
 
   const wamid = messageId(message.id);
   if (!wamid) return { stored: false };
