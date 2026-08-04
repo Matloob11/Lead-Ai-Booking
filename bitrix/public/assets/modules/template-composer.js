@@ -647,13 +647,34 @@ export function openTemplateManager({ onUseTemplate } = {}) {
   const dialog = modal("Templates Management Center", body, { wide: true });
 
   let templates = [];
+  let numbers = [];
   let filterStatus = "";
+  let filterWaba = "";
   let searchTerm = "";
 
   const search = el("input.na-search", {
     type: "search",
     placeholder: "Find template by name or text…",
   });
+
+  // Templates belong to a business account and several numbers share one, so
+  // an agent covering four numbers otherwise reads one undifferentiated list
+  // and cannot tell which template can be sent from which phone.
+  const numberSelect = el("select.na-picker", { style: "width: 190px;" }, [
+    el("option", { value: "" }, ["All my numbers"]),
+  ]);
+
+  const notice = el("div.alert", { hidden: true });
+
+  /** Whichever of the caller's numbers sit on a template's business account. */
+  const numbersFor = (wabaId) =>
+    numbers.filter((n) => n.waba_business_id && n.waba_business_id === wabaId);
+
+  const numberLabel = (wabaId) => {
+    const shared = numbersFor(wabaId);
+    if (!shared.length) return "";
+    return shared.map((n) => n.phone_number || n.title || n.label).join(", ");
+  };
 
   const statusSelect = el("select.na-picker", { style: "width: 140px;" }, [
     el("option", { value: "" }, ["All Statuses"]),
@@ -677,6 +698,7 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 
   const toolbar = el("div.na-toolbar", { style: "align-items: center;" }, [
     search,
+    numberSelect,
     statusSelect,
     syncBtn,
     createBtn,
@@ -692,14 +714,36 @@ export function openTemplateManager({ onUseTemplate } = {}) {
     render();
   });
 
+  numberSelect.addEventListener("change", () => {
+    filterWaba = numberSelect.value;
+    render();
+  });
+
   syncBtn.addEventListener("click", async () => {
     syncBtn.disabled = true;
     syncBtn.textContent = "Syncing…";
+    notice.hidden = true;
     try {
-      await catalog.syncTemplates();
+      const result = await catalog.syncTemplates();
       await fetchTemplates();
+      // Said out loud, because the common outcome of a successful sync is that
+      // nothing on screen changes, which reads exactly like a sync that failed.
+      // The route answers with a plain count, not an object.
+      const count = Number(result?.templates);
+      clear(notice).append(
+        Number.isFinite(count)
+          ? `Refreshed from Meta — ${count} template${count === 1 ? "" : "s"} on record.`
+          : "Refreshed from Meta."
+      );
+      notice.className = "alert wa-x-alert--ok";
+      notice.hidden = false;
     } catch (err) {
-      alert(`Sync failed: ${err.message}`);
+      // In the panel rather than in a browser alert: this screen lives inside
+      // two nested iframes, and "An embedded page at … says" is not a sentence
+      // that tells anybody what went wrong.
+      clear(notice).append(`Could not refresh from Meta: ${err.message}`);
+      notice.className = "alert";
+      notice.hidden = false;
     } finally {
       syncBtn.disabled = false;
       syncBtn.replaceChildren(icon("refresh", { size: 14 }), " Sync from Meta");
@@ -708,8 +752,14 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 
   createBtn.addEventListener("click", () => {
     openCreateTemplateModal({
+      numbers,
       onCreated: async () => {
         await fetchTemplates();
+        clear(notice).append(
+          "Submitted to Meta. It shows as PENDING until the review finishes, usually a minute or two — press Sync from Meta to check."
+        );
+        notice.className = "alert wa-x-alert--ok";
+        notice.hidden = false;
       },
     });
   });
@@ -717,15 +767,43 @@ export function openTemplateManager({ onUseTemplate } = {}) {
   async function fetchTemplates() {
     clear(body).append(el("div.na-note", {}, ["Loading templates from Meta…"]));
     try {
-      templates = await catalog.allTemplates();
+      // The numbers alongside the templates: without them a template can be
+      // listed but not attributed, and this screen's whole complaint was not
+      // knowing which number a template belonged to.
+      const [rows, numberRows] = await Promise.all([
+        catalog.allTemplates(),
+        catalog.numbers().catch(() => []),
+      ]);
+      templates = Array.isArray(rows) ? rows : [];
+      numbers = Array.isArray(numberRows) ? numberRows : [];
       renderMain();
     } catch (err) {
       clear(body).append(el("div.alert", {}, [`Failed to load templates: ${err.message}`]));
     }
   }
 
+  function renderNumberFilter() {
+    const chosen = numberSelect.value;
+    clear(numberSelect).append(el("option", { value: "" }, ["All my numbers"]));
+
+    const seen = new Set();
+    for (const number of numbers) {
+      if (!number.waba_business_id || seen.has(number.waba_business_id)) continue;
+      seen.add(number.waba_business_id);
+      const onIt = templates.filter((t) => t.waba_business_id === number.waba_business_id).length;
+      numberSelect.append(
+        el("option", { value: number.waba_business_id }, [
+          `${numberLabel(number.waba_business_id) || number.title} (${onIt})`,
+        ])
+      );
+    }
+    numberSelect.value = seen.has(chosen) ? chosen : "";
+    filterWaba = numberSelect.value;
+  }
+
   function renderMain() {
-    clear(body).append(toolbar, summary, listContainer);
+    clear(body).append(toolbar, notice, summary, listContainer);
+    renderNumberFilter();
     render();
   }
 
@@ -737,11 +815,12 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 
     const filtered = templates.filter((t) => {
       const matchStatus = !filterStatus || t.status === filterStatus;
+      const matchNumber = !filterWaba || t.waba_business_id === filterWaba;
       const matchText =
         !searchTerm ||
         t.name.toLowerCase().includes(searchTerm) ||
         (t.body_text || "").toLowerCase().includes(searchTerm);
-      return matchStatus && matchText;
+      return matchStatus && matchNumber && matchText;
     });
 
     clear(summary).append(
@@ -750,7 +829,7 @@ export function openTemplateManager({ onUseTemplate } = {}) {
       " · ",
       el("span.tpl-stat-pending", { style: "color: #f59e0b; font-weight: 600;" }, [`${pendingCount} Pending`]),
       rejectedCount ? ` · ${rejectedCount} Rejected` : "",
-      searchTerm || filterStatus ? ` · showing ${filtered.length}` : ""
+      searchTerm || filterStatus || filterWaba ? ` · showing ${filtered.length}` : ""
     );
 
     if (!filtered.length) {
@@ -770,7 +849,15 @@ export function openTemplateManager({ onUseTemplate } = {}) {
         el("div.na-head", {}, [
           el("div.na-who", {}, [
             el("div.na-title", {}, [t.name]),
-            el("div.na-phone", {}, [`Language: ${t.language} · Category: ${t.category}`]),
+            el("div.na-phone", {}, [
+              `Language: ${t.language} · Category: ${t.category}`,
+              // Which phone this can actually be sent from. A template is
+              // approved for one business account and is unusable from a number
+              // on any other, which was invisible until now.
+              numberLabel(t.waba_business_id)
+                ? ` · On ${numberLabel(t.waba_business_id)}`
+                : "",
+            ]),
           ]),
           el("div.na-flags", {}, [
             el("span.na-badge", { class: `na-badge--${statusTone}` }, [statusLabel]),
@@ -801,7 +888,69 @@ export function openTemplateManager({ onUseTemplate } = {}) {
   return dialog;
 }
 
-export function openCreateTemplateModal({ onCreated } = {}) {
+/**
+ * Every number that shares one business account.
+ *
+ * A template belongs to a WABA, not to a number, and several of this company's
+ * numbers sit on the same one. Saying "created on +9715…" alone would be a
+ * half-truth — the template becomes available on all of them — so the screen
+ * names them all.
+ */
+const numbersOnWaba = (numbers, wabaId) =>
+  numbers.filter((n) => n.waba_business_id && n.waba_business_id === wabaId);
+
+export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
+  // Which business account this is being written into. Meta reviews it under
+  // that account's name, so it is not a detail to leave implicit — and an agent
+  // covering four numbers has no other way to know which one they are spending.
+  const numberSelect = el("select.field");
+  const wabaNote = el("div.tplc-waba-note", {}, ["Loading your numbers…"]);
+  let allNumbers = Array.isArray(numbers) ? numbers : [];
+
+  function paintNumbers() {
+    clear(numberSelect);
+    // One option per business account, not per number: two numbers on the same
+    // WABA are the same choice, and offering it twice invites the agent to
+    // wonder which of the two they picked.
+    const seen = new Set();
+    for (const number of allNumbers) {
+      if (!number.waba_business_id || seen.has(number.waba_business_id)) continue;
+      seen.add(number.waba_business_id);
+      numberSelect.append(
+        el("option", { value: number.waba_business_id }, [
+          number.title || number.label || number.phone_number || number.waba_business_id,
+        ])
+      );
+    }
+    if (!seen.size) {
+      numberSelect.append(el("option", { value: "" }, ["No number available"]));
+    }
+    paintWabaNote();
+  }
+
+  function paintWabaNote() {
+    const shared = numbersOnWaba(allNumbers, numberSelect.value);
+    clear(wabaNote).append(
+      shared.length
+        ? `Sendable from ${shared.map((n) => n.phone_number || n.title).join(", ")}`
+        : "This template will be created on your business account."
+    );
+  }
+
+  numberSelect.addEventListener("change", paintWabaNote);
+
+  if (!allNumbers.length) {
+    catalog
+      .numbers()
+      .then((rows) => {
+        allNumbers = Array.isArray(rows) ? rows : [];
+        paintNumbers();
+      })
+      .catch(() => clear(wabaNote).append("Could not load your numbers."));
+  } else {
+    paintNumbers();
+  }
+
   const nameInput = el("input.field", {
     type: "text",
     placeholder: "e.g. property_viewing_offer",
@@ -821,17 +970,149 @@ export function openCreateTemplateModal({ onCreated } = {}) {
   const headerInput = el("input.field", { type: "text", placeholder: "Header text (optional)" });
   const bodyTextarea = el("textarea.field", { rows: 4, placeholder: "Hello {{1}}, thank you for contacting A7 Group. Your appointment is set for {{2}}." });
   const footerInput = el("input.field", { type: "text", placeholder: "Footer text e.g. A7 Real Estate (optional)" });
-  const buttonsInput = el("input.field", { type: "text", placeholder: "Quick reply buttons comma separated e.g. Interested, Call Me" });
 
-  const addVar1 = el("button.btn.btn--ghost.btn--sm", { type: "button", style: "padding: 2px 8px; font-size: 11px;" }, ["+ {{1}}"]);
-  const addVar2 = el("button.btn.btn--ghost.btn--sm", { type: "button", style: "padding: 2px 8px; font-size: 11px;" }, ["+ {{2}}"]);
+  /**
+   * A sample value for every {{n}}, which Meta requires and this screen never
+   * asked for.
+   *
+   * The review is a person reading the finished sentence, and "Hello {{1}}" is
+   * not one — a template submitted without examples comes back rejected, and
+   * the panel reported that as though the wording were at fault. The values are
+   * also what the preview draws, so the agent sees the message a customer will
+   * get rather than the skeleton of it.
+   */
+  const headerExamples = {};
+  const bodyExamples = {};
 
-  addVar1.addEventListener("click", () => {
-    bodyTextarea.value += " {{1}}";
+  const headerVars = el("div.tplc-vars", { hidden: true });
+  const bodyVars = el("div.tplc-vars", { hidden: true });
+
+  function paintVariables(text, store, container, label) {
+    const holes = placeholdersIn(text);
+    container.hidden = !holes.length;
+    // Values for placeholders the agent has since deleted must go too, or a
+    // removed {{3}} keeps sending an example for a hole that is not there.
+    for (const key of Object.keys(store)) {
+      if (!holes.includes(key)) delete store[key];
+    }
+    if (!holes.length) return;
+
+    clear(container).append(
+      el("div.tplc-vars__title", {}, [`Sample values — Meta needs one per placeholder in the ${label}`])
+    );
+    for (const hole of holes) {
+      const input = el("input.field.tplc-vars__input", {
+        type: "text",
+        value: store[hole] || "",
+        placeholder: `What {{${hole}}} looks like, e.g. Ahmed`,
+      });
+      input.addEventListener("input", () => {
+        store[hole] = input.value;
+        updatePreview();
+      });
+      container.append(
+        el("label.tplc-vars__row", {}, [el("span", {}, [`{{${hole}}}`]), input])
+      );
+    }
+  }
+
+  const addVariable = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["+ Add a variable"]);
+  addVariable.addEventListener("click", () => {
+    // The next number, not always {{1}} — appending a duplicate is the one
+    // thing Meta will not accept and the old two fixed buttons made it easy.
+    const next = placeholdersIn(bodyTextarea.value).length + 1;
+    bodyTextarea.value = `${bodyTextarea.value.trimEnd()} {{${next}}}`.trim();
+    bodyTextarea.focus();
     updatePreview();
   });
-  addVar2.addEventListener("click", () => {
-    bodyTextarea.value += " {{2}}";
+
+  /* ------------------------------------------------------------- buttons */
+
+  const buttons = [];
+  const buttonRows = el("div.tplc-btnedit");
+  const addButton = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["+ Add a button"]);
+
+  function paintButtons() {
+    clear(buttonRows);
+    addButton.disabled = buttons.length >= MAX_VISIBLE_BUTTONS;
+
+    buttons.forEach((button, index) => {
+      const kind = el("select.field.tplc-btnedit__kind", {}, [
+        el("option", { value: "QUICK_REPLY" }, ["Quick reply"]),
+        el("option", { value: "URL" }, ["Open a link"]),
+        el("option", { value: "PHONE_NUMBER" }, ["Call a number"]),
+      ]);
+      kind.value = button.type;
+
+      const text = el("input.field", {
+        type: "text",
+        value: button.text || "",
+        maxlength: "25",
+        placeholder: "Button label, max 25 characters",
+      });
+
+      // Only one of these is ever shown — a quick reply carries nothing but its
+      // own label, and asking for a URL beside it invites one to be typed and
+      // silently dropped.
+      const extra = el("input.field", {
+        type: "text",
+        value: button.type === "URL" ? button.url || "" : button.phone_number || "",
+        placeholder:
+          button.type === "URL"
+            ? "https://a7groupdxb.com/listing/{{1}}"
+            : "+9715XXXXXXXX",
+        hidden: button.type === "QUICK_REPLY",
+      });
+
+      // A link ending in a placeholder is how one template points each customer
+      // at their own page, and Meta wants the finished link as proof.
+      const sample = el("input.field", {
+        type: "text",
+        value: button.example || "",
+        placeholder: "What that link looks like filled in",
+        hidden: !(button.type === "URL" && placeholdersIn(button.url).length),
+      });
+
+      const remove = el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Remove this button" }, ["×"]);
+
+      kind.addEventListener("change", () => {
+        button.type = kind.value;
+        paintButtons();
+        updatePreview();
+      });
+      text.addEventListener("input", () => {
+        button.text = text.value;
+        updatePreview();
+      });
+      extra.addEventListener("input", () => {
+        if (button.type === "URL") button.url = extra.value;
+        else button.phone_number = extra.value;
+        sample.hidden = !(button.type === "URL" && placeholdersIn(extra.value).length);
+        updatePreview();
+      });
+      sample.addEventListener("input", () => {
+        button.example = sample.value;
+      });
+      remove.addEventListener("click", () => {
+        buttons.splice(index, 1);
+        paintButtons();
+        updatePreview();
+      });
+
+      buttonRows.append(
+        el("div.tplc-btnedit__row", {}, [
+          el("div.tplc-btnedit__top", {}, [kind, text, remove]),
+          extra,
+          sample,
+        ])
+      );
+    });
+  }
+
+  addButton.addEventListener("click", () => {
+    if (buttons.length >= MAX_VISIBLE_BUTTONS) return;
+    buttons.push({ type: "QUICK_REPLY", text: "", url: "", phone_number: "", example: "" });
+    paintButtons();
     updatePreview();
   });
 
@@ -860,13 +1141,43 @@ export function openCreateTemplateModal({ onCreated } = {}) {
   ]);
 
   function updatePreview() {
+    paintVariables(headerInput.value, headerExamples, headerVars, "header");
+    paintVariables(bodyTextarea.value, bodyExamples, bodyVars, "body");
+
     clear(previewBody);
     if (headerInput.value.trim()) {
-      previewBody.append(el("div.tplc-bubble__header", {}, [headerInput.value.trim()]));
+      previewBody.append(
+        el("div.tplc-bubble__header", {}, [withValues(headerInput.value.trim(), headerExamples)])
+      );
     }
-    previewBody.append(el("div.tplc-bubble__body", {}, [bodyTextarea.value.trim() || "Your template message body text will appear here..."]));
+
+    // withValues, not the raw text: the placeholders are drawn with the sample
+    // values in them, so what is on screen is a message rather than a form. An
+    // unfilled hole stays visible and tinted, which is the thing still to do.
+    const bodyText = bodyTextarea.value.trim();
+    previewBody.append(
+      el("div.tplc-bubble__body", {}, [
+        bodyText
+          ? withValues(bodyText, bodyExamples)
+          : "Your template message body text will appear here…",
+      ])
+    );
+
     if (footerInput.value.trim()) {
       previewBody.append(el("div.tplc-bubble__footer", {}, [footerInput.value.trim()]));
+    }
+
+    const drawable = buttons.filter((b) => (b.text || "").trim());
+    if (drawable.length) {
+      previewBody.append(
+        el(
+          "div.tplc-btns",
+          {},
+          drawable.map((b) =>
+            el("span.tplc-btn", {}, [buttonIcon(b.type), b.text.trim()])
+          )
+        )
+      );
     }
   }
 
@@ -877,19 +1188,25 @@ export function openCreateTemplateModal({ onCreated } = {}) {
   ]);
 
   const leftForm = el("div.tplc-form", { style: "gap: 10px;" }, [
+    el("label.tplc-field", {}, [el("span", {}, ["Creating on"]), numberSelect, wabaNote]),
     el("label.tplc-field", {}, [el("span", {}, ["Template Name"]), nameInput, nameHint]),
     el("label.tplc-field", {}, [el("span", {}, ["Category"]), categorySelect]),
     el("label.tplc-field", {}, [el("span", {}, ["Language"]), langSelect]),
     el("label.tplc-field", {}, [el("span", {}, ["Header Text (Optional)"]), headerInput]),
+    headerVars,
     el("label.tplc-field", {}, [
-      el("div", { style: "display: flex; justify-content: space-between; align-items: center;" }, [
-        el("span", {}, ["Body Text"]),
-        el("div", { style: "display: flex; gap: 4px;" }, [addVar1, addVar2]),
-      ]),
+      el("div.tplc-field__head", {}, [el("span", {}, ["Body Text"]), addVariable]),
       bodyTextarea,
     ]),
+    bodyVars,
     el("label.tplc-field", {}, [el("span", {}, ["Footer Text (Optional)"]), footerInput]),
-    el("label.tplc-field", {}, [el("span", {}, ["Quick Reply Buttons (Comma separated, max 3)"]), buttonsInput]),
+    el("div.tplc-field", {}, [
+      el("div.tplc-field__head", {}, [
+        el("span", {}, [`Buttons (max ${MAX_VISIBLE_BUTTONS})`]),
+        addButton,
+      ]),
+      buttonRows,
+    ]),
     errorEl,
     el("div.tplc-actions", {}, [submitBtn]),
   ]);
@@ -897,19 +1214,35 @@ export function openCreateTemplateModal({ onCreated } = {}) {
   const body = el("div.modal__body.tplc", {}, [leftForm, el("div.tplc-right", {}, [phoneFrame])]);
   const dialog = modal("Create New WhatsApp Template", body, { wide: true });
 
+  paintButtons();
   updatePreview();
 
-  submitBtn.addEventListener("click", async () => {
-    const name = nameInput.value.trim();
-    const bodyText = bodyTextarea.value.trim();
+  /** The first thing wrong with the form, or "" when there is nothing. */
+  function whatIsWrong() {
+    if (!nameInput.value.trim()) return "Give the template a name.";
+    if (!bodyTextarea.value.trim()) return "The template needs body text.";
 
-    if (!name) {
-      errorEl.textContent = "Please enter a valid template name.";
-      errorEl.hidden = false;
-      return;
+    // Checked here rather than left to Meta. A rejection is recorded against
+    // the business account and cannot be taken back, so the cheap mistakes are
+    // worth catching on this side of the submission.
+    for (const [hole, value] of Object.entries({ ...headerExamples, ...bodyExamples })) {
+      if (!String(value || "").trim()) return `Give {{${hole}}} a sample value — Meta reviews the finished sentence.`;
     }
-    if (!bodyText) {
-      errorEl.textContent = "Please enter the template body text.";
+    for (const button of buttons) {
+      if (!button.text.trim()) return "Every button needs a label, or remove it.";
+      if (button.type === "URL" && !button.url.trim()) return `Button "${button.text}" needs a link.`;
+      if (button.type === "PHONE_NUMBER" && !button.phone_number.trim()) {
+        return `Button "${button.text}" needs a phone number.`;
+      }
+    }
+    if (!numberSelect.value) return "No WhatsApp Business account is available on your numbers.";
+    return "";
+  }
+
+  submitBtn.addEventListener("click", async () => {
+    const problem = whatIsWrong();
+    if (problem) {
+      errorEl.textContent = problem;
       errorEl.hidden = false;
       return;
     }
@@ -920,16 +1253,24 @@ export function openCreateTemplateModal({ onCreated } = {}) {
 
     try {
       await catalog.createTemplate({
-        name,
+        waba_business_id: numberSelect.value,
+        name: nameInput.value.trim(),
         category: categorySelect.value,
         language: langSelect.value,
         header_text: headerInput.value.trim(),
-        body_text: bodyText,
+        header_examples: headerExamples,
+        body_text: bodyTextarea.value.trim(),
+        body_examples: bodyExamples,
         footer_text: footerInput.value.trim(),
-        buttons: buttonsInput.value.trim(),
+        buttons: buttons.map((b) => ({
+          type: b.type,
+          text: b.text.trim(),
+          url: b.type === "URL" ? b.url.trim() : "",
+          phone_number: b.type === "PHONE_NUMBER" ? b.phone_number.trim() : "",
+          example: b.example.trim(),
+        })),
       });
 
-      alert("Template submitted successfully to Meta! Status: PENDING (Meta usually approves in 1-2 minutes).");
       dialog.close();
       onCreated?.();
     } catch (err) {

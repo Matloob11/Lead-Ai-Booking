@@ -1,7 +1,10 @@
+import re
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -22,6 +25,11 @@ def _require_admin(request):
 def serialize_template(template):
     return {
         "id": template.pk,
+        # Which business account it lives on. Several numbers share one WABA, so
+        # this is what the screen matches a template back to a number by — an
+        # agent covering four numbers otherwise sees one undifferentiated list
+        # and cannot tell which of them a template can actually be sent from.
+        "waba_business_id": template.waba_business_id,
         "name": template.name,
         "language": template.language,
         "category": template.category,
@@ -219,16 +227,25 @@ def update_number(request, pk):
 def sync_now(request):
     """Pull templates (and optionally channels) from the gateway on demand.
 
-    A schedule already refreshes both, but an admin who has just had a template
-    approved should not have to wait for the next run to use it.
-    """
-    denied = _require_admin(request)
-    if denied:
-        return denied
+    A schedule already refreshes both, but whoever has just had a template
+    approved should not have to wait for the next run to use it — and that is
+    usually the agent who asked for it, not an admin.
 
+    Templates are therefore open to any signed-in agent. It reads from the
+    gateway and writes only into our own copy: nothing is created, nothing is
+    sent, and a template an agent may not use is one they already cannot see,
+    because every list on this screen is scoped to their own numbers.
+
+    Channels stay admin-only. That one rewrites the number catalogue this whole
+    panel is addressed by, and it is not a refresh anybody needs mid-shift.
+    """
     from .tasks import sync_numbers, sync_templates
 
     what = request.data.get("what", "templates")
+    if what in ("numbers", "all"):
+        denied = _require_admin(request)
+        if denied:
+            return denied
     try:
         result = {}
         if what in ("numbers", "all"):
@@ -280,21 +297,107 @@ def all_templates(request):
     return Response([serialize_template(t) for t in templates])
 
 
+#: {{1}}, {{2}} … as Meta writes them, in the order they must be exampled.
+VARIABLE_RE = re.compile(r"\{\{\s*(\d+)\s*\}\}")
+
+
+def _variable_numbers(text):
+    """The distinct placeholders in a piece of template text, in order."""
+    seen = []
+    for found in VARIABLE_RE.findall(text or ""):
+        if found not in seen:
+            seen.append(found)
+    return seen
+
+
+def _examples_for(text, supplied):
+    """One example value per placeholder, in Meta's order.
+
+    Meta rejects a template carrying {{1}} with no example for it — the review
+    is a person reading the finished sentence, and "Hello {{1}}" is not one. The
+    submission used to leave the whole `example` block out, so every template
+    with a variable in it came back refused and the panel reported Meta's
+    complaint as though the wording were at fault.
+
+    A placeholder the composer left blank still gets something, because a
+    missing entry fails the same way an absent block does.
+    """
+    values = supplied if isinstance(supplied, dict) else {}
+    out = []
+    for number in _variable_numbers(text):
+        value = str(values.get(number) or values.get(int(number)) or "").strip()
+        out.append(value or f"Sample {number}")
+    return out
+
+
+def _button_components(raw):
+    """Meta's BUTTONS block from what the composer sent.
+
+    Accepts the old shape — a list of strings, or one comma-separated string —
+    because that is what the panel sent before it could describe anything but a
+    quick reply, and a saved draft should not stop working.
+    """
+    if isinstance(raw, str):
+        raw = [b.strip() for b in raw.split(",") if b.strip()]
+    if not isinstance(raw, list):
+        return []
+
+    buttons = []
+    # Three is Meta's limit for quick replies, and the limit this panel offers
+    # for anything — a longer list is refused by Meta rather than truncated by
+    # us, which reads as the template being wrong.
+    for entry in raw[:3]:
+        if isinstance(entry, str):
+            text = entry.strip()
+            if text:
+                buttons.append({"type": "QUICK_REPLY", "text": text[:25]})
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        text = str(entry.get("text", "")).strip()[:25]
+        if not text:
+            continue
+
+        kind = str(entry.get("type", "QUICK_REPLY")).strip().upper()
+
+        if kind == "URL":
+            url = str(entry.get("url", "")).strip()
+            if not url:
+                continue
+            button = {"type": "URL", "text": text, "url": url}
+            # A URL ending in a placeholder is how a template links to one
+            # customer's own page, and Meta wants the finished link as proof.
+            if VARIABLE_RE.search(url):
+                sample = str(entry.get("example", "")).strip()
+                button["example"] = [sample or VARIABLE_RE.sub("sample", url)]
+            buttons.append(button)
+        elif kind == "PHONE_NUMBER":
+            phone = str(entry.get("phone_number", "")).strip()
+            if not phone:
+                continue
+            buttons.append({"type": "PHONE_NUMBER", "text": text, "phone_number": phone})
+        else:
+            buttons.append({"type": "QUICK_REPLY", "text": text})
+
+    return buttons
+
+
 @api_view(["POST"])
 def create_template(request):
     """Create a new message template and submit to Meta for approval.
 
-    Admins only. A template is written to the company's own WhatsApp Business
-    account, is reviewed by Meta under that account's name, and a rejection
-    counts against it — so this is not something an agent does on their own
-    behalf, however harmless the wording looks.
-    """
-    import re
-    from apps.gateway.client import AlotsClient, AlotsError
+    Scoped to the caller's own WhatsApp Business accounts rather than to admins.
+    A template is reviewed by Meta under the company's name and a rejection
+    counts against that account, so it is not nothing — but the person who knows
+    what wording a customer needs is the agent talking to them, and making them
+    queue behind an admin for every phrase is what left the library at twelve
+    templates while the business ran on two hundred and sixty.
 
-    denied = _require_admin(request)
-    if denied:
-        return denied
+    What the scoping still refuses is writing into a business account the caller
+    does not work on, which is the part that would actually be someone else's.
+    """
+    from apps.gateway.client import AlotsClient, AlotsError
 
     # Only a WABA the caller actually covers. Taking this id from the body
     # unchecked would let anyone who can reach the endpoint write templates
@@ -341,27 +444,33 @@ def create_template(request):
 
     header_text = str(request.data.get("header_text", "")).strip()
     footer_text = str(request.data.get("footer_text", "")).strip()
-    button_texts = request.data.get("buttons", [])
-    if isinstance(button_texts, str):
-        button_texts = [b.strip() for b in button_texts.split(",") if b.strip()]
+
+    # What the composer typed into the "sample value" box beside each {{n}}.
+    body_examples = request.data.get("body_examples", {})
+    header_examples = request.data.get("header_examples", {})
 
     components = []
     if header_text:
-        components.append({"type": "HEADER", "format": "TEXT", "text": header_text})
+        header = {"type": "HEADER", "format": "TEXT", "text": header_text}
+        samples = _examples_for(header_text, header_examples)
+        if samples:
+            # A header takes one placeholder at most, and its examples are a
+            # flat list — unlike the body's, which is a list of rows.
+            header["example"] = {"header_text": samples[:1]}
+        components.append(header)
 
-    components.append({"type": "BODY", "text": body_text})
+    body = {"type": "BODY", "text": body_text}
+    samples = _examples_for(body_text, body_examples)
+    if samples:
+        body["example"] = {"body_text": [samples]}
+    components.append(body)
 
     if footer_text:
         components.append({"type": "FOOTER", "text": footer_text})
 
-    if button_texts and isinstance(button_texts, list):
-        btn_list = []
-        for btn in button_texts[:3]:
-            btn_str = str(btn).strip()
-            if btn_str:
-                btn_list.append({"type": "QUICK_REPLY", "text": btn_str[:25]})
-        if btn_list:
-            components.append({"type": "BUTTONS", "buttons": btn_list})
+    buttons = _button_components(request.data.get("buttons", []))
+    if buttons:
+        components.append({"type": "BUTTONS", "buttons": buttons})
 
     payload = {
         "name": clean_name,
@@ -370,27 +479,13 @@ def create_template(request):
         "components": components,
     }
 
+    # Only the call to Meta is guarded here. Recording it afterwards is a
+    # separate act with separate failures, and wrapping both together meant a
+    # local error — a missing import, once — was reported as "Meta template
+    # submission failed" for a template Meta had already accepted. The next sync
+    # would then find it and nobody would know why it existed.
     try:
-        client = AlotsClient()
-        meta_res = client.create_template(waba_id, payload)
-        meta_id = str((meta_res or {}).get("id", ""))
-        initial_status = (meta_res or {}).get("status", WaTemplate.Status.PENDING).upper()
-        if initial_status not in WaTemplate.Status.values:
-            initial_status = WaTemplate.Status.PENDING
-
-        template, _ = WaTemplate.objects.update_or_create(
-            waba_business_id=waba_id,
-            name=clean_name,
-            language=language,
-            defaults={
-                "meta_template_id": meta_id,
-                "category": category,
-                "status": initial_status,
-                "components": components,
-                "synced_at": timezone.now(),
-            },
-        )
-        return Response(serialize_template(template), status=status.HTTP_201_CREATED)
+        meta_res = AlotsClient().create_template(waba_id, payload) or {}
     except AlotsError as exc:
         err_msg = str(exc)
         if exc.payload and isinstance(exc.payload, dict):
@@ -398,3 +493,21 @@ def create_template(request):
             if err_detail:
                 err_msg = str(err_detail)
         return Response({"detail": f"Meta template submission failed: {err_msg}"}, status=status.HTTP_400_BAD_REQUEST)
+
+    initial_status = str(meta_res.get("status") or WaTemplate.Status.PENDING).upper()
+    if initial_status not in WaTemplate.Status.values:
+        initial_status = WaTemplate.Status.PENDING
+
+    template, _ = WaTemplate.objects.update_or_create(
+        waba_business_id=waba_id,
+        name=clean_name,
+        language=language,
+        defaults={
+            "meta_template_id": str(meta_res.get("id", "")),
+            "category": category,
+            "status": initial_status,
+            "components": components,
+            "synced_at": timezone.now(),
+        },
+    )
+    return Response(serialize_template(template), status=status.HTTP_201_CREATED)

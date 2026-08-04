@@ -46,6 +46,70 @@
   color: var(--muted);
 }
 
+/* A label with a small action on the right — "Body Text   + Add a variable". */
+.tplc-field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tplc-waba-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* The sample value beside every {{n}}. Meta will not review a template without
+   one, so this block is not optional decoration — it is part of the form. */
+.tplc-vars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+.tplc-vars__title {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tplc-vars__row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.tplc-vars__row > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tplc-btnedit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tplc-btnedit__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tplc-btnedit__top {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .tplc-search {
   width: 100%;
   padding: 8px 11px;
