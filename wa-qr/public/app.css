@@ -1096,6 +1096,32 @@ body {
   color: var(--muted);
 }
 
+.msg__missing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm, 8px);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* A voice note is listened to in place, so the player has to fit a bubble
+   rather than assume a page. */
+.msg__audio {
+  width: min(260px, 100%);
+  height: 36px;
+  margin: 2px 0;
+}
+
+.msg__video {
+  max-width: min(320px, 100%);
+  max-height: 260px;
+  border-radius: var(--radius-sm, 8px);
+  background: #000;
+}
+
 .card__history--busy {
   display: grid;
   gap: 6px;

@@ -156,7 +156,9 @@ router.get("/:id/messages", async (req, res, next) => {
          med.file_path AS media_file_path,
          med.mime_type AS media_mime_type,
          med.file_name AS media_file_name,
-         med.size_bytes AS media_size_bytes
+         med.size_bytes AS media_size_bytes,
+         med.downloaded AS media_downloaded,
+         med.download_error AS media_error
        FROM qr_message m
        LEFT JOIN qr_media med ON m.media_id = med.id
        ${whereClause}
@@ -180,8 +182,19 @@ router.get("/:id/messages", async (req, res, next) => {
       author_wa_id: r.author_wa_id,
       created_at: r.created_at,
       media_url: r.media_id ? `/api/media/${r.media_id}` : null,
+      // The same bytes, shown rather than downloaded. Which of the two a
+      // message wants is the panel's decision, so it is given both.
+      media_inline_url: r.media_id ? `/api/media/${r.media_id}/inline` : null,
+      // Without this the panel could only guess a picture from `kind`, and had
+      // no way at all to tell a voice note from a document.
+      media_mime: r.media_mime_type || null,
       media_name: r.media_file_name || null,
       media_size: r.media_size_bytes || null,
+      // Whether the bytes are actually here. A message and its file are stored
+      // separately, so a download that failed leaves a perfectly readable
+      // message pointing at nothing — and the panel, told only that there is an
+      // attachment, drew a broken image in the middle of the conversation.
+      media_downloaded: r.media_id ? Boolean(r.media_downloaded) : null,
     }));
 
     res.json(messages);

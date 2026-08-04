@@ -844,23 +844,61 @@ function quotedFor(message) {
   return target.body || `[${target.kind || "message"}]`;
 }
 
+/**
+ * The picture, the voice note or the file — shown as what it is.
+ *
+ * Two URLs, because the server offers two answers for the same bytes. The
+ * download flattens everything to application/octet-stream with nosniff, which
+ * is right for a document a stranger sent and fatal for a photograph: nosniff
+ * is exactly the instruction not to work out that those bytes are a JPEG, so an
+ * <img> pointing there rendered nothing at all. Every picture in this panel was
+ * a broken image icon. The inline route declares the real type, for the handful
+ * of formats a browser decodes rather than executes.
+ */
 function attachment(message) {
-  // media_url arrives as "/api/media/5" — already absolute, so it has to be
-  // re-based like everything else or it leaves the /qr/ prefix behind.
-  const url = onApi(message.media_url || `api/media/${message.media_id}`);
-  const mime = message.media_mime || message.mime_type || "";
-  const isImage = mime.startsWith("image/") || ["image", "sticker"].includes(message.kind);
+  // The URLs arrive as "/api/media/5" — already absolute, so they have to be
+  // re-based like everything else or they leave the /qr/ prefix behind.
+  const download = onApi(message.media_url || `api/media/${message.media_id}`);
+  const inline = onApi(message.media_inline_url || `api/media/${message.media_id}/inline`);
 
-  if (isImage) {
+  const mime = String(message.media_mime || message.mime_type || "").toLowerCase();
+  const kind = message.kind || "";
+
+  // The file never arrived. Said in words rather than drawn as a broken image
+  // or a player with nothing behind it: the message itself is still worth
+  // reading, and what is missing is worth naming.
+  if (message.media_downloaded === false) {
+    return el("div.msg__missing", {}, [
+      icon("file", { size: 15 }),
+      el("span", {}, [`This ${kind || "attachment"} could not be downloaded from the phone.`]),
+    ]);
+  }
+
+  // The mime type when the server knows it, the kind when it does not — an
+  // imported message whose file never downloaded has a kind and nothing else.
+  const looks = (prefix, ...kinds) => mime.startsWith(prefix) || kinds.includes(kind);
+
+  if (looks("image/", "image", "sticker")) {
     return el("img.msg__thumb", {
-      src: url,
+      src: inline,
       alt: message.media_name || "",
       loading: "lazy",
-      onclick: () => window.open(url, "_blank", "noopener"),
+      onclick: () => window.open(inline, "_blank", "noopener"),
     });
   }
 
-  return el("a.msg__file", { href: url, target: "_blank", rel: "noopener" }, [
+  if (looks("audio/", "audio")) {
+    // A voice note is listened to in place. Downloading a file to hear what a
+    // customer said, and then finding it again to hear it twice, is not a
+    // reasonable thing to ask of somebody answering forty chats.
+    return el("audio.msg__audio", { src: inline, controls: true, preload: "none" });
+  }
+
+  if (looks("video/", "video")) {
+    return el("video.msg__video", { src: inline, controls: true, preload: "metadata" });
+  }
+
+  return el("a.msg__file", { href: download, target: "_blank", rel: "noopener" }, [
     icon("file", { size: 17 }),
     el("span.msg__file-name", {}, [message.media_name || message.file_name || message.kind || "File"]),
     el("span.msg__file-size", {}, [formatBytes(message.media_size ?? message.size_bytes)]),
