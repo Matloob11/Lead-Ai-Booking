@@ -1288,7 +1288,12 @@ export function mountInbox(root, { me }) {
       ui.composer.append(
         el("div.locked", {}, [
           el("div.locked__text", {}, [
-            "The 24-hour window is closed, so a free-form message cannot be sent. Sending a template reopens it.",
+            // Not "sending a template reopens it". A template does not reopen
+            // the window — only a message *from* the customer does. Telling an
+            // agent otherwise is what sends them to write a free-form reply
+            // straight after a template and collect Meta's error 131049.
+            "The 24-hour window is closed, so only a template can be sent. " +
+              "The window reopens when the customer writes back.",
           ]),
           slots.composer,
           el("button.btn.btn--primary", { type: "button", onclick: () => openTemplates(conversation) }, [

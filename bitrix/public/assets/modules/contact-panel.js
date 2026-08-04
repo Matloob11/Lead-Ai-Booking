@@ -323,7 +323,9 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
         "Reply window",
         conversation.is_session_open
           ? `Open until ${fullStamp(conversation.session_expires_at)}`
-          : "Closed — a template is needed to reopen it"
+          // Closed until the customer writes, not until a template is sent —
+          // sending one does not reopen anything.
+          : "Closed — only a template can be sent"
       )
     );
   }

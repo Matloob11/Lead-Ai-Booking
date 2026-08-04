@@ -623,13 +623,25 @@ def lookup(request):
         .order_by("-last_message_at")
     )
 
-    return Response(
-        {
-            "phone": wa_id,
-            "conversations": [serialize_conversation(c) for c in conversations],
-            "numbers": [serialize_number(n) for n in request.user.visible_numbers],
-        }
-    )
+    # Which of our numbers each chat is on, by name.
+    #
+    # serialize_conversation carries number_id and nothing else, so a caller
+    # holding one conversation has an integer and no way to say whose number it
+    # arrived on. The CRM tab printed "Channel #16" — a database id shown to an
+    # agent as though it meant something. The join is done here rather than
+    # left to the caller, because there is exactly one right answer to it.
+    numbers = [serialize_number(n) for n in request.user.visible_numbers]
+    by_id = {n["id"]: n for n in numbers}
+
+    rows = []
+    for conversation in conversations:
+        row = serialize_conversation(conversation)
+        number = by_id.get(row["number_id"])
+        row["number"] = number
+        row["number_label"] = (number or {}).get("title") or (number or {}).get("phone_number") or ""
+        rows.append(row)
+
+    return Response({"phone": wa_id, "conversations": rows, "numbers": numbers})
 
 
 @api_view(["POST"])

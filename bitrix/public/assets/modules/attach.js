@@ -130,7 +130,11 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
       // A closed 24h window comes back as 409 and is not a retryable failure.
       error.textContent =
         failure.code === "http_409"
-          ? "The 24-hour window has closed. Send a template first to reopen it."
+          // A template does not reopen the window; only the customer writing
+          // back does. It earns the right to be replied to, which is a
+          // different thing and the one worth saying to somebody holding a file
+          // they cannot send.
+          ? "The 24-hour window has closed, so a file cannot be sent. Send a template and wait for a reply."
           : failure.message;
     }
   });
