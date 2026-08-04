@@ -372,7 +372,8 @@ async function refresh({ keepScroll = true } = {}) {
   paintConversations();
   if (state.conversationId) {
     await loadMessages(state.conversationId);
-    renderThread({ keepScroll });
+    // Only the messages: a poll must not take the composer with it.
+    paintMessages({ keepScroll });
   }
 }
 
@@ -481,6 +482,34 @@ async function selectConversation(id) {
 
 /* ------------------------------------------------------------------ thread */
 
+/**
+ * Redraws only the messages, leaving the header and composer where they are.
+ *
+ * The thread is polled every few seconds, and rebuilding all of it threw away
+ * the composer on each pass — half-typed replies vanished after five seconds,
+ * and the caret went with them. Nothing above or below the message list
+ * changes between polls, so nothing above or below it is touched.
+ */
+function paintMessages({ keepScroll = true } = {}) {
+  const conversation = activeConversation();
+  const previous = ui.thread.querySelector(".thread__messages");
+  if (!conversation || !previous) return renderThread({ keepScroll });
+
+  const wasAtBottom =
+    previous.scrollTop + previous.clientHeight >= previous.scrollHeight - 60;
+  const keptTop = previous.scrollTop;
+
+  const messages = el("div.thread__messages");
+  for (const message of state.messages) messages.append(bubble(message, conversation));
+  if (!state.messages.length) {
+    messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
+  }
+  if (state.threadError) messages.append(el("div.alert", {}, [state.threadError]));
+
+  previous.replaceWith(messages);
+  messages.scrollTop = !keepScroll || wasAtBottom ? messages.scrollHeight : keptTop;
+}
+
 function renderThread({ keepScroll = false } = {}) {
   const conversation = activeConversation();
 
@@ -588,7 +617,8 @@ function failure(message, conversation) {
         },
       });
       await loadMessages(conversation.id);
-      renderThread();
+      // Messages only, so the cursor stays in the box the agent is still using.
+      paintMessages();
     } catch (error) {
       retry.disabled = false;
       retry.textContent = "Retry";
@@ -684,7 +714,8 @@ function composer(conversation) {
       // Refetched rather than guessed: the row the server wrote carries the id
       // and status a locally invented bubble would not have.
       await loadMessages(conversation.id);
-      renderThread();
+      // Messages only, so the cursor stays in the box the agent is still using.
+      paintMessages();
     } catch (error) {
       send.disabled = false;
       send.textContent = "Send";
