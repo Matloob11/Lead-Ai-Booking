@@ -33,7 +33,7 @@
 set -euo pipefail
 
 HOST="root@187.127.123.235"
-KEY="$HOME/.ssh/hostinger_codex"
+KEY="C:/Users/Matloob/.ssh/hostinger_codex"
 SITE="https://wa.srv1802669.hstgr.cloud"
 
 # The only two places anything is allowed to happen.
@@ -42,7 +42,7 @@ APP_DIR="/opt/a7-wa/deploy"
 
 die() { echo "wa.sh: $*" >&2; exit 2; }
 
-remote() { ssh -i "$KEY" -o BatchMode=yes "$HOST" "$@"; }
+remote() { ssh.exe -i "C:/Users/Matloob/.ssh/hostinger_codex" -o BatchMode=yes -o StrictHostKeyChecking=no "$HOST" "$@"; }
 
 # The compose directory for a stack name, refusing anything else outright.
 stack_dir() {
@@ -123,7 +123,7 @@ case "$cmd" in
     local_path="${1:-}"; remote_path="${2:-}"
     [[ -f "$local_path" ]] || die "no such local file: '$local_path'"
     check_remote_path "$remote_path"
-    scp -i "$KEY" -o BatchMode=yes "$local_path" "$HOST:$remote_path"
+    scp.exe -i "C:/Users/Matloob/.ssh/hostinger_codex" -o BatchMode=yes -o StrictHostKeyChecking=no "$local_path" "$HOST:$remote_path"
     echo "pushed $(md5sum "$local_path" | cut -d' ' -f1)  ->  $remote_path"
     remote "md5sum '$remote_path'"
     ;;

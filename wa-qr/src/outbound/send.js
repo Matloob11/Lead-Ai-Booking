@@ -13,6 +13,29 @@ import { messageId,
   toWaId, resolveContactWaId } from "../inbound/normalise.js";
 import { q, one } from "../db.js";
 
+/**
+ * The absolute path of an attachment, provided it is one of ours.
+ *
+ * `media_path` arrives in the JSON body of /api/send, so it is whatever the
+ * caller says it is. It used to be taken at its word — an absolute path was
+ * used as-is and a relative one was joined without checking where it landed —
+ * which made "send a file" into "read any file on this host and deliver it to a
+ * phone number of my choosing". The .env beside it holds the database
+ * credentials and the list of numbers that must never be linked.
+ *
+ * Nothing about the sending code needed that freedom: every attachment this
+ * service sends was written by the upload route, into this one directory.
+ */
+function insideMediaRoot(mediaPath) {
+  const root = path.resolve(mediaRoot);
+  const resolved = path.resolve(root, String(mediaPath || ""));
+
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error("That attachment is not one this service holds.");
+  }
+  return resolved;
+}
+
 export async function sendOutboundMessage({
   session_id,
   to,
@@ -154,10 +177,7 @@ export async function sendOutboundMessage({
       ["image", "video", "audio", "document", "sticker"].includes(kind) &&
       media_path
     ) {
-      const absolutePath = path.isAbsolute(media_path)
-        ? media_path
-        : path.join(mediaRoot, media_path);
-      const media = MessageMedia.fromFilePath(absolutePath);
+      const media = MessageMedia.fromFilePath(insideMediaRoot(media_path));
       sentMsg = await client.sendMessage(formattedTo, media, {
         caption: body,
         sendMediaAsSticker: kind === "sticker",

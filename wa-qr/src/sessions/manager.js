@@ -381,6 +381,17 @@ async function initClient(sessionId) {
   });
 
   client.on("authenticated", async () => {
+    // Not a downgrade. This fires again whenever WhatsApp re-authenticates a
+    // link that is already working, and writing 'authenticated' over 'ready'
+    // made a phone that was busy importing look like one that had never
+    // finished connecting — for hours, with the panel saying the import was
+    // paused while it was in fact running.
+    const current = await store.getSessionById(sessionId);
+    if (current?.status === "ready") {
+      await store.updateSession(sessionId, { last_seen_at: new Date() });
+      return;
+    }
+
     await store.updateSession(sessionId, {
       status: "authenticated",
       qr_data_url: "",
@@ -540,6 +551,84 @@ async function initClient(sessionId) {
     emit("status", { sessionId, status: "disconnected", error: errorMsg });
     scheduleReconnect(sessionId);
   }
+}
+
+/* --------------------------------------------------------------- watchdog */
+
+/** How often every live phone is asked whether it is still there. */
+const HEALTH_EVERY_MS = 120_000;
+
+/** And how long it gets to answer before the answer is taken as "no". */
+const HEALTH_TIMEOUT_MS = 20_000;
+
+let healthTimer = null;
+
+/**
+ * Notices a phone that has died without saying so.
+ *
+ * WhatsApp Web runs inside a real browser, and a browser can crash. When it
+ * does, whatsapp-web.js does not always find out: the page aborted with
+ * "No EM_ASM constant found" and "Protocol error: Target closed", no
+ * `disconnected` event was emitted, nothing was scheduled to reconnect, and the
+ * session sat at its last known status for three hours and seventeen minutes.
+ * Everything downstream believed it — the panel drew it as connected, and the
+ * history import waited on a call that was never going to return.
+ *
+ * So the question gets asked out loud instead of assumed. `getState()` is
+ * itself a page evaluation, so it is given a deadline: a client that cannot say
+ * how it is within twenty seconds is not well, whatever the reason.
+ */
+export function startHealthWatch() {
+  if (healthTimer) return;
+
+  healthTimer = setInterval(async () => {
+    for (const [sessionId, client] of [...clients.entries()]) {
+      let state = null;
+      try {
+        state = await Promise.race([
+          client.getState(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("getState timed out")), HEALTH_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (err) {
+        state = null;
+        console.warn(`[wa-qr] health check for #${sessionId} failed: ${err.message}`);
+      }
+
+      if (state === "CONNECTED") {
+        await store.updateSession(sessionId, { last_seen_at: new Date() }).catch(() => {});
+        continue;
+      }
+
+      const row = await store.getSessionById(sessionId).catch(() => null);
+      if (!row || row.status === "banned") continue;
+
+      console.warn(
+        `[wa-qr] #${sessionId} is not answering (state ${state ?? "unknown"}) — restarting it`
+      );
+      await store
+        .updateSession(sessionId, {
+          status: "disconnected",
+          last_error: "The connection to WhatsApp stopped responding and is being restarted.",
+        })
+        .catch(() => {});
+      emit("status", { sessionId, status: "disconnected", error: "" });
+
+      // Straight to a fresh client rather than a backoff: this is not a phone
+      // that went away, it is a browser that died, and the only fix is a new
+      // one. The stored credentials are untouched, so it comes back on its own.
+      clients.delete(sessionId);
+      try {
+        await client.destroy();
+      } catch {}
+      initClient(sessionId).catch((err) =>
+        console.error(`[wa-qr] could not restart #${sessionId}:`, err)
+      );
+    }
+  }, HEALTH_EVERY_MS);
+
+  console.info("[wa-qr] health watch active");
 }
 
 /** Schedules exponential backoff reconnect attempt. */

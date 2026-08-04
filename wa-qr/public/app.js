@@ -12,6 +12,16 @@
  */
 
 import { icon, initials, hueFor } from "./icons.js";
+// The lightbox, reactions, search, stars, forwarding and the contact panel. It
+// owns all of that itself and takes five one-line hooks from this file, so the
+// two can be edited at the same time without meeting in the middle.
+import {
+  decorateBubble,
+  installThreadExtras,
+  notifyThreadPainted,
+  threadHeadExtras,
+} from "./thread-extras.js";
+import { createComposer } from "./composer.js";
 
 const POLL_CHAT_MS = 5000;   // no socket on this service; the list is polled
 const POLL_QR_MS = 3000;     // the code itself rotates roughly every 20 seconds
@@ -734,6 +744,9 @@ function messagesNode(conversation) {
     messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
   }
   if (state.threadError) messages.append(el("div.alert", {}, [state.threadError]));
+  // Both paint paths come through here, so this one line covers the poll, a
+  // send, a retry and opening a chat.
+  notifyThreadPainted();
   return messages;
 }
 
@@ -824,9 +837,14 @@ function renderThread({ keepScroll = false } = {}) {
           phone ? ` · on ${sessionName(phone)}` : "",
         ]),
       ]),
+      // Search, starred and the contact panel, when the server has them.
+      threadHeadExtras(),
     ]),
     messages,
-    composer(conversation)
+    createComposer(conversation, {
+      phone,
+      onSent: async () => (await loadMessages(conversation.id), paintMessages()),
+    })
   );
 
   // Newest at the bottom, so that is where the thread opens.
@@ -952,6 +970,8 @@ function failure(message, conversation) {
 function bubble(message, conversation) {
   const outbound = message.direction === "out";
   const node = el("div.msg", {
+    // Named so composer.js can quote it. Nothing else reads this.
+    "data-id": String(message.id),
     class: [outbound ? "msg--out" : "", message.status === "failed" ? "msg--failed" : ""]
       .filter(Boolean)
       .join(" "),
@@ -991,7 +1011,8 @@ function bubble(message, conversation) {
     );
   }
 
-  return node;
+  // The id to be found by, the emoji bar, the star and the ⋯ menu.
+  return decorateBubble(node, message);
 }
 
 /**
@@ -1020,76 +1041,6 @@ function deliveryTick(status) {
     { class: tick.modifier || "", title: tick.label },
     [icon(tick.name, { size: 13, stroke: 2 })]
   );
-}
-
-function composer(conversation) {
-  const phone = sessionById(conversation.session_id);
-  if (phone && phone.status !== "ready") {
-    return el("div.composer.composer--locked", {}, [
-      icon("alert", { size: 15 }),
-      `${sessionName(phone)} is ${statusOf(phone.status).text.toLowerCase()} — messages cannot be sent until it is ready.`,
-    ]);
-  }
-
-  const input = el("textarea.composer__input", {
-    rows: 1,
-    placeholder: "Write a message…",
-    maxlength: String(MAX_BODY),
-  });
-  // Round and iconic rather than a labelled button: it is the only action on
-  // the bar, and the label was competing with the box beside it for the eye.
-  const send = el("button.composer__send", { type: "button", title: "Send  ·  Enter" }, [
-    icon("send", { size: 17 }),
-  ]);
-  const problem = el("div.composer__error", { hidden: true });
-
-  /** Puts the button back the way it was — it has an icon, not a caption. */
-  const showSending = (busy) => {
-    send.disabled = busy;
-    send.title = busy ? "Sending…" : "Send  ·  Enter";
-    clear(send).append(icon(busy ? "clock" : "send", { size: 17 }));
-  };
-
-  async function submit() {
-    const body = input.value.trim();
-    if (!body) return;
-
-    showSending(true);
-    problem.hidden = true;
-    try {
-      await api("api/send", {
-        method: "POST",
-        body: {
-          session_id: conversation.session_id,
-          to: conversationWaId(conversation),
-          kind: "text",
-          body,
-        },
-      });
-      input.value = "";
-      // Refetched rather than guessed: the row the server wrote carries the id
-      // and status a locally invented bubble would not have.
-      await loadMessages(conversation.id);
-      // Messages only, so the cursor stays in the box the agent is still using.
-      paintMessages();
-    } catch (error) {
-      showSending(false);
-      problem.hidden = false;
-      clear(problem).append(error.message);
-    }
-  }
-
-  send.addEventListener("click", submit);
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
-  });
-
-  const bar = el("div.composer", {}, [input, send]);
-  queueMicrotask(() => input.focus());
-  return el("footer.thread__foot", {}, [problem, bar]);
 }
 
 /* ------------------------------------------------------------ phones dialog */
@@ -1467,6 +1418,17 @@ async function openQr(id) {
 async function boot() {
   applyTheme();
   await Promise.all([loadMe(), loadSessions(), loadConversations()]);
+
+  // Before the first render, so the header knows which of its buttons the
+  // server can answer for. Not awaited: it ends in two probe requests, and a
+  // panel that waits on those to draw anything is a panel that looks broken
+  // whenever they are slow.
+  installThreadExtras({
+    el, clear, api, onApi, asList, stamp, withPlus, formatBytes, icon, dialog,
+    state, ui, activeConversation, conversationTitle, conversationWaId,
+    sessionById, sessionName, avatarFor,
+    loadMessages, loadOlderMessages, paintMessages, selectConversation,
+  }).then(renderThread);
 
   clear(root).append(layout);
   renderPhoneSelect();

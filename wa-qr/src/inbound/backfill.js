@@ -77,9 +77,42 @@ const CHAT_PAUSE_MS = 1200;
 /** And a longer one before starting, so WhatsApp Web finishes its own sync. */
 const SETTLE_MS = 20_000;
 
+/**
+ * How long any one chat gets before the import gives up on it and moves on.
+ *
+ * Everything this file asks of WhatsApp is a page evaluation, and puppeteer
+ * puts no time limit on those. When WhatsApp's own code fails to answer — which
+ * it does — the await never settles, the loop never reaches its next iteration,
+ * and the import stops for ever without an error, a log line or a change of
+ * status. Both phones sat like that for three hours and seventeen minutes,
+ * their counters frozen mid-run, looking from the outside exactly like an
+ * import that was still working.
+ */
+const CHAT_TIMEOUT_MS = 120_000;
+const LIST_TIMEOUT_MS = 90_000;
+const MEDIA_TIMEOUT_MS = 60_000;
+
 const running = new Set();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The promise, or a rejection once the deadline passes.
+ *
+ * The original is abandoned rather than cancelled — there is no way to cancel a
+ * page evaluation — so a hung call still holds its own memory. That is the
+ * lesser problem: one leaked evaluation costs a little, and one that blocks the
+ * loop costs everything behind it.
+ */
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000}s`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 /** Starts importing whenever a phone becomes ready, and never twice at once. */
 export function startHistoryImport() {
@@ -142,7 +175,9 @@ export async function runBackfill(sessionId) {
       history_chats_total: 0,
     });
 
-    const jids = (await listChatJids(client)).filter(wanted);
+    const jids = (
+      await withTimeout(listChatJids(client), LIST_TIMEOUT_MS, "the chat list")
+    ).filter(wanted);
     await store.updateSession(id, { history_chats_total: jids.length });
     console.info(`[wa-qr] #${id} has ${jids.length} chat(s) worth importing`);
 
@@ -162,7 +197,14 @@ export async function runBackfill(sessionId) {
       }
 
       try {
-        stored += await importChat({ client, sessionId: id, jid, since });
+        // Bounded, so one chat WhatsApp will not answer for costs a couple of
+        // minutes rather than the rest of the import. What it read before the
+        // deadline is already stored, and the next run picks the chat up again.
+        stored += await withTimeout(
+          importChat({ client, sessionId: id, jid, since }),
+          CHAT_TIMEOUT_MS,
+          jid
+        );
       } catch (error) {
         // One unreadable chat is not a reason to abandon the other eighty.
         console.warn(`[wa-qr] could not import ${jid}: ${error.message}`);
@@ -234,10 +276,21 @@ async function retryFailedMedia(client, sessionId) {
   let recovered = 0;
   for (const row of broken) {
     try {
-      const message = await client.getMessageById(row.wamid);
+      // Both bounded: an expired attachment is one WhatsApp answers slowly for
+      // or not at all, and two thousand of those in a row would hold the run
+      // open indefinitely at the very end, after all the work was done.
+      const message = await withTimeout(
+        client.getMessageById(row.wamid),
+        MEDIA_TIMEOUT_MS,
+        `message ${row.wamid}`
+      );
       if (!message?.hasMedia) continue;
 
-      const media = await processInboundMedia(message);
+      const media = await withTimeout(
+        processInboundMedia(message),
+        MEDIA_TIMEOUT_MS,
+        `media for ${row.wamid}`
+      );
       if (!media?.downloaded) continue;
 
       // Pointed at the new row rather than repairing the old one: the failed

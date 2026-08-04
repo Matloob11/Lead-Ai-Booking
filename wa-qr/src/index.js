@@ -39,7 +39,7 @@ async function main() {
   }
 
   const { startApi } = await import("./api/server.js");
-  const { restoreSessions } = await import("./sessions/manager.js");
+  const { restoreSessions, startHealthWatch } = await import("./sessions/manager.js");
   const { startPersistence } = await import("./inbound/persist.js");
   const { startHistoryImport } = await import("./inbound/backfill.js");
 
@@ -54,6 +54,11 @@ async function main() {
   startHistoryImport();
 
   await restoreSessions();
+
+  // After the sessions, because it only has something to watch once there is
+  // something running.
+  startHealthWatch();
+
   startApi(config.port);
 }
 
