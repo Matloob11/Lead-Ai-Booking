@@ -133,7 +133,14 @@ const buttonIcon = (type) => (BUTTON_ICON[type] || BUTTON_ICON.QUICK_REPLY)();
  * @param {function} options.templatesFor    (numberId) => Promise<template[]>
  * @param {function} options.onSent          (result) => void, after a send lands
  */
-export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting }) {
+/**
+ * @param {string} [options.to]  the customer's number, already known.
+ *   Set when the agent arrived from a CRM record rather than from this panel:
+ *   they clicked the WhatsApp icon beside a lead's phone number, and being
+ *   asked to type that same number back in would be the panel forgetting why
+ *   it was opened.
+ */
+export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting, to = "" }) {
   const isNew = mode === "new";
 
   const state = {
@@ -164,7 +171,11 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     { onchange: () => { state.numberId = numberSelect.value; loadTemplates(); checkExisting(); } },
     numbers.map((n) => el("option", { value: n.id }, [n.title || n.phone_number]))
   );
-  const phone = el("input.field", { type: "tel", placeholder: "971501234567" });
+  const phone = el("input.field", {
+    type: "tel",
+    placeholder: "971501234567",
+    value: String(to || "").replace(/\D/g, ""),
+  });
 
   /**
    * Warns when the typed customer already has a thread.

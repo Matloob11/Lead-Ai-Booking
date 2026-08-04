@@ -44,7 +44,17 @@ const STATUS_TICK = {
   failed: { name: "alert", label: "failed", className: "tick--failed" },
 };
 
-export function mountInbox(root, { me }) {
+/**
+ * @param {object} [options.openRequest]  where to land, when something sent
+ *   the agent here rather than them opening the panel themselves. The CRM tab
+ *   does: an agent clicks the WhatsApp icon beside a lead's number and expects
+ *   that conversation, not the list they left three hours ago.
+ *
+ *   `{ conversationId }`  open this chat
+ *   `{ phone }`           no chat yet — start one with this number, which on a
+ *                         cold contact means a template and nothing else
+ */
+export function mountInbox(root, { me, openRequest = null }) {
   const state = {
     me,
     numbers: [],
@@ -287,6 +297,36 @@ export function mountInbox(root, { me }) {
     // Asking for a taller frame (there is no API for "how much room do I have")
     // meant guessing, and a guess that overshot pushed the portal page into a
     // scrollbar that hid its own header — worse than a shorter panel.
+
+    // Last, because it needs the list and the layout to exist first.
+    if (openRequest) await honourOpenRequest(openRequest);
+  }
+
+  /**
+   * Lands the agent where whoever sent them here meant them to land.
+   *
+   * Deliberately after the panel has drawn rather than instead of it: if the
+   * chat cannot be found, or the number turns out not to be reachable, what
+   * they get is the ordinary inbox rather than an error page — they came here
+   * to talk to somebody and the panel is still the way to do that.
+   */
+  async function honourOpenRequest({ conversationId, phone }) {
+    if (conversationId) {
+      try {
+        await openConversation(Number(conversationId));
+        return;
+      } catch (error) {
+        console.warn("[a7-wa] could not open the requested chat:", error);
+      }
+    }
+
+    if (!phone) return;
+
+    // No conversation for this number. The window has never been open, so a
+    // free-form message is not a thing that can be sent — the only way to
+    // reach somebody cold is a template, which is what this opens on.
+    const digits = String(phone).replace(/\D/g, "");
+    if (digits) openNewContact({ to: digits });
   }
 
   async function loadConversations({ keepActive = true } = {}) {
@@ -1642,9 +1682,10 @@ export function mountInbox(root, { me }) {
     }
   }
 
-  function openNewContact() {
+  function openNewContact({ to = "" } = {}) {
     openTemplateComposer({
       mode: "new",
+      to,
       numbers: state.numbers.map((n) => ({ ...n, title: numberTitle(n) })),
       templatesFor,
       findExisting: findConversationByWaId,

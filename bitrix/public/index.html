@@ -129,7 +129,23 @@
 
           step = "inbox";
           setStep("inbox", "active");
-          await mountInbox(root, { me });
+
+          // Where to land, when Bitrix sent the agent here rather than them
+          // opening the panel themselves. BX24.openApplication carries these
+          // through as the placement's options — the CRM tab passes a
+          // conversation to open, or a number to start one with.
+          let openRequest = null;
+          try {
+            const info =
+              typeof window.BX24.placement?.info === "function" ? window.BX24.placement.info() : null;
+            const opts = info?.options || {};
+            if (opts.conversation_id) openRequest = { conversationId: opts.conversation_id };
+            else if (opts.phone) openRequest = { phone: opts.phone };
+          } catch (e) {
+            console.warn("[a7-wa] no placement options:", e);
+          }
+
+          await mountInbox(root, { me, openRequest });
         } catch (error) {
           fail(step, error);
         }
