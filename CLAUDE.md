@@ -106,22 +106,41 @@ uncommitted changes, it is probably mid-edit somewhere else. Prefer adding a new
 module over widening an existing one, and say in the reply which shared files
 were touched so the user can pass it on.
 
-## About the permission allowlist
+## Talking to the server: `ops/wa.sh`
 
-`.claude/settings.json` pre-approves a deliberately small set: read-only git,
-`git add`/`commit`, and three checksum-and-syntax tools. Nothing else.
+Everything routine on the live host goes through this script, and it is the only
+thing on the allowlist that reaches the server:
 
-`ssh`, `scp`, `curl`, `tar`, `find` and `ls` are **not** on it, and should not be
-added. Each of them takes an argument that runs something else — `find -exec`,
-`tar --to-command`, `curl -o` writing wherever it likes, `ssh host <anything>` —
-so allowing them would approve every command they can reach, which is all of
-them. That matters here more than in most repos: this codebase reads customer
+```
+ops/wa.sh ps                         both stacks, container states
+ops/wa.sh logs qr app 200            container logs
+ops/wa.sh sql qr "SELECT …"          read-only query
+ops/wa.sh sum /opt/a7-wa/panel/x.js  checksum of a deployed file
+ops/wa.sh get /app/assets/x.js       fetch from the public site
+ops/wa.sh push local remote          copy one file
+ops/wa.sh build qr app               rebuild an image
+ops/wa.sh restart qr app             restart services
+ops/wa.sh django-check               makemigrations --check + showmigrations
+```
+
+`ssh`, `scp`, `curl`, `tar`, `find` and `ls` are **not** on the allowlist and
+must not be added. Each takes an argument that runs something else — `find
+-exec`, `tar --to-command`, `curl -o` writing wherever it likes, `ssh host
+<anything>` — so allowing one approves every command it can reach, which is all
+of them. That matters here more than in most repos: this codebase reads customer
 messages, webhook bodies, template text and uploaded filenames into the model's
-context, and all of it is written by people outside the company.
+context, and every word of it was written by somebody outside the company.
 
-For the same reason the deny list is a backstop, not a boundary. It only matches
-commands run locally; the same command inside `ssh …` is a different string. The
-boundary is that remote commands get looked at before they run.
+The script is the narrow thing that can be allowed instead. Stack names resolve
+against a list of two, service names must look like service names, paths must
+sit under `/opt/a7-wa`, and queries run inside a transaction Postgres itself
+marks `READ ONLY` — so a write is refused by the database rather than by a
+regex that thought the query looked harmless. Adding a subcommand is a
+deliberate act; widening `ssh` would have been an accident waiting to be made.
+
+Anything the script does not cover still runs as a plain command and still gets
+looked at first. That is the boundary — not the deny list, which only matches
+commands spelled locally and never sees the same command inside `ssh …`.
 
 Use Glob, Grep and Read instead of `ls`/`find`/`cat` — they are faster, they do
 not need approval, and they cannot be turned into something else.
