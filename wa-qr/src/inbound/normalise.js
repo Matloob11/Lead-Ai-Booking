@@ -31,6 +31,28 @@ export function toWaId(serialised) {
 }
 
 /**
+ * A message's id as a string, whatever shape the library hands it over in.
+ *
+ * `id._serialized` is the documented field and is missing on this build, where
+ * the same value arrives under `$1` — a minified name that will change again.
+ * Falling back to String(id) turned every message into the literal text
+ * "[object Object]", which the first row claimed and the unique index then
+ * refused to every message after it: the conversation's counters moved while
+ * not a single message was stored.
+ *
+ * Rebuilding it from the parts is the last resort and the most durable one —
+ * fromMe, remote and id are the three fields WhatsApp's own format is made of.
+ */
+export function messageId(id) {
+  if (!id) return "";
+  if (typeof id === "string") return id;
+  if (typeof id._serialized === "string" && id._serialized) return id._serialized;
+  if (typeof id.$1 === "string" && id.$1) return id.$1;
+  if (id.id && id.remote) return `${id.fromMe ? "true" : "false"}_${id.remote}_${id.id}`;
+  return "";
+}
+
+/**
  * Resolves a WhatsApp JID (whether @c.us, @g.us, or @lid) to a real phone number wa_id.
  * If the JID is @lid, queries whatsapp-web.js Contact/Client to retrieve the real phone number.
  */
@@ -97,7 +119,7 @@ export async function resolveContactWaId({ client = null, jid = "", message = nu
   if (message && typeof message.getContact === "function") {
     try {
       const contact = await message.getContact();
-      const sameParty = contact?.id?._serialized === jid;
+      const sameParty = messageId(contact?.id) === jid;
       if (sameParty && contact.id.server === "c.us" && contact.id.user) {
         return { waId: toWaId(contact.id.user), lid, isLid };
       }
@@ -159,7 +181,7 @@ export function inboundMessage(
 
   const out = {
     from,
-    id: message.id?._serialized || String(message.id || ""),
+    id: messageId(message.id),
     // Meta sends seconds since the epoch as a string; the library gives seconds.
     timestamp: String(message.timestamp || Math.floor(Date.now() / 1000)),
     type: kind,
@@ -212,11 +234,11 @@ export function inboundReaction(reaction) {
     messages: [
       {
         from: toWaId(reaction.senderId),
-        id: reaction.id?._serialized || String(reaction.id || ""),
+        id: messageId(reaction.id),
         timestamp: String(reaction.timestamp || Math.floor(Date.now() / 1000)),
         type: "reaction",
         reaction: {
-          message_id: reaction.msgId?._serialized || String(reaction.msgId || ""),
+          message_id: messageId(reaction.msgId),
           emoji: reaction.reaction || "",
         },
       },
@@ -239,7 +261,7 @@ export function statusUpdate(message, ack) {
     contacts: [],
     statuses: [
       {
-        id: message.id?._serialized || String(message.id || ""),
+        id: messageId(message.id),
         recipient_id: toWaId(message.to),
         status,
         timestamp: String(Math.floor(Date.now() / 1000)),

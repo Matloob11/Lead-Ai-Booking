@@ -5,6 +5,7 @@
 import { onEvent, getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
 import {
+  messageId,
   toWaId,
   resolveContactWaId,
   kindOf,
@@ -47,7 +48,7 @@ async function handleEvent(type, payload) {
 async function processMessageEvent(sessionId, message) {
   if (!message) return;
 
-  const wamid = message.id?._serialized || String(message.id || "");
+  const wamid = messageId(message.id);
   if (!wamid) return;
 
   const fromJid = message.from || "";
@@ -131,7 +132,7 @@ async function processMessageEvent(sessionId, message) {
   if (message.hasQuotedMsg) {
     try {
       const quoted = await message.getQuotedMessage();
-      quotedId = quoted?.id?._serialized || "";
+      quotedId = messageId(quoted?.id);
     } catch (err) {
       console.warn("[wa-qr] could not read the quoted message:", err.message);
     }
@@ -191,6 +192,34 @@ async function processMessageEvent(sessionId, message) {
   // 3. Message row with ON CONFLICT (wamid) DO NOTHING
   const initialStatus = direction === "in" ? "received" : message.ack ? statusUpdate(message, message.ack).statuses[0].status : "sent";
 
+  // Something we sent ourselves comes back here through message_create, and
+  // the composer has already written a row for it and left it queued because
+  // sendMessage answers with nothing on this WhatsApp build. Settle that row
+  // rather than adding a second one beside it — otherwise every message an
+  // agent sends appears twice, once stuck queued and once complete.
+  if (direction === "out") {
+    const pending = await one(
+      `UPDATE qr_message
+          SET wamid = $1, status = $2, payload = $3
+        WHERE id = (
+          SELECT id FROM qr_message
+           WHERE conversation_id = $4
+             AND direction = 'out'
+             AND wamid IS NULL
+             AND body = $5
+             AND created_at > now() - interval '2 minutes'
+           ORDER BY created_at DESC
+           LIMIT 1)
+        RETURNING id`,
+      [wamid, initialStatus, metaPayload, conversationId, body]
+    );
+    if (pending) {
+      await q(`UPDATE qr_event SET status = 'processed' WHERE id = $1`, [eventRow.id]);
+      await emitWebhook(eventRow.id, metaPayload, phoneNumber);
+      return;
+    }
+  }
+
   await q(
     `INSERT INTO qr_message (conversation_id, direction, kind, wamid, body, media_id, reply_to_id, author_wa_id, status, payload)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -244,7 +273,7 @@ async function processReactionEvent(sessionId, reaction) {
     metaPayload.messages[0].from = senderWaId;
   }
 
-  const targetWamid = reaction.msgId?._serialized || String(reaction.msgId || "");
+  const targetWamid = messageId(reaction.msgId);
   const emoji = reaction.reaction || "";
 
   if (targetWamid) {
@@ -291,7 +320,7 @@ async function processAckEvent(sessionId, message, ack) {
   const eventRow = await one(
     `INSERT INTO qr_event (session_id, kind, payload, status)
      VALUES ($1, 'ack', $2, 'pending') RETURNING *`,
-    [sessionId, { ack, wamid: message.id?._serialized }]
+    [sessionId, { ack, wamid: messageId(message.id) }]
   );
 
   const session = await store.getSessionById(sessionId);

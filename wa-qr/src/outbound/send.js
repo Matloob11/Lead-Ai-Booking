@@ -9,7 +9,8 @@ const { MessageMedia, Location } = pkg;
 import { mediaRoot } from "../config.js";
 import { getClient } from "../sessions/manager.js";
 import * as store from "../sessions/store.js";
-import { toWaId, resolveContactWaId } from "../inbound/normalise.js";
+import { messageId,
+  toWaId, resolveContactWaId } from "../inbound/normalise.js";
 import { q, one } from "../db.js";
 
 export async function sendOutboundMessage({
@@ -167,19 +168,25 @@ export async function sendOutboundMessage({
       sentMsg = await client.sendMessage(formattedTo, body, sendOptions);
     }
 
-    // sendMessage can come back empty when the library gives up inside itself
-    // rather than throwing. Reading .id off that produced "Cannot read
-    // properties of undefined", which is what the agent saw printed in the
-    // chat where the message should have been.
+    // An empty answer is not a failure.
+    //
+    // sendMessage returns nothing on this WhatsApp build while delivering the
+    // message perfectly well — the phone shows it with two blue ticks. Treating
+    // that silence as an error marked delivered messages "failed" in red and
+    // invited the agent to send them a second time.
+    //
+    // The row is left queued rather than guessed at: whatsapp-web.js fires
+    // message_create for our own outbound messages too, so the real id and
+    // status arrive through the event stream a moment later and settle it.
     if (!sentMsg) {
-      throw new Error(
-        "WhatsApp accepted nothing back for this message. The number may not be " +
-          "on WhatsApp, or the phone may have just dropped off — check that it " +
-          "is still linked."
+      console.info(
+        `[wa-qr] sendMessage returned nothing for message ${messageId}; ` +
+          `leaving it queued for message_create to confirm`
       );
+      return { id: messageId, status: "queued", wamid: null };
     }
 
-    const wamid = sentMsg.id?._serialized || String(sentMsg.id || "");
+    const wamid = messageId(sentMsg.id);
 
     // 5. Update DB status='sent' + wamid on success
     const updatedRow = await one(
