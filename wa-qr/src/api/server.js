@@ -13,6 +13,7 @@ import mediaRouter from "./routes/media.js";
 import uploadRouter from "./routes/upload.js";
 import actionsRouter from "./routes/actions.js";
 import messagesRouter from "./routes/messages.js";
+import riskRouter from "./routes/risk.js";
 
 export function startApi(port = 8300) {
   const app = express();
@@ -55,6 +56,7 @@ export function startApi(port = 8300) {
   app.use("/api/upload", uploadRouter);
   app.use("/api/actions", actionsRouter);
   app.use("/api/messages", messagesRouter);
+  app.use("/api/risk", riskRouter);
 
   // Static UI files (served for Agent 3's UI)
   app.use(express.static(path.resolve("public")));

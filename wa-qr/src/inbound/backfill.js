@@ -45,12 +45,18 @@ const FULL_HISTORY_MS = 182 * DAY_MS;
  * How far back attachments are actually downloaded.
  *
  * Six months of photographs, voice notes and forwarded video is tens of
- * gigabytes and hours of transfer, and almost none of it is ever opened. Thirty
+ * gigabytes and hours of transfer, and almost none of it is ever opened. Ten
  * days covers the deal being argued about now — which is what anyone goes
  * looking for — and older messages are still stored, just as a record of what
  * was sent rather than a copy of it.
+ *
+ * Ten and not thirty for a second reason the first run made plain: WhatsApp
+ * stops serving the bytes for older media, so most of what a thirty-day sweep
+ * asked for came back 403 and turned into a row saying only that it could not
+ * be fetched. Asking for less means fewer of those, and the ones we do ask for
+ * are the ones still likely to arrive.
  */
-const MEDIA_WINDOW_MS = 30 * DAY_MS;
+const MEDIA_WINDOW_MS = 10 * DAY_MS;
 
 /**
  * Overlap on a reconnect run, in case the phone and this server disagree about
@@ -114,6 +120,9 @@ function withTimeout(promise, ms, what) {
   ]).finally(() => clearTimeout(timer));
 }
 
+/** How often unfinished imports are looked for and picked back up. */
+const SWEEP_EVERY_MS = 5 * 60_000;
+
 /** Starts importing whenever a phone becomes ready, and never twice at once. */
 export function startHistoryImport() {
   onEvent((type, payload) => {
@@ -127,7 +136,49 @@ export function startHistoryImport() {
       console.error(`[wa-qr] history import for #${sessionId} failed:`, error)
     );
   });
+
+  setInterval(() => {
+    sweepUnfinished().catch((error) => console.error("[wa-qr] import sweep failed:", error));
+  }, SWEEP_EVERY_MS);
+
   console.info("[wa-qr] history import armed");
+}
+
+/**
+ * Picks up every import that stopped without finishing.
+ *
+ * `ready` was the only thing that ever started one, and it fires once. Anything
+ * that ended a run short of 'done' — the phone going away mid-import, a chat
+ * that timed out taking the run with it, the service restarting — then waited
+ * for the phone to disconnect and come back before another attempt was made.
+ * On a phone that stays connected, that is for ever: the import simply stopped,
+ * having read part of the history, and nothing was going to notice.
+ *
+ * A run already in flight is skipped by runBackfill itself, and everything an
+ * import writes is refused by the unique index the second time round, so the
+ * worst a needless sweep costs is the reading.
+ */
+async function sweepUnfinished() {
+  const rows = await store.listAllSessions();
+
+  for (const row of rows) {
+    const id = Number(row.id);
+    if (row.status !== "ready" || !getClient(id)) continue;
+
+    // 'running' counts as unfinished when this process is not the one running
+    // it — that is a run whose service was restarted, and the row is the only
+    // thing left of it.
+    const unfinished =
+      row.history_status === "pending" ||
+      row.history_status === "failed" ||
+      (row.history_status === "running" && !running.has(id));
+    if (!unfinished) continue;
+
+    console.info(`[wa-qr] picking up #${id}'s unfinished import (${row.history_status})`);
+    runBackfill(id).catch((error) =>
+      console.error(`[wa-qr] history import for #${id} failed:`, error)
+    );
+  }
 }
 
 /**

@@ -22,6 +22,9 @@ import {
   threadHeadExtras,
 } from "./thread-extras.js";
 import { createComposer } from "./composer.js";
+// The band across the top warning that a number is being used the way banned
+// numbers are used. Its own module, and its own file, for the same reason.
+import { installSafetyBanner } from "./safety.js";
 
 const POLL_CHAT_MS = 5000;   // no socket on this service; the list is polled
 const POLL_QR_MS = 3000;     // the code itself rotates roughly every 20 seconds
@@ -1431,6 +1434,14 @@ async function boot() {
   }).then(renderThread);
 
   clear(root).append(layout);
+
+  // Above everything, because it is a warning about what somebody is in the
+  // middle of doing rather than a thing to go and look at.
+  installSafetyBanner({
+    el, clear, api, asList, withPlus,
+    mount: (bar) => root.prepend(bar),
+  });
+
   renderPhoneSelect();
   paintConversations();
   renderThread();
