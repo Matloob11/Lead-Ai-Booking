@@ -61,6 +61,14 @@
 
 /* The sample value beside every {{n}}. Meta will not review a template without
    one, so this block is not optional decoration — it is part of the form. */
+/* `hidden` has to win here, and on its own it does not: the attribute is only
+   `display: none` in the browser's own stylesheet, which the rule below
+   outranks. Without this the sample-value box stands open on every template,
+   including the ones with no placeholders to give a value to. */
+.tplc-vars[hidden] {
+  display: none;
+}
+
 .tplc-vars {
   display: flex;
   flex-direction: column;

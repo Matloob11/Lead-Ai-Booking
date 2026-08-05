@@ -47,6 +47,22 @@
   box-sizing: border-box;
 }
 
+/* `hidden` means hidden.
+ *
+ * The attribute's only defence is `display: none` in the browser's own
+ * stylesheet, which any author rule outranks — so a class carrying
+ * `display: flex` leaves its element on screen with `hidden` set and nothing
+ * anywhere saying why. Four of them were: the drop veil sat permanently over
+ * every thread with the conversation dimmed behind it, and the reply bar and
+ * the attachment tray drew two empty strips above the composer in every chat.
+ *
+ * !important because that is the whole point — this has to beat whatever the
+ * element's own class says, including a class written later by somebody who
+ * never sees this line. */
+[hidden] {
+  display: none !important;
+}
+
 /* Thin, faint, and the theme's own colour — matching the inbox this sits in.
    Firefox takes the two keywords; the WebKit rules below do the same job with a
    transparent border so the thumb keeps its distance from the edge. */
