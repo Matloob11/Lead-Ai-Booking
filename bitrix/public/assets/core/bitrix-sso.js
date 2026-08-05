@@ -242,14 +242,51 @@ export async function ssoLogin() {
 }
 
 /**
+ * Whether the session we already hold belongs to the person sitting here.
+ *
+ * The panel used to accept any session that answered 200. Its cookie lives on
+ * the panel's own host, not the portal's, so it outlives the Bitrix login that
+ * created it — and the next colleague to open the panel in that browser was
+ * handed the previous agent's inbox. The login endpoint was never called, so no
+ * account was even created for the person actually using it.
+ *
+ * That is not a theory. One agent opened the panel under her own Bitrix login
+ * and was shown a colleague's number and a colleague's customers, and the
+ * database had no record of her at all.
+ *
+ * Unknown counts as "no". A cheap comparison that cannot be made is not a
+ * reason to keep serving somebody else's conversations — the cost of being
+ * wrong here is one agent reading another's customers, and the cost of a
+ * needless re-login is one POST.
+ */
+async function sessionBelongsToCurrentUser(session) {
+  const held = String(session?.bitrix_user_id || "");
+  if (!held) return false;
+
+  try {
+    const profile = await callBitrix("profile");
+    const current = String(profile?.ID ?? profile?.id ?? "");
+    return Boolean(current) && current === held;
+  } catch (error) {
+    console.warn("[a7-wa] could not confirm who this session belongs to:", error);
+    return false;
+  }
+}
+
+/**
  * Returns the signed-in agent, logging in through Bitrix first if the session
- * cookie is missing or stale. This is the single entry point for the panel.
+ * cookie is missing, stale, or somebody else's. This is the single entry point
+ * for the panel.
  */
 export async function ensureSession() {
   const existing = await apiFetch("/api/auth/me/", { raw: true });
-  if (existing.ok) return existing.json();
 
-  if (existing.status !== 401 && existing.status !== 403) {
+  if (existing.ok) {
+    const session = await existing.json();
+    if (await sessionBelongsToCurrentUser(session)) return session;
+    // Somebody else's session, still valid. Replaced below rather than
+    // reported: a stale cookie is not an error, it is the wrong answer.
+  } else if (existing.status !== 401 && existing.status !== 403) {
     throw new SsoError(
       `http_${existing.status}`,
       `GET /api/auth/me/ → HTTP ${existing.status}`,
