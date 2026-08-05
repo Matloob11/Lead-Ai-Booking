@@ -138,6 +138,18 @@ export async function storeMessage(sessionId, message, options = {}) {
     return { stored: false };
   }
 
+  // WhatsApp talking to itself.
+  //
+  // Pairing notices, protocol messages, the housekeeping two copies of the app
+  // exchange. These were being stored, and storing them was worse than drawing
+  // them: each one creates a contact and a conversation, moves that chat to the
+  // top of the list on its own, and leaves "System" sitting where the last
+  // thing somebody said belongs. One chat in the list held nothing else at all.
+  //
+  // Dropped here, with status and newsletter traffic, rather than hidden in the
+  // panel — a message nobody sent should not be a row.
+  if (kindOf(message) === "system") return { stored: false };
+
   const client = getClient(sessionId);
 
   // Fetch contact info & resolve wa_id

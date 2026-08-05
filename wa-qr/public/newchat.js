@@ -79,6 +79,18 @@ const KIND_LABEL = {
   sticker: "Sticker",
   location: "Location",
   contacts: "Contact card",
+  // Nothing, on purpose. A system message is WhatsApp talking to itself; it is
+  // no longer stored, and the handful already on disk should leave the chat's
+  // line blank rather than announce themselves as the last thing that happened.
+  system: "",
+  deleted: "Message deleted",
+  poll: "Poll",
+  call: "Call",
+  order: "Order",
+  product: "Product",
+  interactive: "Button reply",
+  invite: "Group invitation",
+  pending: "Waiting for this message",
   unknown: "Message not shown here",
 };
 
