@@ -1607,3 +1607,30 @@ body[data-wa-theme="glass-dark"] .quoted {
     display: none;
   }
 }
+
+/* Where a number appears in the CRM, when it appears in more than one place.
+   A lead and three Owner Data items for the same person is a real answer, not
+   an ambiguity — so it is listed rather than guessed at. */
+.crm-hits {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.crm-hits__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.crm-hits__kind {
+  font-weight: 600;
+}
+
+.crm-hits__id {
+  color: var(--muted, #667485);
+  font-size: 12px;
+}

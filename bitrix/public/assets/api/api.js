@@ -63,6 +63,18 @@ export const catalog = {
     apiFetch(`/api/catalog/numbers/${numberId}/agents/`, { method: "PUT", body: { agents } }),
 };
 
+export const crm = {
+  /**
+   * Every CRM record carrying this number — lead, contact, or an Owner Data
+   * item. Answered by our own backend rather than by BX24, because the search
+   * takes several Bitrix calls and the server already has to get it right for
+   * the timeline mirror.
+   */
+  whereis(phone) {
+    return apiFetch(`/api/crm/whereis/?phone=${encodeURIComponent(phone)}`);
+  },
+};
+
 export const inbox = {
   conversations({ number, q, limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit, offset });

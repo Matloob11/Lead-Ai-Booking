@@ -24,7 +24,7 @@ from django.db.models import Count
 
 from apps.crmlink import client
 from apps.crmlink.models import Mirror
-from apps.crmlink.tasks import _line, _record_for
+from apps.crmlink.tasks import _line, _records_for
 from apps.inbox.models import Conversation, Message
 
 # Bitrix answers about two requests a second before it starts refusing. This is
@@ -67,14 +67,17 @@ class Command(BaseCommand):
         if options["conversation"]:
             conversations = conversations.filter(pk=options["conversation"])
 
-        already = set(Mirror.objects.values_list("message_id", flat=True))
+        # Keyed on the record as well as the message. A number can be on a lead
+        # and on an Owner Data item, and one of them already holding a message
+        # says nothing about the other.
+        already = set(Mirror.objects.values_list("message_id", "entity_type", "entity_id"))
 
         matched = skipped = posted = failed = 0
         no_record = []
 
         for conversation in conversations.order_by("pk"):
-            record = _record_for(conversation)
-            if not record:
+            records = _records_for(conversation)
+            if not records:
                 no_record.append(conversation.contact.wa_id)
                 continue
 
@@ -84,34 +87,39 @@ class Command(BaseCommand):
                 .select_related("sent_by")
                 .order_by("created_at", "id")
             )
-            pending = [m for m in messages if m.pk not in already]
-            skipped += len(messages) - len(pending)
+
+            where = ", ".join(f"{r['type']} {r['id']}" for r in records)
+            pending = [
+                (m, r)
+                for r in records
+                for m in messages
+                if (m.pk, r["type"], r["id"]) not in already
+            ]
+            skipped += len(messages) * len(records) - len(pending)
 
             self.stdout.write(
-                f"{conversation.contact.wa_id} -> {record['type']} {record['id']}: "
-                f"{len(pending)} to post, {len(messages) - len(pending)} already there"
+                f"{conversation.contact.wa_id} -> {where}: "
+                f"{len(pending)} to post, {len(messages) * len(records) - len(pending)} already there"
             )
 
             if not write:
                 continue
 
-            for message in pending:
+            for message, record in pending:
                 if options["limit"] and posted >= options["limit"]:
                     break
                 try:
                     comment_id = client.add_comment(record["type"], record["id"], _line(message))
                 except client.BitrixError as exc:
                     failed += 1
-                    self.stderr.write(f"  message {message.pk}: {exc}")
+                    self.stderr.write(f"  message {message.pk} -> {record['type']} {record['id']}: {exc}")
                     continue
 
                 Mirror.objects.get_or_create(
                     message_id=message.pk,
-                    defaults={
-                        "entity_type": record["type"],
-                        "entity_id": record["id"],
-                        "comment_id": comment_id if isinstance(comment_id, int) else None,
-                    },
+                    entity_type=record["type"],
+                    entity_id=record["id"],
+                    defaults={"comment_id": comment_id if isinstance(comment_id, int) else None},
                 )
                 posted += 1
                 time.sleep(PAUSE_SECONDS)

@@ -100,19 +100,73 @@ def _is_a_person(entity_type, entity_id):
     return True
 
 
-def find_record(wa_id):
-    """The lead or contact carrying this number, or None.
+# The Owner Data smart process, and the two fields somebody's phone number
+# ends up in on it.
+#
+# It is searched separately because `crm.duplicate.findbycomm` only knows about
+# leads, contacts and companies — a smart process is invisible to it. And these
+# two fields are plain numbers rather than Bitrix's phone type, so the match is
+# an exact numeric one: the stored value has no `+`, no spaces and no country
+# code unless whoever typed it included one.
+OWNER_DATA_TYPE_ID = 1042
+OWNER_DATA_PHONE_FIELDS = ("ufCrm5_1768317611513", "ufCrm5_1769416533028")
 
-    Both spellings are asked for. Bitrix matches the string it holds, and a
-    number saved as ``+971…`` does not match the same number saved as ``971…``
-    — which is most of them, because the portals that create these leads write
-    it whichever way the customer typed it.
+
+def _owner_data_matches(digits):
+    """Owner Data records carrying this number, as timeline targets."""
+    # Both spellings that survive being stored as a number: the full
+    # international form, and the local one with the country code dropped.
+    candidates = {digits}
+    if digits.startswith("971") and len(digits) > 9:
+        candidates.add(digits[3:])
+
+    found = []
+    for field in OWNER_DATA_PHONE_FIELDS:
+        for value in candidates:
+            try:
+                result = call(
+                    "crm.item.list",
+                    {
+                        "entityTypeId": OWNER_DATA_TYPE_ID,
+                        "select": ["id"],
+                        "filter": {field: int(value)},
+                    },
+                )
+            except (BitrixError, ValueError) as exc:
+                logger.warning("Owner Data search on %s failed: %s", field, exc)
+                continue
+
+            for item in (result or {}).get("items", []):
+                found.append(int(item["id"]))
+
+    # An item can carry the same number in both fields, and would otherwise be
+    # written to twice for one message.
+    return [
+        {"type": f"DYNAMIC_{OWNER_DATA_TYPE_ID}", "id": item_id, "kind": "owner data"}
+        for item_id in dict.fromkeys(found)
+    ]
+
+
+def find_records(wa_id):
+    """Every CRM record carrying this number: lead or contact, and Owner Data.
+
+    A list rather than one answer. An agent often works the owner side of a
+    property from Owner Data and never opens a lead at all, so a conversation
+    can belong in two places at once — and picking one of them would leave the
+    other looking as though nothing had been said.
+
+    Both spellings are asked of the lead and contact search. Bitrix matches the
+    string it holds, and a number saved as ``+971…`` does not match the same
+    number saved as ``971…`` — which is most of them, because the portals that
+    create these leads write it however the customer typed it.
     """
     digits = "".join(ch for ch in str(wa_id) if ch.isdigit())
     if not digits:
-        return None
+        return []
 
+    records = []
     values = [digits, f"+{digits}"]
+
     for entity_type, kind in _SEARCH_ORDER:
         try:
             found = call(
@@ -125,12 +179,25 @@ def find_record(wa_id):
 
         for candidate in (found or {}).get(entity_type) or (found or {}).get(kind) or []:
             if _is_a_person(kind, candidate):
-                return {"type": kind, "id": int(candidate)}
+                records.append({"type": kind, "id": int(candidate), "kind": kind})
+                break
             # Otherwise keep looking. A number can sit on both a real lead and
             # somebody's dumped phone list, and the list must not win just
             # because Bitrix returned it first.
+        if records:
+            # One of lead or contact, not both: the contact behind a lead is
+            # usually the same person, and writing to both puts every message
+            # on the screen twice.
+            break
 
-    return None
+    records.extend(_owner_data_matches(digits))
+    return records
+
+
+def find_record(wa_id):
+    """The first record for this number, or None. Kept for callers wanting one."""
+    records = find_records(wa_id)
+    return records[0] if records else None
 
 
 # Writing

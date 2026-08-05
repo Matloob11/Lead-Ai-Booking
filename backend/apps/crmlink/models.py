@@ -15,15 +15,26 @@ class Mirror(models.Model):
     asked is always "has this one gone across yet".
     """
 
-    message = models.OneToOneField(
-        "inbox.Message", on_delete=models.CASCADE, related_name="crm_mirror"
+    # Many, not one. The same number can sit on a lead *and* on an Owner Data
+    # record — an agent often works the owner side of a property from there and
+    # never opens the lead — so one message can legitimately belong in two
+    # timelines. It was a OneToOne until that turned up.
+    message = models.ForeignKey(
+        "inbox.Message", on_delete=models.CASCADE, related_name="crm_mirrors"
     )
-    entity_type = models.CharField(max_length=16)
+    # "lead", "contact", or "DYNAMIC_1042" for a smart-process item.
+    entity_type = models.CharField(max_length=32)
     entity_id = models.PositiveIntegerField()
     comment_id = models.PositiveBigIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "entity_type", "entity_id"],
+                name="unique_mirror_per_record",
+            )
+        ]
         indexes = [models.Index(fields=["entity_type", "entity_id"])]
 
     def __str__(self):

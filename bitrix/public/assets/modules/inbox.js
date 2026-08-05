@@ -13,10 +13,10 @@
  *  - transfer is admin-only.
  */
 
-import { access, auth, catalog, inbox, asList } from "../api/api.js";
+import { access, auth, catalog, crm, inbox, asList } from "../api/api.js";
 import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
-import { callBitrix, ensureSession } from "../core/bitrix-sso.js";
+import { ensureSession } from "../core/bitrix-sso.js";
 import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
@@ -788,10 +788,15 @@ export function mountInbox(root, { me, openRequest = null }) {
    * way to find out was to leave the panel, open the CRM, and search for the
    * number by hand.
    *
-   * The lookup is Bitrix's own duplicate search, which is the same thing the
-   * portal uses when it decides two records are the same person. It is asked at
-   * click time rather than on every repaint: the answer is one REST call per
-   * chat, and drawing the list would have made hundreds.
+   * Asked of our own backend rather than of Bitrix directly. The answer takes
+   * several REST calls now — the duplicate search for leads, another for
+   * contacts, a read of each candidate to reject the record carrying thirteen
+   * thousand phone numbers, and two filtered queries against Owner Data — and
+   * the server already has to get all of that right for the timeline mirror.
+   * Repeating it in the browser would be a second copy to keep in step.
+   *
+   * At click time rather than on every repaint: it is a handful of calls per
+   * chat, and drawing the conversation list would have made hundreds of them.
    */
   function openLeadButton(conversation) {
     const waId = conversation.contact?.wa_id || "";
@@ -799,29 +804,58 @@ export function mountInbox(root, { me, openRequest = null }) {
 
     const button = el("button.btn.btn--ghost.btn--sm", {
       type: "button",
-      title: "Open this customer's record in the CRM",
-    }, [icon("user", { size: 15 }), " Lead"]);
+      title: "Open this customer's record in the CRM — lead, contact or Owner Data",
+    }, [icon("user", { size: 15 }), " CRM"]);
+
+    const restore = () =>
+      setTimeout(() => clear(button).append(icon("user", { size: 15 }), " CRM"), 2600);
 
     button.addEventListener("click", async () => {
-      const label = button.textContent;
       button.disabled = true;
       try {
-        const found = await findCrmRecord(waId);
-        if (!found) {
-          // Said on the button itself. A modal for "there is no lead" is a
-          // dialog to dismiss in exchange for nothing.
-          clear(button).append(icon("alert", { size: 15 }), " No CRM record");
-          setTimeout(() => clear(button).append(icon("user", { size: 15 }), label), 2600);
+        const records = asList(await crm.whereis(waId), "records");
+
+        if (!records.length) {
+          // Said on the button itself. A modal that exists to report there is
+          // no record is a dialog to dismiss in exchange for nothing.
+          clear(button).append(icon("alert", { size: 15 }), " Not in the CRM");
+          restore();
           return;
         }
-        // openPath rather than a new tab: the panel is already inside Bitrix,
-        // and the portal opens its own records in a slider over whatever the
-        // agent was doing.
-        window.BX24?.openPath?.(found.path);
+
+        // One record: straight there. Several — a lead and the Owner Data
+        // entries for the same person's properties — is a real answer rather
+        // than an ambiguity to resolve by guessing, so it gets a list.
+        if (records.length === 1) {
+          window.BX24?.openPath?.(records[0].path);
+          return;
+        }
+
+        modal(
+          "Where this number appears",
+          el("div.modal__body", {}, [
+            el("p.modal__note", {}, [
+              `${withPlus(waId)} is on ${records.length} records. WhatsApp messages are added to all of them.`,
+            ]),
+            el(
+              "div.crm-hits",
+              {},
+              records.map((record) =>
+                el("button.btn.btn--ghost.crm-hits__row", {
+                  type: "button",
+                  onclick: () => window.BX24?.openPath?.(record.path),
+                }, [
+                  el("span.crm-hits__kind", {}, [record.label]),
+                  el("span.crm-hits__id", {}, [`#${record.id}`]),
+                ])
+              )
+            ),
+          ])
+        );
       } catch (error) {
         console.warn("[a7-wa] CRM lookup failed:", error);
         clear(button).append(icon("alert", { size: 15 }), " CRM search failed");
-        setTimeout(() => clear(button).append(icon("user", { size: 15 }), label), 2600);
+        restore();
       } finally {
         button.disabled = false;
       }
@@ -830,34 +864,16 @@ export function mountInbox(root, { me, openRequest = null }) {
     return button;
   }
 
-  /**
-   * The lead, contact or company carrying this number.
-   *
-   * Leads first, then contacts, then companies — the order the portal itself
-   * treats as most specific. A number can be on more than one; the first is
-   * opened rather than a chooser being drawn, because the agent asked "where
-   * does this land", not "list everywhere it appears".
-   */
-  async function findCrmRecord(waId) {
-    const digits = String(waId).replace(/\D/g, "");
-    // Both spellings. Bitrix matches the string it holds, and a number saved as
-    // +971… does not match one saved as 971….
-    const values = [digits, `+${digits}`];
-
-    for (const [type, path] of [["LEAD", "lead"], ["CONTACT", "contact"], ["COMPANY", "company"]]) {
-      const hit = await callBitrix("crm.duplicate.findbycomm", {
-        entity_type: type,
-        type: "PHONE",
-        values,
-      }).catch(() => null);
-
-      const ids = hit && (hit[type] || hit[type.toLowerCase()]);
-      if (Array.isArray(ids) && ids.length) {
-        return { type, id: ids[0], path: `/crm/${path}/details/${ids[0]}/` };
-      }
-    }
-    return null;
-  }
+  /* The browser-side duplicate search that used to live here has gone to the
+     server — /api/crm/whereis/. It searched leads, contacts and companies and
+     took the first hit, which since then has turned out to be three wrong
+     answers: it missed Owner Data entirely, where an agent often works the
+     owner side of a property and never opens a lead; it accepted the contact
+     carrying 13,501 phone numbers, because Bitrix returns that one for every
+     number on it; and it stopped at the first match when a person genuinely
+     has several records. The server has to get all of that right for the
+     timeline mirror, so asking it is one answer rather than two to keep in
+     step. */
 
   function renderThreadHeader(conversation) {
     clear(ui.threadHeader);
