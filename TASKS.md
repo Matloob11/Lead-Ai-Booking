@@ -27,6 +27,79 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — the media numbers were being manufactured
+Chased why 767 qr_media rows appeared in two hours with no message pointing at
+any of them, and found two leaks. Both are fixed and verified over two sweep
+cycles; the sweep still runs, still says "recovered 0 of 4", and now creates
+nothing.
+
+1. `storeMessage` downloaded the attachment *before* checking whether the
+   message was already stored. A catch-up import re-reads whatever overlaps, the
+   insert refuses it by wamid, and the file lands in a row nothing references.
+2. `retryFailedMedia` left a row behind on every failure, because
+   `processInboundMedia` records each attempt as a new row. The same four files
+   refuse every five minutes — about a thousand rows a day.
+
+The cost was never disk. It was asking WhatsApp for the same media over and over
+from a personal number, which is the load `/api/risk` exists to watch for.
+
+Cleared 10,032 orphan rows. **Rows only** — 2,390 of them named a file a live
+row still uses, because a file is named by its own checksum, so deleting by row
+would have taken a file still in use.
+
+The counts mean something again: 2,534 media rows, 1,908 still missing, 0
+orphans. So the earlier tables in this file — mine and Antigravity's both — were
+counting a leak as if it were history. Do not plan the media work off them.
+
+**Open, for Matloob:** 1.9 GB of files on disk that no live row references.
+Deleting them needs a sweep that checks each path against every live row first.
+Nobody has done it and it is not urgent.
+
+Files: `wa-qr/src/inbound/persist.js`, `wa-qr/src/inbound/backfill.js` — both
+shared, both were being edited by other sessions today.
+
+### 2026-08-05 · Opus session · `wa-qr` — the same attachments were being downloaded over and over
+Found while checking the media numbers, not while looking for it. Two separate
+leaks, both now stopped, both verified by watching a full sweep afterwards.
+
+**The import re-downloaded what it already had.** `storeMessage` fetched the
+attachment *before* the insert, and the insert refuses a known wamid — so every
+catch-up pass pulled the file again and left a `qr_media` row nothing pointed
+at. It now asks whether the message is already stored first, and fetches only
+when the file would land somewhere.
+
+**The retry left one behind every time it failed.** `processInboundMedia`
+records each attempt as a new row, so the four attachments that keep refusing
+were adding four orphans every five minutes — about a thousand a day, for ever.
+The failure is now written onto the original row and the duplicate dropped.
+
+The cost was never the disk. It was asking WhatsApp for the same media again
+and again from a personal number, which is the load these accounts get banned
+for — the thing `/api/risk` watches for everywhere else.
+
+Also fixed: the repair's `DO UPDATE` did not carry `media_id`, so an attachment
+it downloaded was orphaned by the same statement meant to save it. `COALESCE`,
+so a repair can add a file a row never had and never replace one it has.
+
+Files: `wa-qr/src/inbound/persist.js`, `wa-qr/src/inbound/backfill.js`.
+Verified: zero new media rows across a full sweep cycle, with the sweep visibly
+running (`#7 retrying 4 attachment(s) … recovered 0 of 4`).
+
+**Two decisions left for Matloob, and nothing should be deleted before he
+answers.** The leaks left 10,032 orphan `qr_media` rows behind:
+
+| | |
+|---|---|
+| orphan rows | 10,032 |
+| of those, holding a file no live row uses | ~6,800 |
+| disk that holds | **1,914 MB** |
+| orphan rows whose file a live row still needs | 2,390 |
+
+1. Delete the orphan rows? Safe — nothing references them, and the table stops
+   being mostly debris.
+2. Delete the 1.9 GB of files underneath them? Only the ones no live row shares;
+   the 2,390 above must not be touched or live messages lose their attachment.
+
 ### 2026-08-05 · Opus session · `wa-qr` — re-reading the `unknown` messages
 A repair pass asks WhatsApp what the 878 unnameable messages were, message by
 message via `getMessageById` (not chat by chat — chats are addressed by
