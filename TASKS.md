@@ -27,6 +27,114 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — re-reading the `unknown` messages
+A repair pass asks WhatsApp what the 878 unnameable messages were, message by
+message via `getMessageById` (not chat by chat — chats are addressed by
+LinkedID here and the JID mapping is the fragile part). `storeMessage` gained
+`{repair: true}`: `ON CONFLICT (wamid) DO UPDATE … WHERE kind = 'unknown'`, so
+it can never touch a row that is already correct. Runs once per phone,
+`qr_session.kinds_repaired_at`.
+Files: `wa-qr/src/inbound/persist.js`, `backfill.js`, `sessions/store.js`,
+`db/005_kind_repair.sql`.
+
+Phone #3: 93 unknown → **52 named** (48 `call`, 3 `deleted`, 1 `pending`), then
+3 more on a second run once the payload was allowed through — so 41 → 38.
+Phone #7's 785 were still running when this was written.
+
+Not verified, and worth the next session's attention: **38 rows on #3 were
+fetched successfully and then not written, and I do not know which guard in
+`storeMessage` rejected them.** `gone` was 0, so WhatsApp returned the message
+every time; `stored` came back false anyway. Do not assume they are
+unrecoverable — nobody has found out yet. The 3 that did come through are
+`automated_greeting_message` and `biz_content_placeholder`, neither of which is
+in the `KIND` map.
+
+### 2026-08-05 · Opus session · corrections to the two entries below, and where the media stands
+Checked rather than taken on trust, and two things in the entries below are not
+right.
+
+**The three CRM files are not on the server.** The entry below says "the
+deployed copies are still live and still serve 200, referenced by nothing".
+They serve 200 because nginx's `try_files` under `/app/` falls back to the panel
+index for *any* missing path — `/app/nonsense-xyz/` answers 200 with the same
+bytes. `md5sum` on all three says `No such file or directory`. They were removed
+with the rest of the deploy in 354e591.
+
+**And it is not Matloob's to decide — he already did.** The brief for that work
+said, in his words, "`crm-thread.js` ki ab zaroorat nahi ha (hata do ya khaali
+kar do)", along with "thread, composer, bubbles, Open Chat sab HATA DO". The tab
+is a list of numbers on purpose. Nothing is pending here.
+
+**The media count below is the better one.** Grouping by error text, as I did,
+answers the wrong question. Grouped by what the row is attached to:
+
+| | |
+|---|---|
+| older than 10 days | 1,904 |
+| orphan — no message points at it | 804 |
+| **inside the 10-day window** | **4** |
+
+So within the retention Matloob chose, the live problem is four files, not
+2,644. The orphans are retry debris: `retryFailedMedia` writes a *new* qr_media
+row and repoints the message, leaving the failed one behind — nothing is missing
+from any conversation because of them.
+
+**One thing nobody has said yet, and it decides the question.** The log is full
+of `WhatsApp HTTP 403 … media-*.cdn.whatsapp.net/…enc`. WhatsApp expires the
+media itself. Widening the window would not recover the old attachments — it
+would spend disk and transfer discovering they are gone at the source. Worth
+sampling before anyone changes the number.
+
+Also: the kind repair is working. `unknown` is down from 878 to 826, and 48
+calls, 3 deleted messages and 1 pending have come back with real names.
+Session 3 carries `kinds_repaired_at`; session 7 is still going.
+
+Files: none changed. Verification only.
+
+### 2026-08-05 · Opus session · `wa-qr` + `bitrix` — verified live in the browser, and one file loss
+First browser pass over everything built in this session. All of it is live and
+working against real data:
+- QR panel: avatars, in-field search, empty states, thin themed scrollbars.
+- Composer: attach / emoji / voice-note / round send all present; reply control
+  injected onto every bubble and surviving the poll.
+- Manage → **Agents and reports**: two phones listed, Django's agent list
+  arriving over the browser's own session (no token anywhere), Reports showing
+  real figures — 100+ chats, 0 unread, 14 hours quiet, 22 sent in 24h, risk
+  "Normal" — and saying out loud that the count stops at 100.
+- CRM tab loads inside a real lead through the placement; the ChatApp line is
+  creating leads titled "ChatApp - WhatsApp (external provider) - A7 ChatApp
+  WhatsApp | …", so that integration is working end to end.
+
+**Lost work, for the record.** `bitrix/public/crm/crm-thread.js`,
+`crm-template.js` and `crm-thread.css` were written and deployed this session,
+then removed from the working tree by another session (they were untracked, so
+nothing in git records it). The deployed copies are still live and still serve
+200, referenced by nothing. That removal was deliberate in spirit — see "CRM tab
+cut back to a list" below, which argues the tab should not host a half-thread —
+but the two decisions were never reconciled. **Matloob to decide** whether the
+in-tab thread comes back or those three files are deleted from the server.
+
+Found while looking: a document bubble prints its filename twice, once in the
+file chip and once as the body, because the body equals the filename for a
+document with no caption. `wa-qr/public/app.js`, `bubble()`. Not fixed — shared
+file, mid-edit by others.
+
+Files: none changed. Verification only.
+Not verified: the CRM tab's own thread, because it no longer exists to test.
+
+### 2026-08-05 · Antigravity session · `wa-qr` — media breakdown & panel status message update
+Categorized all 2,699 `downloaded = false` rows in `qr_media`:
+- 1,904 rows belong to messages > 10 days old (`m.created_at < NOW() - INTERVAL '10 days'`) — skipped by retention design.
+- 791 rows are unlinked `qr_media` records (duplicate/historical retry records).
+- 4 rows belong to messages within the 10-day window (`downloadMedia failed: r` prior to fix, and 1 invalid webMediaType).
+Updated API and panel to report accurate status per 10-day retention window:
+- API `GET /api/conversations/:id/messages` now returns `media_error`.
+- Panel UI now distinguishes > 10 day old files ("not kept — older than 10 days") from actual recent download failures ("This <kind> could not be downloaded from the phone.").
+- Updated `backfill.js` `sweepUnfinished()` to run `retryFailedMedia()` during periodic 5-min sweeps for ready sessions.
+Files: `wa-qr/src/api/routes/conversations.js`, `wa-qr/public/app.js`, `wa-qr/public/app.css`, `wa-qr/src/inbound/backfill.js`.
+Verified: Deployed to live server, verified md5 checksums match, restarted `wa-qr app` container, verified logs clean.
+Not verified: Physical click testing of UI panel in browser (UI static files deployed and matched via md5).
+
 ### 2026-08-05 · Opus session · `wa-qr` — both imports finished, and what the missing media really is
 matloob 157/157, malik 430/430. 13,908 messages across 583 chats, dated
 February to August, which is the six-month window working.
@@ -150,7 +258,7 @@ then move it out of this list and into the log above.
 |---|---|
 | ~~Agent assignment~~ | Proved working 2026-08-05. Nothing to fix — it is waiting on a decision, not on code. |
 | Media | 2,699 attachments not on disk. **Separated 2026-08-05, see the log:** 2,644 are one already-fixed fault and are recoverable; only 3 were skipped on purpose. |
-| `unknown` messages | 878 rows whose real type was thrown away. Only a re-import can recover them, and `ON CONFLICT DO NOTHING` currently prevents that. |
+| `unknown` messages | Repair pass built and run 2026-08-05. Phone #3: 93 → 38. Phone #7's 785 were mid-run. **38 rows were fetched and then silently not written — which guard refused them is not known.** |
 | Disconnect alert | Not built, and **deliberately deferred** — Matloob wants it later. Do not start it. |
 | ~~Read on the phone~~ | Done 2026-08-05. |
 | CRM placements | Bound by nobody yet. |
