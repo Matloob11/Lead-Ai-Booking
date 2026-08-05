@@ -27,6 +27,16 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — reading a chat now reaches the phone
+`POST /api/actions/seen` existed and nothing called it, so the customer never
+saw a blue tick and the handset still showed the chat unread. It also could not
+have worked for most chats: it reached for `getChatById`, which refuses every
+LinkedID-addressed chat — the same wall the history import hit. Given a bare
+Chat, like the import was.
+Files: `wa-qr/src/outbound/actions.js`, `wa-qr/public/app.js`.
+Verified live on two real chats: `seen_on_phone: true`, counters cleared, and an
+agent with no claim on the phone still refused with 403.
+
 ### 2026-08-05 · Opus session · `wa-qr` — agent assignment proved end to end
 Did not build anything: `phones-admin.js` already carries the assignment UI, and
 `MEDIA_WINDOW_MS` was already 10 days. Both were another session's work, found
@@ -111,7 +121,7 @@ then move it out of this list and into the log above.
 | ~~Agent assignment~~ | Proved working 2026-08-05. Nothing to fix — it is waiting on a decision, not on code. |
 | Media | 2,695 attachments not on disk. Some by design (outside the 10-day window), some real failures — nobody has separated the two. |
 | `unknown` messages | 878 rows whose real type was thrown away. Only a re-import can recover them, and `ON CONFLICT DO NOTHING` currently prevents that. |
-| Disconnect alert | Not built. A phone dropping should reach somebody. |
-| Read on the phone | Reading a chat in the panel does not mark it read on the handset, so the customer never sees a blue tick. |
+| Disconnect alert | Not built, and **deliberately deferred** — Matloob wants it later. Do not start it. |
+| ~~Read on the phone~~ | Done 2026-08-05. |
 | CRM placements | Bound by nobody yet. |
 | Git | No remote. Everything is on one laptop. |
