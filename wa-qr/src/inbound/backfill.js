@@ -38,8 +38,19 @@ import { q } from "../db.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** How far back a first import reaches. */
-const FULL_HISTORY_MS = 182 * DAY_MS;
+/**
+ * How far back a *first* import reaches — a number nobody has linked before.
+ *
+ * Ten days, not the six months this used to take. Six months of one phone is
+ * 13,000 messages and hours of reading, and the value of it fell away fast: the
+ * deal being argued about now is this week's.
+ *
+ * This is only the opening figure. A number that has been linked before does
+ * not come through here at all — see `since` below, which starts from where the
+ * last run finished, so a phone away for twenty days brings back twenty days
+ * and a phone away for three brings back three. Nothing is lost by the gap.
+ */
+const FULL_HISTORY_MS = 10 * DAY_MS;
 
 /**
  * How far back attachments are actually downloaded.
