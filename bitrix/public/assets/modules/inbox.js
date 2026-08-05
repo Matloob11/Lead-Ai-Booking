@@ -1713,11 +1713,23 @@ export function mountInbox(root, { me, openRequest = null }) {
     const frame = el("iframe.linked__frame", {
       src: "/qr/",
       title: "Linked devices",
-      // allow-modals is not decoration: without it a sandboxed frame answers
-      // prompt() with null and confirm() with false, immediately and silently.
-      // That reads as "the user cancelled", so linking a phone returned before
-      // it started and removing one did nothing, with no error either way.
-      sandbox: "allow-scripts allow-same-origin allow-forms allow-modals",
+      // Every flag here was added because something inside was silently doing
+      // nothing without it. A sandboxed frame does not refuse loudly.
+      //
+      //   allow-modals    — prompt() answered null and confirm() answered false
+      //                     without asking anybody, which reads as "cancelled".
+      //                     Linking a phone returned before it started.
+      //   allow-popups    — target="_blank" was dropped on the floor, so View
+      //                     on a document and the lightbox's window.open did
+      //                     nothing at all, with no error either way.
+      //   allow-downloads — the download attribute was ignored the same way,
+      //                     so Download did nothing on a 13 MB PDF.
+      //   …-to-escape-sandbox — a tab opened from here inherits the sandbox
+      //                     otherwise, and Chrome's PDF viewer will not run
+      //                     inside one. The document opened to a blank tab.
+      sandbox:
+        "allow-scripts allow-same-origin allow-forms allow-modals " +
+        "allow-popups allow-popups-to-escape-sandbox allow-downloads",
     });
 
     const close = () => {
