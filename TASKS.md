@@ -27,6 +27,27 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — voice notes survive the poll now
+Pressing play started the audio, then the button snapped back to ▶ and the bar
+froze while the recording kept going behind it.
+
+The thread repaints every five seconds and the repaint replaces the whole
+bubble. Each one built a fresh `new Audio()`, so the visible player was a new
+idle one while the old object played on — an Audio is not in the document and
+nothing stops it when its bubble is discarded. Play again started a second copy
+over the first.
+
+One player per message id now, held across repaints, listeners detached before
+the replacement bubble attaches its own, and the new bubble painted from where
+the recording actually is rather than from zero.
+
+**Anything stateful drawn inside a bubble has this problem.** `paintMessages`
+replaces every bubble on a five-second timer — if you add a player, a form or
+an open menu in there, it needs to outlive the node.
+
+Files: `wa-qr/public/thread-extras.js`.
+Verified: deployed, md5 matches. Not clicked in a browser.
+
 ### 2026-08-05 · Opus session · `bitrix` — the linked-devices frame could not open or save anything
 View and Download on a document did nothing; so did the lightbox on a picture.
 The QR panel was fine. The iframe carrying it is sandboxed and was missing
