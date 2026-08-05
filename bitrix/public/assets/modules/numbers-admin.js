@@ -61,23 +61,43 @@ export function openNumbersAdmin({ onSaved } = {}) {
   ]);
 
   function applyFilter() {
-    const term = search.value.trim().toLowerCase();
+    const raw = search.value.trim().toLowerCase();
+    // Digits on their own, so a number can be found by any run of digits inside
+    // it. Nobody types a WhatsApp number the way it is stored: "+971 52 407
+    // 7268", "0524077268" and "52 407" are all the same number to a person, and
+    // matching the typed string literally found none of them.
+    const typedDigits = raw.replace(/\D/g, "");
     let shown = 0;
 
+    // Ordered, not just filtered. With twenty-one rows in a scrolling box,
+    // "it matched" is only useful if the match is where the eye already is.
+    const ranked = [];
+
     for (const row of rows.values()) {
-      const hit = !term || row.haystack().includes(term);
+      const rank = row.rank(raw, typedDigits);
       const free = !onlyFree.checked || row.assignedCount() === 0;
-      const isVisible = hit && free;
+      const isVisible = rank > 0 && free;
       row.node.hidden = !isVisible;
       row.node.style.display = isVisible ? "" : "none";
-      if (isVisible) shown++;
+      if (isVisible) {
+        shown++;
+        ranked.push({ node: row.node, rank });
+      }
+    }
+
+    // Best first: a number that starts with what was typed before one that
+    // merely contains it, and either before a match on somebody's name.
+    if (raw && ranked.length) {
+      const list = ranked[0].node.parentElement;
+      ranked.sort((a, b) => b.rank - a.rank);
+      for (const { node } of ranked) list.append(node);
     }
 
     const empty = [...rows.values()].filter((r) => r.assignedCount() === 0).length;
     clear(summary).append(
       `${numbers.length} total numbers · ${numbers.length - empty} assigned · `,
       el("strong", {}, [`${empty} unassigned`]),
-      term || onlyFree.checked ? ` · showing ${shown}` : ""
+      raw || onlyFree.checked ? ` · showing ${shown}` : ""
     );
   }
 
@@ -98,7 +118,25 @@ export function openNumbersAdmin({ onSaved } = {}) {
     });
 
     const chips = el("div.na-chips");
-    const picker = el("select.na-picker");
+
+    /**
+     * The agent picker: a box you type into, not a list you scroll.
+     *
+     * It was a <select>. With twenty-odd agents that means opening a dropdown
+     * and reading down it, and a native select cannot be searched by more than
+     * whatever the browser's own first-letter jump does — which lands on the
+     * first name beginning with that letter and goes no further. Typing three
+     * letters of a surname now narrows it as you type.
+     */
+    const pickInput = el("input.na-pick__input", {
+      type: "text",
+      placeholder: "+ Assign an agent…",
+      autocomplete: "off",
+      role: "combobox",
+      "aria-expanded": "false",
+    });
+    const pickMenu = el("div.na-pick__menu", { hidden: true, role: "listbox" });
+    const picker = el("div.na-pick", {}, [pickInput, pickMenu]);
     const status = el("span.na-status");
     const save = el("button.btn.btn--sm.na-save", { type: "button", disabled: true }, ["Save Changes"]);
     const title = el("div.na-title", {}, [number.title || number.phone_number]);
@@ -139,17 +177,9 @@ export function openNumbersAdmin({ onSaved } = {}) {
       }
 
       const free = agents.filter((a) => !assigned.includes(a.id));
-      clear(picker).append(
-        el("option", { value: "" }, [free.length ? "+ Assign an agent…" : "All agents assigned"]),
-        ...free.map((agent) =>
-          el("option", { value: String(agent.id) }, [
-            agent.numbers?.length
-              ? `${agent.display_name} — holds ${agent.numbers.length} ${agent.numbers.length === 1 ? "number" : "numbers"}`
-              : agent.display_name,
-          ])
-        )
-      );
-      picker.disabled = !free.length;
+      pickInput.disabled = !free.length;
+      pickInput.placeholder = free.length ? "+ Assign an agent…" : "All agents assigned";
+      paintMenu();
 
       const changed = dirty();
       save.disabled = !changed;
@@ -159,16 +189,133 @@ export function openNumbersAdmin({ onSaved } = {}) {
       applyFilter();
     }
 
-    picker.addEventListener("change", () => {
-      const id = Number(picker.value);
-      picker.value = "";
+    /** Whoever is not already on this number, narrowed by what has been typed. */
+    function candidates() {
+      const term = pickInput.value.trim().toLowerCase();
+      const free = agents.filter((a) => !assigned.includes(a.id));
+      if (!term) return free;
+
+      // Name first, then a match anywhere in it — "sha" finds "Shahid" before
+      // "Asma Shahid", which is the order somebody typing three letters means.
+      const scored = free
+        .map((agent) => {
+          const name = String(agent.display_name || "").toLowerCase();
+          const at = name.indexOf(term);
+          if (at < 0) return null;
+          return { agent, score: at === 0 ? 2 : 1, at };
+        })
+        .filter(Boolean);
+
+      scored.sort((a, b) => b.score - a.score || a.at - b.at);
+      return scored.map((s) => s.agent);
+    }
+
+    let marked = 0;
+
+    function paintMenu() {
+      const list = candidates();
+      marked = Math.min(marked, Math.max(0, list.length - 1));
+      clear(pickMenu);
+
+      if (!list.length) {
+        pickMenu.append(
+          el("div.na-pick__none", {}, [
+            pickInput.value.trim() ? "No agent matches that." : "All agents are already on this number.",
+          ])
+        );
+        return;
+      }
+
+      list.forEach((agent, index) => {
+        const holds = agent.numbers?.length || 0;
+        pickMenu.append(
+          el(
+            "button.na-pick__item",
+            {
+              type: "button",
+              role: "option",
+              class: index === marked ? "is-marked" : "",
+              // mousedown, not click: the input's blur would close the menu
+              // first and the click would land on nothing.
+              onmousedown: (event) => {
+                event.preventDefault();
+                choose(agent.id);
+              },
+              onmouseenter: () => {
+                marked = index;
+                for (const [i, node] of [...pickMenu.children].entries()) {
+                  node.classList?.toggle("is-marked", i === marked);
+                }
+              },
+            },
+            [
+              el("span.na-pick__name", {}, [agent.display_name || `Agent ${agent.id}`]),
+              holds
+                ? el("span.na-pick__holds", {}, [`${holds} number${holds === 1 ? "" : "s"}`])
+                : null,
+            ]
+          )
+        );
+      });
+    }
+
+    const openMenu = () => {
+      if (pickInput.disabled) return;
+      marked = 0;
+      paintMenu();
+      pickMenu.hidden = false;
+      pickInput.setAttribute("aria-expanded", "true");
+    };
+
+    const closeMenu = () => {
+      pickMenu.hidden = true;
+      pickInput.setAttribute("aria-expanded", "false");
+    };
+
+    function choose(id) {
       if (!id) return;
       assigned.push(id);
+      pickInput.value = "";
+      closeMenu();
 
       if (!label.value.trim() && assigned.length === 1) {
         label.value = agentById(id)?.display_name || "";
       }
       refresh();
+    }
+
+    pickInput.addEventListener("focus", openMenu);
+    pickInput.addEventListener("blur", () => setTimeout(closeMenu, 0));
+    pickInput.addEventListener("input", () => {
+      marked = 0;
+      paintMenu();
+      pickMenu.hidden = false;
+    });
+
+    pickInput.addEventListener("keydown", (event) => {
+      const list = candidates();
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (pickMenu.hidden) return openMenu();
+        marked = Math.max(0, Math.min(list.length - 1, marked + (event.key === "ArrowDown" ? 1 : -1)));
+        paintMenu();
+        pickMenu.children[marked]?.scrollIntoView({ block: "nearest" });
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        // Only ever the row that is actually highlighted. Guessing at the first
+        // match on a bare Enter is how somebody assigns the wrong agent.
+        if (!pickMenu.hidden && list[marked]) choose(list[marked].id);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        pickInput.value = "";
+        closeMenu();
+      }
     });
 
     label.addEventListener("input", refresh);
@@ -232,15 +379,41 @@ export function openNumbersAdmin({ onSaved } = {}) {
       resync: () => {
         if (!dirty()) refresh();
       },
-      haystack: () =>
-        [
-          number.phone_number,
+      /**
+       * How well this row answers what was typed. 0 means it does not.
+       *
+       * Digits are compared against digits, so the punctuation a person puts in
+       * a phone number is ignored on both sides. Higher is a better match, and
+       * the caller uses that to put the closest ones at the top.
+       */
+      rank: (raw, typedDigits) => {
+        if (!raw) return 1;
+
+        const phoneDigits = String(number.phone_number || "").replace(/\D/g, "");
+        if (typedDigits) {
+          // The tail matters most: people read a number back from its end, and
+          // "7268" should find +971524077268 ahead of anything it merely
+          // appears in the middle of.
+          if (phoneDigits.endsWith(typedDigits)) return 5;
+          if (phoneDigits.startsWith(typedDigits)) return 4;
+          if (phoneDigits.includes(typedDigits)) return 3;
+        }
+
+        const words = [
           label.value,
           number.display_name || "",
           ...assigned.map((id) => agentById(id)?.display_name || ""),
         ]
           .join(" ")
-          .toLowerCase(),
+          .toLowerCase();
+
+        if (words.startsWith(raw)) return 2;
+        if (words.includes(raw)) return 1;
+
+        // A term with no digits in it was a name search and has already failed;
+        // one with digits has been answered above. Anything left is a miss.
+        return 0;
+      },
     });
 
     refresh();
@@ -263,7 +436,24 @@ export function openNumbersAdmin({ onSaved } = {}) {
     }
 
     rows.clear();
-    const list = el("div.na-rows", {}, numbers.map(numberRow));
+
+    // Building the rows is guarded too, not only fetching them.
+    //
+    // A throw in here used to escape `load()` entirely and leave the dialog on
+    // "Loading numbers & agents…" for ever, with the reason only in a console
+    // nobody had open. One did: `applyFilter` read a variable named `term` that
+    // does not exist, so every row threw on construction and this screen was
+    // dead for as long as that typo lived.
+    let list;
+    try {
+      list = el("div.na-rows", {}, numbers.map(numberRow));
+    } catch (error) {
+      console.error("[a7-wa] numbers admin failed to draw:", error);
+      clear(body).append(
+        el("div.alert", {}, [`This screen could not be drawn: ${error.message}`])
+      );
+      return;
+    }
 
     const children = [
       el("p.na-note", {}, [
