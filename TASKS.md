@@ -27,6 +27,20 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `bitrix` — the linked-devices frame could not open or save anything
+View and Download on a document did nothing; so did the lightbox on a picture.
+The QR panel was fine. The iframe carrying it is sandboxed and was missing
+`allow-popups`, `allow-downloads` and `allow-popups-to-escape-sandbox` — a
+sandboxed frame drops `target="_blank"`, `window.open` and the `download`
+attribute **silently**, and a tab opened from one inherits the sandbox, which
+Chrome's PDF viewer will not run inside.
+
+Worth remembering when something in `/qr/` "does nothing": check the sandbox on
+`openLinkedDevices` before reading the QR panel's own code.
+
+Files: `bitrix/public/assets/modules/inbox.js`.
+Verified: deployed, md5 matches. Needs a hard refresh — the module is cached.
+
 ### 2026-08-05 · Opus session · `bitrix` — Numbers Management was dead, one word
 Stuck on "Loading numbers & agents…" for everyone. `applyFilter`'s last line
 read `term`; the variable is `raw`. ReferenceError on every row as it was built,
@@ -443,6 +457,45 @@ Files: `wa-qr/src/inbound/backfill.js`, `persist.js`, `sessions/*`,
 `db/003_history.sql`, `wa-qr/public/*`.
 Verified: 13,900 messages imported across both phones, dated correctly, unread
 counts untouched.
+
+---
+
+### 2026-08-05 — Inbound messages stopped arriving: two faults, both fixed
+
+Reported as "message receive nahi ho raha panel main". The endpoint was fine —
+`GET` 200, `POST` 403 without the bearer, which is correct. Webhook events were
+arriving and being stored (281 in 24 hours). They were failing *after* receipt.
+
+**Fault one — the worker was on older code than the web container.** Earlier
+today I rebuilt `web` alone. `worker` kept an image whose `Message` model
+predates `is_starred`, so its INSERT omitted a column the database has as NOT
+NULL with no default, and every inbound message died on
+
+    null value in column "is_starred" of relation "inbox_message"
+
+This is exactly the split CLAUDE.md warns about, arrived at by a different
+route: not `docker compose cp`, but `build web` when three services share the
+image. **Build all of them, or none.** `docker compose build` with no service
+argument, then `up -d`.
+
+**Fault two — a contact card stopped the whole batch.** `_store_inbound` read
+`message.get(kind, {}).get("caption")` for every non-text type, and Meta sends
+`contacts` as a *list*. Asking a list for a key raises, the exception escaped,
+and the event failed permanently — it would have kept failing on every retry.
+Now `_caption()` returns "" unless the payload part is a dict.
+
+Files: `backend/apps/gateway/tasks.py`.
+Verified: failed events 13 → 3 after the rebuild, 3 → 0 after the caption fix;
+all 687 events now `processed`. 48 inbound messages in the last six hours, the
+two `contacts` ones among them. Not touched: the single `transaction.atomic()`
+around a whole event, so one bad message still rolls back its batch — it retries
+and the raw payload is kept, so nothing is lost, and swallowing per-message
+errors would trade a loud failure for a silent one.
+
+Also settled a question left open this morning: 53 `Mirror` rows exist for those
+48 messages, which is the CRM timeline mirror firing from the `post_save` signal
+on real incoming traffic. It had only ever been proved by calling the task
+directly.
 
 ---
 
