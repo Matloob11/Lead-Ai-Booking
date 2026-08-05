@@ -204,8 +204,25 @@ export async function storeMessage(sessionId, message, options = {}) {
   const session = await store.getSessionById(sessionId);
   const phoneNumber = store.visibleNumber(session);
 
-  // Process media if present
-  const mediaRecord = message.hasMedia && withMedia ? await processInboundMedia(message) : null;
+  // What we already hold for this message, if anything.
+  //
+  // Asked before the attachment is fetched, because fetching it first is what
+  // was happening and it was expensive in the worst way. A catch-up import
+  // re-reads whatever overlaps what it already has; the insert below refuses
+  // those by wamid — but by then the file had been downloaded, and the qr_media
+  // row it created pointed at nothing. 767 files came down that way in two
+  // hours, every one of them a copy of a file already on disk.
+  //
+  // The cost is not the disk. It is asking WhatsApp for the same media over and
+  // over from a personal number, which is the kind of load these accounts get
+  // banned for — the thing `/api/risk` exists to watch for elsewhere.
+  const already = await one(`SELECT id, media_id FROM qr_message WHERE wamid = $1`, [wamid]);
+
+  // Fetch only when it would land somewhere: a message we have never seen, or
+  // one being repaired that never got its attachment.
+  const wantMedia =
+    message.hasMedia && withMedia && (!already || (repair && !already.media_id));
+  const mediaRecord = wantMedia ? await processInboundMedia(message) : null;
 
   // Which message this one answers, if any.
   let quotedId = "";
@@ -344,7 +361,13 @@ export async function storeMessage(sessionId, message, options = {}) {
   // with.
   const onConflict = repair
     ? `ON CONFLICT (wamid) DO UPDATE
-         SET kind = EXCLUDED.kind, payload = EXCLUDED.payload
+         SET kind = EXCLUDED.kind,
+             payload = EXCLUDED.payload,
+             -- COALESCE, so a repair can add the attachment a row never got
+             -- but can never replace one it already has. Without this the
+             -- media the repair had just downloaded was left unreferenced,
+             -- which is how the orphan rows started.
+             media_id = COALESCE(qr_message.media_id, EXCLUDED.media_id)
        WHERE qr_message.kind = 'unknown'`
     : `ON CONFLICT (wamid) DO NOTHING`;
 

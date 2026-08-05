@@ -441,7 +441,19 @@ async function retryFailedMedia(client, sessionId) {
         MEDIA_TIMEOUT_MS,
         `media for ${row.wamid}`
       );
-      if (!media?.downloaded) continue;
+      if (!media?.downloaded) {
+        // The attempt failed too — and processInboundMedia records every
+        // attempt as a new qr_media row, so the failure leaves one behind that
+        // nothing points at. The sweep runs every five minutes and the same
+        // four files keep refusing, which was quietly adding about a thousand
+        // orphan rows a day. The reason is worth keeping; the duplicate is not.
+        await q(`UPDATE qr_media SET download_error = $1 WHERE id = $2`, [
+          media?.download_error || "retried and failed again",
+          row.media_id,
+        ]);
+        if (media?.id) await q(`DELETE FROM qr_media WHERE id = $1`, [media.id]);
+        continue;
+      }
 
       // Pointed at the new row rather than repairing the old one: the failed
       // row is the record that this file once could not be fetched, and that is
