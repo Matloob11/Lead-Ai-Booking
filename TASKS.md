@@ -73,17 +73,32 @@ it can never touch a row that is already correct. Runs once per phone,
 Files: `wa-qr/src/inbound/persist.js`, `backfill.js`, `sessions/store.js`,
 `db/005_kind_repair.sql`.
 
-Phone #3: 93 unknown → **52 named** (48 `call`, 3 `deleted`, 1 `pending`), then
-3 more on a second run once the payload was allowed through — so 41 → 38.
-Phone #7's 785 were still running when this was written.
+Both phones finished. **878 → 508, so 370 named.** #3: 93 → 38 (48 `call`,
+3 `deleted`, 1 `pending`). #7: 785 → 218, of 567 named.
 
-Not verified, and worth the next session's attention: **38 rows on #3 were
-fetched successfully and then not written, and I do not know which guard in
-`storeMessage` rejected them.** `gone` was 0, so WhatsApp returned the message
-every time; `stored` came back false anyway. Do not assume they are
-unrecoverable — nobody has found out yet. The 3 that did come through are
-`automated_greeting_message` and `biz_content_placeholder`, neither of which is
-in the `KIND` map.
+The leftovers are no longer a mystery, which was the point of letting the
+payload through even when the kind stayed unknown:
+
+| what WhatsApp calls it | rows | |
+|---|---|---|
+| `album` | 86 | **not in the `KIND` map** — grouped photos |
+| `interactive` | 46 | **not in the map** either, though Django's side has it |
+| `unknown` | 110 | WhatsApp itself has no name for these |
+| `pinned_message` | 4 | not in the map |
+| `biz_content_placeholder` | 4 | |
+| `automated_greeting_message` | 2 | |
+| never rewritten | 256 | see below |
+
+**136 of these are one small change away**: adding `album`, `interactive` and
+`pinned_message` to `KIND` in `normalise.js` and clearing `kinds_repaired_at`
+would name them on the next pass. Not done — nobody asked, and it is a decision
+about what those should render as.
+
+Still not explained, and worth the next session's attention: **256 rows were
+fetched successfully and then not written.** `gone` was 0 both times, so
+WhatsApp returned the message; `stored` came back false anyway, so some guard
+in `storeMessage` rejected them before the insert. Do not assume they are
+unrecoverable — nobody has found out which guard yet.
 
 ### 2026-08-05 · Opus session · corrections to the two entries below, and where the media stands
 Checked rather than taken on trust, and two things in the entries below are not
@@ -294,7 +309,7 @@ then move it out of this list and into the log above.
 |---|---|
 | ~~Agent assignment~~ | Proved working 2026-08-05. Nothing to fix — it is waiting on a decision, not on code. |
 | Media | 2,699 attachments not on disk. **Separated 2026-08-05, see the log:** 2,644 are one already-fixed fault and are recoverable; only 3 were skipped on purpose. |
-| `unknown` messages | Repair pass built and run 2026-08-05. Phone #3: 93 → 38. Phone #7's 785 were mid-run. **38 rows were fetched and then silently not written — which guard refused them is not known.** |
+| `unknown` messages | Repair run 2026-08-05: 878 → 508. Of the leftovers, 136 are `album`/`interactive`/`pinned_message` — one KIND-map change away. 256 were fetched and then silently not written; which guard refused them is still unknown. |
 | Disconnect alert | Not built, and **deliberately deferred** — Matloob wants it later. Do not start it. |
 | ~~Read on the phone~~ | Done 2026-08-05. |
 | CRM placements | Bound by nobody yet. |
