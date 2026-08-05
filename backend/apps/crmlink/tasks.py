@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.inbox.models import Conversation, Message
 
 from . import client, summary as ai
+from .models import Mirror
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,12 @@ def mirror_message(message_id):
     if not message:
         return
 
+    # Already across. Checked before the lookup, so a repeat costs nothing at
+    # all — Celery runs with acks_late, and a worker that dies between posting
+    # the comment and acknowledging the task will run this again.
+    if Mirror.objects.filter(message_id=message.pk).exists():
+        return
+
     record = _record_for(message.conversation)
     if not record:
         # No lead and no contact for this number. Deliberately silent: the
@@ -77,10 +84,22 @@ def mirror_message(message_id):
         return
 
     try:
-        client.add_comment(record["type"], record["id"], _line(message))
+        comment_id = client.add_comment(record["type"], record["id"], _line(message))
     except client.BitrixError as exc:
         logger.warning("Could not mirror message %s: %s", message_id, exc)
         return
+
+    # Recorded after the fact. The other order would mark a message as sent
+    # across and then fail to send it, which is the one mistake this table
+    # cannot recover from.
+    Mirror.objects.get_or_create(
+        message_id=message.pk,
+        defaults={
+            "entity_type": record["type"],
+            "entity_id": record["id"],
+            "comment_id": comment_id if isinstance(comment_id, int) else None,
+        },
+    )
 
     # Every Nth message, rewrite what the manager reads.
     total = Message.objects.filter(conversation_id=message.conversation_id).count()

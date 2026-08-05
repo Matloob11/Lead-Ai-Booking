@@ -67,6 +67,38 @@ def call(method, payload=None):
 # message twice on the same screen.
 _SEARCH_ORDER = (("LEAD", "lead"), ("CONTACT", "contact"))
 
+# More phone numbers than this, and the record is not a person.
+#
+# Contact 167 in this portal is called "Dubai Agent" and carries several
+# thousand numbers — somebody emptied a phone list into one record. Bitrix's
+# duplicate search matches it for every one of them, so without this a
+# customer's private conversation would be posted onto a record shared with
+# thousands of unrelated numbers, and the timeline of the person it actually
+# belongs to would stay empty.
+#
+# Six is generous for a human — mobile, work, home, and a couple of old ones.
+MAX_PHONES_ON_A_PERSON = 6
+
+
+def _is_a_person(entity_type, entity_id):
+    """Whether this record looks like one customer rather than a phone list."""
+    try:
+        record = call(f"crm.{entity_type}.get", {"id": int(entity_id)})
+    except BitrixError as exc:
+        logger.warning("Could not read %s %s: %s", entity_type, entity_id, exc)
+        return False
+
+    phones = (record or {}).get("PHONE") or []
+    if len(phones) > MAX_PHONES_ON_A_PERSON:
+        logger.warning(
+            "Ignoring %s %s: it carries %s phone numbers, so it is a list rather than a person",
+            entity_type,
+            entity_id,
+            len(phones),
+        )
+        return False
+    return True
+
 
 def find_record(wa_id):
     """The lead or contact carrying this number, or None.
@@ -91,9 +123,12 @@ def find_record(wa_id):
             logger.warning("Bitrix duplicate search failed for %s: %s", entity_type, exc)
             continue
 
-        ids = (found or {}).get(entity_type) or (found or {}).get(kind)
-        if ids:
-            return {"type": kind, "id": int(ids[0])}
+        for candidate in (found or {}).get(entity_type) or (found or {}).get(kind) or []:
+            if _is_a_person(kind, candidate):
+                return {"type": kind, "id": int(candidate)}
+            # Otherwise keep looking. A number can sit on both a real lead and
+            # somebody's dumped phone list, and the list must not win just
+            # because Bitrix returned it first.
 
     return None
 
