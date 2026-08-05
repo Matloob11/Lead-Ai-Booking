@@ -312,7 +312,17 @@ export async function storeMessage(sessionId, message, options = {}) {
   // sendMessage answers with nothing on this WhatsApp build. Settle that row
   // rather than adding a second one beside it — otherwise every message an
   // agent sends appears twice, once stuck queued and once complete.
-  if (live && direction === "out") {
+  //
+  // Not only on the live path. The import re-reads our own sent messages too,
+  // and there the queued row has no wamid to collide with — so ON CONFLICT let
+  // a second row straight through and the agent saw their message twice, once
+  // stuck on a clock and once delivered. Both of the duplicates in this
+  // database arrived that way.
+  //
+  // Matched against the message's own time rather than now(), because an
+  // imported message is not new: its timestamp is when it was sent, which is
+  // the moment the queued row was written.
+  if (direction === "out") {
     const pending = await one(
       `UPDATE qr_message
           SET wamid = $1, status = $2, payload = $3
@@ -322,15 +332,18 @@ export async function storeMessage(sessionId, message, options = {}) {
              AND direction = 'out'
              AND wamid IS NULL
              AND body = $5
-             AND created_at > now() - interval '2 minutes'
+             AND created_at BETWEEN $6::timestamptz - interval '5 minutes'
+                                AND $6::timestamptz + interval '5 minutes'
            ORDER BY created_at DESC
            LIMIT 1)
         RETURNING id`,
-      [wamid, initialStatus, metaPayload, conversationId, body]
+      [wamid, initialStatus, metaPayload, conversationId, body, occurredAt]
     );
     if (pending) {
-      await q(`UPDATE qr_event SET status = 'processed' WHERE id = $1`, [eventRow.id]);
-      await emitWebhook(eventRow.id, metaPayload, phoneNumber);
+      if (eventRow) {
+        await q(`UPDATE qr_event SET status = 'processed' WHERE id = $1`, [eventRow.id]);
+        await emitWebhook(eventRow.id, metaPayload, phoneNumber);
+      }
       return { stored: true };
     }
   }
@@ -461,6 +474,10 @@ async function processReactionEvent(sessionId, reaction) {
 async function processAckEvent(sessionId, message, ack) {
   if (!message) return;
 
+  // Same reason as in storeMessage: nothing can be looked up by an id this
+  // build never filled in.
+  ensureSerialized(message);
+
   const fromJid = message.from || "";
   const toJid = message.to || "";
   if (
@@ -484,16 +501,29 @@ async function processAckEvent(sessionId, message, ack) {
   const phoneNumber = store.visibleNumber(session);
   const metaPayload = statusUpdate(message, ack);
 
-  const targetWamid = message.id?._serialized || String(message.id || "");
+  // messageId(), not id._serialized.
+  //
+  // This build does not set `_serialized`, so the fallback ran and String() on
+  // the id object produced the literal "[object Object]" — a wamid no row has
+  // ever held. Every delivery receipt therefore updated nothing, and a sent
+  // message stayed on its clock for ever while the phone beside it showed two
+  // blue ticks. Same field, same mistake, third place in this file.
+  const targetWamid = messageId(message.id);
   const statusStr = metaPayload.statuses[0]?.status || "sent";
 
   if (targetWamid) {
+    // Forwards only. WhatsApp re-sends acks and does not promise their order,
+    // so a stale `sent` arriving after `read` would walk the ticks backwards in
+    // front of the agent. The rank below is the order a message actually moves
+    // through; anything not in it is treated as the beginning.
     await q(
       `UPDATE qr_message
        SET status = $1,
            delivered_at = CASE WHEN $1 = 'delivered' AND delivered_at IS NULL THEN now() ELSE delivered_at END,
            read_at = CASE WHEN $1 = 'read' AND read_at IS NULL THEN now() ELSE read_at END
-       WHERE wamid = $2`,
+       WHERE wamid = $2
+         AND COALESCE(array_position(ARRAY['queued','sent','delivered','read'], status), 0)
+           < array_position(ARRAY['queued','sent','delivered','read'], $1)`,
       [statusStr, targetWamid]
     );
   }

@@ -38,7 +38,20 @@ const INLINE_TYPES = new Set([
   "video/webm",
   "video/3gpp",
   "video/quicktime",
+
+  // A PDF is the one document format a browser renders, and it is most of what
+  // customers send here — a title deed, a passport copy, a signed offer. Making
+  // an agent download each one to read it, then find it again to read it twice,
+  // is not reasonable for somebody working forty chats.
+  //
+  // Served under a sandbox CSP below rather than plainly: a PDF can carry
+  // script, and this one was written by somebody outside the company.
+  "application/pdf",
+  "text/plain",
 ]);
+
+/** Formats that get the sandbox on top of nosniff. */
+const SANDBOX_TYPES = new Set(["application/pdf", "text/plain"]);
 
 /** The row, if this caller is allowed it and its bytes are actually on disk. */
 async function reachableMedia(req, mediaId) {
@@ -89,6 +102,13 @@ router.get("/:id/inline", async (req, res, next) => {
 
     res.setHeader("Content-Type", mime);
     res.setHeader("Content-Disposition", "inline");
+
+    // A picture cannot run anything; a PDF can. The sandbox costs the viewer
+    // nothing — Chrome still renders it — and it takes away the one thing a
+    // document from a stranger should not have on this origin.
+    if (SANDBOX_TYPES.has(mime)) {
+      res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; object-src 'self'");
+    }
     // Still nosniff: it now means "this really is what I said it is", which is
     // the guarantee worth keeping once the type is no longer a lie.
     res.setHeader("X-Content-Type-Options", "nosniff");

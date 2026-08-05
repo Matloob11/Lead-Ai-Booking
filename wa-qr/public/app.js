@@ -1012,12 +1012,50 @@ function attachment(message) {
     return el("video.msg__video", { src: inline, controls: true, preload: "metadata" });
   }
 
-  return el("a.msg__file", { href: download, target: "_blank", rel: "noopener" }, [
+  // Anything else — a document. Two actions, not one.
+  //
+  // This was a single link that downloaded. Reading a title deed then meant
+  // fetching it, opening it from the downloads folder, and fetching it again
+  // the next time somebody asked. A PDF or a plain-text file opens in the
+  // browser now; a Word or Excel file still cannot, so it is offered only as a
+  // download rather than as a button that fails.
+  const canOpenHere = VIEWABLE_DOCS.has(mime);
+
+  return el("div.msg__file", {}, [
     icon("file", { size: 17 }),
-    el("span.msg__file-name", {}, [message.media_name || message.file_name || message.kind || "File"]),
-    el("span.msg__file-size", {}, [formatBytes(message.media_size ?? message.size_bytes)]),
+    el("div.msg__file-who", {}, [
+      el("div.msg__file-name", {}, [
+        message.media_name || message.file_name || message.kind || "File",
+      ]),
+      el("div.msg__file-size", {}, [
+        formatBytes(message.media_size ?? message.size_bytes),
+        canOpenHere ? "" : " · download to open",
+      ]),
+    ]),
+    el("div.msg__file-acts", {}, [
+      canOpenHere
+        ? el("a.msg__file-act", { href: inline, target: "_blank", rel: "noopener", title: "Open it here" }, ["View"])
+        : null,
+      el("a.msg__file-act", {
+        href: download,
+        // `download` rather than a new tab: the server sends this route as an
+        // attachment anyway, and a tab that opens and closes itself looks like
+        // nothing happened.
+        download: message.media_name || "",
+        title: "Save it",
+      }, ["Download"]),
+    ]),
   ]);
 }
+
+/**
+ * Documents a browser can render. Everything else downloads.
+ *
+ * Word and Excel are absent because no browser opens them — offering a View
+ * button for one is offering a button that fails. The server keeps its own copy
+ * of this list, and refuses to serve inline anything not on it.
+ */
+const VIEWABLE_DOCS = new Set(["application/pdf", "text/plain"]);
 
 /**
  * A failure, said once and briefly, with the way out next to it.
