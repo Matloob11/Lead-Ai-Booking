@@ -27,6 +27,27 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — "Message not shown here", down to what it should be
+56 messages read that way. Five WhatsApp type names were simply missing from
+`KIND`: `album`, `interactive`, `pinned_message`, `automated_greeting_message`,
+`biz_content_placeholder`. Added, panel labels with them, repair re-armed by
+clearing `kinds_repaired_at`.
+
+**56 → 44.** #7 named 14, #3 named 0.
+
+The 44 left cannot be closed by anyone. 42 carry **no type at all** — the phone
+was asked again and handed the message back with nothing to call it — and 2 are
+what WhatsApp itself calls `unknown`. None has a body or an attachment. So the
+sentence is true and should stay; do not "fix" it again.
+
+One thing to know if you touch this: `repairUnknownKinds` only runs at the end
+of a full `runBackfill`, and a `done` phone only starts one on `ready`. Clearing
+`kinds_repaired_at` alone does nothing — the container has to be restarted, and
+#7 needed a second restart because its backfill did not fire on the first.
+
+Files: `wa-qr/src/inbound/normalise.js`, `wa-qr/public/app.js`,
+`wa-qr/public/newchat.js`.
+
 ### 2026-08-05 · Opus session · `wa-qr` — the record is ten days now
 `FULL_HISTORY_MS` 182 days → **10**. A first import used to pull six months;
 13,000 messages from one phone, and almost none of it read.
