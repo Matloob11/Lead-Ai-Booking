@@ -20,6 +20,7 @@ import {
   installThreadExtras,
   notifyThreadPainted,
   threadHeadExtras,
+  voiceNote,
 } from "./thread-extras.js";
 import { createComposer } from "./composer.js";
 // Who works which phone, and how those phones are behaving. It also says why
@@ -763,10 +764,22 @@ async function selectConversation(id) {
  * The scrolling middle of the thread: whatever is loaded, plus the way back to
  * what is not.
  */
+/**
+ * Whether a message belongs in the thread at all.
+ *
+ * `system` is WhatsApp talking to itself — pairing notices, protocol messages,
+ * the housekeeping two copies of the app do. Stored, because the event log is
+ * the record of what arrived, and not drawn, because it is not something
+ * anybody said.
+ */
+const worthDrawing = (message) => message.kind !== "system";
+
 function messagesNode(conversation) {
   const messages = el("div.thread__messages");
   if (state.canLoadOlder) messages.append(olderButton());
-  for (const message of state.messages) messages.append(bubble(message, conversation));
+  for (const message of state.messages.filter(worthDrawing)) {
+    messages.append(bubble(message, conversation));
+  }
   if (!state.messages.length) {
     messages.append(el("div.empty", {}, ["No messages in this chat yet."]));
   }
@@ -879,6 +892,39 @@ function renderThread({ keepScroll = false } = {}) {
   else messages.scrollTop = keptTop;
 }
 
+/**
+ * What a message with nothing in it actually was.
+ *
+ * A bubble that says "[unknown]" reads as a fault in this panel. Most of these
+ * are not: WhatsApp carries polls, calls and withdrawn messages down the same
+ * socket as text, and until now none of them had a name here.
+ *
+ * `unknown` is still possible and still says so — but plainly, because it means
+ * "this panel does not draw that kind yet", not "something broke".
+ */
+const KIND_SAID = {
+  deleted: "This message was deleted",
+  poll: "Poll",
+  call: "Call",
+  order: "Order",
+  product: "Product",
+  interactive: "Button reply",
+  invite: "Group invitation",
+  contacts: "Contact card",
+  location: "Location",
+  sticker: "Sticker",
+  pending: "Waiting for this message",
+  system: "",
+  text: "",
+  unknown: "Message not shown here",
+};
+
+function kindSentence(kind) {
+  const key = String(kind || "").toLowerCase();
+  if (key in KIND_SAID) return KIND_SAID[key] || "Message not shown here";
+  return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
 /** The words of the message this one answers, "" if unknown, null if none. */
 function quotedFor(message) {
   if (message.reply_to) return message.reply_to.body || `[${message.reply_to.kind || "message"}]`;
@@ -936,7 +982,10 @@ function attachment(message) {
     // A voice note is listened to in place. Downloading a file to hear what a
     // customer said, and then finding it again to hear it twice, is not a
     // reasonable thing to ask of somebody answering forty chats.
-    return el("audio.msg__audio", { src: inline, controls: true, preload: "none" });
+    //
+    // Drawn by thread-extras rather than by <audio controls>, which renders the
+    // platform's own white widget in the middle of a dark thread.
+    return voiceNote(message, inline);
   }
 
   if (looks("video/", "video")) {
@@ -1019,7 +1068,10 @@ function bubble(message, conversation) {
 
   if (message.body) node.append(el("div.msg__body", {}, [message.body]));
   else if (!message.media_url && !message.media_id) {
-    node.append(el("div.msg__body", {}, [`[${message.kind || "message"}]`]));
+    // In words, not in brackets. "[unknown]" told an agent that something had
+    // gone wrong, when almost always nothing had — it was a poll, a missed
+    // call, or a message the other person deleted.
+    node.append(el("div.msg__body.msg__body--said", {}, [kindSentence(message.kind)]));
   }
 
   if (message.status === "failed") node.append(failure(message, conversation));

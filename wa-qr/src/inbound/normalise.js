@@ -23,6 +23,36 @@ const KIND = {
   location: "location",
   vcard: "contacts",
   multi_vcard: "contacts",
+
+  // Everything below used to fall through to "unknown", and 878 messages —
+  // one in sixteen — were sitting in the panel as the literal text
+  // "[unknown]". Most of them are ordinary things WhatsApp does: a message
+  // somebody deleted, a poll, a missed call, the pairing notices the app sends
+  // itself. None of that is a mystery worth showing an agent as one.
+  //
+  // The names on the right are Meta's own where Meta has one, so the payload
+  // this builds stays in the dialect `apps/gateway/tasks.py` already reads.
+  // `deleted` is the exception: Meta's webhook has no word for a message that
+  // was withdrawn, and "unsupported" would be a worse lie than a new word.
+  revoked: "deleted",
+  ciphertext: "pending", // arrived before the key did; usually resolves itself
+  poll_creation: "poll",
+  poll_update: "poll",
+  call_log: "call",
+  order: "order",
+  product: "product",
+  list: "interactive",
+  list_response: "interactive",
+  buttons_response: "interactive",
+  template_button_reply: "interactive",
+  groups_v4_invite: "invite",
+
+  // Housekeeping between two copies of WhatsApp. Never worth a bubble.
+  e2e_notification: "system",
+  notification_template: "system",
+  gp2: "system",
+  protocol: "system",
+  broadcast_notification: "system",
 };
 
 /** A wa_id as Meta writes it: digits only, no @c.us suffix. */
@@ -207,6 +237,15 @@ export function inboundMessage(
     timestamp: String(message.timestamp || Math.floor(Date.now() / 1000)),
     type: kind,
   };
+
+  // What the library called it, kept alongside what we called it.
+  //
+  // Underscored so it reads as ours rather than as part of Meta's shape. It
+  // exists because 878 messages ended up stored as "unknown" and there was no
+  // way left to ask what any of them had been — the raw type was thrown away at
+  // exactly the point it stopped being understood. The next type WhatsApp
+  // invents will be answerable with one query instead of a guess.
+  if (kind === "unknown" && message.type) out._type = String(message.type);
 
   if (kind === "text") {
     out.text = { body: message.body || "" };

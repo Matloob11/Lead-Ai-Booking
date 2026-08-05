@@ -106,6 +106,93 @@
   word-break: break-word;
 }
 
+/* ------------------------------------------------------------ voice notes */
+
+/* Built here because <audio controls> draws the platform's own widget — a
+   white pill with a ⋯ menu — which takes no colour from the page and looked
+   like a fault sitting in the middle of a dark thread. */
+.voice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 190px;
+  padding: 3px 2px;
+}
+
+.voice__play {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(127, 127, 127, 0.2);
+  color: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.voice__play:hover {
+  background: rgba(127, 127, 127, 0.34);
+}
+
+/* The hit area is 22px tall and the bar drawn inside it is 4px: the thing being
+   aimed at is a moment in a recording, and a 4px target is not one. Drawn with
+   ::before and an absolutely positioned fill rather than padding, because
+   box-sizing is border-box across this panel — padding would eat the height
+   rather than add to it. */
+.voice__track {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.voice__track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.28);
+}
+
+.voice__fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.voice__time {
+  flex: none;
+  min-width: 34px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Said rather than shown: a poll, a call, a withdrawn message. Quieter than a
+   real message, because it is a note about one. */
+.msg__body--said {
+  font-style: italic;
+  opacity: 0.72;
+}
+
 /* --------------------------------------------------------------- reactions */
 
 /* The bubble has to be a positioning context for the bar and the ⋯ button, and
