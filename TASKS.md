@@ -27,6 +27,36 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — both imports finished, and what the missing media really is
+matloob 157/157, malik 430/430. 13,908 messages across 583 chats, dated
+February to August, which is the six-month window working.
+
+Cleared 33 `test_bulk_*` contacts and their 33 chats — somebody's bulk-guard
+test, provably empty, no message of any kind on any of them.
+
+**Read this before touching the media task.** The 2,699 undownloaded
+attachments are not what they look like, and not what the brief for that job
+assumed:
+
+| reason | count |
+|---|---|
+| `downloadMedia failed: r` | **2,644** |
+| `webMediaType is invalid` | 27 |
+| `No media data returned` | 19 |
+| `downloadMedia failed: t` | 4 |
+| too big — by design | 3 |
+| `Runtime.callFunctionOn` | 2 |
+
+`failed: r` is the minified error from the `id._serialized` bug — the one
+`media.js` was fixed for in 4485520. So almost none of these were skipped on
+purpose: they are one already-fixed fault, and they are recoverable. Only three
+are the deliberate kind.
+
+The catch: `retryFailedMedia()` only looks inside the 10-day media window, so
+it can never reach most of them. Recovering the rest means deciding how far
+back is worth the disk and the transfer — that is Matloob's call, not the
+agent's. Do not widen the window without asking.
+
 ### 2026-08-05 · Opus session · `wa-qr` — reading a chat now reaches the phone
 `POST /api/actions/seen` existed and nothing called it, so the customer never
 saw a blue tick and the handset still showed the chat unread. It also could not
@@ -119,7 +149,7 @@ then move it out of this list and into the log above.
 | | |
 |---|---|
 | ~~Agent assignment~~ | Proved working 2026-08-05. Nothing to fix — it is waiting on a decision, not on code. |
-| Media | 2,695 attachments not on disk. Some by design (outside the 10-day window), some real failures — nobody has separated the two. |
+| Media | 2,699 attachments not on disk. **Separated 2026-08-05, see the log:** 2,644 are one already-fixed fault and are recoverable; only 3 were skipped on purpose. |
 | `unknown` messages | 878 rows whose real type was thrown away. Only a re-import can recover them, and `ON CONFLICT DO NOTHING` currently prevents that. |
 | Disconnect alert | Not built, and **deliberately deferred** — Matloob wants it later. Do not start it. |
 | ~~Read on the phone~~ | Done 2026-08-05. |
