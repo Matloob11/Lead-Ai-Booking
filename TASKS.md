@@ -27,6 +27,23 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `bitrix` — Numbers Management was dead, one word
+Stuck on "Loading numbers & agents…" for everyone. `applyFilter`'s last line
+read `term`; the variable is `raw`. ReferenceError on every row as it was built,
+`numbers.map(numberRow)` threw with it, `load()` rejected unhandled, spinner for
+ever — reason only in a console nobody had open.
+
+Whoever wrote the search ranking (entry below) introduced it; it parses fine, so
+nothing caught it before a browser did.
+
+Also wrapped the render in a try. The fetch was already guarded and the render,
+where the work actually happens, was not — which is why a one-word mistake
+looked like a hang instead of an error.
+
+Files: `bitrix/public/assets/modules/numbers-admin.js`.
+Verified: parses, deployed, md5 matches. Not verified in a browser — Matloob has
+the window; needs a hard refresh past the cached module.
+
 ### 2026-08-05 · Opus session · `wa-qr` — ticks, doubles, and documents
 Matloob's screenshot: his own messages showing twice in the panel, one on a
 clock and one delivered, while WhatsApp beside it showed two blue ticks.
