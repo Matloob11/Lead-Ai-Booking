@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "apps.inbox",
     "apps.gateway",
     "apps.reports",
+    "apps.crmlink",
 ]
 
 MIDDLEWARE = [
@@ -226,6 +227,30 @@ MEDIA_AUTHENTICATED_HOSTS = env_list("MEDIA_AUTHENTICATED_HOSTS", "lookaside.fbs
 BITRIX_CLIENT_ID = env("BITRIX_CLIENT_ID", "")
 BITRIX_CLIENT_SECRET = env("BITRIX_CLIENT_SECRET", "")
 
+# An inbound webhook, which is the only credential this backend has for writing
+# to the portal. The AUTH_ID an agent signs in with is spent verifying who they
+# are and never kept, so nothing else here can reach Bitrix — and a message
+# arriving at three in the morning has no agent's session to borrow.
+#
+# Ends with a slash; a method name is appended to it. Empty disables the
+# mirroring entirely rather than failing every message.
+BITRIX_WEBHOOK_URL = env("BITRIX_WEBHOOK_URL", "").strip()
+
+# OpenAI — the running summary pinned to a lead
+# ---------------------------------------------------------------------------
+OPENAI_API_KEY = env("OPENAI_API_KEY", "")
+OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT = int(env("OPENAI_TIMEOUT", "45"))
+
+# How many messages may pass before the summary is rewritten. Every message
+# would cost a model call per message on a busy number; ten keeps it current
+# without the bill following the traffic.
+SUMMARY_EVERY_N_MESSAGES = int(env("SUMMARY_EVERY_N_MESSAGES", "10"))
+
+# How much of the conversation the model is shown. The tail, because what the
+# customer wants now matters more than what they asked three weeks ago.
+SUMMARY_CONTEXT_MESSAGES = int(env("SUMMARY_CONTEXT_MESSAGES", "60"))
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -238,5 +263,12 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": env("LOG_LEVEL", "INFO")},
     "loggers": {
         "django.db.backends": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+        # httpx logs the full URL of every request it makes, at INFO. The
+        # Bitrix inbound webhook carries its token in the path, so that one line
+        # puts a standing credential into the container log — which far more
+        # people read than the environment file it is supposed to live in.
+        # WARNING keeps the failures and drops the addresses.
+        "httpx": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+        "httpcore": {"level": "WARNING", "handlers": ["console"], "propagate": False},
     },
 }
