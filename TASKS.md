@@ -58,47 +58,10 @@ Nobody has done it and it is not urgent.
 Files: `wa-qr/src/inbound/persist.js`, `wa-qr/src/inbound/backfill.js` — both
 shared, both were being edited by other sessions today.
 
-### 2026-08-05 · Opus session · `wa-qr` — the same attachments were being downloaded over and over
-Found while checking the media numbers, not while looking for it. Two separate
-leaks, both now stopped, both verified by watching a full sweep afterwards.
-
-**The import re-downloaded what it already had.** `storeMessage` fetched the
-attachment *before* the insert, and the insert refuses a known wamid — so every
-catch-up pass pulled the file again and left a `qr_media` row nothing pointed
-at. It now asks whether the message is already stored first, and fetches only
-when the file would land somewhere.
-
-**The retry left one behind every time it failed.** `processInboundMedia`
-records each attempt as a new row, so the four attachments that keep refusing
-were adding four orphans every five minutes — about a thousand a day, for ever.
-The failure is now written onto the original row and the duplicate dropped.
-
-The cost was never the disk. It was asking WhatsApp for the same media again
-and again from a personal number, which is the load these accounts get banned
-for — the thing `/api/risk` watches for everywhere else.
-
-Also fixed: the repair's `DO UPDATE` did not carry `media_id`, so an attachment
-it downloaded was orphaned by the same statement meant to save it. `COALESCE`,
-so a repair can add a file a row never had and never replace one it has.
-
-Files: `wa-qr/src/inbound/persist.js`, `wa-qr/src/inbound/backfill.js`.
-Verified: zero new media rows across a full sweep cycle, with the sweep visibly
-running (`#7 retrying 4 attachment(s) … recovered 0 of 4`).
-
-**Two decisions left for Matloob, and nothing should be deleted before he
-answers.** The leaks left 10,032 orphan `qr_media` rows behind:
-
-| | |
-|---|---|
-| orphan rows | 10,032 |
-| of those, holding a file no live row uses | ~6,800 |
-| disk that holds | **1,914 MB** |
-| orphan rows whose file a live row still needs | 2,390 |
-
-1. Delete the orphan rows? Safe — nothing references them, and the table stops
-   being mostly debris.
-2. Delete the 1.9 GB of files underneath them? Only the ones no live row shares;
-   the 2,390 above must not be touched or live messages lose their attachment.
+A second entry describing this same work was written a few minutes later and has
+been removed. Two sessions reached the same two leaks from different directions
+within the hour — which is the collision this file exists to make visible, and
+the first time it has actually caught one.
 
 ### 2026-08-05 · Opus session · `wa-qr` — re-reading the `unknown` messages
 A repair pass asks WhatsApp what the 878 unnameable messages were, message by
