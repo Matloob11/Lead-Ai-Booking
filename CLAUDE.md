@@ -106,6 +106,12 @@ uncommitted changes, it is probably mid-edit somewhere else. Prefer adding a new
 module over widening an existing one, and say in the reply which shared files
 were touched so the user can pass it on.
 
+**Read the last ten entries of `TASKS.md` before starting, and add one when you
+finish.** It is the only place that says who was working on what, whether it
+reached the server, and whether anybody proved it works — none of which a commit
+message carries. Twice now, work has been rebuilt that already existed, and once
+a change was undone by a session that could not tell whose it was.
+
 ## Talking to the server: `ops/wa.sh`
 
 Everything routine on the live host goes through this script, and it is the only
