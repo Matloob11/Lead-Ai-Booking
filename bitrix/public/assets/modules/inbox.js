@@ -16,7 +16,7 @@
 import { access, auth, catalog, inbox, asList } from "../api/api.js";
 import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
-import { ensureSession } from "../core/bitrix-sso.js";
+import { callBitrix, ensureSession } from "../core/bitrix-sso.js";
 import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
@@ -780,6 +780,85 @@ export function mountInbox(root, { me, openRequest = null }) {
     clear(ui.messages).append(el("div.thread__hint", {}, ["Select a chat from the left."]));
   }
 
+  /**
+   * The way back to the CRM record this customer belongs to.
+   *
+   * Put beside the window chip because that is where somebody stands when they
+   * want to know whether any of this reached the lead — and until now the only
+   * way to find out was to leave the panel, open the CRM, and search for the
+   * number by hand.
+   *
+   * The lookup is Bitrix's own duplicate search, which is the same thing the
+   * portal uses when it decides two records are the same person. It is asked at
+   * click time rather than on every repaint: the answer is one REST call per
+   * chat, and drawing the list would have made hundreds.
+   */
+  function openLeadButton(conversation) {
+    const waId = conversation.contact?.wa_id || "";
+    if (!waId) return null;
+
+    const button = el("button.btn.btn--ghost.btn--sm", {
+      type: "button",
+      title: "Open this customer's record in the CRM",
+    }, [icon("user", { size: 15 }), " Lead"]);
+
+    button.addEventListener("click", async () => {
+      const label = button.textContent;
+      button.disabled = true;
+      try {
+        const found = await findCrmRecord(waId);
+        if (!found) {
+          // Said on the button itself. A modal for "there is no lead" is a
+          // dialog to dismiss in exchange for nothing.
+          clear(button).append(icon("alert", { size: 15 }), " No CRM record");
+          setTimeout(() => clear(button).append(icon("user", { size: 15 }), label), 2600);
+          return;
+        }
+        // openPath rather than a new tab: the panel is already inside Bitrix,
+        // and the portal opens its own records in a slider over whatever the
+        // agent was doing.
+        window.BX24?.openPath?.(found.path);
+      } catch (error) {
+        console.warn("[a7-wa] CRM lookup failed:", error);
+        clear(button).append(icon("alert", { size: 15 }), " CRM search failed");
+        setTimeout(() => clear(button).append(icon("user", { size: 15 }), label), 2600);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    return button;
+  }
+
+  /**
+   * The lead, contact or company carrying this number.
+   *
+   * Leads first, then contacts, then companies — the order the portal itself
+   * treats as most specific. A number can be on more than one; the first is
+   * opened rather than a chooser being drawn, because the agent asked "where
+   * does this land", not "list everywhere it appears".
+   */
+  async function findCrmRecord(waId) {
+    const digits = String(waId).replace(/\D/g, "");
+    // Both spellings. Bitrix matches the string it holds, and a number saved as
+    // +971… does not match one saved as 971….
+    const values = [digits, `+${digits}`];
+
+    for (const [type, path] of [["LEAD", "lead"], ["CONTACT", "contact"], ["COMPANY", "company"]]) {
+      const hit = await callBitrix("crm.duplicate.findbycomm", {
+        entity_type: type,
+        type: "PHONE",
+        values,
+      }).catch(() => null);
+
+      const ids = hit && (hit[type] || hit[type.toLowerCase()]);
+      if (Array.isArray(ids) && ids.length) {
+        return { type, id: ids[0], path: `/crm/${path}/details/${ids[0]}/` };
+      }
+    }
+    return null;
+  }
+
   function renderThreadHeader(conversation) {
     clear(ui.threadHeader);
     if (!conversation) {
@@ -809,6 +888,7 @@ export function mountInbox(root, { me, openRequest = null }) {
         conversation.assigned_agent
           ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
           : null,
+        openLeadButton(conversation),
         el("button.btn.btn--ghost.btn--sm", {
           type: "button",
           title: "Export chat record",
