@@ -27,6 +27,36 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — ticks, doubles, and documents
+Matloob's screenshot: his own messages showing twice in the panel, one on a
+clock and one delivered, while WhatsApp beside it showed two blue ticks.
+
+**Ticks.** `processAckEvent` read `message.id._serialized` — the field this
+build does not set — and fell back to `String(id)`, giving the literal
+`"[object Object]"`. Every delivery receipt matched nothing. **Third place in
+this file with that same bug**; if you touch anything that reads a message id,
+use `messageId()`. Acks also only move a message forward now: WhatsApp re-sends
+them out of order and a stale `sent` after `read` walked the ticks backwards.
+
+**Doubles.** The outbound reconcile was fenced behind `live`. The import
+re-reads our own sent messages, the queued row has no wamid to collide with, so
+`ON CONFLICT` let a second row through. Runs on both paths now, matched against
+the message's own timestamp rather than `now()`. Four settled stubs deleted
+live.
+
+**Documents.** A file was one link that downloaded. `application/pdf` and
+`text/plain` serve inline now, under a sandbox CSP — a PDF can carry script and
+these are written by strangers. Every file row has View and Download; Word and
+Excel get Download only, because no browser opens them.
+
+Verified: 0 stuck queued, outbound now 660 read / 63 delivered / 109 sent / 1
+failed, and a real PDF returns 200 `application/pdf` with the sandbox header.
+Not verified: the ticks advancing on a message sent from the panel right now —
+needs somebody to send one.
+
+Files: `wa-qr/src/inbound/persist.js`, `src/api/routes/media.js`,
+`public/app.js`, `public/app.css`.
+
 ### 2026-08-05 · Opus session · `wa-qr` — "Message not shown here", down to what it should be
 56 messages read that way. Five WhatsApp type names were simply missing from
 `KIND`: `album`, `interactive`, `pinned_message`, `automated_greeting_message`,
