@@ -594,10 +594,24 @@ async function markRead(id) {
   conversation.unread_count = 0;
   paintConversations();
 
+  // The phone as well as our own counter.
+  //
+  // Reading a chat here used to clear the badge and tell WhatsApp nothing, so
+  // the customer never saw their message go blue and the handset itself still
+  // showed the chat unread. `seen` does both — and it is the one place in this
+  // product where blue ticks are possible at all: the Cloud gateway refuses
+  // read receipts outright, a QR-linked phone does not.
+  //
+  // The plain route is the fallback rather than an alternative. If the handset
+  // is offline the badge must still go, or an agent is left looking at a number
+  // that will not clear.
   try {
-    await api(`api/conversations/${id}/read`, { method: "POST" });
+    await api("api/actions/seen", { method: "POST", body: { conversation_id: Number(id) } });
   } catch (error) {
-    console.warn("[wa-qr] could not mark the chat read:", error.message);
+    console.warn("[wa-qr] could not mark the chat seen on the phone:", error.message);
+    await api(`api/conversations/${id}/read`, { method: "POST" }).catch((second) =>
+      console.warn("[wa-qr] could not clear the badge either:", second.message)
+    );
   }
 }
 
