@@ -185,6 +185,15 @@ function closeLightbox() {
 /** The one that is playing, so starting another stops it. */
 let nowPlaying = null;
 
+/**
+ * One player per message, kept across repaints. See voiceNote for why.
+ *
+ * Keyed by message id and never cleared: a thread holds forty bubbles and an
+ * Audio with no source loaded costs nothing until it is played. Switching chats
+ * leaves whatever was playing to finish, which is the same thing WhatsApp does.
+ */
+const voices = new Map();
+
 const clock = (seconds) => {
   const s = Math.max(0, Math.round(Number(seconds) || 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -206,9 +215,31 @@ const clock = (seconds) => {
 export function voiceNote(message, src) {
   const { el, clear } = ctx;
 
-  const audio = new Audio();
-  audio.preload = "metadata";
-  audio.src = src;
+  // The audio outlives the bubble drawn around it.
+  //
+  // The thread repaints every five seconds, and a repaint replaces the whole
+  // bubble. A fresh `new Audio()` each time meant the recording carried on —
+  // an Audio object is not in the document and does not stop when its bubble
+  // is thrown away — while the button in front of the agent reset to ▶ and the
+  // bar stopped moving. It sounded like it was playing and looked like it was
+  // not, and pressing play again started a second copy over the first.
+  //
+  // Kept by message id, so the same recording keeps one player however many
+  // times its bubble is redrawn.
+  let held = voices.get(message.id);
+  if (!held) {
+    const audio = new Audio();
+    audio.preload = "metadata";
+    audio.src = src;
+    held = { audio, detach: null };
+    voices.set(message.id, held);
+  }
+
+  // Listeners belong to the nodes being built now. Without dropping the last
+  // set, every repaint would add another and one `timeupdate` would run forty
+  // times a second against forty dead buttons.
+  held.detach?.();
+  const { audio } = held;
 
   const play = el("button.voice__play", { type: "button", title: "Play" }, ["▶"]);
   const fill = el("div.voice__fill");
@@ -223,24 +254,38 @@ export function voiceNote(message, src) {
     time.textContent = audio.paused ? clock(total) : clock(total - audio.currentTime);
   };
 
+  /** ▶ or ❚❚, from what the audio is actually doing rather than from a flag. */
+  const paintButton = () => {
+    play.textContent = audio.paused ? "▶" : "❚❚";
+    play.title = audio.paused ? "Play" : "Pause";
+  };
+
+  const onEnded = () => {
+    audio.currentTime = 0;
+    nowPlaying = null;
+    paintButton();
+    paint();
+  };
+  const onState = () => {
+    paintButton();
+    paint();
+  };
+
   audio.addEventListener("loadedmetadata", paint);
   audio.addEventListener("timeupdate", paint);
-  audio.addEventListener("ended", () => {
-    audio.currentTime = 0;
-    play.textContent = "▶";
-    play.title = "Play";
-    nowPlaying = null;
-    paint();
-  });
-  audio.addEventListener("pause", () => {
-    play.textContent = "▶";
-    play.title = "Play";
-    paint();
-  });
-  audio.addEventListener("play", () => {
-    play.textContent = "❚❚";
-    play.title = "Pause";
-  });
+  audio.addEventListener("ended", onEnded);
+  audio.addEventListener("pause", onState);
+  audio.addEventListener("play", onState);
+
+  // Handed back so the next repaint can take them off this audio before it
+  // wires up the bubble that replaces this one.
+  held.detach = () => {
+    audio.removeEventListener("loadedmetadata", paint);
+    audio.removeEventListener("timeupdate", paint);
+    audio.removeEventListener("ended", onEnded);
+    audio.removeEventListener("pause", onState);
+    audio.removeEventListener("play", onState);
+  };
 
   play.addEventListener("click", () => {
     if (!audio.paused) return audio.pause();
@@ -268,6 +313,11 @@ export function voiceNote(message, src) {
   track.addEventListener("pointermove", (event) => {
     if (track.hasPointerCapture(event.pointerId)) seek(event);
   });
+
+  // Drawn from where the recording actually is, not from zero. A repaint that
+  // reset the bar to the start was the other half of what looked like a stall.
+  paintButton();
+  paint();
 
   return el("div.voice", {}, [play, track, time]);
 }
