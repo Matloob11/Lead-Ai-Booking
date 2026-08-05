@@ -27,6 +27,51 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — the record is ten days now
+`FULL_HISTORY_MS` 182 days → **10**. A first import used to pull six months;
+13,000 messages from one phone, and almost none of it read.
+
+The rule in full, because half of it was already built and nobody had written
+it down together:
+
+- **a number never linked before** → 10 days
+- **a number coming back** → from where its last run finished, however long the
+  gap. Away 20 days brings back 20; away 60 brings back 60.
+- **a known number rescanned onto a fresh QR** → inherits the watermark through
+  `adoptHistoryFrom`, so it catches up instead of starting over.
+
+Proved all four against the deployed constant inside the container: 10 / 21 /
+61 / 1 days. The extra day is the deliberate clock-drift overlap; `wamid` refuses
+the re-reads.
+
+Done once, by hand, on the live database at Matloob's instruction — 12,373
+messages older than ten days, the 486 chats and contacts left holding nothing,
+1,906 media rows, 2 files. **1,541 messages across 98 chats remain, 26 July to
+today.** Nothing in the code deletes on a schedule or when a phone connects; he
+asked for that explicitly. If it is wanted again, it is run again on purpose.
+
+Files: `wa-qr/src/inbound/backfill.js`.
+
+### 2026-08-05 · Opus session · `bitrix` — Numbers Management: both searches
+Matloob: partial digits found nothing until the whole number was typed, and the
+agent dropdown could only be scrolled.
+
+The number box now compares **digits to digits** — "+971 52 407", "0524077268"
+and "52 407" are one number to a person and were three different strings to the
+old literal `includes()`. Matches are also reordered to the top, best first:
+ends-with beats starts-with beats contains, then names. Twenty-one rows in a
+scrolling box need the answer where the eye already is.
+
+The agent `<select>` is now a type-to-filter combobox — arrow keys, Enter on the
+highlighted row only (never a guess at the first match), Escape clears. Name
+matches are ordered name-start before mid-name.
+
+Files: `bitrix/public/assets/modules/numbers-admin.js`, `numbers-admin.css`.
+Verified: 20 checks on both rankings against the real numbers and agent names;
+deployed, md5 matched, nginx serves both at the byte counts on disk.
+Not verified: not clicked in the browser — Matloob had the window. Needs a hard
+refresh to get past the cached module.
+
 ### 2026-08-05 · Opus session · `wa-qr` — 1.9 GB of unreferenced media removed, and a deletion not done
 Matloob asked for a one-off cut of everything older than 10 days, for these two
 phones only, because of server pressure. The numbers said that would not achieve
