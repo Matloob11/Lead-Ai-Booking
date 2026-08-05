@@ -27,6 +27,39 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-05 · Opus session · `wa-qr` — 1.9 GB of unreferenced media removed, and a deletion not done
+Matloob asked for a one-off cut of everything older than 10 days, for these two
+phones only, because of server pressure. The numbers said that would not achieve
+it, and he chose otherwise once he saw them:
+
+| | |
+|---|---|
+| whole database | 22 MB |
+| media on disk | 2.3 GB |
+| free on the server | 147 GB, 24% used |
+| messages older than 10 days | 12,373 of 13,913 — **89%** |
+| chats that would be left empty | 486 of 584 |
+
+Deleting 89% of the record would have freed about 9 MB, because the space is in
+media, not rows — and it would have undone what the history import is for: an
+agent deletes a chat, it is noticed a week later, and there is nothing left to
+check. **No messages were deleted.**
+
+What was deleted: 5,375 files nothing references — 1.9 GB. 419 MB and 546 files
+remain, which is every file a live message still names.
+
+**The dry run earned its keep.** The first attempt's SQL quoting broke inside
+the ssh command, the "still needed" list came back empty, and the delete list
+was therefore *every file on disk*. Printing the counts instead of piping
+straight to `rm` is the only reason 2.3 GB of customer media is still there.
+Never delete from a list nobody has looked at.
+
+Verified after: two images serve 200 with their real bytes and mime, a PDF 302s
+to the download route by design and serves 200 there, and nothing needed is
+missing from disk.
+
+Files: none changed. Live data only.
+
 ### 2026-08-05 · Opus session · `wa-qr` — the media numbers were being manufactured
 Chased why 767 qr_media rows appeared in two hours with no message pointing at
 any of them, and found two leaks. Both are fixed and verified over two sweep
