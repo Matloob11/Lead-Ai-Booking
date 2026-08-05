@@ -91,6 +91,9 @@ const KIND_LABEL = {
   interactive: "Button reply",
   invite: "Group invitation",
   pending: "Waiting for this message",
+  album: "Photos",
+  pinned: "Pinned a message",
+  unsupported: "Not sent by WhatsApp",
   unknown: "Message not shown here",
 };
 

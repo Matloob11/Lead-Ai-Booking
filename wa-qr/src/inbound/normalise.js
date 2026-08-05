@@ -47,6 +47,20 @@ const KIND = {
   template_button_reply: "interactive",
   groups_v4_invite: "invite",
 
+  // Found by asking the phone what the leftover "unknown" rows were, which is
+  // the whole reason `_type` is recorded below. None of these is exotic —
+  // they were simply never written down.
+  //
+  // `album` is the wrapper WhatsApp sends when somebody picks several photos at
+  // once; the photos themselves arrive as their own image messages beside it,
+  // so this row is a marker rather than a picture. Kept rather than dropped,
+  // because "they sent four photos together" is worth seeing.
+  album: "album",
+  interactive: "interactive",
+  pinned_message: "pinned",
+  automated_greeting_message: "text",
+  biz_content_placeholder: "unsupported",
+
   // Housekeeping between two copies of WhatsApp. Never worth a bubble.
   e2e_notification: "system",
   notification_template: "system",

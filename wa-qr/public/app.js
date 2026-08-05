@@ -928,6 +928,9 @@ const KIND_SAID = {
   location: "Location",
   sticker: "Sticker",
   pending: "Waiting for this message",
+  album: "Several photos, sent together",
+  pinned: "Pinned a message",
+  unsupported: "WhatsApp did not send the contents",
   system: "",
   text: "",
   unknown: "Message not shown here",
@@ -969,13 +972,16 @@ function attachment(message) {
   const mime = String(message.media_mime || message.mime_type || "").toLowerCase();
   const kind = message.kind || "";
 
-  // The file never arrived. Said in words rather than drawn as a broken image
-  // or a player with nothing behind it: the message itself is still worth
-  // reading, and what is missing is worth naming.
+  // The file never arrived or is older than the retention window.
   if (message.media_downloaded === false) {
-    return el("div.msg__missing", {}, [
+    const ageMs = message.created_at ? Date.now() - new Date(message.created_at).getTime() : 0;
+    const isOld = ageMs > 10 * 24 * 60 * 60 * 1000;
+    const text = isOld
+      ? "not kept — older than 10 days"
+      : `This ${kind || "attachment"} could not be downloaded from the phone.`;
+    return el("div.msg__missing", { title: message.media_error || "" }, [
       icon("file", { size: 15 }),
-      el("span", {}, [`This ${kind || "attachment"} could not be downloaded from the phone.`]),
+      el("span", {}, [text]),
     ]);
   }
 
