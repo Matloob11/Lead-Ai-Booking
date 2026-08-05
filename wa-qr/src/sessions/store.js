@@ -72,6 +72,7 @@ const UPDATABLE = new Set([
   "history_chats_total",
   "history_chats_done",
   "history_messages",
+  "kinds_repaired_at",
 ]);
 
 /** Dynamically updates fields for a session. */

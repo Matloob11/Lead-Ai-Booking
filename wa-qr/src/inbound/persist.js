@@ -79,6 +79,10 @@ function sentAt(message) {
  * different from the other.
  *
  * @param {boolean} [options.historical]  read back from the phone, not live
+ * @param {boolean} [options.repair]      allowed to overwrite a row that is
+ *                                        still `kind = 'unknown'`, and only
+ *                                        that. Everything else is refused by
+ *                                        the unique index as usual.
  * @param {boolean} [options.withMedia]   download attachments (import only —
  *                                        six months of video is not worth
  *                                        pulling, thirty days of it is)
@@ -92,7 +96,7 @@ function sentAt(message) {
  * @returns {Promise<{stored: boolean}>}  whether a new row was written
  */
 export async function storeMessage(sessionId, message, options = {}) {
-  const { historical = false, withMedia = true, contact = null } = options;
+  const { historical = false, withMedia = true, contact = null, repair = false } = options;
   const live = !historical;
 
   if (!message) return { stored: false };
@@ -317,10 +321,37 @@ export async function storeMessage(sessionId, message, options = {}) {
   // RETURNING tells the two apart: a row written, or one the unique index
   // already held. An import re-reads whatever overlaps what it has, so without
   // this the count it reports would be of messages seen, not messages kept.
+  //
+  // `repair` is the one case that may overwrite. 878 rows were stored before
+  // the raw WhatsApp type was kept anywhere, so their real type is gone and
+  // only WhatsApp can say what they were — but DO NOTHING means re-reading them
+  // changes nothing at all, which is why they have stayed broken.
+  //
+  // The WHERE on the update is the whole safety of it. Only a row that is
+  // still 'unknown' is touched; anything already identified is left exactly as
+  // it is, so a repair pass that runs twice, or over a chat that needed
+  // nothing, cannot damage a single correct row.
+  // Deliberately not `AND EXCLUDED.kind <> 'unknown'`. The first run of this
+  // named 52 of one phone's 93 and left 41 — and because the update was
+  // refused for those, their payload was never written either, so the raw
+  // WhatsApp type normalise.js now records went missing with them. The answer
+  // to "what were the other 41?" was thrown away a second time by the guard
+  // meant to protect them.
+  //
+  // The row is already 'unknown', so re-reading it can only leave it that way
+  // or improve it. Writing the payload regardless is what turns the leftovers
+  // from a dead end into a list of type names the KIND map can be extended
+  // with.
+  const onConflict = repair
+    ? `ON CONFLICT (wamid) DO UPDATE
+         SET kind = EXCLUDED.kind, payload = EXCLUDED.payload
+       WHERE qr_message.kind = 'unknown'`
+    : `ON CONFLICT (wamid) DO NOTHING`;
+
   const inserted = await one(
     `INSERT INTO qr_message (conversation_id, direction, kind, wamid, body, media_id, reply_to_id, author_wa_id, status, payload, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     ON CONFLICT (wamid) DO NOTHING
+     ${onConflict}
      RETURNING id`,
     [
       conversationId,

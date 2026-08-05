@@ -172,7 +172,12 @@ async function sweepUnfinished() {
       row.history_status === "pending" ||
       row.history_status === "failed" ||
       (row.history_status === "running" && !running.has(id));
-    if (!unfinished) continue;
+    if (!unfinished) {
+      retryFailedMedia(getClient(id), id).catch((error) =>
+        console.error(`[wa-qr] media retry sweep for #${id} failed:`, error)
+      );
+      continue;
+    }
 
     console.info(`[wa-qr] picking up #${id}'s unfinished import (${row.history_status})`);
     runBackfill(id).catch((error) =>
@@ -271,6 +276,10 @@ export async function runBackfill(sessionId) {
 
     await retryFailedMedia(client, id);
 
+    // Once per phone, and after the import rather than during it: a message
+    // this pass is about to ask for may be one the import is still writing.
+    if (!session.kinds_repaired_at) await repairUnknownKinds(client, id);
+
     await store.updateSession(id, {
       history_status: "done",
       history_finished_at: new Date(),
@@ -285,6 +294,96 @@ export async function runBackfill(sessionId) {
   } finally {
     running.delete(id);
   }
+}
+
+/**
+ * Asks WhatsApp what the messages we could not name actually were.
+ *
+ * 878 rows say `kind = 'unknown'`. They were stored before the raw WhatsApp
+ * type was kept anywhere, so what they really were — a poll, a call record, an
+ * order — was decided to be unnameable and then discarded. Nothing here can
+ * work it out; only WhatsApp still knows, and only while the phone still holds
+ * the message.
+ *
+ * Re-importing does not fix them, which is why they have stayed broken for as
+ * long as they have: `ON CONFLICT (wamid) DO NOTHING` is what stops the import
+ * from writing the same message twice, and it stops this too. `repair: true`
+ * turns that into an update bounded by `WHERE kind = 'unknown'`, so a correct
+ * row cannot be touched however many times this runs.
+ *
+ * Asked message by message rather than chat by chat. The obvious way is to
+ * re-read every chat that contains one, but a chat is addressed by JID and what
+ * this database holds is a phone number — and on this account most chats are
+ * addressed by LinkedID, so that mapping is exactly the fragile part. The wamid
+ * is already WhatsApp's own id for the message, so getMessageById needs nothing
+ * reconstructed and asks for nothing that is not broken.
+ *
+ * Once per phone, recorded in kinds_repaired_at. Some of these will never come
+ * back — a message the phone has since dropped is gone — and without the marker
+ * the pass would go looking for them again on every reconnect for ever.
+ */
+async function repairUnknownKinds(client, sessionId) {
+  const unknown = await q(
+    `SELECT m.wamid
+       FROM qr_message m
+       JOIN qr_conversation c ON c.id = m.conversation_id
+      WHERE c.session_id = $1
+        AND m.kind = 'unknown'
+        AND m.wamid IS NOT NULL
+      ORDER BY m.created_at DESC`,
+    [sessionId]
+  );
+
+  if (!unknown.length) {
+    await store.updateSession(sessionId, { kinds_repaired_at: new Date() }).catch(() => {});
+    return;
+  }
+
+  console.info(`[wa-qr] #${sessionId} re-reading ${unknown.length} message(s) of unknown type`);
+
+  let named = 0;
+  let gone = 0;
+  for (const row of unknown) {
+    if (getClient(sessionId) !== client) {
+      console.warn(`[wa-qr] #${sessionId} disconnected during the kind repair — leaving it unmarked`);
+      return; // no marker, so the next connection picks it up again
+    }
+
+    try {
+      const message = await withTimeout(
+        client.getMessageById(row.wamid),
+        MEDIA_TIMEOUT_MS,
+        `message ${row.wamid}`
+      );
+      if (!message) {
+        gone += 1;
+        continue;
+      }
+
+      // withMedia false on purpose: this is about the type, and the bytes for
+      // a message this old are not being served any more anyway.
+      const result = await storeMessage(sessionId, message, {
+        historical: true,
+        repair: true,
+        withMedia: false,
+      });
+      if (result?.stored) named += 1;
+    } catch (error) {
+      gone += 1;
+      console.warn(`[wa-qr] could not re-read ${row.wamid}: ${error.message}`);
+    }
+  }
+
+  await store.updateSession(sessionId, { kinds_repaired_at: new Date() }).catch(() => {});
+
+  // The leftovers are not a mystery to WhatsApp — it handed the message over
+  // quite happily. They are types this service has no name for yet, and now
+  // that their payload carries the raw one, the query that lists them is
+  //   SELECT payload->'messages'->0->>'_type' … WHERE kind = 'unknown'
+  console.info(
+    `[wa-qr] #${sessionId} kind repair finished — ${named} named, ${gone} the phone no longer has, ` +
+      `${unknown.length - named - gone} of a type this service does not model yet`
+  );
 }
 
 /**
