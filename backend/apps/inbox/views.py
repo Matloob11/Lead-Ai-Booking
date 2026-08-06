@@ -546,6 +546,19 @@ def reminders(request, pk=None):
     queryset = Reminder.objects.filter(agent=request.user).select_related(
         "conversation", "conversation__contact", "conversation__number"
     )
+
+    # Under a conversation, this means that conversation's reminders. It used to
+    # ignore `pk` entirely and answer with every reminder the agent had, on
+    # every chat — so opening one chat showed follow-ups belonging to others as
+    # though they were its own. Nothing leaked across agents, but the answer was
+    # to a question nobody asked.
+    #
+    # The chat is checked as well as filtered on: a conversation id counts up
+    # from 1, and this is one more route that takes one.
+    if pk is not None:
+        conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+        queryset = queryset.filter(conversation=conversation)
+
     if request.GET.get("open") != "0":
         queryset = queryset.filter(is_done=False)
 
