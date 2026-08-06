@@ -1041,7 +1041,7 @@ export interface IWhatsAppEngine {
    * Expected to be slow (minutes) and to run in the background. It must never block the live
    * socket, and a caller must not await it on a path that delivers messages.
    */
-  importHistorySince?(since: Date): Promise<number>;
+  importHistorySince?(since: Date, onProgress?: (pct: number) => void): Promise<number>;
   sendSeen(chatId: string): Promise<boolean>;
   markUnread(chatId: string): Promise<boolean>;
   deleteChat(chatId: string): Promise<boolean>;

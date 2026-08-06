@@ -94,6 +94,9 @@ export class SessionResponseDto {
   })
   engineLoaded!: boolean;
 
+  @ApiProperty({ description: 'History import sync progress percentage (0-100)', example: 100 })
+  syncProgress!: number;
+
   /**
    * Map a Session entity to the public response shape, stripping sensitive
    * engine config fields (`config`, `proxyUrl`, `proxyType`) that must not
@@ -126,6 +129,7 @@ export class SessionResponseDto {
           }
         : null,
       engineLoaded,
+      syncProgress: session.syncProgress ?? 100,
     };
   }
 }

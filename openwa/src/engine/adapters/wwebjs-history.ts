@@ -132,6 +132,8 @@ export interface ImportHistoryOptions {
   since: Date;
   /** Handed each batch. Rejections are logged and the import carries on. */
   emit: (messages: IncomingMessage[]) => void | Promise<void>;
+  /** Optional sync progress callback (0..100%). */
+  onProgress?: (percent: number) => void | Promise<void>;
   /** False once this engine is no longer the live one, which stops the run where it stands. */
   isLive: () => boolean;
   log?: (message: string) => void;
@@ -147,6 +149,7 @@ export async function importWwebjsHistory({
   client,
   since,
   emit,
+  onProgress,
   isLive,
   log = (): void => {},
 }: ImportHistoryOptions): Promise<number> {
@@ -161,12 +164,23 @@ export async function importWwebjsHistory({
   const cutoffMs = since.getTime();
   let handed = 0;
 
-  for (const jid of jids) {
+  for (let i = 0; i < jids.length; i++) {
+    const jid = jids[i];
     // The phone went away mid-import. What was read is already handed over; the watermark is left
     // where it was, so the next connection covers this stretch again.
     if (!isLive()) {
       log(`history: session no longer live — stopping after ${handed} message(s)`);
       return handed;
+    }
+
+    // Chats read out of chats to read — the one denominator that is actually known here. Messages
+    // would be the truer measure of work and cannot be counted in advance: nothing says how many a
+    // chat holds until it has been paged. Capped at 99 so the last chat does not report finished
+    // before it has been read; the 100 below is written once the loop is genuinely over.
+    try {
+      await onProgress?.(Math.min(99, Math.round(((i + 1) / jids.length) * 100)));
+    } catch {
+      // Reporting progress is not the job. A caller that cannot record it still gets the import.
     }
 
     try {
@@ -177,6 +191,12 @@ export async function importWwebjsHistory({
     }
 
     await sleep(CHAT_PAUSE_MS);
+  }
+
+  try {
+    await onProgress?.(100);
+  } catch {
+    // As above — the caller's bookkeeping, not the import's.
   }
 
   log(`history: handed over ${handed} message(s) from ${jids.length} chat(s)`);

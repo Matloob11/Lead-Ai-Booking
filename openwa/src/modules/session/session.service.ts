@@ -440,11 +440,26 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   }
 
   async getChats(id: string, opts: ListOptions = {}): Promise<ChatSummary[]> {
-    await this.findOne(id); // Verify session exists
+    const session = await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);
 
     if (!engine) {
       throw new BadRequestException('Session is not started');
+    }
+
+    // A history import that is still running has read some chats and not others, and the engine
+    // answers with whatever has landed so far. Handing that over would show a list that grows and
+    // reorders under the reader — and an agent who knows the phone has two hundred chats and sees
+    // forty concludes the rest are lost. Refusing says the true thing instead, and says how far it
+    // has got, because the alternative (an empty list) reads as "there is nothing here".
+    //
+    // Only the whatsapp-web.js path ever moves this: the column defaults to 100, and Baileys is
+    // handed its own history on connect and never runs an import.
+    if (session.syncProgress != null && session.syncProgress < 100) {
+      throw new ConflictException(
+        `Still importing this number's history — ${session.syncProgress}% done. ` +
+          'Chats become available when it finishes.',
+      );
     }
 
     // Most-recent first, then bound the response window. Sorting before the cap means a capped

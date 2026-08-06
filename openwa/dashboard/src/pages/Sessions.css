@@ -785,3 +785,67 @@
   font-size: 0.9375rem;
   color: var(--text-primary);
 }
+
+/* History import progress
+ *
+ * Sits inside .session-info, below the rows rather than as one of them: a label/value pair cannot
+ * hold a bar and a sentence without the column widths fighting it. Only rendered while an import
+ * is actually running, so nothing here needs a resting state.
+ */
+.session-sync {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.sync-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.sync-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Tabular figures so the number does not jog sideways as it climbs through 9 to 10 to 100. */
+.sync-pct {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sync-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-light);
+  overflow: hidden;
+}
+
+.sync-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+
+.sync-note {
+  margin: 0.4375rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* The bar animates on a three-second poll, which is a slow crawl rather than motion — but the
+ * preference is a statement about all non-essential movement, and the width is readable without it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .sync-bar-fill {
+    transition: none;
+  }
+}

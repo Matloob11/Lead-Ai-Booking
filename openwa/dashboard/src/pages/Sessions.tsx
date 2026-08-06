@@ -51,6 +51,19 @@ function restrictionTitle(restriction: AccountRestriction, t: TFunction): string
   return parts.join(' · ');
 }
 
+/**
+ * How far this session's history import has got, as a whole percentage.
+ *
+ * Read off the object rather than through the `Session` type: `services/api.ts` is upstream's file
+ * and two other sessions are working in it, and one field is not worth a merge conflict there. A
+ * gateway that does not send the field reads as finished — the same default the column carries, so
+ * an older build never leaves a session looking stuck at nothing.
+ */
+function syncPercent(session: Session): number {
+  const value = (session as Session & { syncProgress?: number }).syncProgress;
+  return typeof value === 'number' ? value : 100;
+}
+
 export function Sessions() {
   const { t } = useTranslation();
   useDocumentTitle(t('sessions.title'));
@@ -208,6 +221,18 @@ export function Sessions() {
     fetchSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A percentage climbs without any status transition, and the session feed only pushes on
+  // transitions — so nothing already on this page would ever move the number. Poll while at least
+  // one import is running and stop the moment none is, so an idle Sessions page holds no timer.
+  const importing = sessions.some(s => syncPercent(s) < 100);
+  useEffect(() => {
+    if (!importing) return;
+    const timer = setInterval(() => {
+      void fetchSessions();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [importing, fetchSessions]);
 
   const handleDelete = async (id: string) => {
     const session = sessions.find(s => s.id === id);
@@ -781,6 +806,35 @@ export function Sessions() {
                       <span className="info-value restriction-text" title={restrictionTitle(session.restriction, t)}>
                         {t(`sessions.restriction.${session.restriction.kind}`)}
                       </span>
+                    </div>
+                  ) : null}
+                  {/* Only while an import is running. A finished session shows no bar at all rather
+                      than a full one — a permanent 100% is a thing to read every time the page
+                      loads, and it says nothing. */}
+                  {syncPercent(session) < 100 ? (
+                    <div className="session-sync">
+                      <div className="sync-head">
+                        <span className="sync-label">
+                          {/* Zero does not mean "nothing has happened": the import waits for
+                              WhatsApp Web to finish its own sync and then asks the handset for its
+                              chat list, and until that answers there is no denominator to count
+                              against. Saying so beats a bar that looks stalled. */}
+                          {syncPercent(session) === 0 ? 'Reading the chat list…' : 'Importing history'}
+                        </span>
+                        <span className="sync-pct">{syncPercent(session)}%</span>
+                      </div>
+                      <div
+                        className="sync-bar"
+                        role="progressbar"
+                        aria-label="History import progress"
+                        aria-valuenow={syncPercent(session)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      >
+                        {/* A floor of 2% so the track never reads as an empty box at the start. */}
+                        <div className="sync-bar-fill" style={{ width: `${Math.max(2, syncPercent(session))}%` }} />
+                      </div>
+                      <p className="sync-note">This number&rsquo;s chats stay hidden until it finishes.</p>
                     </div>
                   ) : null}
                 </div>

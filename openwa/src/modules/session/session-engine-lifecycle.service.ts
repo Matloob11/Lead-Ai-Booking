@@ -721,6 +721,11 @@ export class SessionEngineLifecycle {
     if (this.historyRunning.has(id)) return;
     this.historyRunning.add(id);
 
+    // Whether this run put the session into the locked state, so the finally below knows there is
+    // something to undo. A run that never got that far must not write a progress value for a
+    // session it never touched.
+    let locked = false;
+
     try {
       const session = await this.sessionRepository.findOne({ where: { id } });
       if (!session) return;
@@ -741,7 +746,20 @@ export class SessionEngineLifecycle {
         { sessionId: id, action: 'history_import_start' },
       );
 
-      const handed = await engine.importHistorySince(since);
+      // Locked before the first chat is read, on a reconnect as much as on a first link. A phone
+      // away for a fortnight comes back with a fortnight to fetch, and a half-fetched list is
+      // exactly as misleading then as it is on day one.
+      await this.sessionRepository.update(id, { syncProgress: 0 });
+      locked = true;
+
+      const handed = await engine.importHistorySince(since, async (pct: number) => {
+        try {
+          await this.sessionRepository.update(id, { syncProgress: pct });
+        } catch {
+          // A percentage that failed to save is not worth abandoning an import over; the next chat
+          // writes the next one, and the finally block guarantees the run ends unlocked either way.
+        }
+      });
 
       // Only on a run that reached the end, and only while this engine is still the live one — a
       // run whose phone disconnected half way must not claim the stretch it did not finish.
@@ -753,7 +771,7 @@ export class SessionEngineLifecycle {
         return;
       }
 
-      await this.sessionRepository.update(id, { historyImportedAt: startedAt });
+      await this.sessionRepository.update(id, { historyImportedAt: startedAt, syncProgress: 100 });
       this.logger.log(`History import finished — ${handed} message(s) offered`, {
         sessionId: id,
         action: 'history_import_done',
@@ -767,6 +785,23 @@ export class SessionEngineLifecycle {
       });
     } finally {
       this.historyRunning.delete(id);
+      // Unlock however this run ended — finished, abandoned on a superseded engine, or thrown.
+      // Locked is a state only a running import may hold: a run that dies at 43% and leaves it
+      // there hides every chat on the number until somebody notices and edits a database column,
+      // and nothing in the panel would say why. Unlocking a partial import shows a partial list,
+      // which is the smaller harm and self-corrects — the watermark was not moved, so the next
+      // connection reads the same stretch again and fills the gap.
+      if (locked) {
+        try {
+          await this.sessionRepository.update(id, { syncProgress: 100 });
+        } catch (err) {
+          this.logger.warn('Could not clear the sync lock after a history import', {
+            sessionId: id,
+            error: err instanceof Error ? err.message : String(err),
+            action: 'history_import_unlock_failed',
+          });
+        }
+      }
     }
   }
 

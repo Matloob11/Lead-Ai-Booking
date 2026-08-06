@@ -1785,13 +1785,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * replaces it, and a run belonging to the old client must stop rather than keep paging a handset
    * that has moved on.
    */
-  async importHistorySince(since: Date): Promise<number> {
+  async importHistorySince(since: Date, onProgress?: (pct: number) => void): Promise<number> {
     const client = this.client;
     if (!client) return 0;
 
     return importWwebjsHistory({
       client,
       since,
+      onProgress,
       isLive: () => this.client === client,
       emit: messages => this.callbacks.onHistoryMessages?.(messages),
       log: message => this.logger.log(message),

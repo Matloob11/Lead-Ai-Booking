@@ -27,6 +27,220 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `openwa` — the suffix match is gone, and a number says how far it has got
+
+**Security first, and it was somebody else's line.** `session-scope.ts` had grown
+digit-and-suffix matching: strip everything but digits from both sides, and let
+an allowlist entry through if either string *ends with* the other. Seven digits
+was the whole bar. So `…4423` on an allowlist reached every session whose digits
+ended `4423`, and since a UUID is full of digits, the strings being compared were
+not even the same kind of thing. It was authorization by coincidence.
+
+It was put there to prop up the phase when `allowedSessions` held phone numbers
+and OpenWA matched session ids. That phase is over — Django sends real session
+ids now — so the fuzzy block was not repaired, it was deleted:
+
+```ts
+return sessionScope != null && sessionScope !== '*' && allowedSessions.includes(sessionScope);
+```
+
+A null or empty allowlist still means unrestricted; that is how an admin key is
+expressed and it was deliberately left alone. Confirmed gone from the built
+gateway, not just the source: `grep -c cleanDigits /app/dist/…/session-scope.js`
+→ **0**.
+
+**Then the actual work: a linked number now says how far its import has got, and
+holds its chats back until it is done.**
+
+The reason for the second half is the whole point. whatsapp-web.js answers
+`getChats()` with whatever has landed so far, so during an import the list grows
+and reorders under the reader. An agent who knows the phone has two hundred
+chats, sees forty, and watches them shuffle does not think "still importing" —
+they think the record is broken. Refusing outright says the true thing, and an
+empty list would not: `GET /sessions/:id/chats` returns **409** with the live
+figure in the message — *"Still importing this number's history — 32% done."* —
+which the dashboard already surfaces verbatim, because its chat-load error path
+passes the server's message through.
+
+**The percentage is chats read out of chats to read.** Messages would be the
+truer measure and cannot be counted in advance: nothing says how many a chat
+holds until it has been paged. Before the list itself comes back — the import
+waits 15s for WhatsApp Web to finish its own sync, then asks the handset — there
+is no denominator at all, so it reports 0 and the card says **"Reading the chat
+list…"** rather than showing a bar that looks stalled. Nothing here invents a
+number or runs a timer.
+
+**Locked on reconnect too, not just first link.** A phone away a fortnight comes
+back with a fortnight to fetch, and a half-fetched list is exactly as misleading
+then as on day one. The watermark work already existed; this only had to stop
+assuming a reconnect was cheap.
+
+**The failure case is the one that needed care.** A run that dies at 43% and
+leaves the value there hides every chat on that number *for ever*, and nothing in
+the panel would say why — a state only a database edit could clear. So the unlock
+moved into `finally`, guarded by a flag so a run that never locked cannot write
+progress for a session it never touched. However the run ends — finished,
+abandoned on a superseded engine, or thrown — the session comes back unlocked.
+Showing a partial list is the smaller harm and it self-corrects: the watermark is
+not moved on a short run, so the next connection reads the same stretch again.
+
+Files: `common/security/session-scope.ts` (reverted), `session.service.ts`,
+`session.controller.ts`, `session-engine-lifecycle.service.ts`,
+`engine/adapters/wwebjs-history.ts`, `whatsapp-web-js.adapter.ts`,
+`engine/interfaces/whatsapp-engine.interface.ts`, `session.entity.ts`,
+`session-response.dto.ts`, `database/migrations/1786200000000-*.ts`,
+`dashboard/src/pages/Sessions.tsx`, `Sessions.css`.
+
+**Verified on the live number (marketting, 923166753715), twice through.** Two
+full import cycles were watched end to end, not sampled:
+
+| | |
+|---|---|
+| percentage over one run | 32 → 48 → 67 → 86 → **100** |
+| and again | 21 → 38 → 54 → 70 → 86 → **100** |
+| `/chats` while below 100 | **409**, message carrying the live figure |
+| `/chats` at 100 | **200**, **157** chats |
+| fuzzy matcher in `/app/dist` | **0 occurrences** |
+
+**Seen in a browser, both themes, 1280px and 800px** — rendered in the
+container's own Chromium, because the Playwright MCP profile is held open by
+Matloob's Chrome and there is no second way in. Captured mid-import at 3%, 28%,
+32% and 38%: the card reads **Connected** with *Importing history* and a bar, the
+0% state reads *Reading the chat list…*, and the Chats screen shows **zero rows**
+with the server's sentence in a toast. One capture caught the 0% → 3% handover,
+which is the transition itself.
+
+**A rough edge left deliberately, because the file belongs to another session:**
+that toast is styled as a red **"Failed to load chats"**, and the empty list
+beside it still says *"No chats"*. An import in progress is neither. The fix is
+in `pages/Chats.tsx` — catch the 409 in `loadChats`, and show it as an inline
+notice in the list rather than an error toast — and that file was off limits for
+this piece of work. Until then the agent does get the true reason; it just wears
+the wrong colour.
+
+**And one expectation that turned out not to hold — worth reading before the
+next migration.** This deployment runs `DATABASE_SYNCHRONIZE=true`, so TypeORM
+sets `migrationsRun: false` and **there is no migrations table at all** in
+`openwa.sqlite`. The `syncProgress` column is there and correct
+(`INTEGER NOT NULL DEFAULT 100`) because synchronize created it from the entity —
+**not** because the migration ran. So "the migration list is clean" could not be
+demonstrated here, because there is no list. The migration file is still right,
+still idempotent behind a `hasColumn` guard, and is in the repo and on the
+server — it is what a deployment with synchronize turned off would use. Also
+note the data store here is **SQLite** (`/app/data/openwa.sqlite`), not Postgres,
+and there is no `psql` in the container.
+
+**Not verified:** `dashboard/src/pages/Sessions.test.ts` was not run — there are
+no local `node_modules` and the builder stage is not kept in the image. The
+production build (tsc + vite) passed, which is type checking, not that test. And
+nobody has clicked through this in Bitrix.
+
+**Whoever is in `wwebjs-chats.ts` and the two projectors: your code is live.**
+The build takes whatever is on the server, and those three files were already
+sitting there in an uncommitted state when this build ran — so the running
+container is this entry's work *plus* yours, and yours has not been committed
+here. Nothing was overwritten and nothing of yours was edited; this is only to
+say it shipped, in case it was not meant to yet.
+
+### 2026-08-06 · Opus session · `backend` — assigning a linked phone to an agent, and the empty allowlist that meant "everything"
+
+Agents could open Linked devices but saw nothing, assigned or not. Two faults
+under that, and the second is the one worth remembering.
+
+**Scoping was against the wrong namespace.** `openwa_credentials` filled
+`allowedSessions` with the agent's Business Platform phone numbers.
+`common/security/session-scope.ts` matches against a session's **id** — the UUID
+OpenWA issues. A phone number never equals a UUID, so the allowlist matched
+nothing and the boundary looked enforced because it refused everyone.
+
+**An empty allowlist is not "nothing", it is "unrestricted".** That is how an
+admin key is expressed. So the moment the first fault was corrected, an agent
+with nothing assigned got the run of every conversation instead of none.
+Measured: agent 29, assigned nothing, could list the session. Now an agent with
+no assignment is scoped to `unassigned:agent:<pk>` — a string that cannot be a
+session id, so the allowlist stays non-empty and matches nothing.
+
+**Somewhere to do the assigning**, which did not exist anywhere before:
+`OpenWaAssignment` (session_id, label, agent), deliberately separate from
+`catalog.NumberAssignment` because it points at another system's records.
+`session_id` is stored as text and is not validated against OpenWA — an admin
+editing a roster is a bad moment to discover the gateway is down — and `label`
+is a copy of the session's name so the roster reads as "marketting" rather than
+a bare UUID when the gateway cannot be asked. `GET /api/auth/openwa-sessions/`
+joins the gateway's list to our assignments and **still lists anything assigned
+that the gateway did not return**, because a roster that quietly drops rows is
+how an agent keeps access nobody can see. `PUT …/<session_id>/agents/` replaces
+the roster, same contract as the number roster.
+
+Verified end to end on the live server, not by reading:
+
+| | |
+|---|---|
+| `GET openwa-sessions` as admin | 200, lists `marketting` |
+| same as an agent | **403** |
+| assign agent 24, then their credentials | scope becomes the session **id** |
+| agent 24's key against `/api/sessions` | **1** session — was 0 |
+| agent 29, assigned nothing | scope `unassigned:agent:29`, **0** sessions |
+
+**A migration existed nowhere.** `Agent.openwa_api_key` and `openwa_key_id` were
+on the model and the columns were in the database, but there was no `0005` file
+on disk, in the repo, or in `django_migrations` — while `makemigrations --check`
+wanted to create it. That is the failure CLAUDE.md says has bitten this project
+twice: the next `migrate` would have tried to add columns that already exist.
+Generated, recorded, and copied into the repo *and* the server's build context.
+`0006_openwaassignment` was handled the same way from the start. Both end with
+`makemigrations --check` reporting no changes.
+
+Also: the panel now sends the key. The receiving half was built earlier but
+nothing ever sent one, so an agent opening Linked devices met OpenWA's own API
+key box — the one thing the handover exists to prevent. `openLinkedDevices`
+waits for the frame's `openwa_ready`, fetches the agent's credentials in
+parallel, and posts to the frame's exact origin, never `*`. The button is also
+no longer admin-only.
+
+Files: `backend/apps/accounts/models.py`, `views.py`, `urls.py`,
+`migrations/0005_*.py` (recovered), `migrations/0006_openwaassignment.py` (new),
+`bitrix/public/assets/modules/inbox.js` (shared).
+
+**The admin screen exists now** — menu → **Linked phone agents**, admin only. A
+new module rather than a section added to Numbers, per CLAUDE.md and because they
+are not the same thing: those numbers are rows in our database, these are
+sessions owned by the gateway, and one can leave the list because a handset was
+unlinked elsewhere. A tick saves immediately; a failed save **stays on screen**
+rather than fading, because an admin who misses it believes an agent has access
+they do not. When the gateway does not answer, the last recorded roster is shown
+with a banner saying so — and rows we hold an assignment for that the gateway did
+not return are listed and marked, never dropped.
+
+**Rebuilt to look like Numbers Management**, on Matloob's word — the first
+attempt was a grid of checkboxes per phone, which read as though every agent were
+being handed everything. Now it is the same shape as the screen next to it: a
+search over phone, number and assigned agent; chips with Remove; a type-to-filter
+"+ Assign an agent…" box; an explicit **Save Changes** that only lights when
+something changed. It wears `numbers-admin.css`'s own `na-` classes rather than a
+second set — **its own stylesheet was written and then deleted** once it was
+clear every class already existed. An admin should not have to learn two ways to
+say the same thing, and there is now no second file to keep in step.
+
+Files: `bitrix/public/assets/modules/linked-phones-admin.js` (new),
+`bitrix/public/assets/api/api.js`, `index.html`,
+`bitrix/public/assets/modules/inbox.js` (all shared).
+Verified: both new files serve 200, the stylesheet is linked, the module
+**imports cleanly with its whole dependency chain** (which is what proves the new
+`linkedPhones` export resolves), and the menu entry is in the deployed bundle.
+
+**Not done:** the click-through from inside Bitrix has not been watched end to
+end — every piece was tested on its own, and the panel cannot boot outside the
+portal. Nobody has ticked a box in the real screen yet.
+
+**Flagged, not touched:** `openwa/src/common/security/session-scope.ts` has grown
+digit-based **suffix** matching (`scopeDigits.endsWith(allowedDigits)`), which
+means any 7+ digit allowlist entry reaches every session whose digits end the
+same way. It was presumably added to prop up the phone-number scoping this entry
+replaces, and is now both dangerous and unnecessary — `allowedSessions` holds
+real session ids, so `includes()` is the whole check. Another session was mid-edit
+in that file, so it was reported rather than changed.
+
 ### 2026-08-06 · Opus session · `backend` + `openwa` — the gateway's admin key was in the source; rotated
 
 **Somebody else's work again, fixed because it was live.** The session that built

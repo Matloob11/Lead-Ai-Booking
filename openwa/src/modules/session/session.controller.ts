@@ -328,6 +328,7 @@ export class SessionController {
   @ApiResponse({ status: 200, description: 'List of active chats (most recent first)', type: [ChatSummaryDto] })
   @ApiResponse({ status: 400, description: 'Session not ready' })
   @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: 'History import still running (see syncProgress)' })
   @ApiQuery({ name: 'limit', required: false, description: 'Max chats to return (1–1000, default 1000)' })
   @ApiQuery({ name: 'offset', required: false, description: 'Number of chats to skip (for paging)' })
   async getChats(

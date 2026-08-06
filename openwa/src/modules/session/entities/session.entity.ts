@@ -97,6 +97,9 @@ export class Session {
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
   historyImportedAt!: Date | null;
 
+  @Column({ type: 'integer', default: 100 })
+  syncProgress!: number;
+
   @CreateDateColumn()
   createdAt!: Date;
 
