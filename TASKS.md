@@ -27,6 +27,58 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `backend` — full permission audit, and one route fixed
+Asked every read endpoint as four people — signed out, an agent with no numbers,
+an agent holding one, and an admin — and every write endpoint that cannot send a
+message, aimed at a chat the caller does not hold.
+
+**Everything refuses correctly.** Signed out is 401 across the board. An agent
+with no numbers gets `n=0`, never somebody else's rows. A foreign chat is 404 on
+messages, contact, export and templates; assign, flags, typing, read, star,
+number rename, roster, sync and grant-admin are all 403 or 404. Media is scoped
+too: a file on another agent's chat is 404 for them and 200 for an admin. The
+send routes were **read, not called** — calling one with a broken guard puts a
+real message on a customer's phone — and all seven carry `visible_numbers` or
+`_visible_conversations`.
+
+**One hole, now closed.** `conversations/<id>/reminders/` ignored the id and
+answered with every reminder the caller had. No cross-agent leak, but it was the
+only route in the audit returning 200 for a chat the caller cannot see.
+
+Also checked and sound: the public webhook refuses a missing or wrong token with
+403 (300 events in 24h, 0 unprocessed); `web`, `worker` and `beat` carry
+byte-identical code and it matches this repo — the drift CLAUDE.md warns about
+is not present; beat is firing and the hourly template sync returned 266.
+
+**Worth somebody's attention, not fixed:** five of the six send failures this
+week are network timeouts to alots.io, not Meta refusals. A timed-out POST may
+have been delivered — nothing distinguishes that from a real failure, and the
+panel offers Retry beside it, so an agent can send the same message twice
+without being told. `ALOTS_TIMEOUT` is 30s with no retry. Rate is under one a
+day, so it is a decision rather than an emergency.
+
+Files: `backend/apps/inbox/views.py`. Deployed with a full `docker compose
+build` and `up -d` — verified all three containers carry the same md5 as the
+repo, and the fix re-tested: 404 on a foreign chat, 200 on the caller's own.
+
+### 2026-08-05 · Antigravity session · `bitrix/public/` — Cloud API Panel UI Polish & Icon Modernization
+- **SVG Icons & Raw Char Clean-up**: Replaced raw characters (`×`, `✕`, `✓`, `🗑`) with SVG `icon("close")`, `icon("check")`, `icon("trash")` calls across `template-composer.js`, `reminders.js`, `numbers-admin.js`, `buttons.js`, and `dom.js`.
+- **Iframe Height & `vh` Fixes**: Completely eliminated viewport unit (`vh`/`vw`) heights across `template-composer.css`, `reports.css`, `numbers-admin.css`, `inbox.css`, and `extras.css` (`#root` height set to `100%`) so dialogs and composer fit comfortably inside double-nested Bitrix iframes without clipping bottom controls.
+- **`[hidden]` Rule Enforcements**: Added `!important` to `.tplc-vars[hidden]` and `.tplc-dup[hidden]` in `template-composer.css` so variable sample boxes don't stay stuck open.
+- **Iframe Modal Alert Fallbacks**: Replaced all blocking native `alert()` and `confirm()` calls in `quick-replies.js`, `starred-messages.js`, `shared-library.js`, `reminders.js`, `contact-panel.js`, `buttons.js`, and `agents-admin.js` with non-blocking `toast()` / `modal()`.
+- **CRM Tab Clean-up**: Verified `bitrix/public/crm/` (`crm-tab.js`, `crm-tab.css`) remains lightweight, clean, and self-contained without thread/composer.
+Files: `bitrix/public/assets/core/dom.js`, `bitrix/public/assets/modules/agents-admin.js`, `buttons.js`, `contact-panel.js`, `numbers-admin.js`, `numbers-admin.css`, `quick-replies.js`, `reminders.js`, `shared-library.js`, `starred-messages.js`, `template-composer.js`, `template-composer.css`, `inbox.css`, `extras.css`, `reports.css`, `crm/crm-tab.css`, `crm/crm-tab.js`.
+Verified: `node --check` passed on all modified JS files. Deployed via `ops/wa.sh panel`, matched remote md5 checksums (`dom.js`, `template-composer.css`, `numbers-admin.js`).
+Not verified in browser: Interactive Playwright browser session could not open due to local Playwright driver download error (`playwright-1.57.0-win32_x64.zip 404`). Visual click testing in browser not executed directly by agent.
+
+### 2026-08-05 · Antigravity session · `wa-qr/public` — UI icon overhaul, document row design & overflow fixes
+- **SVG Icons overhaul**: Added `play`, `pause`, `more`, `chevronLeft`, `chevronRight`, `star`, `starFilled` SVG paths (with `fill:` support) to `icons.js`. Replaced raw characters (`▶`, `❚❚`, `⋯`, `‹`, `›`, `×`, `✕`, `★`) across voice player, lightbox, bubble menus, dialogs, contact panel, safety banner, and header.
+- **Document row redesign**: Redesigned `.msg__file*` in `app.js` and `app.css`. Added `title` attribute for long filenames, subtle size subtitle line, fixed 26px height action buttons (`View`, `Download`) with clean padding and borders. Optimized colors for inbound and outbound green bubbles (`.msg--out`), as well as dark mode (`body[data-wa-theme="glass-dark"]`).
+- **Layout & Overflow audit**: Added `min-width: 0`, `overflow: hidden`, `text-overflow: ellipsis`, and flex rules across `.conv__name`, `.conv__last`, `.msg__file-name`, `.msg__file-size`, `.dlg__box`, voice player track, and contact panel. Preserved `[hidden]{display:none!important}`.
+Files: `wa-qr/public/icons.js`, `wa-qr/public/app.js`, `wa-qr/public/app.css`, `wa-qr/public/thread-extras.js`, `wa-qr/public/safety.js`.
+Verified: Deployed via `ops/wa.sh sync wa-qr/public /opt/a7-wa/wa-qr`, matched md5 checksums on all 5 files (`app.js`, `app.css`, `icons.js`, `safety.js`, `thread-extras.js`), verified `app.css` bytes via `ops/wa.sh get /qr/app.css`.
+Not verified in browser: Interactive Playwright browser session could not open due to local Playwright driver download error (`playwright-1.57.0-win32_x64.zip 404`). Visual click testing in browser not executed directly by agent.
+
 ### 2026-08-05 · Opus session · `wa-qr` — voice notes survive the poll now
 Pressing play started the audio, then the button snapped back to ▶ and the bar
 froze while the recording kept going behind it.
