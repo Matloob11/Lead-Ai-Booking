@@ -195,6 +195,7 @@ router.get("/:id/messages", async (req, res, next) => {
       // message pointing at nothing — and the panel, told only that there is an
       // attachment, drew a broken image in the middle of the conversation.
       media_downloaded: r.media_id ? Boolean(r.media_downloaded) : null,
+      media_error: r.media_id ? (r.media_error || null) : null,
     }));
 
     res.json(messages);

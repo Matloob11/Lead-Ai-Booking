@@ -3,7 +3,7 @@
  */
 
 import { inbox } from "../api/api.js";
-import { clear, el, formatBytes, modal } from "../core/dom.js";
+import { clear, el, formatBytes, modal, toast } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
 export function openSharedLibraryModal({ onSelectAsset, isPicker = false } = {}) {
@@ -115,13 +115,12 @@ export function openSharedLibraryModal({ onSelectAsset, isPicker = false } = {})
             type: "button",
             title: "Delete asset",
             onclick: async () => {
-              if (confirm(`Delete "${asset.title}" from shared library?`)) {
-                try {
-                  await inbox.deleteSharedAsset(asset.id);
-                  await fetchAssets();
-                } catch (err) {
-                  alert(`Delete failed: ${err.message}`);
-                }
+              try {
+                await inbox.deleteSharedAsset(asset.id);
+                toast(`Deleted "${asset.title}"`, "ok");
+                await fetchAssets();
+              } catch (err) {
+                toast(`Delete failed: ${err.message}`, "err");
               }
             },
           }, [icon("trash", { size: 14 })]),

@@ -7,7 +7,7 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 18px;
   align-items: start;
-  max-height: min(78vh, 720px);
+  max-height: 100%;
 }
 
 .tplc-left {
@@ -15,7 +15,7 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  max-height: min(78vh, 720px);
+  max-height: 100%;
 }
 
 .tplc-right {
@@ -66,7 +66,7 @@
    outranks. Without this the sample-value box stands open on every template,
    including the ones with no placeholders to give a value to. */
 .tplc-vars[hidden] {
-  display: none;
+  display: none !important;
 }
 
 .tplc-vars {
@@ -556,7 +556,7 @@ body[data-wa-theme="glass-dark"] .tplc-btn {
 }
 
 .tplc-dup[hidden] {
-  display: none;
+  display: none !important;
 }
 
 /* The plate is amber whatever the theme does, so the button on it states its

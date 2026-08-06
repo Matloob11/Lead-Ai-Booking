@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>A7 WhatsApp — Liquid Glass (dark)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    width: 1280px; height: 800px;
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #eef3f9;
+    -webkit-font-smoothing: antialiased;
+    background: #0a1020;
+    overflow: hidden;
+  }
+
+  /* Atmosphere the glass has something to refract. Brand navy + gold, with a
+     teal that reads as "WhatsApp" without being the WhatsApp green. */
+  .bg { position: fixed; inset: -20%; z-index: 0; filter: saturate(130%); }
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .85; }
+  .b1 { width: 780px; height: 780px; left: -6%; top: -12%;  background: radial-gradient(circle at 30% 30%, #1d6f7a, #0e3550 65%, transparent 72%); }
+  .b2 { width: 900px; height: 900px; right: -12%; top: -22%; background: radial-gradient(circle at 60% 40%, #c8a34a, #6b4f16 60%, transparent 70%); opacity: .55; }
+  .b3 { width: 820px; height: 820px; left: 24%; bottom: -34%; background: radial-gradient(circle at 50% 50%, #2a4f9c, #16265a 60%, transparent 70%); opacity: .8; }
+  .b4 { width: 520px; height: 520px; right: 12%; bottom: -16%; background: radial-gradient(circle at 50% 50%, #14806a, #0b3b36 60%, transparent 70%); opacity: .6; }
+
+  .stage { position: relative; z-index: 1; height: 100%; padding: 26px; }
+
+  /* The one big frosted surface everything else sits on. */
+  .app {
+    height: 100%;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    border-radius: 26px;
+    overflow: hidden;
+    background: rgba(255,255,255,.07);
+    backdrop-filter: blur(34px) saturate(180%);
+    -webkit-backdrop-filter: blur(34px) saturate(180%);
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 30px 80px rgba(3,8,20,.55), inset 0 1px 0 rgba(255,255,255,.22);
+  }
+
+  /* ---- sidebar ---- */
+  .side { display: flex; flex-direction: column; min-width: 0;
+          background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+          border-right: 1px solid rgba(255,255,255,.10); }
+
+  .side__top { display: flex; align-items: center; gap: 8px; padding: 18px 16px 12px; }
+  .brand { font-weight: 650; letter-spacing: .2px; margin-right: auto; font-size: 14px; white-space: nowrap; }
+  .brand span { color: #e6c979; }
+
+  .pillbtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.18);
+    color: #eef3f9; white-space: nowrap;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.20);
+  }
+  .pillbtn--gold {
+    background: linear-gradient(180deg, rgba(230,201,121,.95), rgba(196,161,73,.9));
+    border-color: rgba(255,235,180,.5); color: #241b06;
+    box-shadow: 0 6px 18px rgba(200,163,74,.35), inset 0 1px 0 rgba(255,255,255,.55);
+  }
+
+  .filters { padding: 0 16px 14px; display: grid; gap: 9px; }
+  .field {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border-radius: 14px; font-size: 13px;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14);
+    color: rgba(238,243,249,.62);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+  }
+
+  .convs { flex: 1; overflow: hidden; padding: 4px 10px 10px; display: grid; gap: 6px; align-content: start; }
+
+  .conv {
+    display: grid; grid-template-columns: 42px 1fr; gap: 11px;
+    padding: 11px; border-radius: 16px; border: 1px solid transparent;
+  }
+  .conv--on {
+    background: rgba(255,255,255,.13);
+    border-color: rgba(255,255,255,.22);
+    box-shadow: 0 8px 24px rgba(3,8,20,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .conv--warn { background: rgba(217,144,34,.14); border-color: rgba(240,190,110,.30); }
+  .conv > div { min-width: 0; }
+
+  .av {
+    width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
+    font-size: 13px; font-weight: 650; color: #0e1a2b;
+    background: linear-gradient(160deg, #dfe9f5, #a9c2dd);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+  }
+  .row1 { display: flex; align-items: baseline; gap: 8px; }
+  .nm { font-weight: 620; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tm { margin-left: auto; font-size: 11px; color: rgba(238,243,249,.5); }
+  .pv { font-size: 12.5px; color: rgba(238,243,249,.62); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pv svg { display: inline; vertical-align: -2px; margin-right: 4px; opacity: .75; }
+  .meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: rgba(238,243,249,.45); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .dot--on { background: #37d39b; box-shadow: 0 0 10px rgba(55,211,155,.8); }
+  .dot--warn { background: #f0b34a; box-shadow: 0 0 10px rgba(240,179,74,.8); }
+  .badge { margin-left: auto; min-width: 19px; height: 19px; padding: 0 6px; border-radius: 999px;
+           background: #37d39b; color: #06281c; font-size: 11px; font-weight: 700;
+           display: grid; place-items: center; box-shadow: 0 4px 12px rgba(55,211,155,.4); }
+
+  /* ---- thread ---- */
+  .thread { display: flex; flex-direction: column; min-width: 0; }
+
+  .thead {
+    display: flex; align-items: center; gap: 12px; padding: 15px 20px;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,0));
+  }
+  .who { display: flex; align-items: center; gap: 11px; margin-right: auto; }
+  .who h2 { font-size: 15px; font-weight: 650; }
+  .who p { font-size: 12px; color: rgba(238,243,249,.55); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: rgba(55,211,155,.16); border: 1px solid rgba(55,211,155,.35); color: #7ff0c6;
+  }
+
+  .msgs { flex: 1; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+
+  .daysep { display: flex; align-items: center; gap: 12px; color: rgba(238,243,249,.45); font-size: 11.5px; margin: 4px 0; }
+  .daysep::before, .daysep::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
+  .daysep span { padding: 3px 12px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+
+  .m { max-width: 62%; display: flex; flex-direction: column; }
+  .m--in { align-self: flex-start; align-items: flex-start; }
+  .m--out { align-self: flex-end; align-items: flex-end; }
+
+  .bub {
+    padding: 10px 13px; border-radius: 18px; font-size: 13.5px; line-height: 1.45;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 22px rgba(3,8,20,.28), inset 0 1px 0 rgba(255,255,255,.20);
+  }
+  .m--in  .bub { background: rgba(255,255,255,.11); border: 1px solid rgba(255,255,255,.17); border-bottom-left-radius: 7px; }
+  .m--out .bub { background: linear-gradient(180deg, rgba(46,168,131,.34), rgba(30,124,99,.30));
+                 border: 1px solid rgba(120,235,195,.32); border-bottom-right-radius: 7px; }
+
+  .foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 3px;
+          font-size: 10.5px; color: rgba(238,243,249,.6); }
+  .tick { display: inline-flex; }
+  .tick--read { color: #7fd2ff; }
+  .err { color: #ff9d94; font-size: 11.5px; margin-top: 4px; }
+
+  .shot { width: 240px; height: 150px; border-radius: 13px; margin-bottom: 7px;
+          background: linear-gradient(150deg, #7ea8c9, #b8d0c4 55%, #d9c79a);
+          border: 1px solid rgba(255,255,255,.28); }
+
+  .reacts { display: flex; gap: 5px; margin-top: -5px; }
+  .react { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+           font-size: 12px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
+           box-shadow: 0 4px 12px rgba(3,8,20,.3); }
+  .react b { font-size: 10.5px; color: rgba(238,243,249,.7); font-weight: 700; }
+
+  .warnbar { display: flex; align-items: center; gap: 8px; padding: 9px 20px; font-size: 12px;
+             color: #f6d79a; background: rgba(217,144,34,.16); border-top: 1px solid rgba(240,190,110,.28); }
+
+  /* ---- composer ---- */
+  .comp { display: flex; align-items: center; gap: 9px; padding: 14px 18px;
+          border-top: 1px solid rgba(255,255,255,.10);
+          background: linear-gradient(0deg, rgba(255,255,255,.07), rgba(255,255,255,0)); }
+  .ico { width: 38px; height: 38px; border-radius: 13px; display: grid; place-items: center;
+         background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+         color: rgba(238,243,249,.8); box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
+  .input { flex: 1; padding: 11px 16px; border-radius: 999px; font-size: 13.5px;
+           color: rgba(238,243,249,.5);
+           background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+           box-shadow: inset 0 1px 0 rgba(255,255,255,.14); }
+  .send { display: inline-flex; align-items: center; gap: 7px; padding: 11px 20px; border-radius: 999px;
+          font-size: 13.5px; font-weight: 650; color: #06281c;
+          background: linear-gradient(180deg, #5ee3ab, #23b483);
+          border: 1px solid rgba(150,255,215,.5);
+          box-shadow: 0 8px 22px rgba(35,180,131,.4), inset 0 1px 0 rgba(255,255,255,.55); }
+
+  svg { display: block; }
+</style>
+</head>
+<body>
+  <div class="bg">
+    <div class="blob b1"></div><div class="blob b2"></div>
+    <div class="blob b3"></div><div class="blob b4"></div>
+  </div>
+
+  <div class="stage">
+    <div class="app">
+
+      <aside class="side">
+        <div class="side__top">
+          <div class="brand">WhatsApp<span> ·</span> A7</div>
+          <div class="pillbtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></svg>
+            Numbers
+          </div>
+          <div class="pillbtn pillbtn--gold">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            New
+          </div>
+        </div>
+
+        <div class="filters">
+          <div class="field">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+            Saare numbers
+          </div>
+          <div class="field">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            Naam ya number dhoondein
+          </div>
+        </div>
+
+        <div class="convs">
+          <div class="conv conv--on">
+            <div class="av">M</div>
+            <div>
+              <div class="row1"><span class="nm">Matloob (test)</span><span class="tm">12:05 AM</span></div>
+              <div class="pv">Hmm</div>
+              <div class="meta"><span class="dot dot--on"></span> Ahmed — Damac Hills</div>
+            </div>
+          </div>
+
+          <div class="conv conv--warn">
+            <div class="av">9</div>
+            <div>
+              <div class="row1"><span class="nm">971555484423</span><span class="tm">12:05 AM</span></div>
+              <div class="pv">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:.75"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                Damac Hills 2 Sales Centre
+              </div>
+              <div class="meta"><span class="dot dot--warn"></span> Window 42m mein band <span class="badge">2</span></div>
+            </div>
+          </div>
+
+          <div class="conv">
+            <div class="av">S</div>
+            <div>
+              <div class="row1"><span class="nm">Sana Iqbal</span><span class="tm">Aug 2</span></div>
+              <div class="pv">Hello. I had your inquiry that your looking f…</div>
+              <div class="meta"><span class="dot dot--on"></span> Fatima — Business Bay</div>
+            </div>
+          </div>
+
+          <div class="conv">
+            <div class="av">RK</div>
+            <div>
+              <div class="row1"><span class="nm">Rehan Khan</span><span class="tm">Aug 1</span></div>
+              <div class="pv">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="opacity:.75"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                Floor-plan.pdf
+              </div>
+              <div class="meta"><span class="dot" style="background:#8b96a6"></span> Ahmed — Damac Hills</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="thread">
+        <div class="thead">
+          <div class="who">
+            <div class="av">M</div>
+            <div>
+              <h2>Matloob (test)</h2>
+              <p>923078633218 · Ahmed — Damac Hills</p>
+            </div>
+          </div>
+          <div class="chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            Session khuli · 23h 54m
+          </div>
+          <div class="pillbtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>
+            Transfer
+          </div>
+        </div>
+
+        <div class="msgs">
+          <div class="daysep"><span>Aaj</span></div>
+
+          <div class="m m--in">
+            <div class="bub">Assalam o alaikum, Damac Hills 2 mein 2-bed ka kya rate chal raha hai?<div class="foot">11:58 PM</div></div>
+          </div>
+
+          <div class="m m--out">
+            <div class="bub">
+              <div class="shot"></div>
+              Ye rahi latest price list — 2-bed 1.35M se shuru.
+            <div class="foot">A7 Administrator · 12:01 AM
+              <span class="tick tick--read"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg></span>
+            </div></div>
+            <div class="reacts"><span class="react">👍</span><span class="react">❤️ <b>2</b></span></div>
+          </div>
+
+          <div class="m m--in">
+            <div class="bub">Hmm<div class="foot">12:00 AM</div></div>
+          </div>
+
+          <div class="m m--out">
+            <div class="bub">
+              Damac Hills 2 Sales Centre
+              <div class="err">131053 · Media upload error</div>
+            <div class="foot">A7 Administrator · 12:03 AM
+              <span class="tick" style="color:#ff9d94"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+            </div></div>
+          </div>
+        </div>
+
+        <div class="warnbar">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          Window 42m mein band ho rahi hai — abhi jawab dein, warna template bhejna padega.
+        </div>
+
+        <div class="comp">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></div>
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/></svg></div>
+          <div class="input">Message likhein…</div>
+          <div class="send">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+            Send
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</body>
+</html>

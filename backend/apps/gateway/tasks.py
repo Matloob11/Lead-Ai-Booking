@@ -41,14 +41,26 @@ def _ts(value):
         return timezone.now()
 
 
+def _caption(message, kind):
+    """The caption Meta put beside a non-text message, if it put one there.
+
+    Not every type carries its payload as an object: ``contacts`` arrives as a
+    list of cards, and asking a list for a key raises rather than returning
+    nothing. That exception used to escape the task, which meant one contact
+    card stopped the whole webhook event — and with it every other message in
+    the same batch.
+    """
+    part = message.get(kind)
+    return part.get("caption", "") if isinstance(part, dict) else ""
+
+
 def _describe(message):
     """A short preview for the conversation list."""
     kind = message.get("type", "unknown")
     if kind == "text":
         return message.get("text", {}).get("body", "")
     if kind in MEDIA_KINDS:
-        caption = message.get(kind, {}).get("caption", "")
-        return caption or f"[{kind}]"
+        return _caption(message, kind) or f"[{kind}]"
     if kind == "location":
         return "[location]"
     if kind == "button":
@@ -141,7 +153,7 @@ def _store_inbound(number, message, contact_profiles):
             "conversation": conversation,
             "direction": Message.Direction.INBOUND,
             "kind": kind,
-            "body": preview if kind == "text" else message.get(kind, {}).get("caption", ""),
+            "body": preview if kind == "text" else _caption(message, kind),
             "media": media,
             "reply_to": quoted,
             "payload": message,

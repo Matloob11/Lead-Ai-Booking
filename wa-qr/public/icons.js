@@ -39,6 +39,13 @@ const PATHS = {
   location: ["M12 21s6.4-5.6 6.4-10.4a6.4 6.4 0 10-12.8 0C5.6 15.4 12 21 12 21z", "circle:12,10.4,2.4"],
   paperclip: ["M20.4 11.6l-8.2 8.2a5 5 0 01-7-7l8.6-8.6a3.4 3.4 0 014.8 4.8l-8.6 8.6a1.8 1.8 0 01-2.5-2.5l7.9-7.9"],
   inbox: ["M3.4 12.6L6 5.2h12l2.6 7.4v5.6a1.6 1.6 0 01-1.6 1.6H5a1.6 1.6 0 01-1.6-1.6z", "M3.4 12.6h4.4a2 2 0 002 2h4.4a2 2 0 002-2h4.4"],
+  play: ["fill:M7 5v14l11-7z"],
+  pause: ["fill:M7 5h3.5v14H7z", "fill:M13.5 5H17v14h-3.5z"],
+  more: ["circle:6,12,1.5", "circle:12,12,1.5", "circle:18,12,1.5"],
+  chevronLeft: ["M15 18l-6-6 6-6"],
+  chevronRight: ["M9 18l6-6-6-6"],
+  star: ["M12 2.5l2.9 6 6.6.9-4.8 4.7 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.8-4.7 6.6-.9z"],
+  starFilled: ["fill:M12 2.5l2.9 6 6.6.9-4.8 4.7 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.8-4.7 6.6-.9z"],
 };
 
 /**
@@ -72,6 +79,12 @@ export function icon(name, { size = 16, stroke = 1.7 } = {}) {
       circle.setAttribute("cy", cy);
       circle.setAttribute("r", r);
       svg.append(circle);
+    } else if (shape.startsWith("fill:")) {
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", shape.slice(5));
+      path.setAttribute("fill", "currentColor");
+      path.setAttribute("stroke", "none");
+      svg.append(path);
     } else {
       const path = document.createElementNS(SVG, "path");
       path.setAttribute("d", shape);

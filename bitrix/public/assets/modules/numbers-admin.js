@@ -14,6 +14,7 @@
 
 import { catalog } from "../api/api.js";
 import { el, clear, debounce, modal } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 
 const badge = (text, tone) => el("span.na-badge", { class: tone ? `na-badge--${tone}` : "" }, [text]);
 
@@ -170,7 +171,7 @@ export function openNumbersAdmin({ onSaved } = {}) {
                   refresh();
                 },
               },
-              ["Remove ×"]
+              [icon("close", { size: 12 }), " Remove"]
             ),
           ])
         );

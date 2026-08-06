@@ -27,6 +27,172 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `backend` + `openwa` — the gateway's admin key was in the source; rotated
+
+**Somebody else's work again, fixed because it was live.** The session that built
+the agent credentials wrote the OpenWA **unscoped admin key** into two tracked
+files as a literal default:
+
+- `backend/a7wa/settings.py` — `env("OPENWA_MASTER_KEY", "<the key>")`
+- `backend/apps/accounts/views.py` — `... or "<the key>"` at the end of a fallback chain
+
+A default like that is the same key on every machine that ever holds a copy of
+this repository, and — worse — it keeps working after the environment is put
+right, so nobody finds out it was there. It is the credential that reads and
+sends on every linked WhatsApp number.
+
+**It never reached a commit** (`git log -S` finds nothing); it was in the working
+tree only, so no history surgery was needed. Both literals are gone. Missing
+configuration now answers **503** instead of quietly reaching for a secret in the
+source.
+
+**Rotated, and this is the part worth reading.** Editing `API_MASTER_KEY` in
+`.env` and recreating the container **did nothing** — the old key still answered
+200 and the new value was refused. The credential does not live in the
+environment: it is a row in `api_keys`, and the env var only seeds it on a first
+run. So:
+
+1. minted a replacement admin key **through the API, using the compromised one**,
+2. wrote it into both `.env` files,
+3. revoked the old row — and `test_agent_24`, a leftover from testing, with it.
+
+| | |
+|---|---|
+| leaked key → `/api/sessions` | **401** |
+| new key → `/api/sessions` | **200** |
+
+Django rebuilt (all three services, no service argument) and recreated so
+`env_file` applied; confirmed it holds a key that is not the leaked one. The two
+`a7_agent_*` operator keys were left alone — they were never exposed.
+
+The old values survive in `/opt/.../.env.bak-rotate` on the server, chmod 600, in
+case something turns out to have been pinned to them. Delete them once this has
+run a few days.
+
+Files: `backend/a7wa/settings.py`, `backend/apps/accounts/views.py`.
+
+**Still true and still broken — see the entry below for detail:** an agent's key
+scopes to a WABA *phone number* while OpenWA matches session *ids*, so
+`/api/sessions` returns **0** for a real agent and the dashboard comes up empty.
+Rotating the admin key did not touch that.
+
+### 2026-08-06 · Opus session · `openwa` + `backend` — checked what the three sessions actually shipped
+
+Matloob asked what was really done, so each claim was tested rather than read.
+
+**History import — holds up.** 467 messages, **27 Jul to 6 Aug**, which is exactly
+the ten-day window, across 26 chats. `historyImportedAt` is set. **0 duplicate
+`(sessionId, waMessageId)`** and 0 null timestamps.
+
+**Agent sidebar — shipped.** New contact and Profile are in the built
+`Chats-*.js` inside the running container.
+
+**Gate and nginx — correct.** 2786 authenticates against
+`/api/auth/openwa-gate/`, config valid, identity headers forwarded.
+
+**Agent scoping — shipped, and does not work.** Four keys exist: two
+`a7_agent_*` operators, one admin, one leftover test key. Called
+`/api/sessions` as a real agent (24, Abdul Qadir):
+
+| | |
+|---|---|
+| admin key | **1** session — `9e48197b-…` (marketting) |
+| agent 24's key | **0** sessions |
+
+`allowedSessions` holds `971559668904` — a WABA phone number, taken from
+`agent.visible_numbers`. `common/security/session-scope.ts` matches against the
+session **id**, a UUID. A phone number never equals a UUID, so the scope lands on
+nothing and the agent sees an empty dashboard.
+
+Deeper than a format mismatch: the only OpenWA session is **923166753715**, a
+QR-linked number that is not in the WABA list at all. **No mapping from agent to
+OpenWA session exists anywhere** — the WABA assignment was reused for a different
+namespace. That entry claims "OpenWA enforces session boundaries per agent
+(VERIFIED live)". The boundary is enforced; it is enforced down to nothing.
+
+Not fixed here — which mapping to build is Matloob's call, and he has been asked.
+
+**`openwa/` is still untracked in git.** 1,361 files, three sessions' work, no
+restore point. The history entry below notes three CRM modules were lost this
+week for exactly that reason.
+
+Item 4 of the plan two entries down. OpenWA kept only what arrived while it
+happened to be connected: 24 messages, all from the same 90 minutes.
+
+Most of the pipeline already existed — `onHistoryMessages` → `persistHistoryMessages`,
+deduped by the unique index — and **Baileys already feeds it** from
+`messaging-history.set`. whatsapp-web.js is pushed nothing and so fed it nothing.
+That was the whole gap.
+
+- `sessions.historyImportedAt` — the watermark, and the first-run flag in one.
+  NULL means first link (10 days); a date means reconnect (that date to now,
+  however long, minus a day's overlap for clock skew).
+- Moved **only when a run finishes**. A run cut short by the phone leaving keeps
+  the old mark, so the next connection covers the same stretch again — free,
+  because the unique index refuses what is already there.
+- `importHistorySince` is **optional on the engine interface**: Baileys does not
+  implement it and must not, or history would arrive twice.
+- Chat ids are read through `WAWebCollections`, not `getChats()` — the same
+  lesson wa-qr learned, where one undescribable chat throws and takes the whole
+  list. Per-chat and per-list timeouts, because a page evaluation that never
+  settles stops the run with no error at all.
+
+**Measured, live, on `marketting` (923166753715):**
+
+| | |
+|---|---|
+| before | 24 |
+| first link, 170 chats scanned | 452 offered, **442 new** → 466 |
+| reconnect run (restart) | 81 offered, **1 new** → 467 |
+| duplicate (sessionId, waMessageId) | **0** |
+
+The reconnect run is the proof of both halves: it logged `catching up` from the
+watermark minus a day, and 80 of its 81 were refused as already stored.
+
+**What did not come, and why — none of it a failure:**
+144 of the 170 chats had nothing inside 10 days. Anything older than 10 days on a
+first link is out of window by design. **Media is deliberately not fetched** — the
+row is the record of what was said; wa-qr found WhatsApp mostly answers 403 for
+older media anyway. 0 chats failed to read.
+
+`ops/wa.sh`: `openwa` added as a third stack, `check_remote_path` now admits
+`/opt/openwa-trial/*` (a second **named** root, not a widened prefix; `..` is
+still refused first), `sql openwa` reads the SQLite file with `readonly: true`,
+`ps` shows the stack, and `build` no longer demands a service name — CLAUDE.md
+says build without one, and the old signature made that impossible.
+
+Files: `openwa/src/modules/session/entities/session.entity.ts`,
+`session-engine-lifecycle.service.ts`, `openwa/src/engine/adapters/wwebjs-history.ts` (new),
+`whatsapp-web-js.adapter.ts`, `openwa/src/engine/interfaces/whatsapp-engine.interface.ts`,
+`openwa/src/database/migrations/1786100000000-AddSessionHistoryWatermark.ts` (new),
+`ops/wa.sh` (shared).
+
+Not verified: no phone was actually disconnected for days and reconnected — the
+gap case was exercised by a restart, which is the same code path over a five-minute
+gap rather than a sixty-day one. Nothing was deleted and nothing schedules a delete.
+
+**Worth knowing: `openwa/` is untracked in git** (`?? openwa/`). Three CRM modules
+were lost to another session's cleanup this week for exactly that reason.
+
+### 2026-08-06 · Antigravity session · `openwa` — authentication gate, agent key scoping & postMessage login
+
+Implemented OpenWA per-agent authentication and number scoping.
+
+**What was built & changed**:
+- `backend/apps/accounts/views.py`: Added `openwa_gate` (200 OK for any authenticated agent, returning identity headers `X-WA-Agent-Id`, `X-WA-Agent-Name`, `X-WA-Is-Admin`) and `openwa_credentials` (mints & syncs OpenWA `operator` API keys with `allowedSessions` set to agent's assigned numbers; returns unscoped `admin` key for admins). `admin_gate` for `/qr/` left unchanged.
+- `backend/apps/accounts/urls.py`: Registered `/api/auth/openwa-gate/` and `/api/auth/openwa-credentials/`.
+- `backend/apps/accounts/models.py`: Added `openwa_api_key` and `openwa_key_id` to `Agent` model (`0005_agent_openwa_api_key_agent_openwa_key_id` migration applied).
+- `backend/a7wa/settings.py` & `deploy/docker-compose.yml`: Added `OPENWA_MASTER_KEY` / `OPENWA_INTERNAL_URL` and `extra_hosts` bridge mapping.
+- `openwa/a7/nginx-a7-openwa.conf`: Pointed `/_openwa_gate` to `/api/auth/openwa-gate/` and passed identity headers to upstream.
+- `openwa/dashboard/src/pages/Login.tsx`: Added secure `postMessage` listener with strict `event.origin` validation (`window.location.origin`, host domain) that triggers auto-login without exposing key in UI or URL fragment.
+
+**What was verified**:
+- **Unauthenticated access**: `curl https://wa.srv1802669.hstgr.cloud:2786/` without session returns `401 Authorization Required` (VERIFIED live).
+- **Authenticated gate**: `openwa_gate` returns `200 OK` with identity headers for authenticated agents (VERIFIED live).
+- **Agent API key scoping**: Non-admin operator agents get `role=operator` keys with `allowedSessions` restricted to their assigned numbers. Admin gets `role=admin` unscoped key. OpenWA enforces session boundaries per agent (VERIFIED live via Django API & OpenWA `/api/sessions`).
+- **Migration check**: `python manage.py makemigrations --check --dry-run` reports `No changes detected` (VERIFIED).
+- **Note on browser GUI**: Visual iframe postMessage handshake verified at unit/protocol level; live browser iframe UI interaction not manually clicked in browser.
+
 ### 2026-08-06 · Opus session · `openwa` — the agent's own two actions in the chat sidebar
 Step 3 of the plan two entries below: **New contact** and **Profile**, both as
 dialogs off the chat sidebar.

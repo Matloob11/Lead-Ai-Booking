@@ -1,0 +1,48 @@
+/* A7: how the dashboard sits when something else has framed it.
+ *
+ * Nothing here applies unless `data-embedded` is on the document, which main.tsx
+ * sets only when the page is not the top window — so the standalone dashboard is
+ * left exactly as upstream designed it.
+ *
+ * The A7 panel opens this in a frame that already carries its own "Linked
+ * devices" bar. Inside that, the page's own 2rem padding, its title and its
+ * subtitle are a second helping of chrome saying what the bar above already
+ * said, and they come out of the height the conversation has to live in.
+ */
+
+/* The page's own title and strapline. The actions beside them — the message
+ * search — are the one part worth keeping, so it is the title group and the
+ * subtitle that go, not the header. */
+:root[data-embedded] .page-header__title-group,
+:root[data-embedded] .page-header__subtitle {
+  display: none;
+}
+
+:root[data-embedded] .page-header {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+:root[data-embedded] .chats-page {
+  padding: 0;
+  /* Not `calc(100vh - 4rem)`. Inside a frame 100vh *is* the frame, so every
+     margin subtracted from it is height taken twice. */
+  height: 100%;
+}
+
+:root[data-embedded] .chats-page .chats-layout {
+  /* Upstream pins this to `calc(100vh - 12rem)` to leave room for the page
+     chrome above it. Framed, that chrome is gone and the 12rem became a dead
+     strip along the bottom of the conversation. Let flex measure it instead. */
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+  /* A card floating on a background reads as a card when the background is a
+     page. Framed edge to edge there is no background left for it to float on,
+     so the rounded corners and the border just cut the conversation short. */
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}

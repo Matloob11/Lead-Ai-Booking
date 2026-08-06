@@ -302,3 +302,104 @@ def admin_gate(request):
     answer["X-WA-Agent-Name"] = request.user.display_name or request.user.get_username()
     answer["X-WA-Is-Admin"] = "1" if request.user.has_admin_rights else "0"
     return answer
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def openwa_gate(request):
+    """Answers nginx's auth_request before it proxies the OpenWA dashboard/API.
+
+    Every authenticated agent (admin or operator) gets 200 OK.
+    Returns X-WA-Agent-Id, X-WA-Agent-Name, and X-WA-Is-Admin headers for proxying.
+    """
+    answer = Response({"ok": True})
+    answer["X-WA-Agent-Id"] = str(request.user.pk)
+    answer["X-WA-Agent-Name"] = request.user.display_name or request.user.get_full_name() or request.user.get_username()
+    answer["X-WA-Is-Admin"] = "true" if request.user.has_admin_rights else "false"
+    return answer
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def openwa_credentials(request):
+    """Provides OpenWA API key credentials for the authenticated agent.
+
+    - Admin: returns role='admin' with unscoped master API key.
+    - Operator: returns role='operator' with API key scoped to the agent's visible numbers.
+    """
+    import os
+    from django.conf import settings
+
+    agent = request.user
+    # No literal fallback. This is the unscoped admin credential for the WhatsApp
+    # gateway; a default written into the source is the same key on every machine
+    # that has ever held a copy of this repository, and it goes on working after
+    # the environment is corrected, so nobody finds out it was there. Missing
+    # configuration is answered loudly instead.
+    master_key = (
+        getattr(settings, "OPENWA_MASTER_KEY", None)
+        or os.getenv("OPENWA_MASTER_KEY")
+        or os.getenv("API_MASTER_KEY")
+    )
+    if not master_key:
+        return Response(
+            {"detail": "OpenWA is not configured on this server."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    openwa_base_url = getattr(settings, "OPENWA_INTERNAL_URL", None) or os.getenv("OPENWA_INTERNAL_URL") or "http://openwa-api:2785"
+
+    if agent.has_admin_rights:
+        return Response({
+            "role": "admin",
+            "apiKey": master_key,
+            "allowedSessions": [],
+        })
+
+    # Non-admin operator: scope to their assigned numbers
+    sessions = [n.phone_number for n in agent.visible_numbers]
+    key_name = f"a7_agent_{agent.pk}"
+
+    # If we already have a saved API key for this agent, sync its allowedSessions in OpenWA
+    if agent.openwa_api_key and agent.openwa_key_id:
+        try:
+            with httpx.Client(timeout=10) as client:
+                res = client.put(
+                    f"{openwa_base_url}/api/auth/api-keys/{agent.openwa_key_id}",
+                    json={"allowedSessions": sessions, "role": "operator"},
+                    headers={"X-API-Key": master_key},
+                )
+            if res.status_code == 200:
+                return Response({
+                    "role": "operator",
+                    "apiKey": agent.openwa_api_key,
+                    "allowedSessions": sessions,
+                })
+        except Exception as exc:
+            logger.warning("Failed to update OpenWA key for agent %s: %s", agent.pk, exc)
+
+    # Key is missing or update failed: mint a new key in OpenWA
+    try:
+        with httpx.Client(timeout=10) as client:
+            res = client.post(
+                f"{openwa_base_url}/api/auth/api-keys",
+                json={"name": key_name, "role": "operator", "allowedSessions": sessions},
+                headers={"X-API-Key": master_key},
+            )
+        if res.status_code in (200, 201):
+            data = res.json()
+            raw_key = data.get("apiKey", "")
+            key_id = data.get("id", "")
+            if raw_key and key_id:
+                agent.openwa_api_key = raw_key
+                agent.openwa_key_id = key_id
+                agent.save(update_fields=["openwa_api_key", "openwa_key_id"])
+                return Response({
+                    "role": "operator",
+                    "apiKey": raw_key,
+                    "allowedSessions": sessions,
+                })
+    except Exception as exc:
+        logger.error("Failed to mint OpenWA key for agent %s: %s", agent.pk, exc)
+
+    return Response({"detail": "Could not issue OpenWA API key"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

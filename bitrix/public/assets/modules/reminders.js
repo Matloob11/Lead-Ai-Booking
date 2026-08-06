@@ -4,7 +4,8 @@
  * preset + custom datetimepicker, WebAudio sound beep, and real-time toast alert on reminder.due.
  */
 
-import { el, clear, untilText, stamp, modal } from "../core/dom.js";
+import { el, clear, untilText, stamp, modal, toast } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 import { getReminders, createReminder, markReminderDone, deleteReminder } from "../api/api-extras.js";
 
 function getActiveConversationId() {
@@ -76,7 +77,7 @@ function showToast({ contactName, note, conversationId }) {
   const toast = el("div.wa-x-toast", {}, [
     el("div.wa-x-toast-head", {}, [
       el("div.wa-x-toast-title", {}, ["⏰ Reminder Alert"]),
-      el("button.wa-x-toast-close", { type: "button", onclick: () => { clearTimeout(timer); dismiss(); } }, ["×"]),
+      el("button.wa-x-toast-close", { type: "button", title: "Dismiss", onclick: () => { clearTimeout(timer); dismiss(); } }, [icon("close", { size: 14 })]),
     ]),
     el("div.wa-x-toast-contact", {}, [contactName]),
     el("div.wa-x-toast-note", {}, [note || "Follow-up reminder"]),
@@ -183,11 +184,11 @@ function mountTopbar() {
                 await markReminderDone(r.id);
                 await loadAndRenderList();
               } catch (err) {
-                alert(`Error: ${err.message}`);
+                toast(`Error: ${err.message}`, "err");
               }
             },
           },
-          ["✓"]
+          [icon("check", { size: 14 })]
         );
 
         const deleteBtn = el(
@@ -202,11 +203,11 @@ function mountTopbar() {
                 await deleteReminder(r.id);
                 await loadAndRenderList();
               } catch (err) {
-                alert(`Error: ${err.message}`);
+                toast(`Error: ${err.message}`, "err");
               }
             },
           },
-          ["🗑"]
+          [icon("trash", { size: 14 })]
         );
 
         const row = el(
@@ -294,7 +295,7 @@ function mountComposerClock() {
   const openReminderDialog = (initialDate = new Date()) => {
     const convId = getActiveConversationId();
     if (!convId) {
-      alert("Select a conversation first.");
+      toast("Select a conversation first.", "err");
       return;
     }
 

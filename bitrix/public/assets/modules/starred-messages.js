@@ -3,7 +3,7 @@
  */
 
 import { inbox } from "../api/api.js";
-import { clear, el, formatBytes, modal, stamp } from "../core/dom.js";
+import { clear, el, formatBytes, modal, stamp, toast } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
 export function openStarredMessagesModal({ conversationId, onNavigateToMessage } = {}) {
@@ -53,7 +53,7 @@ export function openStarredMessagesModal({ conversationId, onNavigateToMessage }
                   await inbox.star(item.id, false);
                   await fetchStarred();
                 } catch (err) {
-                  alert(`Unstar failed: ${err.message}`);
+                  toast(`Unstar failed: ${err.message}`, "err");
                 }
               },
             }, [icon("star", { size: 14 })]),

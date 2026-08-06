@@ -43,6 +43,8 @@ services:
       redis: {condition: service_healthy}
     ports:
       - "127.0.0.1:8100:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Bind mounts, not named volumes: the host nginx serves /static/ straight
       # off disk, and media must survive a stack rebuild.

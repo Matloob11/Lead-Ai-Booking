@@ -3,7 +3,7 @@
  */
 
 import { inbox } from "../api/api.js";
-import { clear, el, modal } from "../core/dom.js";
+import { clear, el, modal, toast } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
 export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
@@ -87,7 +87,7 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
                   await inbox.deleteQuickReply(reply.id);
                   await fetchReplies();
                 } catch (err) {
-                  alert(err.message);
+                  toast(err.message || "Failed to delete quick reply", "err");
                 }
               },
             }, [icon("trash", { size: 14 })]),

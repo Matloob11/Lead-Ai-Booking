@@ -1084,7 +1084,7 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
         hidden: !(button.type === "URL" && placeholdersIn(button.url).length),
       });
 
-      const remove = el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Remove this button" }, ["×"]);
+      const remove = el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Remove this button" }, [icon("close", { size: 14 })]);
 
       kind.addEventListener("change", () => {
         button.type = kind.value;

@@ -4,7 +4,8 @@
  * Enforces character limits, live counters, error handling without losing agent's input.
  */
 
-import { el, clear, modal } from "../core/dom.js";
+import { el, clear, modal, toast } from "../core/dom.js";
+import { icon } from "../core/icons.js";
 import { sendReplyButtons } from "../api/api-extras.js";
 
 function getActiveConversationId() {
@@ -63,7 +64,7 @@ export function mountButtons() {
   btnIcon.addEventListener("click", () => {
     const convId = getActiveConversationId();
     if (!convId) {
-      alert("Select a chat first.");
+      toast("Select a chat first.", "err");
       return;
     }
     openButtonsModal(convId);
@@ -167,7 +168,7 @@ function openButtonsModal(conversationId) {
             }
           },
         },
-        ["×"]
+        [icon("close", { size: 14 })]
       );
 
       const row = el("div.wa-x-button-input-row", {}, [

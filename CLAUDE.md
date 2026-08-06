@@ -7,26 +7,33 @@ plain ES modules served as static files.
 
 ## Deploying
 
-There is no build step and no CI. The live system is a Hostinger VPS.
+There is no CI. The live system is a Hostinger VPS.
 
-```
-ssh -i "$HOME/.ssh/hostinger_codex" -o BatchMode=yes root@187.127.123.235
-```
-
-**Backend** — `/opt/a7-wa/backend` on the host is bind-mounted to `/app` in
-`web`, `worker` and `beat`. Write to the *host* path and restart:
+**Backend** — the code is **baked into the image**, not mounted. The only
+volumes are `../media` and `../static`; `/opt/a7-wa/backend` is the *build
+context*, so writing there changes nothing until an image is built from it.
+Push the file, then:
 
 ```bash
-tar -cf - -C backend apps/... | ssh … 'tar -xf - -C /opt/a7-wa/backend --overwrite \
-  && chown -R 10001:10001 /opt/a7-wa/backend'
-ssh … 'cd /opt/a7-wa/deploy && docker compose restart web worker beat'
+ops/wa.sh push backend/apps/x/y.py /opt/a7-wa/backend/apps/x/y.py
+cd /opt/a7-wa/deploy && docker compose build && docker compose up -d
 ```
 
-Do **not** deploy with `docker compose cp` into a container. It writes inside one
-container only, the container runs as uid 10001 and cannot overwrite files the
-mount owns, and anything it does write is lost when the container is recreated.
-Copying into `web` while `worker` and `beat` read the mount is how the three
-services end up running three different versions of the code.
+`build` with **no service argument**, and `up -d`, not `restart`:
+
+- `web`, `worker` and `beat` build separately, so `build web` leaves the other
+  two on their old images. That is how the three services end up running three
+  different versions — and it is easy to miss, because webhook processing happens
+  in `worker` while everything you reach by hand answers from `web`. On
+  2026-08-05 a `web`-only build left `worker` with a `Message` model predating
+  `is_starred`; every inbound message failed for hours behind an endpoint that
+  tested perfectly healthy.
+- `env_file:` is read when a container is *created*. A new environment variable
+  is invisible to `restart`.
+
+`docker compose cp` into a container is worse still: it writes inside one
+container, as a uid that cannot overwrite what it needs to, and loses the write
+on the next recreate.
 
 **Panel** — `bitrix/public/` → `/opt/a7-wa/panel/`, owned by `www-data`, then
 `systemctl reload nginx`. `bitrix/deploy/deploy-panel.sh` does this with rsync

@@ -124,10 +124,10 @@ function openLightbox(message) {
   const caption = el("div.lb__caption");
   const counter = el("div.lb__counter");
 
-  const prev = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Previous picture" }, ["‹"]);
-  const next = el("button.lb__nav.lb__nav--next", { type: "button", title: "Next picture" }, ["›"]);
+  const prev = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Previous picture" }, [ctx.icon("chevronLeft", { size: 24 })]);
+  const next = el("button.lb__nav.lb__nav--next", { type: "button", title: "Next picture" }, [ctx.icon("chevronRight", { size: 24 })]);
   const save = el("a.lb__save", { title: "Download this picture" }, ["Download"]);
-  const shut = el("button.lb__close", { type: "button", title: "Close" }, ["×"]);
+  const shut = el("button.lb__close", { type: "button", title: "Close" }, [ctx.icon("close", { size: 16 })]);
 
   function show(index) {
     at = (index + shots.length) % shots.length;
@@ -241,7 +241,7 @@ export function voiceNote(message, src) {
   held.detach?.();
   const { audio } = held;
 
-  const play = el("button.voice__play", { type: "button", title: "Play" }, ["▶"]);
+  const play = el("button.voice__play", { type: "button", title: "Play" }, [ctx.icon(audio.paused ? "play" : "pause", { size: 12 })]);
   const fill = el("div.voice__fill");
   const track = el("div.voice__track", {}, [fill]);
   const time = el("div.voice__time", {}, ["0:00"]);
@@ -254,9 +254,9 @@ export function voiceNote(message, src) {
     time.textContent = audio.paused ? clock(total) : clock(total - audio.currentTime);
   };
 
-  /** ▶ or ❚❚, from what the audio is actually doing rather than from a flag. */
+  /** play or pause icon, from what the audio is actually doing rather than from a flag. */
   const paintButton = () => {
-    play.textContent = audio.paused ? "▶" : "❚❚";
+    clear(play).append(ctx.icon(audio.paused ? "play" : "pause", { size: 12 }));
     play.title = audio.paused ? "Play" : "Pause";
   };
 
@@ -359,7 +359,7 @@ function reactionBar(message) {
       title: "Remove my reaction",
       "data-emoji": "",
       "data-act": "react",
-    }, ["✕"])
+    }, [ctx.icon("close", { size: 12 })])
   );
 
   return bar;
@@ -749,7 +749,7 @@ function paintContact() {
   const panel = el("aside.contactp", {}, [
     el("div.contactp__top", {}, [
       el("div.contactp__title", {}, ["Contact"]),
-      el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: toggleContact, title: "Close" }, ["×"]),
+      el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: toggleContact, title: "Close" }, [ctx.icon("close", { size: 14 })]),
     ]),
     el("div.contactp__who", {}, [
       ctx.avatarFor(conversation, title),
@@ -855,7 +855,7 @@ export function decorateBubble(node, message) {
   node.dataset.messageId = String(message.id);
 
   if (message.starred) {
-    node.append(ctx.el("span.msg__star", { title: "Starred" }, ["★"]));
+    node.append(ctx.el("span.msg__star", { title: "Starred" }, [ctx.icon("starFilled", { size: 12 })]));
   }
 
   node.append(
@@ -863,7 +863,7 @@ export function decorateBubble(node, message) {
       type: "button",
       title: "More",
       "data-act": "menu",
-    }, ["⋯"])
+    }, [ctx.icon("more", { size: 15 })])
   );
 
   // Appended only if there is one. append(null) writes the literal text "null"
@@ -909,7 +909,7 @@ export function threadHeadExtras() {
         type: "button",
         title: "Starred messages",
         onclick: openStarred,
-      }, ["★"])
+      }, [ctx.icon("star", { size: 14 })])
     );
   }
   buttons.push(

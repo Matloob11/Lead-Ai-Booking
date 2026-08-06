@@ -272,3 +272,11 @@ LOGGING = {
         "httpcore": {"level": "WARNING", "handlers": ["console"], "propagate": False},
     },
 }
+
+# The unscoped admin credential for the OpenWA gateway. Deliberately no default:
+# one written here is the same key on every machine that has ever held a copy of
+# this repository, and it keeps working after the environment is put right, so
+# nobody discovers it was there. Empty means unconfigured, and the route that
+# needs it answers 503 rather than quietly using a secret from the source.
+OPENWA_MASTER_KEY = env("OPENWA_MASTER_KEY", "")
+OPENWA_INTERNAL_URL = env("OPENWA_INTERNAL_URL", "http://openwa-api:2785")

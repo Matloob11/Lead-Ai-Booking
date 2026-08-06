@@ -24,6 +24,7 @@
 #   ops/wa.sh get /app/assets/x.js        fetch from the public site
 #   ops/wa.sh push local remote           copy one file to the server
 #   ops/wa.sh sync src /opt/a7-wa/wa-qr   copy a directory to the server
+#   ops/wa.sh build openwa                rebuild the OpenWA trial stack
 #   ops/wa.sh panel [stale…]              publish bitrix/public to /opt/a7-wa/panel
 #   ops/wa.sh build qr app                rebuild an image
 #   ops/wa.sh restart qr app              restart services
@@ -59,9 +60,14 @@ SSH_OPTS=(
   -o UserKnownHostsFile="$KNOWN_HOSTS"
 )
 
-# The only two places anything is allowed to happen.
+# The only places anything is allowed to happen.
 QR_DIR="/opt/a7-wa/wa-qr"
 APP_DIR="/opt/a7-wa/deploy"
+# OpenWA is a separate trial stack with its own compose file and its own root.
+# Added deliberately rather than by loosening the check to /opt: this is a second
+# named directory, not a wildcard, and everything below still refuses anything
+# that is not provably inside one of them.
+OPENWA_DIR="/opt/openwa-trial/OpenWA"
 
 die() { echo "wa.sh: $*" >&2; exit 2; }
 
@@ -70,9 +76,10 @@ remote() { ssh.exe -i "$KEY" "${SSH_OPTS[@]}" "$HOST" "$@"; }
 # The compose directory for a stack name, refusing anything else outright.
 stack_dir() {
   case "${1:-}" in
-    qr)  echo "$QR_DIR" ;;
-    app) echo "$APP_DIR" ;;
-    *)   die "unknown stack '${1:-}' — it is 'qr' or 'app'" ;;
+    qr)     echo "$QR_DIR" ;;
+    app)    echo "$APP_DIR" ;;
+    openwa) echo "$OPENWA_DIR" ;;
+    *)      die "unknown stack '${1:-}' — it is 'qr', 'app' or 'openwa'" ;;
   esac
 }
 
@@ -87,12 +94,17 @@ check_count() {
   [[ "${1:-}" =~ ^[0-9]{1,5}$ ]] || die "'${1:-}' is not a number of lines"
 }
 
-# Somewhere under /opt/a7-wa, and provably so — no `..`, no absolute escape, no
-# characters a shell would read as anything other than a path.
+# Inside one of the two deploy roots, and provably so — no `..`, no absolute
+# escape, no characters a shell would read as anything other than a path.
+#
+# Two named roots rather than one, and never a prefix that could widen: `..` is
+# refused before the prefix is trusted, so "/opt/a7-wa/../etc" cannot pass by
+# starting with the right characters.
 check_remote_path() {
   local p="${1:-}"
-  [[ "$p" == /opt/a7-wa/* ]] || die "refusing a path outside /opt/a7-wa: '$p'"
-  [[ "$p" != *..* ]]         || die "refusing a path containing '..': '$p'"
+  [[ "$p" != *..* ]] || die "refusing a path containing '..': '$p'"
+  [[ "$p" == /opt/a7-wa/* || "$p" == /opt/openwa-trial/* ]] ||
+    die "refusing a path outside /opt/a7-wa and /opt/openwa-trial: '$p'"
   [[ "$p" =~ ^[A-Za-z0-9._/@-]+$ ]] || die "refusing unusual characters in: '$p'"
 }
 
@@ -106,7 +118,9 @@ case "$cmd" in
   ps)
     remote "cd $QR_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
             echo '---'; \
-            cd $APP_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'"
+            cd $APP_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
+            echo '--- openwa'; \
+            cd $OPENWA_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'"
     ;;
 
   logs)
@@ -118,6 +132,26 @@ case "$cmd" in
     dir=$(stack_dir "${1:-}")
     query="${2:-}"
     [[ -n "$query" ]] || die "sql needs a query"
+
+    # OpenWA keeps its data in SQLite, not Postgres, so the same verb reaches a
+    # different database there. Read-only is still the database's own answer and
+    # not a regex's: `readonly: true` opens the file with SQLITE_OPEN_READONLY, so
+    # sqlite itself refuses every write — including one smuggled in after a
+    # semicolon — rather than a pattern deciding the query looked harmless.
+    if [[ "${1:-}" == openwa ]]; then
+      printf '%s' "$query" | remote "cd $dir && docker compose exec -T openwa-api sh -c '\
+        exec node -e \"
+          const Database = require(\\\"better-sqlite3\\\");
+          const fs = require(\\\"fs\\\");
+          const candidates = [process.env.DATABASE_NAME, \\\"/app/data/openwa.sqlite\\\", \\\"./data/openwa.sqlite\\\", \\\"/data/openwa.sqlite\\\"].filter(Boolean);
+          const file = candidates.find(p => fs.existsSync(p));
+          if (!file) { console.error(\\\"no sqlite file found in: \\\" + candidates.join(\\\", \\\")); process.exit(1); }
+          const db = new Database(file, { readonly: true, fileMustExist: true });
+          const sql = fs.readFileSync(0, \\\"utf8\\\");
+          for (const row of db.prepare(sql).all()) console.log(Object.values(row).join(\\\"\t\\\"));
+        \"'"
+      exit 0
+    fi
 
     # Read-only because the database says so, not because the query looked
     # harmless. --single-transaction puts both -c options in one transaction,
@@ -198,8 +232,18 @@ case "$cmd" in
     ;;
 
   build)
-    dir=$(stack_dir "${1:-}"); check_service "${2:-}"
-    remote "cd $dir && docker compose build '$2' 2>&1 | tail -3"
+    # The service is optional, and leaving it off is the documented practice:
+    # `web`, `worker` and `beat` build separately, so naming one leaves the other
+    # two on their old images — which is how three services end up running three
+    # versions, and it is easy to miss because webhook processing happens in
+    # `worker` while everything reached by hand answers from `web`.
+    dir=$(stack_dir "${1:-}")
+    if [[ -n "${2:-}" ]]; then
+      check_service "$2"
+      remote "cd $dir && docker compose build '$2' 2>&1 | tail -3"
+    else
+      remote "cd $dir && docker compose build 2>&1 | tail -3"
+    fi
     ;;
 
   up)

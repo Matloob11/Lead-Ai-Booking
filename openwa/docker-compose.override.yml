@@ -1,0 +1,27 @@
+# A7 deployment overrides. Kept out of docker-compose.yml so an upstream update
+# can be pulled without a merge conflict.
+
+services:
+  # The Docker socket proxy is off. This host also runs the live A7 stack, and
+  # OpenWA's own SECURITY.md says the proxy cannot scope container-create
+  # payloads — a compromised API container could create containers with host
+  # bind-mounts and reach the rest of the box. DockerService degrades gracefully
+  # and logs "Docker not available"; only dashboard-driven datastore
+  # orchestration is lost, which this deployment does not use.
+  docker-proxy:
+    profiles: ['disabled']
+
+  openwa-api:
+    networks:
+      - default
+      - a7wa_net
+    environment:
+      # docker-compose.yml forwards an explicit list of variables, so one that is
+      # absent from that list never reaches the container however it is set in
+      # .env — which is exactly how a setting can look applied and do nothing.
+      - FRAME_ANCESTORS=${FRAME_ANCESTORS:-}
+
+networks:
+  a7wa_net:
+    name: a7wa_default
+    external: true

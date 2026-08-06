@@ -1,4 +1,5 @@
 /** Tiny DOM helpers — enough structure to avoid a framework and a build step. */
+import { icon } from "./icons.js";
 
 /**
  * el("div.row", {onclick}, [child, "text"]) → HTMLElement.
@@ -130,7 +131,7 @@ export function modal(title, content, { wide = false, onClose } = {}) {
   const box = el("div.modal__box", { class: wide ? "modal__box--wide" : "" }, [
     el("div.modal__head", {}, [
       el("h2.modal__title", {}, [title]),
-      el("button.modal__x", { type: "button", onclick: close }, ["×"]),
+      el("button.modal__x", { type: "button", onclick: close, title: "Close" }, [icon("close", { size: 14 })]),
     ]),
     content,
   ]);

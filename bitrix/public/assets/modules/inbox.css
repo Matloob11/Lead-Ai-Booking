@@ -1230,7 +1230,7 @@ body {
 .modal__box {
   width: 100%;
   max-width: 460px;
-  max-height: 86vh;
+  max-height: 90%;
   overflow: auto;
   background: #fff;
   border-radius: 12px;
@@ -1311,7 +1311,7 @@ body {
 }
 
 .tpl-list {
-  max-height: 52vh;
+  max-height: 380px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 8px;

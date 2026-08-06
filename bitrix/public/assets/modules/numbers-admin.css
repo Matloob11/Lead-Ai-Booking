@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-height: min(76vh, 700px);
+  max-height: 100%;
 }
 
 .na-note {
@@ -187,6 +187,97 @@
 
 .na-picker-wrap {
   margin-top: 4px;
+}
+
+/* ----------------------------------------------------- agent combobox
+
+   A box you type into rather than a list you scroll. The menu is absolute so
+   opening it does not push the rows below it down — with the dialog already
+   scrolling, a list that reflows the page under the pointer is unusable. */
+
+.na-pick {
+  position: relative;
+}
+
+.na-pick__input {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.na-pick__input:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+.na-pick__input:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.na-pick__menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--menu-bg, #fff);
+  color: var(--menu-ink, var(--ink));
+  box-shadow: 0 12px 32px rgba(14, 42, 71, 0.18);
+  scrollbar-width: thin;
+}
+
+.na-pick__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* One highlight, driven by the keyboard and by the pointer alike, so arrowing
+   down and moving the mouse never disagree about what Enter would pick. */
+.na-pick__item.is-marked {
+  background: var(--menu-hover, rgba(14, 42, 71, 0.08));
+}
+
+.na-pick__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.na-pick__holds {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.na-pick__none {
+  padding: 9px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 /* ----------------------------------------------------------------- chips */

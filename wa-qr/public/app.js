@@ -337,7 +337,14 @@ const ui = {
 const layout = el("div.app", {}, [
   el("aside.side", {}, [
     el("div.side__top", {}, [
-      el("div.side__title", {}, [icon("phone", { size: 16 }), "Linked phones"]),
+      // The words are wrapped because `text-overflow` has nothing to act on
+      // otherwise: a bare string inside a flex container becomes an anonymous
+      // item, which no rule can reach. Narrow, the title used to be cut mid-word
+      // with no ellipsis to say it had been.
+      el("div.side__title", {}, [
+        icon("phone", { size: 16 }),
+        el("span.side__title-text", {}, ["Linked phones"]),
+      ]),
       el("button.btn.btn--ghost.btn--sm", { type: "button", onclick: openPhones }, [
         icon("link", { size: 13 }),
         "Manage",
@@ -1020,13 +1027,12 @@ function attachment(message) {
   // browser now; a Word or Excel file still cannot, so it is offered only as a
   // download rather than as a button that fails.
   const canOpenHere = VIEWABLE_DOCS.has(mime);
+  const fileName = message.media_name || message.file_name || message.kind || "File";
 
   return el("div.msg__file", {}, [
-    icon("file", { size: 17 }),
+    icon("file", { size: 18 }),
     el("div.msg__file-who", {}, [
-      el("div.msg__file-name", {}, [
-        message.media_name || message.file_name || message.kind || "File",
-      ]),
+      el("div.msg__file-name", { title: fileName }, [fileName]),
       el("div.msg__file-size", {}, [
         formatBytes(message.media_size ?? message.size_bytes),
         canOpenHere ? "" : " · download to open",
@@ -1034,15 +1040,12 @@ function attachment(message) {
     ]),
     el("div.msg__file-acts", {}, [
       canOpenHere
-        ? el("a.msg__file-act", { href: inline, target: "_blank", rel: "noopener", title: "Open it here" }, ["View"])
+        ? el("a.msg__file-act", { href: inline, target: "_blank", rel: "noopener", title: "Open document" }, ["View"])
         : null,
       el("a.msg__file-act", {
         href: download,
-        // `download` rather than a new tab: the server sends this route as an
-        // attachment anyway, and a tab that opens and closes itself looks like
-        // nothing happened.
         download: message.media_name || "",
-        title: "Save it",
+        title: "Save document",
       }, ["Download"]),
     ]),
   ]);
@@ -1101,6 +1104,19 @@ function failure(message, conversation) {
   ]);
 }
 
+/**
+ * Whether the body would only repeat the filename already on the file row.
+ *
+ * A document sent with no caption arrives with its own filename as the body, so
+ * the row said `MONICAH CV-2-1.pdf…` and the line directly beneath it said the
+ * same thing again. A real caption is still printed — this only matches when the
+ * two are the same string.
+ */
+function repeatsFileName(message) {
+  const name = String(message.media_name || message.file_name || "").trim();
+  return Boolean(name) && String(message.body || "").trim() === name;
+}
+
 function bubble(message, conversation) {
   const outbound = message.direction === "out";
   const node = el("div.msg", {
@@ -1124,7 +1140,9 @@ function bubble(message, conversation) {
 
   if (message.media_url || message.media_id) node.append(attachment(message));
 
-  if (message.body) node.append(el("div.msg__body", {}, [message.body]));
+  if (message.body && !repeatsFileName(message)) {
+    node.append(el("div.msg__body", {}, [message.body]));
+  }
   else if (!message.media_url && !message.media_id) {
     // In words, not in brackets. "[unknown]" told an agent that something had
     // gone wrong, when almost always nothing had — it was a poll, a missed

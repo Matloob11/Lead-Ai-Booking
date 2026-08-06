@@ -9,6 +9,9 @@ urlpatterns = [
     path("me/", views.me, name="me"),
     # Asked by nginx before it proxies /qr/ — see admin_gate.
     path("gate/", views.admin_gate, name="admin-gate"),
+    # Asked by nginx before it proxies OpenWA (port 2786) — see openwa_gate.
+    path("openwa-gate/", views.openwa_gate, name="openwa-gate"),
+    path("openwa-credentials/", views.openwa_credentials, name="openwa-credentials"),
     path("access-request/", views.access_request, name="access-request"),
     path("access-requests/", views.access_request_list, name="access-request-list"),
     path(

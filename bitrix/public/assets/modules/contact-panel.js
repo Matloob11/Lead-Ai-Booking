@@ -16,7 +16,7 @@
 
 import { apiFetch } from "../core/bitrix-sso.js";
 import { inbox } from "../api/api.js";
-import { clear, el, formatBytes, initials, stamp } from "../core/dom.js";
+import { clear, el, formatBytes, initials, stamp, toast } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 import { openLightbox } from "../core/lightbox.js";
 
@@ -228,7 +228,7 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
                 if (data.conversation) data.conversation.labels = updated.labels;
                 onSaved?.(data);
               } catch (err) {
-                alert(`Tag update failed: ${err.message}`);
+                toast(`Tag update failed: ${err.message}`, "err");
               }
             },
           },

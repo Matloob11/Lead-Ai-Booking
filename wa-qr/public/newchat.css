@@ -135,7 +135,7 @@ body[data-wa-theme="glass-dark"] .nc__note--bad { color: #fca5a5; }
   min-width: 0;
   /* Bounded: this page is framed twice over, so a dialog that grows with its
      content runs off the bottom of a window it cannot measure. */
-  max-height: 62vh;
+  max-height: 440px;
   overflow-y: auto;
 }
 

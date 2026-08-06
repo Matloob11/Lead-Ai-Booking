@@ -3,7 +3,7 @@
  */
 
 import { catalog } from "../api/api.js";
-import { clear, el, modal } from "../core/dom.js";
+import { clear, el, modal, toast } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
 export function openAgentsAdminModal({ me } = {}) {
@@ -42,7 +42,7 @@ export function openAgentsAdminModal({ me } = {}) {
             agent.is_manual_admin = updated.is_manual_admin;
           } catch (err) {
             toggleInput.checked = !toggleInput.checked;
-            alert(err.message || "Failed to update admin rights");
+            toast(err.message || "Failed to update admin rights", "err");
           } finally {
             if (!isSelf) toggleInput.disabled = false;
           }

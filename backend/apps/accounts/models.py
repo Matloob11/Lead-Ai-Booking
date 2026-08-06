@@ -38,6 +38,10 @@ class Agent(AbstractUser):
 
     last_seen_at = models.DateTimeField(null=True, blank=True)
 
+    # Scoped API key minted in OpenWA for this agent
+    openwa_api_key = models.CharField(max_length=255, blank=True)
+    openwa_key_id = models.CharField(max_length=64, blank=True)
+
     class Meta:
         ordering = ["display_name", "username"]
 

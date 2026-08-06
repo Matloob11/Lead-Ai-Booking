@@ -1688,14 +1688,24 @@ export function mountInbox(root, { me, openRequest = null }) {
   }
 
   /**
-   * The QR-linked channel, opened inside the panel rather than in a tab.
+   * Where the QR-linked channel lives.
    *
-   * It is a separate service behind /qr/, which nginx will not proxy without a
-   * valid admin session — so this is a plain iframe with no token to pass. It
-   * is deliberately not part of the inbox: a QR-linked phone is a different
-   * kind of channel with different rules, and mixing the two screens would
-   * suggest otherwise.
+   * This was `/qr/` — the wa-qr service — and is now OpenWA. **wa-qr has not been
+   * removed**: it is still running, still holds both linked phones and all of its
+   * history, and putting this line back is the whole of going back to it.
+   *
+   * An absolute URL on a different port rather than a path, because OpenWA is a
+   * single-page app that asks for `/assets/…` and `/api/…` absolutely, and `/api/`
+   * on this host already belongs to Django. nginx publishes it on 2786 with the
+   * certificate this name already has, behind the same session gate that stands
+   * in front of `/qr/`.
+   *
+   * None of this touches the Business Platform side. The WABA numbers, their
+   * templates and the inbox around them are served by `backend/` through
+   * alots.io and know nothing about either of these services.
    */
+  const LINKED_DEVICES_URL = "https://wa.srv1802669.hstgr.cloud:2786/";
+
   /**
    * The QR channel, filling the panel rather than floating over it.
    *
@@ -1711,7 +1721,7 @@ export function mountInbox(root, { me, openRequest = null }) {
    */
   function openLinkedDevices() {
     const frame = el("iframe.linked__frame", {
-      src: "/qr/",
+      src: LINKED_DEVICES_URL,
       title: "Linked devices",
       // Every flag here was added because something inside was silently doing
       // nothing without it. A sandboxed frame does not refuse loudly.

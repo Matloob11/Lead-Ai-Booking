@@ -61,7 +61,7 @@ export function installSafetyBanner({ el, clear, api, asList, withPlus, mount })
       const name = row.label || withPlus(row.phone_number) || `Phone #${row.session_id}`;
 
       const close = el("button.safety__x", { type: "button", title: "Hide until this changes" }, [
-        "×",
+        icon("close", { size: 14 }),
       ]);
       close.addEventListener("click", () => {
         // Keyed on the reasons, not on the phone: hiding it once must not hide
