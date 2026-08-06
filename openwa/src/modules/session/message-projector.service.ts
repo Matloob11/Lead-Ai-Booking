@@ -126,6 +126,19 @@ export class MessageProjector {
       this.ingestInboundStatus(id, engine, message);
       return;
     }
+    // A7: nothing from a group is taken in — not stored, not dispatched, not
+    // shown. These are personal handsets, and their groups belong to whoever
+    // owns the phone rather than to the company. Dropped at the door, before
+    // persistence and before webhooks, so there is no copy anywhere to leak
+    // later through a search or an export. The history import refuses the same
+    // ids in message-history-projector, and the chat list never lists them.
+    if (message.chatId?.endsWith('@g.us')) return;
+    // A7: nor anything WhatsApp said about the conversation rather than in it — encryption notices,
+    // "X was added", protocol housekeeping. Stored, they create chats that nobody wrote to, raise
+    // them to the top of the list on a timestamp no human produced, and leave a blank bubble in the
+    // thread. That exact mistake was made on the wa-qr panel and had to be undone by hand. Dropped
+    // at the door for the same reason groups are: what is never written cannot surface later.
+    if (message.type === 'system') return;
     if (this.shouldSkipEphemeralMessage(id, message)) return;
     this.logger.debug(`Message received from ${message.from}`, {
       sessionId: id,

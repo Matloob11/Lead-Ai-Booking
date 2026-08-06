@@ -13,6 +13,8 @@ import {
   sessionApi,
   messageApi,
   asMessageType,
+  // A7: the sidebar search box now looks inside messages too, not just chat names.
+  searchApi,
   type Session,
   type Chat,
   type ChatKind,
@@ -32,7 +34,9 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useToast } from '../hooks/useToast';
 import { PageHeader } from '../components/PageHeader';
-import { GlobalSearch } from '../components/GlobalSearch';
+// A7: shared with what used to be the corner search box — it turns a typed query
+// into the API's params, and returns null for one too short to be worth sending.
+import { buildSearchParams } from '../utils/search-highlight';
 import { useChatMessages, useChatMessagesActions, messagesQueryKey } from '../hooks/useChatMessages';
 import { useChannelMessages } from '../hooks/useChannelMessages';
 import { useContactStatuses } from '../hooks/useContactStatuses';
@@ -116,11 +120,19 @@ export function Chats() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [loadingSessions, setLoadingSessions] = useState<boolean>(true);
+  // A7: the sessions held back from the list above because their history is still importing. Kept
+  // apart from `sessions` rather than mixed in: a half-imported chat list is worse than none, but
+  // "connect a session first" is the wrong thing to tell somebody whose phone is plainly connected.
+  const [importingSessions, setImportingSessions] = useState<Session[]>([]);
 
   // Chats list
   const [chats, setChats] = useState<Chat[]>([]);
   const [loadingChats, setLoadingChats] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // A7: what the same box found inside the messages. Chat names match locally and
+  // instantly; these arrive from the server a moment later and render beneath.
+  const [messageHits, setMessageHits] = useState<SearchHit[]>([]);
+  const [messageHitsLoading, setMessageHitsLoading] = useState<boolean>(false);
 
   // Selected chat & message history
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
@@ -257,25 +269,51 @@ export function Chats() {
   const activePhoneText =
     activePhoneDisplay ?? (resolvedPhoneQ.data ? formatPhoneForDisplay(resolvedPhoneQ.data) : null);
 
-  // 1. Fetch available connected sessions on mount
-  useEffect(() => {
-    const loadSessions = async () => {
+  // 1. Fetch available connected sessions.
+  //
+  // A7: hoisted out of the mount effect so the poll below can reuse it. A session held back for an
+  // import is not permanently unusable — it becomes usable the moment the import finishes, and
+  // without a second look this screen would sit on an empty state until somebody reloaded the page.
+  const loadSessions = useCallback(
+    async (quiet = false) => {
       try {
-        setLoadingSessions(true);
+        if (!quiet) setLoadingSessions(true);
         const list = await sessionApi.list();
-        const readySessions = list.filter(s => s.status === 'ready');
+        const isSynced = (s: Session) =>
+          s.syncProgress === undefined || s.syncProgress === null || s.syncProgress >= 100;
+        const readySessions = list.filter(s => s.status === 'ready' && isSynced(s));
         setSessions(readySessions);
+        setImportingSessions(list.filter(s => s.status === 'ready' && !isSynced(s)));
+        // Functional: a poll must not pull the selection back to the first session while an agent
+        // is reading a different one. Only an empty selection is filled in.
         if (readySessions.length > 0) {
-          setSelectedSessionId(readySessions[0].id);
+          setSelectedSessionId(current =>
+            current && readySessions.some(s => s.id === current) ? current : readySessions[0].id,
+          );
         }
       } catch (err) {
-        showErrorToast(t('chats.errors.loadSessions'), err instanceof Error ? err.message : undefined);
+        if (!quiet) showErrorToast(t('chats.errors.loadSessions'), err instanceof Error ? err.message : undefined);
       } finally {
-        setLoadingSessions(false);
+        if (!quiet) setLoadingSessions(false);
       }
-    };
+    },
+    [t, showErrorToast],
+  );
+
+  useEffect(() => {
     void loadSessions();
-  }, [t, showErrorToast]);
+  }, [loadSessions]);
+
+  // A7: an import raises no status transition, so nothing already on this screen would ever learn
+  // that it finished. Poll only while one is running, and stop the moment none is — quietly, so a
+  // failed poll does not throw a toast at somebody who is just waiting.
+  useEffect(() => {
+    if (importingSessions.length === 0) return;
+    const timer = setInterval(() => {
+      void loadSessions(true);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [importingSessions.length, loadSessions]);
 
   // 2. Fetch chats when active session changes
   const loadChats = useCallback(
@@ -754,6 +792,54 @@ export function Chats() {
   // because chats/channelsQuery.data/statusesQuery.data are already stable, query-cached references,
   // so re-filtering on every render is cheap. See utils/chatFilters for the two status orderings.
   const filteredChats = filterChats(chats, searchQuery);
+
+  // A7: the one search box in the sidebar looks inside the messages as well as
+  // across the chat names. The floating box that used to do this sat in the
+  // top-right corner of a framed panel and read as part of Bitrix rather than
+  // part of this screen; an agent hunting for "the deed I sent Khaled" should
+  // not have to know which of two boxes to type into.
+  //
+  // Chat names are matched locally and instantly. Message bodies are a request
+  // to the server, so they are debounced and land underneath a moment later —
+  // the chat list never waits for them.
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setMessageHits([]);
+      setMessageHitsLoading(false);
+      return;
+    }
+    const params = buildSearchParams(query, selectedSessionId ? { sessionId: selectedSessionId } : undefined, {
+      limit: 20,
+      offset: 0,
+    });
+    if (!params) {
+      setMessageHits([]);
+      return;
+    }
+    setMessageHitsLoading(true);
+    let live = true;
+    const timer = setTimeout(() => {
+      searchApi
+        .search(params)
+        .then(res => {
+          if (live) setMessageHits(res.hits);
+        })
+        // Silent: full-text search is optional on this deployment (501 when the
+        // index is absent), and a red banner over the chat list for a search
+        // that simply is not offered would be worse than no message results.
+        .catch(() => {
+          if (live) setMessageHits([]);
+        })
+        .finally(() => {
+          if (live) setMessageHitsLoading(false);
+        });
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, selectedSessionId]);
   // The channels zero-state ("not subscribed to any channels") stays keyed on the UNFILTERED list
   // below, so a non-matching search renders an empty list rather than claiming there are none.
   const filteredChannels = filterChannels(channelsQuery.data ?? [], searchQuery);
@@ -794,7 +880,11 @@ export function Chats() {
       <PageHeader
         title={t('nav.chats')}
         subtitle={t('chats.subtitle')}
-        actions={sessions.length > 0 && <GlobalSearch currentSessionId={selectedSessionId} onHit={handleSearchHit} />}
+        // A7: no floating "Search messages…" in the corner. The sidebar already
+        // has a search over the chat list, which is what an agent is looking for;
+        // a second box hanging in the top-right of a framed panel read as part of
+        // Bitrix rather than part of this screen.
+        actions={null}
       />
 
       {/* Real-time connection permanently dropped — let the user re-establish it instead of
@@ -813,6 +903,20 @@ export function Chats() {
         <div className="chats-loading-container">
           <Loader2 className="animate-spin" size={32} />
           <p>{t('common.loading')}</p>
+        </div>
+      ) : sessions.length === 0 && importingSessions.length > 0 ? (
+        // A7: a connected phone whose history is still being read. Telling this agent to "connect a
+        // session first" would be plainly false — theirs is connected, and the number is right
+        // there on the card. The screen recovers on its own: the poll above notices the finish.
+        <div className="chats-error-state">
+          <Loader2 className="animate-spin" size={40} />
+          <h3>Reading this number&rsquo;s history</h3>
+          <p>
+            {importingSessions
+              .map(s => `${s.name}${s.phone ? ` (${s.phone})` : ''} — ${s.syncProgress ?? 0}%`)
+              .join(', ')}
+          </p>
+          <p>Chats appear as soon as this finishes. Showing a half-imported list would look like the rest was lost.</p>
         </div>
       ) : sessions.length === 0 ? (
         <div className="chats-error-state">
@@ -835,6 +939,9 @@ export function Chats() {
             onSwitchTab={switchTab}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
+            messageHits={messageHits}
+            messageHitsLoading={messageHitsLoading}
+            onSelectMessageHit={handleSearchHit}
             onComposeStatus={() => setComposeOpen(true)}
             onNewContact={() => setNewContactOpen(true)}
             onOpenProfile={() => setProfileOpen(true)}

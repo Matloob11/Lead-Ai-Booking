@@ -38,6 +38,14 @@ export class WwebjsChats {
         continue;
       }
 
+      // A7: groups are not part of this. The phones here answer customers one at
+      // a time, and a personal account's groups — family, neighbours, whatever
+      // the handset's owner belongs to — are nobody's work and should not be
+      // sitting in an agent's list at all. Dropped by JID rather than by
+      // `chat.isGroup`, because the suffix is what the id itself says and does
+      // not depend on the library having populated the flag.
+      if (id.endsWith('@g.us')) continue;
+
       summaries.push({
         id,
         name: chat.name || id,

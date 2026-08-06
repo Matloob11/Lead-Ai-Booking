@@ -41,6 +41,16 @@ export interface Session {
    * Optional only because a dashboard can be served by a gateway that predates the field.
    */
   engineLoaded?: boolean;
+  /**
+   * How far this session's history import has got, 0–100. Below 100 the gateway refuses this
+   * session's chats (409) rather than hand over a list that is still filling: a half-imported list
+   * grows and reorders under the reader, which reads as messages going missing.
+   *
+   * Optional for the same reason as `engineLoaded` — a gateway that predates the field sends
+   * nothing, and every caller must read a missing value as "finished" so an older backend never
+   * leaves a session looking stuck at nothing.
+   */
+  syncProgress?: number;
   phone?: string | null;
   pushName?: string | null;
   lastActive?: string | null;

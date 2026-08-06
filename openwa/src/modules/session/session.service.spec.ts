@@ -3166,7 +3166,12 @@ describe('SessionService', () => {
       expect(row.metadata).toEqual({ media: marker });
     });
 
-    it('persists the group participant as author (the stable sender id attribution keys on)', async () => {
+    // This used to assert that a group message stored its participant as `author`. Groups are no
+    // longer taken in at all — these are personal handsets and their groups belong to whoever owns
+    // the phone — so that path is unreachable and the assertion would test nothing. What replaces
+    // it is the rule that actually holds now, pinned where the old one was: the message is refused
+    // before it is written, not merely hidden from the list.
+    it('refuses a group message outright — nothing is persisted', async () => {
       const callbacks = await startAndCaptureCallbacks();
       // Pass the message through the hook chain untouched (the default mock replaces data with {}).
       (hookManager.execute as jest.Mock).mockImplementation((_e: string, data: unknown) =>
@@ -3188,11 +3193,9 @@ describe('SessionService', () => {
       );
       await flush();
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const row = (messageRepository.create as jest.Mock).mock.calls[0][0] as Partial<Message>;
-      expect(row.author).toBe('628111@c.us');
-      expect(row.from).toBe('120363@g.us');
-      expect(row.chatName).toBe('Alice');
+      expect(messageRepository.create).not.toHaveBeenCalled();
+      // Nor dispatched: a webhook copy is a copy, and the point of refusing is that none is kept.
+      expect(dispatchedEvents('message.received')).toHaveLength(0);
     });
 
     it('scopes the ack status UPDATE by sessionId, not just waMessageId', async () => {
@@ -3868,9 +3871,12 @@ describe('SessionService', () => {
         mockEngine.resolveContactPhone.mockImplementation((id: string) => Promise.resolve(store.resolvePhone(id)));
         const callbacks = await startAndCaptureCallbacks();
 
-        // Group lid author resolved to <phone>@c.us by the engine boundary.
+        // A lid sender resolved to <phone>@c.us by the engine boundary. Written as a direct chat
+        // rather than the group this used to use: groups are now refused before the projector
+        // reaches this code (see the @g.us guard), so a group message would prove nothing. The
+        // branch under test is the same either way — resolution reads `author ?? from`.
         callbacks.onMessage!(
-          makeMessage({ from: 'g@g.us', chatId: 'g@g.us', author: '628111222333@c.us', isLidSender: true }),
+          makeMessage({ from: '628111222333@c.us', chatId: '628111222333@c.us', isLidSender: true }),
         );
         await flush();
 
@@ -4393,9 +4399,12 @@ describe('SessionService', () => {
         expect(messageRepository.save).not.toHaveBeenCalled(); // no longer the throwing path
       });
 
-      it('persists author only for inbound history rows, never for the account’s own (fromMe) posts', async () => {
-        // The Baileys history sync includes the account's own group messages (with author = self);
-        // those must land with author NULL to keep the column's "null on outgoing" contract.
+      // This used to check the "author is NULL on the account's own posts" contract, using the group
+      // history that carries an author at all. The history import refuses groups now, for the same
+      // reason the live path does, so the case cannot be reached — and what is worth pinning in its
+      // place is that the refusal covers the import too. An import that took what the live path
+      // rejects would quietly refill the database on the next reconnect.
+      it('refuses group history — an import cannot reintroduce what the live path rejects', async () => {
         const callbacks = await startAndCaptureCallbacks();
         const created: Array<Record<string, unknown>> = [];
         (messageRepository.create as jest.Mock).mockImplementation((data: Record<string, unknown>) => {
@@ -4423,9 +4432,7 @@ describe('SessionService', () => {
         ]);
         await flush();
 
-        const byId = new Map(created.map(r => [r.waMessageId as string, r]));
-        expect(byId.get('h-in')?.author).toBe('628111@c.us');
-        expect(byId.get('h-out')?.author).toBeUndefined();
+        expect(created).toHaveLength(0);
       });
 
       it('synthesizes the omitted media marker for media-free history rows (no empty bubbles)', async () => {

@@ -25,6 +25,22 @@ export async function persistHistoryMessages(
     if (!m.id || m.isStatusBroadcast || !m.chatId || !m.from || !m.to) {
       continue;
     }
+    // A7: group history is not imported. These are personal handsets and their
+    // groups are the owner's own — family, neighbours, trade chatter — none of
+    // it the company's work, and an import that pulls it puts other people's
+    // conversations in front of an agent and in our database. Dropped here
+    // rather than only hidden in the list, because "do not fetch it" was the
+    // ask: what is never written cannot leak later through a search, an export,
+    // or a screen nobody thought to filter.
+    if (m.chatId.endsWith('@g.us')) {
+      continue;
+    }
+    // A7: nor WhatsApp's own notices about the conversation — encryption changes, "X was added",
+    // protocol housekeeping. The live path refuses the same thing in message-projector; an import
+    // that took them anyway would fill a fresh chat list with entries nobody ever wrote to.
+    if (m.type === 'system') {
+      continue;
+    }
     // Mirror the live onMessage guard: skip disappearing messages when the operator opted out, so a
     // history backfill can't bypass STORE_EPHEMERAL_MESSAGES=false. No-op when the flag is at its
     // default (true); only a message with a positive timer is dropped, never a regular one.

@@ -27,6 +27,73 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-07 · Opus session · `openwa` — "connect a session first", said to somebody whose phone was connected
+
+Chasing the red *Failed to load chats* toast turned up something worse sitting
+behind it. Another session had already taught the Chats screen about
+`syncProgress` — a session below 100% is filtered out of the ready list, so no
+chats request is made and no toast appears. But with that session filtered out
+the list is empty, and the empty state says:
+
+> **Please connect a WhatsApp session from the Sessions menu first.**
+
+Which is false, and alarming in the one direction that matters: the phone *is*
+linked, the number is on the card two clicks away, and an agent reading that
+concludes it dropped off. **And it never cleared.** `loadSessions` ran on mount
+only, so once the import finished the screen stayed on that message until
+somebody reloaded the page — a state with no way out that the screen itself
+would offer.
+
+Both halves fixed. The sessions held back for an import are now kept apart from
+the ones that are simply absent, and get their own state — a spinner, the
+number, and the live percentage — so the screen says the true thing. And
+`loadSessions` was hoisted out of the mount effect so a 5-second poll can reuse
+it while any import is running, stopping the moment none is. The poll is quiet:
+a failed one raises no toast at somebody who is only waiting. It also refuses to
+move the selection — a poll must not drag an agent back to the first session
+while they are reading a different one.
+
+**Watched it happen, in a browser, without touching the page.** Opened the Chats
+screen at **51%**, saw the same page's own copy read **78%** a minute later, and
+at **~110 seconds the chat list appeared with 157 rows** — no reload, no
+navigation, no toast. That is the claim that needed proving and it is the one
+thing a screenshot of a finished state cannot show.
+
+**The three failing group specs are green, and the coverage was not deleted.**
+
+- `resolves senderPhone from a canonicalized @c.us author` was rewritten as a
+  **direct** chat. Resolution reads `author ?? from`, so the branch under test is
+  identical and the assertion survives intact — it just no longer needs a group.
+- The other two asserted things that are now genuinely unreachable (a group
+  message's participant attribution, and the author-null-on-fromMe contract that
+  only group history carries). Rather than delete them, each was rewritten to
+  pin the rule that replaced it — the message is **refused before it is written**,
+  live and on import both — with a comment saying what it used to prove. The
+  import case is worth having: an import that took what the live path rejects
+  would quietly refill the database on the next reconnect.
+
+`npx jest src/modules/session src/engine` → **1784 of 1784 pass, 39 suites, none
+failing.**
+
+**A build that had never been green.** The first build after pushing failed with
+four `TS2339: Property 'syncProgress' does not exist on type 'Session'` — three
+of them in the *other* session's filter, not in the new code. Their
+`services/api.ts` had the field and the server's copy did not, so their Chats.tsx
+change had never compiled anywhere. Pushing the current `api.ts` fixed it (and a
+duplicate `syncProgress?: number` two lines apart, one from each of us, was
+folded into the documented one).
+
+**Files, and what came with them.** `dashboard/src/pages/Chats.tsx`,
+`dashboard/src/services/api.ts`, `modules/session/session.service.spec.ts`, plus
+— committed here for the first time — `message-projector.service.ts`,
+`message-history-projector.ts` and `engine/adapters/wwebjs-chats.ts`. **Those
+last three, and much of Chats.tsx and api.ts, are another session's work that was
+sitting uncommitted.** It is committed now because the specs above assert its
+behaviour: leaving it uncommitted meant a revert would turn the suite red with no
+explanation. Nothing of theirs was edited beyond the one `system` guard added
+beside their group guard. `ChatSidebar.tsx` and `a7-embedded.css` are still
+theirs and untouched.
+
 ### 2026-08-06 · Opus session · `openwa` — cleared what the first import took before there were rules
 
 The first import ran before anyone had decided what a linked phone should bring
