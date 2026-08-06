@@ -71,6 +71,9 @@ describe('SessionController — create() response contract', () => {
       lastError: null,
       restriction: null,
       engineLoaded: false,
+      // A session that has never run an import counts as finished, which is what the column
+      // defaults to — a fresh row must not read as 0% and hold its own chats back.
+      syncProgress: 100,
     });
   });
 

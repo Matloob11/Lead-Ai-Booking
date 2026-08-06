@@ -28,7 +28,7 @@ export const OMITTED_MEDIA = { mimetype: '', omitted: true } as const;
  *   and an empty object would be noise).
  */
 export function buildMessageMetadata(
-  message: Pick<IncomingMessage, 'media' | 'quotedMessage' | 'call' | 'type'>,
+  message: Pick<IncomingMessage, 'media' | 'quotedMessage' | 'call' | 'type' | 'rawType'>,
   synthesizeOmittedMedia = false,
 ): Record<string, unknown> | undefined {
   const metadata: Record<string, unknown> = {};
@@ -42,6 +42,12 @@ export function buildMessageMetadata(
   }
   if (message.call) {
     metadata.call = message.call;
+  }
+  // Set by the adapter only when the type could not be mapped. Stored so an unknown row says what
+  // it actually was — the previous 121 of them said nothing at all, and the only way to find out
+  // would have been to reproduce the traffic.
+  if (message.rawType) {
+    metadata.rawType = message.rawType;
   }
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }

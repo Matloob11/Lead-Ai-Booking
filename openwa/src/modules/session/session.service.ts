@@ -23,11 +23,24 @@ import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
+import { newestPerChat, overlayStoredMessages } from './chat-list-overlay';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
+
+/**
+ * How many of a session's newest stored messages are read to draw the chat list.
+ *
+ * The list needs one row per chat, but "newest per chat" is not a query that stays the same across
+ * SQLite and Postgres, and the two-query version is worse: a chat count in the hundreds turns into
+ * a second lookup per chat. Reading a bounded newest-first slice and taking the first row seen per
+ * chat is exact whenever the slice covers every chat, and 4000 covers this account's whole history
+ * several times over. Beyond it, a chat falls back to the engine's own preview — the behaviour
+ * before the overlay existed.
+ */
+const CHAT_LIST_MESSAGE_SCAN = 4000;
 
 // Re-exported so the existing spec import paths keep working after these moved out.
 export { clampReconnectDelay } from './reconnect-policy';
@@ -462,9 +475,26 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       );
     }
 
+    // The engine says which chats exist; our own rows say what was last said in them and when. See
+    // chat-list-overlay for why the second half is needed at all — in short, most of this phone's
+    // chats came back with no preview and a date older than the thread underneath.
+    const engineChats = await engine.getChats();
+    const stored = await this.messageRepository.find({
+      where: { sessionId: id },
+      order: { timestamp: 'DESC' },
+      // Bounded so a session with years in it cannot pull its whole history in to draw a list. A
+      // chat whose newest message falls outside this slice keeps the engine's own value, which is
+      // what every chat used before this existed — so the cap degrades to the old behaviour rather
+      // than to a blank row.
+      take: CHAT_LIST_MESSAGE_SCAN,
+    });
+
     // Most-recent first, then bound the response window. Sorting before the cap means a capped
-    // response is the N newest chats (what clients show first) rather than an arbitrary slice.
-    const chats = [...(await engine.getChats())].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    // response is the N newest chats (what clients show first) rather than an arbitrary slice —
+    // and it runs after the overlay, so a chat our rows moved forward sorts where it now belongs.
+    const chats = overlayStoredMessages(engineChats, newestPerChat(stored)).sort(
+      (a, b) => (b.timestamp || 0) - (a.timestamp || 0),
+    );
     return paginate(chats, opts.limit, opts.offset);
   }
 

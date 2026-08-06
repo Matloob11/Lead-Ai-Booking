@@ -35,7 +35,41 @@ export function mapWwebjsMessageType(raw: string): MessageType {
       return 'poll';
     case 'revoked':
       return 'revoked';
+
+    // What the reader actually chose, arriving under the name of the widget they chose it with. The
+    // body carries the chosen text, so treating these as anything other than text would hide a real
+    // reply behind a placeholder.
+    case 'list_response':
+    case 'buttons_response':
+    case 'template_button_reply':
+    // A "highly structured message" — the template itself, whose body is the rendered text.
+    case 'hsm':
+      return 'text';
+
+    // WhatsApp talking about the conversation rather than anyone talking in it. These arrive on the
+    // same channel as real messages and carry no body, so as `unknown` they were indistinguishable
+    // from a content type we had failed to map — and both ended up as blank bubbles.
+    case 'e2e_notification':
+    case 'notification':
+    case 'notification_template':
+    case 'group_notification':
+    case 'gp2':
+    case 'groups_v4_invite':
+    case 'broadcast_notification':
+    case 'protocol':
+    case 'debug':
+    case 'scheduled_event_creation':
+      return 'system';
+
     default:
+      // Still unknown, but no longer anonymous: the caller records the token (see `rawType`), so the
+      // next kind WhatsApp invents is identifiable from the row rather than from guesswork.
+      //
+      // Deliberately left here rather than forced into a near-enough member: `album` groups media
+      // whose items also arrive on their own, `ciphertext` is a message not yet decrypted rather
+      // than an unreadable one, and `order`/`product`/`payment`/`interactive`/`native_flow`/`list`
+      // are commerce and UI objects with no honest home in the union. Calling any of them 'text'
+      // would put an empty bubble in a thread and claim somebody typed it.
       return 'unknown';
   }
 }
@@ -96,6 +130,12 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
     // the adapter) so engine-neutral code can skip them without matching the literal.
     isStatusBroadcast: msg.to === 'status@broadcast' || chatId === 'status@broadcast',
   };
+
+  // Only when the mapping gave up. Recording it for every message would put 'chat' on every text
+  // row for no gain; recording it for the ones we could not name is the whole point.
+  if (incoming.type === 'unknown' && msg.type) {
+    incoming.rawType = msg.type;
+  }
 
   // In a group, `from` is the group JID, so `author` is the only way to know the real sender.
   if (msg.author) {

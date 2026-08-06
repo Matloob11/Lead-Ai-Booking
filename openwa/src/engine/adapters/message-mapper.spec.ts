@@ -143,9 +143,44 @@ describe('mapWwebjsMessageType (engine type-token -> neutral MessageType boundar
     ['call_log', 'call'],
     ['revoked', 'revoked'],
     ['poll_creation', 'poll'],
-    ['e2e_notification', 'unknown'], // any unmapped wwebjs type
+    // WhatsApp talking about the conversation rather than anyone talking in it. These used to fall
+    // through to 'unknown', which made them indistinguishable from a content type we had failed to
+    // map — and both drew a blank bubble.
+    ['e2e_notification', 'system'],
+    ['gp2', 'system'],
+    ['notification_template', 'system'],
+    ['protocol', 'system'],
+    // The reader's own answer, arriving under the name of the widget they answered with. The body
+    // carries the chosen text, so anything but 'text' would hide a real reply.
+    ['list_response', 'text'],
+    ['buttons_response', 'text'],
+    ['template_button_reply', 'text'],
+    ['hsm', 'text'],
+    // Still unmapped on purpose — see the default arm for why none of these has an honest home in
+    // the union. The token is preserved on the message as `rawType` instead.
+    ['order', 'unknown'],
+    ['album', 'unknown'],
+    ['ciphertext', 'unknown'],
+    ['something_whatsapp_invents_next', 'unknown'],
   ])('maps wwebjs type %s -> %s', (raw, expected) => {
     expect(mapWwebjsMessageType(raw)).toBe(expected);
+  });
+
+  it('records the engine token only when the mapping gave up', () => {
+    const raw: RawMessageFields = {
+      id: { _serialized: 'MSG1' },
+      from: '123@c.us',
+      to: 'me@c.us',
+      body: '',
+      type: 'chat',
+      timestamp: 1700000000,
+      fromMe: false,
+    };
+    // Kept only where it tells us something: a mapped type already says what the message is, and
+    // storing 'chat' on every text row would be noise on the overwhelming majority of messages.
+    expect(buildIncomingMessageBase({ ...raw, type: 'order' }).rawType).toBe('order');
+    expect(buildIncomingMessageBase({ ...raw, type: 'chat' }).rawType).toBeUndefined();
+    expect(buildIncomingMessageBase({ ...raw, type: 'gp2' }).rawType).toBeUndefined();
   });
 });
 

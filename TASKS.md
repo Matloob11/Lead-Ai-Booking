@@ -27,6 +27,109 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `openwa` — why a chat list said "No messages yet" over a chat full of messages
+
+Three things were asked for. **One of them was not a bug, and this entry starts
+there because the wrong diagnosis was mine.**
+
+**Outbound persist: nothing was broken.** The report was that a message sent
+from the panel never reached the database. Two mistakes produced that reading:
+the "outgoing today" query used a two-hour window against UTC while the
+screenshot's *05:34 PM* was local, and the media bubble in the thread was taken
+as proof of a send when `useChatMessages` merges **two** sources — our rows
+*and* `getChatHistory` off the engine. The bubble came from the engine half.
+Settled by sending one text through `POST …/messages/send-text` to the phone's
+own number: 500 → **501** rows, outgoing 80 → **81**, row present with the body
+and status `read`. Nothing to fix.
+
+**The chat list was genuinely wrong, and not in the way it looked.** The list is
+built from WhatsApp Web's own chat models, which disagree with the thread twice
+over: **63 of 157 chats came back with no `lastMessage` at all** (most media
+carries no caption, and the caption *is* the preview), and the timestamp is
+whatever that model last recorded — one row read *Mar 10* over a thread with
+newer messages in it. So the row is now corrected against our own rows, in a new
+module (`chat-list-overlay.ts`) rather than by widening the service: ours wins
+where ours is newer, or where the engine offered no preview; name, unread count
+and kind stay the engine's, because it is the only thing that knows them. A
+caption-less message gets described — *Photo*, *Voice message*, *Call* — instead
+of reading as empty.
+
+Two rules in there are worth keeping. **The overlay never invents a chat**: a
+chat we hold rows for that the engine did not list was deleted on the handset,
+and putting it back would resurrect a conversation somebody removed. And it
+**steps over a row it cannot describe** rather than stopping at it — 17 chats
+were headed by an old encryption notice stored back when everything unmapped
+became `unknown`, and stopping there defines the row by the one message in it
+that says nothing.
+
+**`unknown` was 121 of 500 rows, and the reason it stayed unknown is that
+nothing recorded what it was.** The mapper's default arm threw the engine's own
+token away, so the only way to find out was to reproduce the traffic. Now the
+token is kept on the message (`rawType`) and stored in metadata whenever the
+mapping gives up — the next kind WhatsApp invents will be identifiable from the
+row. The map itself was filled in against the library's real `MessageTypes`
+enum, read out of the installed copy rather than from memory:
+
+- `list_response` / `buttons_response` / `template_button_reply` / `hsm` →
+  **text**. These are the reader's own answer arriving under the name of the
+  widget they answered with; the body holds the chosen words.
+- `e2e_notification`, `gp2`, `group_notification`, `notification`,
+  `notification_template`, `groups_v4_invite`, `broadcast_notification`,
+  `protocol`, `debug`, `scheduled_event_creation` → a new **`system`** type, and
+  both projectors now drop it at the door. This is the wa-qr lesson repeated:
+  storing them created chats nobody wrote to, lifted them to the top of the list
+  on a timestamp no human produced, and left blank bubbles in threads — it had to
+  be undone by hand there.
+- `order`, `product`, `payment`, `album`, `ciphertext`, `interactive`,
+  `native_flow`, `list`, `oversized` are **left unknown on purpose** and said so
+  in the code. None has an honest home in the union, and calling one 'text' puts
+  an empty bubble in a thread and claims somebody typed it.
+
+**The 121 existing rows cannot be re-typed.** They were stored with no token, so
+there is nothing to re-derive from — the same dead end as the 42 type-less rows
+on wa-qr. 100 of them are group rows that will not come back now groups are
+refused, and 18 chats hold *nothing but* those notices. Removing them is a
+deletion of live data and was **not** done without being asked; that is a
+decision to take deliberately.
+
+Files: `engine/interfaces/whatsapp-engine.interface.ts`,
+`engine/adapters/message-mapper.ts` (+ spec),
+`modules/session/message-row.mapper.ts`,
+`modules/session/chat-list-overlay.ts` + spec (new),
+`modules/session/session.service.ts`, `session.controller.spec.ts`, and one line
+each in `message-projector.service.ts` and `message-history-projector.ts` —
+**both of those are another session's open files**; the added line sits beside
+theirs and does the same kind of thing.
+
+Measured on the live number, before and after:
+
+| | before | after |
+|---|---|---|
+| chats with a preview | 94 / 157 | **95 / 157** |
+| …of the preview-less, how many we hold rows for | 17 | **17**, and all 17 hold *only* notice rows — correctly nothing to show |
+| preview-less with nothing stored | — | 45, all outside the 10-day window |
+| groups in the list | 5 | **0** (the other session's filter) |
+| `system` rows stored | n/a | **0** |
+| a row dated by a notice at 06:51 | yes | now dated *Jul 31*, labelled **Call** |
+
+Tests: `npx jest src/modules/session src/engine` in a throwaway image with the
+dev dependencies — **1781 of 1784 pass**. The two new spec files are 61 of those.
+The three failures are all group-message tests
+(`persists the group participant as author`, the lid-sender one, and the history
+author one) and they fail because of **the other session's group filter**, not
+this work — a group message now returns before the code those tests assert on.
+Whoever owns that change: either the specs need updating or the filter does.
+
+Seen in a browser (container Chromium, both themes): 157 rows, real previews,
+right dates, no groups, no error toast.
+
+**One follow-up left undone on purpose:** `dashboard/src/services/api.ts` has a
+`MESSAGE_TYPES` list that does not include `system`, so `asMessageType` coerces
+it to `unknown` on the client. Nothing breaks — the server drops system messages
+before they are stored or dispatched, so the client should never see one — but if
+that ever changes, add it there. That file is another session's open work, so it
+was left alone.
+
 ### 2026-08-06 · Opus session · `openwa` — the suffix match is gone, and a number says how far it has got
 
 **Security first, and it was somebody else's line.** `session-scope.ts` had grown

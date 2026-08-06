@@ -65,6 +65,11 @@ export type MessageType =
   // A message WhatsApp deliberately withheld from linked/companion devices (e.g. high-security
   // business OTPs): the payload is absent by design, not unparseable. See `mapBaileysMessageType`.
   | 'masked'
+  // WhatsApp talking about the conversation rather than anyone talking in it: encryption notices,
+  // "X was added", protocol housekeeping. Nobody typed these and nobody reads them, but they arrive
+  // on the same channel as real messages and used to land as `unknown`, which made them
+  // indistinguishable from a content type we had simply failed to map.
+  | 'system'
   | 'unknown';
 
 export interface IncomingMessage {
@@ -84,6 +89,14 @@ export interface IncomingMessage {
    * code can skip these without matching an engine-specific pseudo-JID (e.g. `status@broadcast`).
    */
   isStatusBroadcast?: boolean;
+  /**
+   * The engine's own type token, carried ONLY when `type` came out `unknown`.
+   *
+   * An unmapped message used to be anonymous: the row said `unknown` and nothing said unknown
+   * *what*, so the only way to find out was to guess from the surrounding traffic. WhatsApp adds
+   * message kinds without asking, so this will happen again — and next time the token is in the row.
+   */
+  rawType?: string;
   /** WhatsApp ephemeral/disappearing-messages timer in seconds. Set per-chat on each message
    *  in the raw payload. 0 or undefined = no disappearing timer.
    *  Known values: 86400 (24h), 604800 (7d), 7776000 (90d). */
