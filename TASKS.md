@@ -27,6 +27,57 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `openwa` — cleared what the first import took before there were rules
+
+The first import ran before anyone had decided what a linked phone should bring
+in. Two rules arrived afterwards — **no groups** (a personal handset's groups are
+the owner's own life, not the company's work) and **no system notices** — and the
+rows from before them were still sitting in the database, which is why a chat
+list drawn from our own rows kept showing encryption notices as a chat's last
+event.
+
+**The two window rules were already right and were left alone**, confirmed by
+reading rather than assumed: `FIRST_LINK_HISTORY_DAYS = 10` for a number linking
+for the first time, and on a reconnect `since = historyImportedAt - 1 day`, so a
+phone away for a fortnight brings back the fortnight. The watermark only moves on
+a run that finishes, so a run cut short costs nothing but a re-read.
+
+**The cleanup was stopped mid-way to ask, and that was the right call.** The
+counts came out much larger than "clear the junk" suggests: of 501 rows, **441
+were group rows, and 129 of those carried real text and 214 carried media**. One
+group held 432 of them. Deleting them was deleting genuine conversation, not
+housekeeping — so it went back to Matloob with the numbers rather than being
+done quietly. He chose to remove them, knowing what went.
+
+| | |
+|---|---|
+| backed up first | `openwa.sqlite.bak-preclean-20260806`, 12.6 MB, chmod 600 |
+| rows before | 501 |
+| deleted (groups + bodiless notices, overlapping) | **462** |
+| rows after | **39**, across 5 chats |
+| full-text index after | 39 — the `messages_fts_ad` trigger kept it consistent |
+| database file | 12.6 MB → **410 KB** after VACUUM |
+
+**No files were deleted.** The 27 MB under `data/media` is `statuses/` — 9 files
+belonging to the 10 `status_updates` rows, nothing to do with messages, whose
+media lived as base64 in `metadata` and went with the rows. The last time a file
+sweep was attempted on this project it built a delete list of everything on disk,
+so the referencing rows were checked before concluding anything was orphaned.
+
+**Then the part that actually proves it: the container was recreated and a full
+import allowed to run.** 255 seconds, 0 → 100%, and nothing came back — 39 rows
+still, **0 group rows, 0 notices, 0 system rows**. The rules hold on the way in,
+so the cleanup is not something that has to be repeated.
+
+The chat list still shows **95 of 157** chats with a preview and **0 groups**,
+unchanged by the cleanup: the engine remains the source for chats we hold nothing
+for, and our rows only correct what they can.
+
+**Worth knowing going forward:** this number's own database is now 39 messages.
+Almost all of its recent traffic was that one group, and groups are refused. The
+last-10-days rule is doing what it was asked to, and what an agent sees will grow
+from the customer conversations that arrive from here on.
+
 ### 2026-08-06 · Opus session · `openwa` — why a chat list said "No messages yet" over a chat full of messages
 
 Three things were asked for. **One of them was not a bug, and this entry starts
