@@ -27,6 +27,407 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-06 · Opus session · `openwa` — the agent's own two actions in the chat sidebar
+Step 3 of the plan two entries below: **New contact** and **Profile**, both as
+dialogs off the chat sidebar.
+
+**New contact.** The chat list only ever shows people who already wrote, so an
+agent could answer a customer and never reach one. The number is normalised
+before anything else — `+971 55 548 4423`, `0555484423` and `555484423` are one
+number to a person and were three strings to a computer — and a leading `0` is
+read against the **linked phone's own country**, taken from a deliberately short
+table of the codes this business actually uses. A missing code costs nothing:
+the number is taken as typed and `contacts/check/:number` decides.
+
+The check runs 500 ms after typing stops and **before** the send, not after. A
+send to a number not on WhatsApp fails, and a run of failures from one handset
+is what these accounts get restricted for.
+
+**Profile.** The agent's number, status, and the figures — today, all-time in and
+out, chats open, failed sends — plus today hour by hour and the busiest chats.
+Shaped after `backend/apps/reports/views.py` so the two panels read alike.
+
+It asks **`/stats/sessions/:id`, not `/stats/overview`**. The global stats routes
+are `@RequireRole(ADMIN)` because they aggregate across every session — an agent
+calling one gets 403, and an agent is who this screen is for. The per-session
+route carries a session id, so the gateway's own `allowedSessions` fence scopes
+it. Fetched with a local `fetch` rather than a new export in `services/api.ts`:
+that file is upstream's, and one caller is not worth a merge conflict in it.
+
+Files: `components/chats/NewContactModal.tsx` (new),
+`components/chats/AgentProfileModal.tsx` (new), `components/chats/ChatSidebar.tsx`
+(two props, two buttons), `pages/Chats.tsx` (import, two state flags,
+`selectedSession`, two renders), `pages/Chats.css` (appended; new class names, so
+no `:root[data-embedded]` prefix is needed — nothing upstream claims them).
+
+Verified: built clean; `a7-sidebar-actions`, `a7-modal__box`, `New contact` and
+`stats/sessions/` all present in the served `Chats-*.css` / `Chats-*.js`; both
+chunks 200 over HTTP; container healthy and the linked session back to `ready`.
+
+**Not verified — say so plainly: none of this has been seen in a browser.**
+Playwright refused (`Browser is already in use` — Matloob has the profile open),
+and the dashboard is reached over an SSH tunnel rather than a public URL, so
+there was no second way in. Nobody has clicked either button, at either width,
+in either theme.
+
+**A deploy trap worth knowing:** `up -d --force-recreate openwa-api` failed with
+`No such container: 975772…` and left the container in `Created`, not running —
+`docker compose ps` said `not running` while an earlier `up -d` had started a
+*renamed* one. A plain `docker compose up -d` fixed it. Check the state after
+recreating, do not assume.
+
+### 2026-08-06 · Opus session · `openwa` — an origin check that let anyone log an agent into their own account
+
+**Somebody else's in-progress work, fixed in place because it was live.** The
+parallel session building the panel→dashboard key handover wrote the postMessage
+listener in `dashboard/src/pages/Login.tsx` like this:
+
+```js
+origin.includes(host) || origin.endsWith('.srv1802669.hstgr.cloud') ||
+origin.includes('localhost') || origin.includes('127.0.0.1')
+```
+
+`https://localhost.attacker.com` contains "localhost".
+`https://wa.srv1802669.hstgr.cloud.attacker.com` contains the panel's hostname.
+Both passed.
+
+**What that buys an attacker is not a leak but an injection.** The message being
+trusted here *is the API key*. Post one and the agent is logged into the
+attacker's account — every conversation they then open or answer runs through a
+WhatsApp session somebody else controls, and it looks entirely normal from the
+inside.
+
+`frame-ancestors` blocks framing, so the obvious route is shut. It is not the
+only route: a page that calls `window.open()` on the dashboard can post to what
+it opened, opener to openee, with no framing involved. And resting on that one
+control is worse than it sounds here, because it is set from an environment
+variable that this repo's own docs invite you to change.
+
+Now an exact allowlist of whole origins compared with `===`. `event.origin` is
+written by the browser, never the sender, and already normalised to
+`scheme://host[:port]`, so exact match is the entire check and needs no parsing.
+The dev-server origins are behind `import.meta.env.DEV` and are absent from the
+production bundle — verified. The ready ping is addressed to each trusted origin
+in turn instead of `'*'`; the browser delivers only where the origin matches and
+drops the rest.
+
+Deliberately **not** added: a user gesture before accepting a key. The whole
+point of the handover is that an agent never sees or holds a credential, and a
+"click to continue" would put one back in front of them for no gain against this
+attacker.
+
+Files: `openwa/dashboard/src/pages/Login.tsx`.
+Verified in the **shipped** bundle, not the source: the built `Login-*.js` inside
+the running container carries `[window.location.origin,
+"https://wa.srv1802669.hstgr.cloud"]` and no substring test survives anywhere in
+`dist/assets`.
+
+Two things for whoever owns that file: `docker compose up -d` collided with
+another session's mid-deploy and failed on a container name conflict — it
+resolved itself, but check `docker ps` before assuming your build is what is
+running. And **do not put the substring check back**; if another trusted origin
+is needed, add the whole origin to the list.
+
+### 2026-08-06 · Opus session · `openwa` — renamed, trimmed, and what the rest of the plan rests on
+
+First slice of Matloob's bigger ask: make OpenWA behave like the WABA panel —
+agents see only chats on the numbers assigned to them, admins see everything, ten
+days of history on a first link and the whole gap on a reconnect, and drop what
+A7 does not use.
+
+**Read the code before designing anything, and most of it turned out to exist:**
+
+| Needed | Already in OpenWA |
+|---|---|
+| agent vs admin | `ApiKeyRole` — `admin`/`operator`/`viewer`, enforced server-side |
+| number → agent | **`allowedSessions` on the API key**, applied by `common/security/session-scope.ts` |
+| messages kept | `Message` entity; the thread reads the **database**, not the engine |
+| history import | **absent** — has to be built |
+| retention / watermark | **absent** — has to be built |
+
+So the assignment mechanism is not something to invent. An agent is an `operator`
+key whose `allowedSessions` lists their numbers; an admin is an unscoped `admin`
+key. Both refusals happen on the server, not in the menu.
+
+**Done in this slice**
+
+- Renamed to **A7 Group** — `appName` in all twelve locales, the document title
+  and the logo's alt text. The author credit in the login footer is deliberately
+  left alone: renaming what we deploy is one thing, taking someone's name off
+  their work is another, and their licence is why this can be vendored at all.
+- **A7's mark replaces the OpenWA logo** in all three places it is drawn — both
+  sidebar states and the login card — and is the favicon too, so the browser tab
+  no longer says OpenWA either. `openwa_logo.webp` and the old `favicon.svg` are
+  deleted, not orphaned. Matloob asked for it as SVG; it went in as the 360×360
+  PNG he supplied. The mark has a gradient ground and fine detail in the tower,
+  which a trace either flattens or turns into hundreds of paths, and at the sizes
+  it is drawn — 32px in the sidebar, ~120px on the login card — the PNG is
+  already past retina. Said so rather than quietly substituting.
+- **Chats / Channels / Status tab bar removed** for everyone, and the status
+  composer with it. The lists below still key off `activeTab`, which nothing can
+  now move off `'chats'` — left in place rather than deleted so an upstream merge
+  stays readable.
+- **Plugins page unrouted and off the menu.** The plugin *system* stays and must:
+  the boot log says `[whatsapp-web.js] WhatsApp-web.js engine plugin loaded` —
+  the engine is itself a plugin, so tearing the system out takes WhatsApp with it.
+- **Every nav item except Chats is now admin-only.** An operator sees one link.
+
+Files: `openwa/dashboard/src/components/Layout.tsx`, `App.tsx`,
+`components/chats/ChatSidebar.tsx`, `hooks/useDocumentTitle.ts`, `index.html`,
+`i18n/locales/*.json`.
+
+Verified live: title `A7 Group`, the renamed string in the bundle, no Plugins
+route, no tab keys. Built clean, container healthy.
+
+**A mistake worth not repeating:** a `sed` meant to drop one import line stripped
+every blank line in `Layout.tsx`. Valid TypeScript, and it would have turned the
+diff against upstream into the whole file — which is exactly what `openwa/A7.md`
+promises not to do. Restored the pristine copy from the server and redid it with
+targeted edits. **Do not reformat vendored upstream source in passing.**
+
+**Still to build, in order** — each rests on the one before:
+
+1. `admin_gate` in `backend/apps/accounts/views.py` answers **403 to any
+   non-admin**. It guards `/qr/` as well, so it cannot simply be opened up —
+   agents would land in wa-qr, which is admin-only by design. OpenWA needs a
+   gate of its own.
+2. One `operator` key per agent, `allowedSessions` set by an admin; the panel
+   hands the browser the right key over `postMessage` after the gate has said who
+   it is, so no agent ever sees or holds a credential. Not a URL fragment — that
+   survives in history and logs.
+3. The agent's own sidebar: **New contact**, and a **Profile** button showing
+   their number and their day's and week's activity, along the lines of what
+   `backend/apps/reports/` already computes for the WABA side.
+4. History: a watermark per session, ten days on a first link, the whole gap on a
+   reconnect however long it ran — and **no scheduled delete**, which is what
+   Matloob chose, and what `wa-qr` does.
+
+### 2026-08-06 · Opus session · `openwa` — the chat fills the frame now
+
+Matloob linked `marketting` (923166753715) and the chats came up inside Bitrix,
+with a band of dead space above and below them.
+
+Not our CSS — `.linked__frame` was already `flex: 1` and filling. It was the
+dashboard's own page:
+
+- `.chats-page` carries `padding: 2rem`, and
+- `.chats-layout` is pinned to `height: calc(100vh - 12rem)`.
+
+That 12rem is upstream leaving room for the page's own heading. **In a frame
+`100vh` is the frame**, so the allowance came out of the height a second time and
+sat along the bottom as a dead strip. On top of that the page prints its own
+title and strapline, directly under a bar that already says "Linked devices".
+
+Fixed as an **embedded mode** rather than by editing the page: `main.tsx` sets
+`data-embedded` on the document when `window.self !== window.top`, and
+`dashboard/src/a7-embedded.css` hangs everything off `:root[data-embedded]`. The
+standalone dashboard is untouched — which matters, because that is how the
+dashboard is reached over an SSH tunnel when Bitrix is not involved.
+
+Two things worth knowing if you touch this:
+
+- `Chats.css` is a **route chunk**, loaded after `index.css`, so source order
+  would favour upstream. The override holds on specificity —
+  `:root[data-embedded] .chats-page .chats-layout` beats `.chats-page
+  .chats-layout`. Keep the `:root[data-embedded]` prefix or the rule silently
+  loses.
+- Reading `window.top` throws across origins in some browsers, so the check is in
+  a try/catch and the catch assumes embedded. A dashboard that fails to start is
+  a worse outcome than an untrimmed one.
+
+Files: `openwa/dashboard/src/a7-embedded.css` (new), `openwa/dashboard/src/main.tsx`.
+Deployed: md5 matched on both files, image rebuilt, container recreated healthy.
+
+Verified: the built bundle carries the `[data-embedded]` rules and the flag logic;
+the linked session came back `ready` by itself after the recreate
+(`AUTO_START_SESSIONS`, and the data volume kept the profile); framing still works
+after the rebuild. **Not verified: the chat page itself.** Seeing it needs a login
+inside the frame and the dashboard's only credential is the shared API key —
+Matloob has it open and a refresh will show whether the strip is gone.
+
+### 2026-08-06 · Opus session · `openwa` + `bitrix` — Linked devices now opens OpenWA; wa-qr hidden, not removed
+
+Matloob's instruction, in his words: hide wa-qr rather than end it, put OpenWA in
+its place behind the Linked-devices button, and **leave the WABA side alone** —
+only the linked-device channel changes.
+
+**wa-qr is still running.** Both phones still `ready` (`#3` matloob, `#7` malik),
+its database and media untouched, `/qr/` still served and still behind its gate.
+The only thing that changed is that nothing in the UI points at it. Going back is
+one line: `LINKED_DEVICES_URL` in `bitrix/public/assets/modules/inbox.js`.
+
+**The WABA side was not touched and was checked afterwards** — 143 inbound
+messages in the last 24 hours, `/api/gateway/webhook/alots/` answering 200,
+`backend/` and alots.io not involved in any of this.
+
+**The one real obstacle was framing.** OpenWA sends
+`frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN`, and the panel opens
+this in an iframe which Bitrix frames in turn — so it would have come up blank
+with nothing on screen to explain it. The cheap fix was `proxy_hide_header` on
+the CSP at nginx; that also throws away the per-request script nonce and
+`default-src 'self'`, on the one service here holding live WhatsApp sessions.
+Instead `src/main.ts` now reads `FRAME_ANCESTORS` from the environment and drops
+`X-Frame-Options` only when it is set — unset, upstream behaviour is unchanged.
+Verified live: `frame-ancestors 'self' https://wa.srv1802669.hstgr.cloud
+https://crm.a7grouprealestatedxb.com`, no `X-Frame-Options`, **nonce and
+default-src still intact**.
+
+**Published on port 2786**, not a path. The dashboard is a single-page app that
+asks for `/assets/…` and `/api/…` absolutely, and `/api/` on this host belongs to
+Django — that collision cannot be proxied around. A separate hostname would have
+needed a DNS record and a second certificate; a separate port reuses the one this
+name already has. Behind the same `auth_request` gate as `/qr/`, because OpenWA's
+own login is a single shared API key.
+
+**The source now lives in this repo** at `openwa/`, 17 MB, upstream at the commit
+deployed plus the two local changes, so it can be edited and rebuilt here rather
+than pulled blind on the server. `openwa/A7.md` says what differs and why;
+`openwa/a7/patch_frame_ancestors.py` re-applies the patch after an upstream pull
+and **refuses rather than guesses** if the code it anchors on has moved.
+`.env` and `data/` are gitignored — `data/` holds session profiles, which are
+credentials.
+
+Files: `openwa/**` (new), `bitrix/public/assets/modules/inbox.js`,
+`/etc/nginx/conf.d/a7-openwa.conf` (server only, copy at
+`openwa/a7/nginx-a7-openwa.conf`). Other sessions are in fifteen `bitrix/public/`
+files right now; `inbox.js` was not one of them.
+
+Verified in a browser: the panel serves the new module, and OpenWA **renders
+inside an iframe** opened from the panel's own origin with the real sandbox
+flags — screenshot `openwa-framed-probe.png`. Gate proved both ways: `401` for
+the dashboard and the API without a panel session, `200` with.
+
+**Not done, and it cannot be done from here:** no number is linked to OpenWA yet.
+That needs the QR scanned on each handset. WhatsApp allows four linked devices,
+so both numbers can be added to OpenWA **while wa-qr still holds them** — there is
+no window with no inbox, and no reason to stop wa-qr until OpenWA has proved
+itself. Also not done: the click-through from inside Bitrix itself, which needs a
+portal session; the framing was proved from the panel origin instead.
+
+**Worth knowing before this becomes anything but a trial:** one shared API key
+means every agent uses the same credential, with no per-agent identity and no
+record of who did what — which the A7 panel does have. The key the app minted on
+first boot is in the container log.
+
+### 2026-08-06 · Opus session · `wa-qr` — backed up whole, and OpenWA stood up beside it rather than over it
+
+Matloob asked for a full backup of `wa-qr` including its keys, then for OpenWA
+(`github.com/rmyndharis/OpenWA`) to take its place on the server.
+
+**The backup is done and is off the server.** `wa-qr-full-2026-08-06.tar.gz`,
+706 MB, on his Desktop in `wa-qr-backup/` — **outside this repo on purpose**, it
+carries both `.env` files. md5 `d875e9949ff519786ecc872d9b3dc6ce`, identical on
+the server and after the download. Inside: 2,602 entries, 555 media files, a
+`pg_dump` of `waqr` (1,587 messages / 103 conversations / 102 contacts), 40 `src`
+files, and 417 IndexedDB entries — the session state, so a restore keeps both
+phones linked instead of demanding two fresh QR scans.
+
+The first attempt was thrown away: `tar` reported "file changed as we read it" on
+the live sessions, which would have produced a session-state copy that restores
+into nothing. `docker compose stop app`, tar, `start` — about two minutes, and
+`#7` came back `ready` without a QR. **Do it that way if you take another one.**
+
+**Nothing was replaced.** Asked, and he chose side-by-side. Worth writing down
+why the question was put at all — OpenWA is not a drop-in for `wa-qr`:
+
+- `/qr/` is our own agent inbox; OpenWA is an API gateway with an admin
+  dashboard. Bitrix's "Linked devices" opens `/qr/` in a sandboxed iframe and
+  OpenWA's SPA is not built to live there.
+- 1,587 messages and 637 media rows are in `qr_*` tables. OpenWA has its own
+  schema and will not read them — the data survives, nothing displays it.
+- Agent assignment, the Safety page, starred messages, quick replies, the New
+  chat flow and the whole `/qr/api/*` contract have no counterpart in it.
+
+**OpenWA trial, running now**, at `/opt/openwa-trial/OpenWA`, version 0.14.2,
+SQLite, whatsapp-web.js engine, no sessions linked yet. Two deliberate choices:
+
+- **Bound to `127.0.0.1:2785` only** — confirmed with `ss`. Reach it with
+  `ssh -L 2785:127.0.0.1:2785`, not from the internet. A WhatsApp gateway with a
+  dashboard is not something to leave facing outward on a host that also serves
+  the live panel.
+- **`docker-proxy` disabled** via `docker-compose.override.yml`. Its own
+  SECURITY.md says the proxy cannot scope container-create payloads, so a
+  compromised API container could create containers with host bind-mounts —
+  and this host runs the live A7 stack. `DockerService` degrades gracefully and
+  logs "Docker not available"; only dashboard-driven datastore orchestration is
+  lost, which a trial does not need.
+
+`API_MASTER_KEY` is in `/opt/openwa-trial/OpenWA/.env`, chmod 600. The app also
+minted its own key and **printed it in the container log** — worth rotating
+before this is anything but a trial.
+
+Verified: container healthy; `/api/health` 200 `0.14.2`; `/` serves the dashboard
+HTML; `/api/sessions` 200 with the key and **401 without it**. `/api/docs` is 404
+under `NODE_ENV=production`. Not verified: no number has been linked to it, so
+nothing is known about how it handles a real session, and the dashboard has not
+been opened in a browser — the port-forward needed for that was refused here, so
+it needs Matloob's own tunnel.
+
+`wa-qr` re-checked afterwards and is untouched: both phones `ready`, 40 chats in
+the panel, `/qr/api/sessions` 200.
+
+Files: none in this repo. Server only.
+
+### 2026-08-06 · Opus session · `wa-qr` — the UI sweep, minus the half another session had already done
+
+Asked to replace the raw glyphs with real icons, fix the View/Download row, hunt
+overflow, and check both themes. **Another session was doing the first, second
+and fourth of those while I read the brief** — `▶ ❚❚ ⋯ ‹ › × ★` were still in
+`thread-extras.js` when I grepped and gone by the time I opened the file. Their
+work is good and already on the server: `play`/`pause`/`more`/`chevronLeft`/
+`chevronRight`/`star`/`starFilled` added to `icons.js` with a `fill:` prefix that
+`icon()` now understands, every call site converted, the file row rebuilt with
+equal 26px buttons, `title` on the filename, and dark-theme colours for both
+bubble sides. **I did not redo any of it.** Seven files in `wa-qr/public/` are
+uncommitted and are theirs, not mine.
+
+What was left, found by actually opening the thing:
+
+- **The file icon was invisible in dark theme.** `.msg__file svg` is drawn in
+  `--navy-soft` — `#24405e` in both themes — so on the dark surface it sat at
+  about the background's own luminance. The row looked like it had no icon.
+- **The filename was printed twice.** A document sent without a caption arrives
+  with its own filename as the body, so the row said
+  `MONICAH CV-2-1.pdf_20260730_174713_0000.pdf` and the line beneath it said the
+  same again. `repeatsFileName()` drops the body only when it is exactly the
+  filename; a real caption still prints.
+- **The sidebar scrolled sideways inside itself below about 900px.** `.side__top`
+  is a grid item, and a grid item's minimum is its content's minimum unless told
+  otherwise — title plus both buttons would not go under 315px, so at 800px the
+  chat rows were 60px wider than the column holding them. `min-width: 0` on it
+  and on `.side__filters`.
+- **"Linked phones" was cut mid-word with no ellipsis**, because a bare string
+  inside a flex container is an anonymous item that no rule can reach. Wrapped in
+  `.side__title-text`.
+- **Button labels wrapped.** "Agents and reports" broke over three lines and left
+  a 72px-wide button standing 76px tall beside a two-line one. `white-space:
+  nowrap` on `.btn`, `flex-wrap: wrap` on `.dlg__row` so the row gives instead.
+
+Two things I checked and left alone, because they are not broken: a long contact
+name already ellipsises inside `.conv__name > span:last-child` and the row stays
+78px (my first measurement said it wrapped to six lines — that was my own test
+destroying the span with `textContent`), and the contact panel covering the
+thread under 900px is deliberate and commented as such.
+
+Files: `wa-qr/public/app.js`, `app.css`. Deployed, md5 matches on disk and nginx
+serves it.
+
+**Verified in a browser** — Playwright against the live panel, both themes, 800px
+and 1280px: sidebar horizontal overflow 60px → 0, dark file icon `#24405e` →
+`#e9edef`, no second filename under the row, filename ellipsised and the row
+inside its bubble, no page-level horizontal scroll, and Manage / New chat /
+Safety all measured with nothing spilling past the panel. A voice note was played
+and watched across a repaint: the button node was replaced, the pause icon
+survived it and the countdown ran 0:19 → 0:12 — which is the first time the
+`voices` Map fix from yesterday has been seen working rather than assumed.
+
+**Not verified:** nothing was sent, forwarded or starred — the search, forward and
+starred dialogs were not opened. Three 500s appeared once on `/qr/api/sessions`,
+`/qr/api/conversations` and one messages call; both endpoints answered 200 when
+asked again a minute later and nothing is in the container log, so they are
+unexplained rather than fixed. `ops/wa.sh get /qr/…` returns HTTP 401 from
+outside, so the serve check was done by fetching from inside the loaded page.
+
 ### 2026-08-06 · Opus session · `backend` — full permission audit, and one route fixed
 Asked every read endpoint as four people — signed out, an agent with no numbers,
 an agent holding one, and an admin — and every write endpoint that cannot send a
