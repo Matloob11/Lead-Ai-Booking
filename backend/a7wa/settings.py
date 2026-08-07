@@ -280,3 +280,34 @@ LOGGING = {
 # needs it answers 503 rather than quietly using a secret from the source.
 OPENWA_MASTER_KEY = env("OPENWA_MASTER_KEY", "")
 OPENWA_INTERNAL_URL = env("OPENWA_INTERNAL_URL", "http://openwa-api:2785")
+
+# --- "a linked phone went away" alert -------------------------------------
+#
+# When an agent unlinks their handset the inbox stops receiving on that number,
+# and nothing on any screen says so — the chats simply stop. These settings are
+# how the people who need to know get told.
+#
+# Sent as a TEMPLATE on purpose. The 24-hour free-form window opens only on an
+# inbound message, so a cold alert to an admin who has not written today cannot
+# be plain text; it would fail with 131047 exactly when it matters. The template
+# is UTILITY, not MARKETING, so it is outside Meta's per-customer daily cap that
+# the marketing templates share.
+DEVICE_ALERT_TEMPLATE = env("DEVICE_ALERT_TEMPLATE", "whatsapp_device_disconnected")
+DEVICE_ALERT_TEMPLATE_LANG = env("DEVICE_ALERT_TEMPLATE_LANG", "en")
+
+# Who hears about it. Digits only, no '+' — that is what the gateway expects.
+DEVICE_ALERT_RECIPIENTS = env_list(
+    "DEVICE_ALERT_RECIPIENTS",
+    "923078633218,971503928461,971555484423",
+)
+
+# The number the alert is sent FROM, and the one to try when that fails. Two
+# different WABAs on purpose: an alert that shares a business account with the
+# thing that has gone wrong is an alert that can go down with it. The template is
+# approved on both.
+DEVICE_ALERT_PHONE_ID = env("DEVICE_ALERT_PHONE_ID", "1170318422839203")
+DEVICE_ALERT_PHONE_ID_BACKUP = env("DEVICE_ALERT_PHONE_ID_BACKUP", "1198764669988838")
+
+# Shared with the gateway, which is the only thing that calls the alert route.
+# No default: an empty secret must refuse every caller rather than accept any.
+DEVICE_ALERT_SECRET = env("DEVICE_ALERT_SECRET", "")

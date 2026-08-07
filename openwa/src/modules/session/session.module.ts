@@ -12,6 +12,7 @@ import { SessionProxyInterceptor } from './session-proxy.interceptor';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { DeviceAlertService } from './device-alert.service';
 import { PresenceStore } from './presence-store.service';
 import { SessionController } from './session.controller';
 import { WebhookModule } from '../webhook/webhook.module';
@@ -37,6 +38,7 @@ import { AutomationModule } from '../automation/automation.module';
     SessionEngineLifecycle,
     SessionErrorStore,
     SessionRestrictionStore,
+    DeviceAlertService,
     PresenceStore,
     SessionLidResolver,
     SessionLivenessWatchdog,

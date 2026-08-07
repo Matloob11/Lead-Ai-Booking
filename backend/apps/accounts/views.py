@@ -330,6 +330,8 @@ def openwa_credentials(request):
     import os
     from django.conf import settings
 
+    from .models import OpenWaAssignment
+
     agent = request.user
     # No literal fallback. This is the unscoped admin credential for the WhatsApp
     # gateway; a default written into the source is the same key on every machine
@@ -355,8 +357,37 @@ def openwa_credentials(request):
             "allowedSessions": [],
         })
 
-    # Non-admin operator: scope to their assigned numbers
-    sessions = [n.phone_number for n in agent.visible_numbers]
+    # Non-admin operator: scope to the linked phones assigned to them.
+    #
+    # OpenWA matches `allowedSessions` against a session's **id**, the UUID it
+    # issues — see common/security/session-scope.ts. This used to send the
+    # agent's Business Platform phone numbers instead, which are a different
+    # namespace entirely: a phone number never equals a UUID, so the scope
+    # matched nothing and every agent, assigned or not, opened an empty chat
+    # list. It looked like a working boundary because it refused everything.
+    #
+    # An agent with nothing assigned still gets an empty list, and that is the
+    # right answer to "you have not been given a phone yet" — but now it is the
+    # answer to the question actually asked.
+    sessions = list(
+        OpenWaAssignment.objects.filter(agent=agent, is_active=True)
+        .values_list("session_id", flat=True)
+        .distinct()
+    )
+
+    # An empty allowlist does NOT mean "nothing" to OpenWA — it means
+    # *unrestricted*, which is how an admin key is expressed
+    # (common/security/session-scope.ts). So an agent with no phone assigned
+    # would have been handed the run of every conversation in the building.
+    # Measured before this line existed: agent 29, assigned nothing, could list
+    # the session.
+    #
+    # A placeholder that cannot be a session id keeps the allowlist non-empty
+    # and matches nothing, so "assigned nothing" reads as "sees nothing". It
+    # carries the agent's id so a scope like this is recognisable in the key
+    # list rather than looking like a mistake.
+    if not sessions:
+        sessions = [f"unassigned:agent:{agent.pk}"]
     key_name = f"a7_agent_{agent.pk}"
 
     # If we already have a saved API key for this agent, sync its allowedSessions in OpenWA
@@ -403,3 +434,173 @@ def openwa_credentials(request):
 
     return Response({"detail": "Could not issue OpenWA API key"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+
+def _openwa_config():
+    """Base URL and master key for talking to OpenWA, or (None, None)."""
+    import os
+
+    key = (
+        getattr(settings, "OPENWA_MASTER_KEY", None)
+        or os.getenv("OPENWA_MASTER_KEY")
+        or os.getenv("API_MASTER_KEY")
+    )
+    base = (
+        getattr(settings, "OPENWA_INTERNAL_URL", None)
+        or os.getenv("OPENWA_INTERNAL_URL")
+        or "http://openwa-api:2785"
+    )
+    return (base, key) if key else (None, None)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def openwa_sessions(request):
+    """The linked phones, and which agents each one is assigned to. Admins only.
+
+    The roster is ours; the phones are OpenWA's. So the list is fetched from the
+    gateway and the assignments are joined on from our own table — and if the
+    gateway cannot be reached, the assignments are still returned against the
+    labels we recorded when they were made. An admin can then still see and edit
+    who covers what, which is the part that does not depend on OpenWA being up.
+    """
+    from .models import OpenWaAssignment
+
+    if not request.user.has_admin_rights:
+        return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
+
+    assignments = {}
+    for row in OpenWaAssignment.objects.filter(is_active=True).select_related("agent"):
+        assignments.setdefault(row.session_id, {"label": row.label, "agents": []})
+        assignments[row.session_id]["agents"].append(row.agent_id)
+
+    base, key = _openwa_config()
+    sessions, reachable = [], False
+    if base and key:
+        try:
+            with httpx.Client(timeout=10) as client:
+                res = client.get(f"{base}/api/sessions", headers={"X-API-Key": key})
+            if res.status_code == 200:
+                reachable = True
+                payload = res.json()
+                rows = payload if isinstance(payload, list) else payload.get("data", [])
+                for s in rows:
+                    sid = s.get("id") or s.get("sessionId")
+                    if not sid:
+                        continue
+                    sessions.append({
+                        "id": sid,
+                        "name": s.get("name") or "",
+                        "phone": s.get("phoneNumber") or s.get("phone") or "",
+                        "status": s.get("status") or "",
+                        "agents": assignments.get(sid, {}).get("agents", []),
+                    })
+        except httpx.HTTPError:
+            logger.warning("OpenWA unreachable while listing sessions", exc_info=True)
+
+    # Anything assigned but not returned above — the gateway is down, or the
+    # session was unlinked over there. Shown rather than hidden: a roster that
+    # quietly drops rows is how an agent keeps access nobody can see.
+    seen = {s["id"] for s in sessions}
+    for sid, info in assignments.items():
+        if sid not in seen:
+            sessions.append({
+                "id": sid,
+                "name": info["label"],
+                "phone": "",
+                "status": "unreachable" if not reachable else "missing",
+                "agents": info["agents"],
+            })
+
+    return Response({"reachable": reachable, "sessions": sessions})
+
+
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def openwa_session_agents(request, session_id):
+    """Replaces the roster for one linked phone. Admins only.
+
+    Send the state you want, not a change to it — the same contract as the
+    Business Platform number roster, so an admin ticking boxes cannot end up
+    half-applied if two of them save at once.
+    """
+    from .models import OpenWaAssignment
+
+    if not request.user.has_admin_rights:
+        return Response({"detail": "Admins only"}, status=status.HTTP_403_FORBIDDEN)
+
+    wanted = request.data.get("agents")
+    if not isinstance(wanted, list):
+        return Response({"detail": "agents must be a list of agent ids."}, status=status.HTTP_400_BAD_REQUEST)
+
+    label = (request.data.get("label") or "").strip()[:120]
+    ids = {int(a) for a in wanted if str(a).isdigit()}
+
+    current = OpenWaAssignment.objects.filter(session_id=session_id, is_active=True)
+    have = {row.agent_id: row for row in current}
+
+    for agent_id in have.keys() - ids:
+        have[agent_id].is_active = False
+        have[agent_id].save(update_fields=["is_active"])
+
+    for agent_id in ids - have.keys():
+        OpenWaAssignment.objects.update_or_create(
+            session_id=session_id,
+            agent_id=agent_id,
+            defaults={"is_active": True, "label": label, "created_by": request.user},
+        )
+
+    if label:
+        OpenWaAssignment.objects.filter(session_id=session_id).update(label=label)
+
+    # The keys already handed out carry the old scope until they are re-minted,
+    # and openwa_credentials only re-syncs when an agent next opens the panel.
+    # Clearing them here would be worse: an agent mid-conversation would be
+    # signed out. They pick up the new scope on their next open.
+    return Response({"session_id": session_id, "agents": sorted(ids)})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@csrf_exempt
+def device_disconnected_alert(request):
+    """Called by the OpenWA gateway when a linked handset stops being linked.
+
+    Deliberately not behind a session login: the caller is a service, not a
+    person, and it has no session to present. It authenticates with a shared
+    secret instead — compared in constant time, and refused outright when the
+    secret is unset, because an alert route that accepts anybody is a way to
+    send WhatsApp messages from the company's number.
+
+    Answers 200 even when some sends failed. The gateway's job was to report the
+    handset; whether Meta accepted the alert is not something it can act on, and
+    a non-2xx would only make it retry a message that has already been delivered
+    to the other recipients.
+    """
+    import hmac
+
+    expected = getattr(settings, "DEVICE_ALERT_SECRET", "")
+    if not expected:
+        logger.error("Device alert refused: DEVICE_ALERT_SECRET is not configured")
+        return Response({"detail": "Alerting is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    presented = request.headers.get("X-Alert-Secret", "")
+    if not hmac.compare_digest(presented, expected):
+        logger.warning("Device alert refused: bad secret")
+        return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+    phone = (request.data or {}).get("phone")
+    session_name = (request.data or {}).get("sessionName")
+    reason = (request.data or {}).get("reason") or "unknown"
+
+    logger.warning(
+        "Linked device reported down: %s (%s) — %s",
+        phone or "no number",
+        session_name or "unnamed",
+        reason,
+    )
+
+    from apps.accounts.device_alerts import send_device_disconnected_alert
+
+    results = send_device_disconnected_alert(phone=phone, session_name=session_name)
+    return Response({"recipients": results})

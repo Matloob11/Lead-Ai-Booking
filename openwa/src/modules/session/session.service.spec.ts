@@ -1,5 +1,6 @@
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { DeviceAlertService } from './device-alert.service';
 import { PresenceStore } from './presence-store.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
@@ -217,6 +218,7 @@ describe('SessionService', () => {
         SessionEngineLifecycle,
         SessionErrorStore,
         SessionRestrictionStore,
+        DeviceAlertService,
         PresenceStore,
         { provide: AuditService, useValue: auditService },
         {

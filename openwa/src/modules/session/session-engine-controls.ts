@@ -11,6 +11,7 @@ import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { DeviceAlertService } from './device-alert.service';
 import { PresenceStore } from './presence-store.service';
 import { type createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
@@ -46,6 +47,7 @@ export interface SessionEngineControlsHost {
   engines: EngineRegistry;
   sessionErrors: SessionErrorStore;
   sessionRestrictions: SessionRestrictionStore;
+  deviceAlerts: DeviceAlertService;
   presence: PresenceStore;
   hookManager: HookManager;
   configService?: ConfigService;
@@ -84,6 +86,7 @@ export class SessionEngineControls {
   private readonly engines: EngineRegistry;
   private readonly sessionErrors: SessionErrorStore;
   private readonly sessionRestrictions: SessionRestrictionStore;
+  private readonly deviceAlerts: DeviceAlertService;
   private readonly presence: PresenceStore;
   private readonly hookManager: HookManager;
   private readonly configService?: ConfigService;
@@ -101,6 +104,7 @@ export class SessionEngineControls {
     this.engines = host.engines;
     this.sessionErrors = host.sessionErrors;
     this.sessionRestrictions = host.sessionRestrictions;
+    this.deviceAlerts = host.deviceAlerts;
     this.presence = host.presence;
     this.hookManager = host.hookManager;
     this.configService = host.configService;
@@ -376,6 +380,11 @@ export class SessionEngineControls {
       sessionId: id,
       action: 'logout',
     });
+    // Told at once, unlike a dropped connection: an unlink is not coming back on
+    // its own, and until somebody scans a QR nothing arrives on that number. The
+    // row's phone was cleared two lines up, so the number is read from the copy
+    // taken before the teardown — which is the whole reason that copy exists.
+    this.deviceAlerts.reportUnlinked(id, session.phone, session.name);
     return this.requireSession(id);
   }
 

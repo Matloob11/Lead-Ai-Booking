@@ -10,6 +10,7 @@ import { SessionLivenessWatchdog } from './session-liveness-watchdog.service';
 import { MessageProjector } from './message-projector.service';
 import { SessionErrorStore } from './session-error-store.service';
 import { SessionRestrictionStore } from './session-restriction-store.service';
+import { DeviceAlertService } from './device-alert.service';
 import { PresenceStore } from './presence-store.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
@@ -239,6 +240,7 @@ export class SessionEngineLifecycle {
     private readonly messages: MessageProjector,
     private readonly sessionErrors: SessionErrorStore,
     private readonly sessionRestrictions: SessionRestrictionStore,
+    private readonly deviceAlerts: DeviceAlertService,
     private readonly presence: PresenceStore,
     private readonly eventsGateway: EventsGateway,
     private readonly webhookService: WebhookService,
@@ -329,6 +331,7 @@ export class SessionEngineLifecycle {
       engines: this.engineRegistry,
       sessionErrors: this.sessionErrors,
       sessionRestrictions: this.sessionRestrictions,
+      deviceAlerts: this.deviceAlerts,
       presence: this.presence,
       hookManager: this.hookManager,
       configService: this.configService,
@@ -657,6 +660,10 @@ export class SessionEngineLifecycle {
     // A fresh READY stretch starts the watchdog's failure budget clean too.
     this.watchdog.clear(id);
     this.sessionErrors.clear(id);
+    // Whatever disconnection was waiting to be reported has just un-happened.
+    // Cancelled here rather than on the reconnect attempt: an attempt is not a
+    // recovery, and only READY proves the handset is answering again.
+    this.deviceAlerts.reportBack(id);
     // Being linked and ready is proof that a connection-level block is over — it is exactly what such
     // a block prevents. A reachout timelock survives: it never stopped the session connecting.
     const liftedByReady = this.sessionRestrictions.clearIfDisprovedByReady(id);
@@ -922,6 +929,10 @@ export class SessionEngineLifecycle {
 
     void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
     this.eventsGateway.emitSessionDisconnected(id, { reason });
+    // Held, not sent: most disconnects are back within seconds through the
+    // reconnect backoff, and one message per lost signal would train everybody
+    // to ignore the alert that matters. reportBack() on READY cancels it.
+    this.deviceAlerts.reportDropped(id, session.phone, session.name, reason);
 
     // Execute hook for disconnected event
     void this.hookManager.execute(

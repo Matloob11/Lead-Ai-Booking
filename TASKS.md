@@ -27,6 +27,143 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-07 · Opus session · `openwa` + `backend` — telling somebody when a linked phone goes away
+
+When an agent unlinks their handset the inbox simply stops receiving on that
+number. No screen says so, no status anybody watches changes, and the first sign
+is a customer complaining nobody answered. Three numbers now get a WhatsApp when
+it happens: `923078633218`, `971503928461`, `971555484423`.
+
+**Sent as a template, and that is not a detail.** The 24-hour free-form window
+opens only on an inbound message, so plain text to an admin who has not written
+today fails with 131047 — precisely when the alert matters. Matloob created
+`whatsapp_device_disconnected` (UTILITY, en, two body variables) and, on advice,
+left **Allow Category Change unticked**: reclassified as MARKETING it would fall
+under Meta's per-customer daily cap that this account's 173 marketing templates
+already share, and the one day it was needed it would go quietly undelivered.
+
+**Two WABAs, and the second is the point rather than belt-and-braces.** The same
+template is approved on `1529906518933156` (sends from `1170318422839203`) and on
+`897583580064486` (`1198764669988838`). An alert that shares a business account
+with whatever has gone wrong is an alert that can go down with it.
+
+**Two kinds of "gone", told apart on purpose.**
+
+- **unlinked** — the agent removed the device. It is not coming back on its own,
+  so the alert goes at once, from `logout()`.
+- **dropped** — the connection fell over. Most recover in seconds through the
+  reconnect backoff, and one message per lost signal would train everybody to
+  ignore the alert that matters. Held **10 minutes**, cancelled the moment the
+  session reaches READY again. Re-arming while one is pending is a deliberate
+  no-op: a session flapping every thirty seconds would otherwise keep pushing its
+  own deadline back and never report at all.
+
+Cancelled on READY rather than on a reconnect *attempt* — an attempt is not a
+recovery, and only READY proves the handset is answering.
+
+**Not built on the webhook table**, though it exists and dispatches
+`session.disconnected` already. A webhook is a row somebody has to remember to
+create, per session: the next number an agent links would silently have no alert
+on it and nothing would look wrong. This is configuration on the process, so it
+covers sessions that do not exist yet. `logout()` also dispatched no webhook at
+all, so the deliberate case — the one that matters most — had no event to hang
+off.
+
+Files — gateway: `modules/session/device-alert.service.ts` (new),
+`session.module.ts`, `session-engine-lifecycle.service.ts`,
+`session-engine-controls.ts`, two spec provider lists, `docker-compose.yml`.
+Backend: `apps/accounts/device_alerts.py` (new), `views.py`, `urls.py`,
+`a7wa/settings.py`.
+
+**Verified, and two of the three findings are worth carrying forward.**
+
+| | |
+|---|---|
+| gateway suites after the DI change | **2121/2121**, 51 suites |
+| route with no secret / a wrong one | **403** both |
+| a real alert, end to end | **971503928461 ✓ · 971555484423 ✓** |
+| `923078633218` | **failed from both WABAs** — see below |
+| gateway → Django, wrong secret on purpose | **403** — reaches it; the secret gate is all that stands between |
+| `makemigrations --check` | No changes detected |
+
+**`923078633218` cannot be reached from this WABA, and it is not our bug.**
+WhatsApp itself says the number exists (asked through the linked device's
+`contacts/check`, which sends nothing). But the same template fails to it from
+**both** business accounts, and a *different* long-approved template fails to it
+too, while the identical template to the UAE numbers succeeds. The gateway
+returns a bare `HTTP 500 / "An unexpected error occurred"` with no reason, so
+Meta's own explanation is not visible from here. The usual cause is a number that
+is itself registered on WhatsApp Business Platform — Meta will not deliver a
+business message to a business sender. **Matloob should check whether that number
+is one of the company's own WABA senders**; if it is, the alert needs a different
+number for that person.
+
+**Two configuration traps, both of which looked like working code.**
+
+1. The gateway's `docker-compose.yml` has **no `env_file`** — every variable is
+   listed explicitly, and the file says so in a comment. Adding
+   `DEVICE_ALERT_URL`/`DEVICE_ALERT_SECRET` to `.env` did nothing: the container
+   came up healthy with both unset and the alert would simply never have fired.
+   They are on the `environment:` list now.
+2. Django answered the gateway with **400 Bad Request** — `ALLOWED_HOSTS`, because
+   the internal call carries `Host: web:8000`. `web` added. Worth knowing before
+   the next service-to-service call inside the compose network.
+
+**Not verified:** nobody has actually unlinked a handset to watch the alert fire.
+That means taking Matloob's live number off the inbox, which is his call, not a
+test to run unasked. Every link in the chain is proven separately — the trigger
+compiles and is covered by the suite, the gateway reaches the route, and the
+route sends real WhatsApp — but the whole thing has not been run once from a real
+logout.
+
+### 2026-08-07 · Opus session · `openwa` — picked up the lossless-history branch; closed the one hole that loses messages silently
+
+Matloob stopped the session working in the `codex/openwa-history-sync` worktree
+and handed it over. Read the 202-line design first
+(`docs/superpowers/specs/2026-08-07-openwa-lossless-history-sync-design.md`) —
+20 test scenarios, an identity audit, a seven-step deployment protocol. What was
+actually built is the groundwork and nothing else: three nullable session columns
+(`historyFirstLinkedAt`, `historySyncToken`, `historySyncError`), the
+`(sessionId, chatId, createdAt)` message index, an additive migration, one config
+value, and four spec files. **28 lines and five files.** No engine work, no
+identity gate, no DB-first chat list, no pagination.
+
+**Ran the tests rather than assuming**, and one of the four was red on purpose:
+`session-engine-event-wiring.spec` asserts `onHistoryMessages` hands back the
+projector's promise. It was returning `undefined`.
+
+That is the spec's central safety property, and it was the live behaviour:
+
+```ts
+void host.messages.persistHistoryMessages(id, messages)
+  .catch(err => this.logger.error(...));
+```
+
+A batch the database refused was logged and then looked, to the importer, exactly
+like a batch that had been written — so the checkpoint advanced past messages
+that were never stored. Silent loss, in the one place the whole feature exists to
+prevent.
+
+The promise is now returned unwrapped, and the interface says
+`void | Promise<void>` so a producer can await it. `.catch()` cannot come back
+even in a form that returns something: it resolves a *new* promise, which the
+caller cannot tell from success. `wwebjs-history` already awaited `emit(batch)`,
+so the chain now runs end to end.
+
+Files: `openwa/src/modules/session/session-engine-event-wiring.ts`,
+`openwa/src/engine/interfaces/whatsapp-engine.interface.ts` — **worktree only**.
+
+Verified: the four focused suites go 3/4 → **4/4**. Then the whole
+`src/modules/session` + `src/engine` run: **1,779 pass, 7 fail** — and those same
+7 fail with my two files stashed, so **the branch was already red when it was
+handed over**. They sit in `whatsapp-web-js.adapter.spec`,
+`wwebjs-backport-201832.spec` and `session.controller.spec`, and belong to the
+partial DTO/entity work, not to this change.
+
+**Nothing deployed.** The live stack is untouched: the spec's own protocol wants a
+volume backup and a sanitized identity audit before any of this reaches the
+server, and neither has been done.
+
 ### 2026-08-07 · Opus session · `openwa` — the two message types that arrived and could not be read
 
 Went through every WhatsApp message type against the library's own

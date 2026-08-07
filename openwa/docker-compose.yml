@@ -193,6 +193,13 @@ services:
       - CHAT_MEDIA_ARCHIVE_MAX_BYTES=${CHAT_MEDIA_ARCHIVE_MAX_BYTES:-}
       - CHAT_MEDIA_ARCHIVE_TTL_DAYS=${CHAT_MEDIA_ARCHIVE_TTL_DAYS:-}
       - CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS=${CHAT_MEDIA_ORPHAN_SWEEP_INTERVAL_MS:-}
+      # A7: telling the backend that a linked handset has gone away, so it can send the WhatsApp
+      # alert. Forwarded explicitly for the reason given above — with no env_file, a variable that
+      # is not on this list never reaches the container however carefully .env is edited, and the
+      # alert would stay silently off. Both unset means the feature is off, which is what an
+      # installation that has no backend wants.
+      - DEVICE_ALERT_URL=${DEVICE_ALERT_URL:-}
+      - DEVICE_ALERT_SECRET=${DEVICE_ALERT_SECRET:-}
       - CHAT_MEDIA_ORPHAN_GRACE_MS=${CHAT_MEDIA_ORPHAN_GRACE_MS:-}
       # Send pacing (opt-in anti-ban governor). Forwarded explicitly for the same reason as the
       # chat-media block above: without these lines SEND_PACING_ENABLED=true in the operator's .env
