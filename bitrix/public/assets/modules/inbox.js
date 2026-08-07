@@ -19,6 +19,7 @@ import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "../core/bitrix-sso.js";
 import { imagesInThread, openLightbox } from "../core/lightbox.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
+import { openLinkedPhonesAdmin } from "./linked-phones-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
 import { openTemplateComposer, openTemplateManager } from "./template-composer.js";
 import { openSharedLibraryModal } from "./shared-library.js";
@@ -178,12 +179,26 @@ export function mountInbox(root, { me, openRequest = null }) {
           "Numbers",
         ])
       : null,
+    // The same job for the QR-linked phones. A separate screen because they are
+    // separate things — those numbers are ours, these are sessions living in the
+    // gateway, and a phone can leave this list because somebody unlinked a
+    // handset rather than because anything changed here.
     me.is_wa_admin
-      ? el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
-          icon("smartphone", { size: 16 }),
-          "Linked devices",
+      ? el("button.btn.menu__item", { onclick: openLinkedPhones, type: "button" }, [
+          icon("users", { size: 16 }),
+          "Linked phone agents",
         ])
       : null,
+    // Everyone, not admins only. An agent answers the QR-linked phones too, and
+    // what they can actually see there is decided on the far side rather than by
+    // hiding the door: their OpenWA key is scoped to the numbers assigned to
+    // them, server-side. An agent with nothing assigned gets an empty chat list,
+    // which is the correct answer to "you have not been given a number yet" —
+    // not an error, and not somebody else's conversations.
+    el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
+      icon("smartphone", { size: 16 }),
+      "Linked devices",
+    ]),
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openRequests, type: "button" }, [
           icon("users", { size: 16 }),
@@ -280,7 +295,14 @@ export function mountInbox(root, { me, openRequest = null }) {
     // panel becomes a way to ask for one instead of an empty list.
     if (!state.numbers.length) {
       root.className = "";
-      renderNoNumbersScreen(root, { me, onAssigned: () => window.location.reload() });
+      renderNoNumbersScreen(root, {
+        me,
+        onAssigned: () => window.location.reload(),
+        // This screen stands in for the whole panel, so without handing the QR
+        // channel through here an agent who has only a linked phone — and no
+        // Business Platform number — could not reach it at all.
+        onLinkedDevices: openLinkedDevices,
+      });
       return;
     }
 
@@ -798,6 +820,87 @@ export function mountInbox(root, { me, openRequest = null }) {
    * At click time rather than on every repaint: it is a handful of calls per
    * chat, and drawing the conversation list would have made hundreds of them.
    */
+  /**
+   * A wa_id as a person writes it. `971552666614` is a string to a computer and
+   * a phone number to everybody else.
+   *
+   * This existed only as a name: two places called `withPlus` and nothing ever
+   * defined it. The older of them sits in the "this number is on several
+   * records" modal, which needs two or more hits to open and so had never run —
+   * a ReferenceError waiting for the first customer who was in the CRM twice.
+   */
+  function withPlus(waId) {
+    const digits = String(waId || "").replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.length === 12 && digits.startsWith("971")) {
+      return `+971 ${digits.slice(3, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+    }
+    return `+${digits}`;
+  }
+
+  /**
+   * The number is in neither Leads nor Owner Data, so offer to put it in one.
+   *
+   * Two places, asked rather than guessed: a buyer enquiring belongs in Leads,
+   * and somebody an agent is dealing with about a property they own belongs in
+   * Owner Data. Only the agent on the conversation knows which, and picking one
+   * silently would scatter owners through the lead pipeline.
+   *
+   * Whichever is chosen, the whole conversation is copied into the new record's
+   * timeline in the order it happened — the point of making the record here
+   * rather than by hand in another tab is that the history comes with it.
+   */
+  function offerToCreate(conversation, waId, button, restore) {
+    // The destination is passed to `run()` at click time, not carried on the
+    // button, so this only needs the label.
+    const pick = (label) =>
+      el("button.btn.btn--ghost.crm-hits__row", { type: "button" }, [
+        el("span.crm-hits__kind", {}, [label]),
+      ]);
+
+    const asLead = pick("Create a Lead");
+    const asOwner = pick("Create in Owner Data");
+    const note = el("p.modal__note", {}, [
+      `${withPlus(waId)} is not in the CRM. Creating a record here also copies this ` +
+        `conversation into its timeline, oldest message first.`,
+    ]);
+
+    const dialog = modal(
+      "Not in the CRM yet",
+      el("div.modal__body", {}, [note, el("div.crm-hits", {}, [asLead, asOwner])])
+    );
+
+    const run = async (where, source) => {
+      asLead.disabled = asOwner.disabled = true;
+      clear(note).append("Creating the record and copying the conversation…");
+      try {
+        const made = await crm.createRecord(conversation.id, where);
+        clear(note).append(
+          `${made.label} #${made.id} created. ${made.messages_copied} message` +
+            `${made.messages_copied === 1 ? "" : "s"} copied` +
+            `${made.messages_failed ? `, ${made.messages_failed} could not be` : ""}.`
+        );
+        // Straight to it. The agent asked for a record; showing them the record
+        // is the answer, not a dialog reporting that one exists.
+        window.BX24?.openPath?.(made.path);
+        dialog?.close?.();
+        clear(button).append(icon("user", { size: 15 }), " CRM");
+      } catch (error) {
+        // Left on screen. A failed create that clears itself leaves the agent
+        // believing the lead is there.
+        clear(note).append(error?.message || "Bitrix refused to create the record.");
+        asLead.disabled = asOwner.disabled = false;
+        void source;
+      }
+    };
+
+    asLead.addEventListener("click", () => run("lead", asLead));
+    asOwner.addEventListener("click", () => run("owner_data", asOwner));
+
+    clear(button).append(icon("user", { size: 15 }), " Create lead");
+    restore();
+  }
+
   function openLeadButton(conversation) {
     const waId = conversation.contact?.wa_id || "";
     if (!waId) return null;
@@ -816,10 +919,10 @@ export function mountInbox(root, { me, openRequest = null }) {
         const records = asList(await crm.whereis(waId), "records");
 
         if (!records.length) {
-          // Said on the button itself. A modal that exists to report there is
-          // no record is a dialog to dismiss in exchange for nothing.
-          clear(button).append(icon("alert", { size: 15 }), " Not in the CRM");
-          restore();
+          // Not in the CRM is not news, it is a job. The button used to say so
+          // and change back a moment later, which left the agent to go and make
+          // the lead by hand in another tab and paste the number in.
+          offerToCreate(conversation, waId, button, restore);
           return;
         }
 
@@ -1396,6 +1499,16 @@ export function mountInbox(root, { me, openRequest = null }) {
     interactive: "Interactive message",
     button: "Button reply",
     system: "System message",
+    // Meta's own `unsupported` type, stored here as `unknown`: the customer sent
+    // something the Cloud API will not carry to a business number — a poll, a
+    // view-once message, whatever WhatsApp has added lately. It arrives as error
+    // 131051 with the content absent, and Meta does not even say what it was
+    // (`raw_type` is itself "unknown"). Nothing can be shown because nothing was
+    // sent to us, and nothing can be re-imported later. Spelled out because
+    // "[unknown]" reads to an agent as a fault in this panel, and the next thing
+    // they do is report a bug instead of asking the customer to resend.
+    unknown: "WhatsApp could not deliver this message. Ask the customer to send it again as text, a photo or a file.",
+    unsupported: "WhatsApp could not deliver this message. Ask the customer to send it again as text, a photo or a file.",
   };
 
   const unsupportedLabel = (kind) =>
@@ -1742,8 +1855,55 @@ export function mountInbox(root, { me, openRequest = null }) {
         "allow-popups allow-popups-to-escape-sandbox allow-downloads",
     });
 
+    // Signing the agent in, so they never meet a login screen.
+    //
+    // OpenWA's only credential is an API key. Asking an agent to hold one would
+    // be asking them to keep a password that opens every conversation on the
+    // number — so the panel fetches theirs and hands it over, and they see the
+    // chats instead of a box they have no way to fill.
+    //
+    // The frame speaks first: it posts `openwa_ready` once its listener is
+    // attached. Posting before that raced the iframe's own boot and the message
+    // landed on nothing. The key is fetched in parallel, so whichever arrives
+    // second does the send.
+    //
+    // Addressed to the frame's exact origin, never "*" — a wildcard would offer
+    // the key to whatever happened to be in that frame.
+    const openwaOrigin = new URL(LINKED_DEVICES_URL).origin;
+    let credentials = null;
+    let frameReady = false;
+
+    const handOver = () => {
+      if (!frameReady || !credentials?.apiKey) return;
+      frame.contentWindow?.postMessage(
+        { type: "openwa_auth", key: credentials.apiKey },
+        openwaOrigin
+      );
+    };
+
+    const onFrameMessage = (event) => {
+      if (event.origin !== openwaOrigin) return;
+      if (event.data?.type !== "openwa_ready") return;
+      frameReady = true;
+      handOver();
+    };
+    window.addEventListener("message", onFrameMessage);
+
+    fetch("/api/auth/openwa-credentials/", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        credentials = data;
+        handOver();
+      })
+      .catch(() => {
+        // Left deliberately quiet. The frame falls back to its own login box,
+        // which is a worse experience but not a broken one, and an alert over
+        // the panel would say nothing an agent could act on.
+      });
+
     const close = () => {
       document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("message", onFrameMessage);
       screen.remove();
     };
     const onKey = (event) => {
@@ -1780,6 +1940,12 @@ export function mountInbox(root, { me, openRequest = null }) {
         if (active) renderThreadHeader(active);
       },
     });
+  }
+
+  // Nothing to refresh afterwards: the roster changes what an *agent* can reach
+  // on their next open, and nothing on this admin's own screen depends on it.
+  function openLinkedPhones() {
+    openLinkedPhonesAdmin();
   }
 
   function openRequests() {

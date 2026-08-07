@@ -27,6 +27,52 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-07 · Opus session · `backend` + `bitrix` — `[unsupported]` was true, and read like our fault
+
+A chat showed `[unsupported]` in the list and `[unknown]` in the bubble. The
+stored webhook payload says exactly what happened, in Meta's own words:
+
+```json
+"type": "unsupported",
+"errors": [{ "code": 131051, "title": "Message type unknown",
+             "details": "Message type is currently not supported." }],
+"unsupported": { "type": "unknown", "raw_type": "unknown" }
+```
+
+So the customer sent something the **Cloud API will not carry to a business
+number** — a poll, a view-once message, whatever WhatsApp has added lately. The
+content never reached us and cannot be recovered or re-imported, and Meta does
+not even name what it was: `raw_type` is itself `"unknown"`.
+
+Nothing to fix in the pipeline, then — but plenty wrong with saying it that way.
+`[unsupported]` reads to an agent as a fault in this panel, and the next thing
+they do is report a bug instead of asking the customer to resend. Both places now
+say what happened and what to do:
+
+- list preview (`gateway/tasks.py` `_describe`) — *Unsupported message — ask them
+  to resend it*
+- bubble (`inbox.js` `UNSUPPORTED_LABEL`, keyed on both `unknown` and
+  `unsupported`) — *WhatsApp could not deliver this message. Ask the customer to
+  send it again as text, a photo or a file.*
+
+Only 2 such messages exist in the whole database (4 and 7 August), both carrying
+131051. The preview is written once at receive time, so the change would not have
+touched the ones already there — the single stale row was rewritten by hand so
+the fix is visible now rather than on the next occurrence.
+
+Verified: the panel module is byte-identical on disk and over HTTPS
+(`32a3e751…`), and the new text appears twice in what the site actually serves.
+
+**A trap in my own tooling, recorded so the next person does not repeat it:**
+`ops/wa.sh get` does **not** return the body — it prints
+`HTTP 200  88311 bytes`. Grepping its output for content always finds nothing and
+md5-ing it hashes the status line, which briefly looked like nginx serving a
+stale file. The size in that line is the real check; for content, curl the public
+URL and hash that.
+
+`bitrix/public/assets/modules/inbox.js` is a shared file — only the label map was
+touched.
+
 ### 2026-08-07 · Opus session · `openwa` + `backend` — telling somebody when a linked phone goes away
 
 When an agent unlinks their handset the inbox simply stops receiving on that
@@ -160,9 +206,66 @@ handed over**. They sit in `whatsapp-web-js.adapter.spec`,
 `wwebjs-backport-201832.spec` and `session.controller.spec`, and belong to the
 partial DTO/entity work, not to this change.
 
-**Nothing deployed.** The live stack is untouched: the spec's own protocol wants a
-volume backup and a sanitized identity audit before any of this reaches the
-server, and neither has been done.
+**Then the red tests, and deployed.** The other four failures were all the host,
+not the code, and it is worth knowing which is which before "fixing" a test:
+
+- `session.controller.spec` asserts the DTO's exact field list and the partial
+  work added `syncError` without updating it. Added — the contract genuinely
+  changed.
+- `whatsapp-web-js.adapter.spec` ×3: `killOrphanedChromiumProcesses` returns
+  immediately unless the platform is darwin/linux, so on a Windows box three
+  tests asserted a kill that could never happen. The block now pins
+  `process.platform` to `linux`, so they test the sweep instead of the machine.
+- `wwebjs-backport-201832.spec` ×3 build a git-only PATH with `fs.symlinkSync`
+  and `which`. Windows has neither (EPERM without developer mode). Skipped
+  **only** on win32; the script they cover runs solely inside the Linux image
+  build.
+
+`src/modules/session` + `src/engine`: **41 suites, 1,783 pass, 3 skip.** Full run:
+20 failures remain across 7 suites (storage/config/plugins) — every one of those
+files is **untouched by this branch**, and they all turn on `chmod 0o000`, which
+Windows ignores. Left alone deliberately: silencing 20 tests in code this branch
+never touched would hide real Linux failures to make a Windows console look
+green. `npm run build` passes.
+
+**Deployed — the two files only.** The rest of the branch is half of an identity
+feature; shipping it would put that half in production. Backup first and taken in
+a **stop window**, because the running copy gave `tar: file changed as we read
+it` — the same lesson as the wa-qr backup. `openwa-data-clean-20260807-115740.tar.gz`,
+346 MB, md5 `e712e214…`. Image `a4c606e4…` → `3d9ea94d…`, healthy.
+
+**A data loss that is not this deploy's.** Messages had gone 500 → 18 and the 441
+group rows with them. The pre-deploy backup proves when: it already held **15
+messages, 0 groups**. The deploy took it 15 → 18, which is three live arrivals.
+Whatever removed the history happened earlier and elsewhere.
+
+**And the reason it never came back on its own, which is the real find.** A run
+went 0 → 100% and imported nothing. `historyImportedAt` read `12:03` — now —
+because every run moves it to its own start time. The rows had been deleted while
+the checkpoint marched on, so each import asked WhatsApp only for "since a moment
+ago" and correctly received nothing. The checkpoint and the data had drifted
+apart with no way back. That is precisely what the design's immutable
+`historyFirstLinkedAt` anchor exists to prevent, and it is now a demonstrated
+failure rather than a hypothetical one.
+
+Rewound the watermark to NULL — which the code reads as first link, so ten days —
+with the app stopped so nothing raced it. Nothing was deleted; the unique index
+carried the duplicate risk.
+
+| | before | after |
+|---|---|---|
+| messages | 18 | **47** |
+| chats | — | 8 |
+| groups | 0 | **0** |
+| duplicates | 0 | **0** |
+| window | 6–7 Aug | **31 Jul – 7 Aug** |
+
+47 rather than the 59 non-group rows an earlier import found: groups and now
+`system` notices are both filtered out, and WhatsApp's own available history
+rolls forward. Stated as measured, not explained away.
+
+**Still not done:** the sanitized identity audit the spec puts before any
+production mutation does not exist, so it was not run.
 
 ### 2026-08-07 · Opus session · `openwa` — the two message types that arrived and could not be read
 

@@ -71,6 +71,15 @@ def _describe(message):
         return reply.get("title", "[interactive]")
     if kind == "reaction":
         return message.get("reaction", {}).get("emoji", "[reaction]")
+    if kind == "unsupported":
+        # Meta's own type for "the customer sent something the Cloud API cannot
+        # deliver to a business number" — a poll, a view-once message, whatever
+        # WhatsApp has added that the Business Platform does not carry. It comes
+        # with error 131051 and no content at all; Meta does not even name what
+        # it was (`raw_type` is itself "unknown"). So there is nothing to show
+        # and nothing to recover, and "[unsupported]" reads to an agent like a
+        # fault in this panel rather than a message that never arrived.
+        return "Unsupported message — ask them to resend it"
     return f"[{kind}]"
 
 
