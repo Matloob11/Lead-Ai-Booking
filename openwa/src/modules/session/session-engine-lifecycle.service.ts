@@ -667,20 +667,12 @@ export class SessionEngineLifecycle {
     // one-shot recovery budget is re-armed for a future episode.
     this.stuckAuthRecoveryUsed.delete(id);
 
-    void this.sessionRepository
-      .update(id, {
-        status: SessionStatus.READY,
-        phone,
-        pushName,
-        connectedAt: new Date(),
-        lastActiveAt: new Date(),
-      })
-      .catch(err =>
-        this.logger.warn('Failed to persist session ready state', {
-          sessionId: id,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
+    const readyPersisted = this.persistReadyState(id, phone, pushName).catch(err =>
+      this.logger.warn('Failed to persist session ready state', {
+        sessionId: id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
 
     // Best-effort snapshot of the account's own contacts' currently-active statuses. Live status
     // posts arrive through onMessage below; this just backfills what was already up before we
@@ -696,7 +688,47 @@ export class SessionEngineLifecycle {
 
     // Not awaited: an import takes minutes and this runs on the callback that also delivers live
     // messages. Anything that waited here would hold the socket open behind it.
-    void this.importHistory(id, engine);
+    //
+    // It does wait for the ready write, though, and only for that — because that write is what may
+    // have cleared the watermark for a changed number, and the importer's first act is to read it.
+    // Started without it, the two race and a new handset can be handed the old one's watermark.
+    void readyPersisted.then(() => this.importHistory(id, engine));
+  }
+
+  /**
+   * Record a session reaching READY — and notice when the number on the other end has changed.
+   *
+   * A handset unlinked from the phone itself (WhatsApp → Linked devices → Log out) never runs our
+   * own `logout()`, so nothing clears the row: the session keeps the old number and the old history
+   * watermark, and the next QR can be scanned by anybody. Without this, that new number is treated
+   * as a reconnection of the old one and told to read "from the watermark to now" — a date that
+   * belongs to a phone it has never met — instead of its own first ten days.
+   *
+   * Only a *change* clears it. A session reconnecting as the same number keeps its watermark, which
+   * is the whole point of having one: a phone away for a fortnight brings back the fortnight.
+   */
+  private async persistReadyState(id: string, phone: string, pushName: string): Promise<void> {
+    const previous = await this.sessionRepository.findOne({ where: { id }, select: { id: true, phone: true } });
+    // Compared on digits: the two sides are written by different code paths and one of them may
+    // carry a `+` or spacing, and a formatting difference must not read as a different handset.
+    const digits = (value: string | null | undefined): string => (value ?? '').replace(/\D/g, '');
+    const numberChanged = Boolean(previous?.phone) && digits(previous?.phone) !== digits(phone);
+
+    if (numberChanged) {
+      this.logger.log('A different number linked into this session — its history starts fresh', {
+        sessionId: id,
+        action: 'history_watermark_reset',
+      });
+    }
+
+    await this.sessionRepository.update(id, {
+      status: SessionStatus.READY,
+      phone,
+      pushName,
+      connectedAt: new Date(),
+      lastActiveAt: new Date(),
+      ...(numberChanged ? { historyImportedAt: null } : {}),
+    });
   }
 
   /**

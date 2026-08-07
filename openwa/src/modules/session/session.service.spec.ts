@@ -371,7 +371,9 @@ describe('SessionService', () => {
       // A completed engine-backed unlink wipes the stored credentials on both engines, so the
       // session can never reach READY without a fresh QR — clearing phone takes it out of the boot
       // auto-start query (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass.
-      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      // The history watermark goes with it: the next QR can be scanned by ANY handset, and one that
+      // has never been read must get its own first ten days rather than a stranger's resume point.
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null, historyImportedAt: null });
       // The returned row reflects the cleared phone.
       expect(result).toBeDefined();
       expect(result.phone).toBeNull();
@@ -406,8 +408,8 @@ describe('SessionService', () => {
       );
       // phone IS cleared after the engine-backed attempt even on the incomplete path: the local
       // credentials were torn down, so re-entering boot auto-start would only resurrect a session
-      // that can no longer reach READY.
-      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      // that can no longer reach READY. The watermark goes with it for the same reason as above.
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null, historyImportedAt: null });
     });
 
     it('logout() rejects with 400 when no engine is loaded (session already stopped) and does NOT clear phone', async () => {
@@ -420,7 +422,9 @@ describe('SessionService', () => {
       await expect(service.logout('sess-uuid-1')).rejects.toBeInstanceOf(BadRequestException);
       // The rejection happens before any teardown side effects: no stop-mark left behind.
       expect(stoppingOf().has('sess-uuid-1')).toBe(false);
-      expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      // Nothing about the row is touched — not the phone, and not the watermark that decides how
+      // far back the next link reads.
+      expect(repository.update).not.toHaveBeenCalled();
     });
 
     const pendingTeardownsOf = () =>
@@ -2600,6 +2604,9 @@ describe('SessionService', () => {
       (repository.update as jest.Mock).mockClear();
 
       callbacks.onReady?.('628123', 'Tester');
+      // The ready write now reads the row first, to notice a different number linking into this
+      // session, so it lands a tick later than it used to.
+      await new Promise(resolve => setImmediate(resolve));
 
       expect(repository.update).toHaveBeenCalledWith(
         'sess-uuid-1',

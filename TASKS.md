@@ -27,6 +27,73 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-07 · Opus session · `openwa` — cleared for real numbers, and the watermark a new phone would have inherited
+
+Matloob is about to link the real numbers; the one linked so far was only ever a
+test. Two things came out of that.
+
+**There was no other device's data to remove.** Looked for it rather than
+assuming: one row in `sessions`, one credential directory (`session-marketting`),
+and every row in every table carrying a `sessionId` belonged to it. Nothing
+orphaned, nothing left behind by an earlier session. Said here because "I found
+nothing" is a result and the next person should not go looking again.
+
+**A bug that would have bitten on the very next link.** `historyImportedAt` is
+what tells the importer "read from here to now" instead of "read the last ten
+days" — and nothing ever cleared it. `logout()` cleared `phone` and left the
+watermark. So unlinking the test phone and scanning the QR with a real number
+would have handed that new number a resume point belonging to a handset it has
+never met: not its own ten days, but "everything since some stranger last
+synced". Cleared on both logout paths now.
+
+The other half is the unlink that never touches our code at all — **WhatsApp →
+Linked devices → Log out, done on the phone**. No `logout()` runs, the row keeps
+its number and its watermark, and the next QR can be scanned by anybody. So the
+ready handler now reads the row before writing it and clears the watermark when
+the number that just connected is *different* from the one recorded. Compared on
+digits, because the two sides are written by different paths and a `+` must not
+read as a different handset. A session reconnecting as the **same** number keeps
+its watermark — that is the whole point of having one.
+
+That also meant the ready write had to stop racing the importer: it is now
+awaited before `importHistory` starts, because that write is what may have
+cleared the watermark and reading it first is the importer's opening move.
+
+**The clear itself**, backed up first (`openwa.sqlite.bak-preclear-20260807`):
+
+| | |
+|---|---|
+| messages | 53 → **0** |
+| status posts | 21 → **0** |
+| lid mappings / templates | 1 / 1 → **0** |
+| status media on disk | 18 files, **46 MB** → 0 (12 K) |
+| database file | 15.2 MB → **295 KB** |
+
+The 46 MB was other people's stories — named contacts' photos and videos, held
+with `expiresAt` **null**, so nothing would ever have removed them. Same class of
+thing as the groups, and worth a decision of its own before real numbers link.
+The rows were deleted first and the files only after confirming **0** rows still
+referenced a path.
+
+**The session row and its credentials were left alone.** Deleting them unlinks a
+live handset, which is Matloob's call and not a database cleanup. The consequence
+is visible and honest: on the next restart the watermark said "you last read to
+Aug 6 19:08", so a catch-up import ran and brought back **7 messages across 2
+chats** — the real traffic of the last two days, groups excluded. That is the
+rule working, not a leak. If this number should start from nothing, unlink it:
+the new code then gives whatever links next its own ten days.
+
+**No delete button was added anywhere, and none should be.** Matloob was explicit:
+no admin and no agent gets a way to remove data from the panel. Everything above
+was done by hand, once, against the database.
+
+Tests: **1784 of 1784 pass, 39 suites.** Three specs pinned the old payloads —
+two logout assertions now expect the watermark to be cleared alongside `phone`,
+and the ready-status test awaits a tick because the ready write reads the row
+first. The third was tightened while it was open: `not.toHaveBeenCalledWith(…,
+{ phone: null })` would have passed against any changed payload, so it is now
+`not.toHaveBeenCalled()` — the 400 path must not touch the row at all.
+
 ### 2026-08-07 · Opus session · `openwa` — "connect a session first", said to somebody whose phone was connected
 
 Chasing the red *Failed to load chats* toast turned up something worse sitting

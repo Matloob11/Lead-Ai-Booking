@@ -344,7 +344,11 @@ export class SessionEngineControls {
       // local credentials were torn down, so re-entering auto-start would only wedge it. The retryable
       // 502 carries a stable machine code so the dashboard can branch on origin without guessing from
       // the status/message; no success audit is written on this path.
-      await this.sessionRepository.update(id, { phone: null });
+      //
+      // The history watermark goes with the phone, for the reason spelled out on the success path
+      // below: whatever links here next is a fresh link, and the watermark describes a handset that
+      // is no longer attached.
+      await this.sessionRepository.update(id, { phone: null, historyImportedAt: null });
       throw new BadGatewayException({
         statusCode: HttpStatus.BAD_GATEWAY,
         message:
@@ -359,7 +363,14 @@ export class SessionEngineControls {
     // reach READY again without a fresh QR/pairing. Clear `phone` to take it out of the boot
     // auto-start query (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass
     // on every restart. onReady rewrites it on the next successful link.
-    await this.sessionRepository.update(id, { phone: null });
+    //
+    // The history watermark is cleared with it, and that is the point rather than tidiness. The
+    // watermark is what tells the importer "read from here to now" instead of "read the last ten
+    // days". After an unlink the next QR can be scanned by ANY handset — a different agent, a
+    // different number — and that phone has never been read at all. Left in place, a number linking
+    // for the first time would be given a stranger's watermark and fetch from a date that means
+    // nothing to it.
+    await this.sessionRepository.update(id, { phone: null, historyImportedAt: null });
 
     this.logger.log(`Session logged out: ${session.name}`, {
       sessionId: id,
