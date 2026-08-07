@@ -4,6 +4,7 @@ import { ChevronDown, CornerUpLeft, Loader2, MessageSquare, Smile, Trash2 } from
 import type { Chat } from '../../services/api';
 import { getMediaSrc, senderKey, type ChatMessageView } from '../../utils/chatMessages';
 import MessageBody from './MessageBody';
+import { parseVCards } from './vcard';
 
 // Stable per-sender colour for group message labels, like WhatsApp gives each participant a colour.
 // Hashed from the sender's name so the same person keeps the same colour across a session. The palette
@@ -169,6 +170,49 @@ function ChatThread({
                 </div>
               );
             }
+            // A shared contact arrives as raw vCard text in `body` and nothing else — no media
+            // payload — so it is read here rather than downloaded. Falls through to the text bubble
+            // when the body is not a vCard we can read, which is better than an empty card.
+            if (msg.type === 'contact') {
+              const contacts = parseVCards(msg.body);
+              if (contacts.length === 0) return null;
+              return (
+                <div className="message-contacts">
+                  {contacts.map((contact, index) => (
+                    <div className="message-contact-card" key={`${contact.name}-${index}`}>
+                      <div className="message-contact-name">👤 {contact.name || t('chats.media.contact')}</div>
+                      {contact.phones.map(phone => (
+                        <div className="message-contact-phone" key={phone}>
+                          {phone}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+            // The question survives in `body`; the options only exist because the adapter now keeps
+            // them. Vote counts are not shown because nothing subscribes to the vote events yet —
+            // an empty tally would read as "nobody voted", which is a different claim.
+            if (msg.type === 'poll') {
+              const poll = msg.metadata?.poll;
+              if (!poll) return null;
+              return (
+                <div className="message-poll">
+                  <div className="message-poll-question">📊 {poll.name || msg.body}</div>
+                  {/* Keyed by position, not by text: WhatsApp permits a poll with two identically
+                      worded options, and keying on the text would collapse them into one row. */}
+                  {poll.options.map((option, index) => (
+                    <div className="message-poll-option" key={`${index}-${option}`}>
+                      {option}
+                    </div>
+                  ))}
+                  {poll.allowMultipleAnswers && (
+                    <div className="message-poll-note">{t('chats.media.pollMultiple')}</div>
+                  )}
+                </div>
+              );
+            }
             if (!mediaInfo) return null;
             if (mediaInfo.omitted) {
               return <div className="message-media-omitted">📎 {t('chats.media.omitted')}</div>;
@@ -259,7 +303,15 @@ function ChatThread({
                     msg.body &&
                     (!mediaInfo || msg.body !== mediaInfo.filename) &&
                     msg.type !== 'location' &&
-                    msg.type !== 'call' && <MessageBody text={msg.body} className="message-text" />
+                    msg.type !== 'call' &&
+                    // Same suppression as location/call: the body IS the card above, and repeating
+                    // it would print the raw vCard under the name it was just read from. A body we
+                    // could not parse falls through and still shows, so nothing is ever swallowed.
+                    !(msg.type === 'contact' && parseVCards(msg.body).length > 0) &&
+                    // The poll's question is the heading of the block above it.
+                    !(msg.type === 'poll' && msg.metadata?.poll) && (
+                      <MessageBody text={msg.body} className="message-text" />
+                    )
                   )}
 
                   <div className="message-meta">

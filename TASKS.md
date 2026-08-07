@@ -27,6 +27,86 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-07 · Opus session · `openwa` — the two message types that arrived and could not be read
+
+Went through every WhatsApp message type against the library's own
+`MessageTypes` enum rather than from memory. Everything an agent actually meets
+renders: text, image, sticker, video, audio, voice, document, location, call,
+revoked, masked — and button/list/template replies, which carry the reader's own
+words in `body` and are mapped to text. Two did not.
+
+**A shared contact printed fifteen lines of raw vCard.** `vcard`/`multi_vcard`
+carries `BEGIN:VCARD … END:VCARD` in `body` and nothing else — no media payload —
+and the thread had no case for it, so it fell through to the plain text bubble.
+Now parsed in the browser (`components/chats/vcard.ts`, new) and drawn as a card:
+name, then each number in a monospace, selectable line, because an agent's next
+move is to copy it. Every contact in the body, not just the first — that is what
+`multi_vcard` means. A body that is **not** a readable vCard falls through to the
+text bubble exactly as before, so nothing is ever swallowed.
+
+Parsed client-side on purpose: the vCard text is already stored verbatim on every
+such row including every one already in the database, so there is nothing to
+backfill and no second copy to keep in step.
+
+**A poll showed its question and nothing else, and that was a gateway fault, not
+a UI one.** The options were on the raw message and were being dropped at the
+adapter boundary — `IncomingMessage` had no field for them. Added
+(`poll: { name, options, allowMultipleAnswers }`), read off wwebjs's `pollName` /
+`pollOptions` / `allowMultipleAnswers`, and stored in metadata beside `call` so a
+poll in the history does not depend on the engine still holding its message.
+
+**Vote counts are deliberately absent.** They arrive as their own events and
+nothing subscribes to them yet, so the options are drawn with an empty ring
+rather than a tick or a filled dot: a mark that looked like a selection would
+claim something this screen cannot see, and an empty tally would read as "nobody
+voted" rather than "not known".
+
+**The parser is where this quietly goes wrong, so it has its own tests — and one
+of them caught something.** The fold test failed, and the code was right: vCard
+folds a long line by breaking it and starting the next with a space, and *both*
+the break and that space belong to the fold, not the value (RFC 6350 §3.2). A
+number split mid-digits rejoins with **no** gap; the test had asserted a space.
+Fixed the expectation, and widened the unfold to bare-LF folding while there —
+a continuation left on its own line reads as a property with no colon and is
+dropped, losing the tail of a phone number silently.
+
+Files: `engine/interfaces/whatsapp-engine.interface.ts`,
+`engine/adapters/message-mapper.ts`, `modules/session/message-row.mapper.ts`,
+`components/chats/vcard.ts` + `vcard.test.ts` (new), `components/chats/ChatThread.tsx`,
+`services/api.ts`, `utils/chatMessages.ts`, `pages/Chats.css`, and two keys added
+to **all twelve** locale files (checked they round-trip byte-identically first, so
+the diff is two lines each and no upstream formatting moved).
+
+**Verified on the live number, end to end, not by reading.** A contact and a poll
+were sent to the phone's **own** number — no third party involved — then read
+back out of the database and looked at in a browser, both themes:
+
+| | |
+|---|---|
+| poll stored | `{"poll":{"name":"Site visit day?","options":["Saturday","Sunday","Either"],"allowMultipleAnswers":true}}` |
+| contact stored | raw vCard in `body`, as expected |
+| rendered | card reads **Abu Khaled / 971501234567**; poll reads the question, three options, "Multiple answers allowed" |
+| `BEGIN:VCARD` visible anywhere on the page | **false** — the raw text is suppressed under the card |
+| chat list preview | picked up "Site visit day?" through the overlay |
+
+Tests: gateway **1784/1784**, 39 suites. vCard parser **9/9**. The three test rows
+were deleted afterwards so the database stays clean for the real numbers.
+
+**Still not supported, and named so nobody re-derives it:** `album`, `order`,
+`product`, `payment`, `ciphertext`, `interactive`, `native_flow`, `list`,
+`oversized`. Of these only two turn up in practice — an **album** (the individual
+photos still arrive as their own messages, so the pictures are there; only the
+grouping is lost) and **ciphertext** (a message not yet decrypted, which arrives
+properly a moment later). The rest are Business catalog/checkout objects A7 does
+not use. Each now carries its engine token as `rawType`, so a row says what it
+was instead of only that it was unknown.
+
+Cosmetic, unverified: the 👤 and 📊 glyphs render as boxes in the container's
+headless Chromium, which has no emoji font. Every other emoji in this panel comes
+from the same place and has always looked right in a real browser, so this is
+almost certainly the screenshot and not the page — but nobody has confirmed it in
+Matloob's own browser.
+
 ### 2026-08-07 · Opus session · `openwa` — cleared for real numbers, and the watermark a new phone would have inherited
 
 Matloob is about to link the real numbers; the one linked so far was only ever a

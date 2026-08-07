@@ -73,7 +73,9 @@
       "callVideo": "Videoanruf",
       "callVideoMissed": "Verpasster Videoanruf",
       "omitted": "Medien",
-      "image": "Bild"
+      "image": "Bild",
+      "contact": "Kontakt",
+      "pollMultiple": "Mehrfachauswahl erlaubt"
     },
     "subtitle": "WhatsApp-Nachrichten in Echtzeit senden und beantworten",
     "noSessionsTitle": "Keine verbundenen Sitzungen",

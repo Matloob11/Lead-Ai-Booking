@@ -108,6 +108,15 @@ export interface IncomingMessage {
   /** Set for `call` (call_log) messages: video vs voice, and whether an incoming call went unanswered. */
   call?: { video: boolean; missed: boolean };
   /**
+   * Set for `poll` (poll_creation) messages: the question and what can be voted for.
+   *
+   * Without this a poll arrives as its question and nothing else — the options are on the raw
+   * message and were being dropped at the adapter boundary, so a thread showed "Lunch?" with no
+   * indication that anything had been asked. Vote counts are deliberately absent: they arrive as
+   * their own events, which nothing here subscribes to yet.
+   */
+  poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
+  /**
    * Set by the adapter when the sender is identified by a privacy id (e.g. a WhatsApp `@lid`) rather
    * than a phone number, so engine-neutral code can decide whether to attempt phone resolution without
    * matching an engine-specific JID scheme.

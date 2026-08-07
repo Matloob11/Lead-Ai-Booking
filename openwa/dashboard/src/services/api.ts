@@ -259,6 +259,12 @@ export interface ChatMessage {
     quotedMessage?: { id: string; body: string };
     reactions?: Record<string, string>;
     call?: { video: boolean; missed: boolean };
+    /**
+     * A poll's question and what could be voted for. Vote counts are absent by design — they
+     * arrive as their own events, which nothing subscribes to yet, and an empty tally would read
+     * as "nobody voted" rather than "not known".
+     */
+    poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
   };
 }
 

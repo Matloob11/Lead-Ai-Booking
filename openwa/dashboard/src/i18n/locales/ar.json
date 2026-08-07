@@ -73,7 +73,9 @@
       "callVideo": "مكالمة فيديو",
       "callVideoMissed": "مكالمة فيديو فائتة",
       "omitted": "وسائط",
-      "image": "صورة"
+      "image": "صورة",
+      "contact": "جهة اتصال",
+      "pollMultiple": "يُسمح بعدة إجابات"
     },
     "subtitle": "أرسل ورد على رسائل واتساب في الوقت الفعلي",
     "noSessionsTitle": "لا توجد جلسات متصلة",

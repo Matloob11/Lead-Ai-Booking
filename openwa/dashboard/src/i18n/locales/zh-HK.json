@@ -73,7 +73,9 @@
       "callVideo": "視像通話",
       "callVideoMissed": "未接視像通話",
       "omitted": "媒體",
-      "image": "圖片"
+      "image": "圖片",
+      "contact": "聯絡人",
+      "pollMultiple": "允許多選"
     },
     "subtitle": "即時傳送和回覆 WhatsApp 訊息",
     "noSessionsTitle": "沒有已連線的工作階段",

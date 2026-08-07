@@ -73,7 +73,9 @@
       "callVideo": "영상 통화",
       "callVideoMissed": "부재중 영상 통화",
       "omitted": "미디어",
-      "image": "이미지"
+      "image": "이미지",
+      "contact": "연락처",
+      "pollMultiple": "복수 응답 허용"
     },
     "subtitle": "실시간으로 WhatsApp 메시지를 보내고 답장하세요",
     "noSessionsTitle": "연결된 세션 없음",

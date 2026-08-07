@@ -28,7 +28,7 @@ export const OMITTED_MEDIA = { mimetype: '', omitted: true } as const;
  *   and an empty object would be noise).
  */
 export function buildMessageMetadata(
-  message: Pick<IncomingMessage, 'media' | 'quotedMessage' | 'call' | 'type' | 'rawType'>,
+  message: Pick<IncomingMessage, 'media' | 'quotedMessage' | 'call' | 'poll' | 'type' | 'rawType'>,
   synthesizeOmittedMedia = false,
 ): Record<string, unknown> | undefined {
   const metadata: Record<string, unknown> = {};
@@ -42,6 +42,11 @@ export function buildMessageMetadata(
   }
   if (message.call) {
     metadata.call = message.call;
+  }
+  // The options a poll asked about. Stored rather than re-read from the engine because a poll in
+  // the history is a poll whose message the engine may no longer hold.
+  if (message.poll) {
+    metadata.poll = message.poll;
   }
   // Set by the adapter only when the type could not be mapped. Stored so an unknown row says what
   // it actually was — the previous 121 of them said nothing at all, and the only way to find out

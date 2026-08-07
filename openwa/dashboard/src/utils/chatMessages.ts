@@ -127,6 +127,8 @@ export interface ChatMessageView extends ChatMessage {
     quotedMessage?: { id: string; body: string };
     reactions?: Record<string, string>;
     call?: { video: boolean; missed: boolean };
+    /** See the same field on ChatMessage in services/api.ts — vote counts are deliberately absent. */
+    poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
   };
 }
 

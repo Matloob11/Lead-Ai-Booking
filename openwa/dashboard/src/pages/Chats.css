@@ -1787,3 +1787,65 @@
   font-weight: 650;
   color: var(--text-muted);
 }
+
+/* Shared contact cards and polls
+ *
+ * Both used to fall through to the plain text bubble, which meant a shared contact printed fifteen
+ * lines of raw vCard and a poll printed its question with nothing under it. Scoped under
+ * .chats-page like every other bubble rule in this file.
+ *
+ * Deliberately not tinted per direction: an outgoing bubble is already coloured, and a second
+ * background inside it reads as a nested box rather than a card. A hairline border does the work in
+ * both.
+ */
+.chats-page .message-contact-card,
+.chats-page .message-poll {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.625rem;
+  margin-bottom: 0.375rem;
+}
+
+.chats-page .message-contact-card + .message-contact-card {
+  margin-top: 0.375rem;
+}
+
+.chats-page .message-contact-name,
+.chats-page .message-poll-question {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* A phone number is read digit by digit and often compared against another one, so it gets a
+ * monospace face and is selectable — an agent's next move is usually to copy it. */
+.chats-page .message-contact-phone {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.875em;
+  user-select: text;
+}
+
+.chats-page .message-poll-option {
+  font-size: 0.9375em;
+  padding: 0.1875rem 0;
+  padding-inline-start: 1.1em;
+  position: relative;
+}
+
+/* A ring rather than a filled dot or a tick: nothing here knows how anybody voted, and a mark that
+ * looked like a selection would say something this screen cannot see. */
+.chats-page .message-poll-option::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.55em;
+  width: 0.6em;
+  height: 0.6em;
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+}
+
+.chats-page .message-poll-note {
+  margin-top: 0.25rem;
+  font-size: 0.8125em;
+  color: var(--text-muted);
+}

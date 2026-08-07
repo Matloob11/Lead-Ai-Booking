@@ -97,6 +97,16 @@ export interface RawMessageFields {
   author?: string;
   /** WIDs @mentioned in the message; whatsapp-web.js attaches this to every Message. */
   mentionedIds?: string[];
+  /** Set by whatsapp-web.js on a `poll_creation` message only. */
+  pollName?: string;
+  /**
+   * The library hands these back as `{ name, localId }` objects, but a plain string is accepted too
+   * — a build that changes the shape should degrade to a readable option rather than to `[object
+   * Object]` in somebody's chat.
+   */
+  pollOptions?: Array<{ name?: string } | string>;
+  /** whatsapp-web.js derives this from `pollSelectableOptionsCount`; true means multi-select. */
+  allowMultipleAnswers?: boolean;
   /** Raw wwebjs payload; `notifyName` carries the sender's push name without an extra lookup. */
   _data?: { notifyName?: string; ephemeralDuration?: number };
 }
@@ -135,6 +145,22 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
   // row for no gain; recording it for the ones we could not name is the whole point.
   if (incoming.type === 'unknown' && msg.type) {
     incoming.rawType = msg.type;
+  }
+
+  // A poll's question survives in `body`; its options were being dropped here, so a thread showed
+  // the question with nothing under it. Only the options that actually have text are kept — an
+  // empty one would render as a blank row somebody could try to vote for.
+  if (incoming.type === 'poll') {
+    const options = (msg.pollOptions ?? [])
+      .map(option => (typeof option === 'string' ? option : (option?.name ?? '')))
+      .filter(name => name !== '');
+    if (options.length > 0) {
+      incoming.poll = {
+        name: msg.pollName || incoming.body,
+        options,
+        allowMultipleAnswers: Boolean(msg.allowMultipleAnswers),
+      };
+    }
   }
 
   // In a group, `from` is the group JID, so `author` is the only way to know the real sender.
