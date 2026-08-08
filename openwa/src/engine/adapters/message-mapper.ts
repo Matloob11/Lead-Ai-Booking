@@ -1,6 +1,7 @@
 import { EditedMessage, IncomingMessage, MessageContact, MessageType } from '../interfaces/whatsapp-engine.interface';
 import type { SerializedWid } from '../types/whatsapp-web-js.types';
 import { chatKind } from '../identity/wa-id';
+import { wwebjsAckToDeliveryStatus } from './wwebjs-messaging';
 
 /**
  * Map a whatsapp-web.js `MessageTypes` token to the engine-neutral {@link MessageType}, so no
@@ -107,8 +108,17 @@ export interface RawMessageFields {
   pollOptions?: Array<{ name?: string } | string>;
   /** whatsapp-web.js derives this from `pollSelectableOptionsCount`; true means multi-select. */
   allowMultipleAnswers?: boolean;
-  /** Raw wwebjs payload; `notifyName` carries the sender's push name without an extra lookup. */
-  _data?: { notifyName?: string; ephemeralDuration?: number };
+  /**
+   * WhatsApp's own delivery counter for this message: -1 failed, 0 pending, 1 sent, 2 delivered,
+   * 3+ read. Present on every message the library builds, including one read back out of history.
+   */
+  ack?: number;
+  /**
+   * Raw wwebjs payload; `notifyName` carries the sender's push name without an extra lookup, and
+   * `ack` appears here as well as on the wrapper because some builds leave the wrapper's getter
+   * undefined on a history-fetched message while the raw field is populated.
+   */
+  _data?: { notifyName?: string; ephemeralDuration?: number; ack?: number };
 }
 
 /**
@@ -145,6 +155,20 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
   // row for no gain; recording it for the ones we could not name is the whole point.
   if (incoming.type === 'unknown' && msg.type) {
     incoming.rawType = msg.type;
+  }
+
+  // The delivery state WhatsApp itself is holding, carried so it can be applied where no live
+  // `message_ack` event ever arrives: a message read back out of the phone's history, or one whose
+  // ack landed while the gateway was down. Only our own messages have one worth reading — an
+  // inbound message's ack describes the sender's copy, not ours.
+  //
+  // Read straight off the raw field rather than through the library's `ack` getter, which some
+  // builds leave undefined on a history-fetched message while `_data.ack` is populated.
+  if (msg.fromMe) {
+    const ack = msg.ack ?? msg._data?.ack;
+    if (typeof ack === 'number') {
+      incoming.deliveryStatus = wwebjsAckToDeliveryStatus(ack);
+    }
   }
 
   // A poll's question survives in `body`; its options were being dropped here, so a thread showed

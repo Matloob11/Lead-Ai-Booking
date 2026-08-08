@@ -3,6 +3,7 @@ import { Repository, In } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { buildMessageMetadata } from './message-row.mapper';
+import { ackStatusTransitionFrom, deliveryStatusToMessageStatus } from '../message/message-status.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IncomingMessage } from '../../engine/interfaces/whatsapp-engine.interface';
 import { LoggerService } from '../../common/services/logger.service';
@@ -63,6 +64,18 @@ export async function persistHistoryMessages(
       select: { waMessageId: true },
     });
     const seen = new Set(existing.map(r => r.waMessageId));
+
+    // A row we already hold is not left alone: its tick may have moved while nobody was listening.
+    // `message_ack` fires once, when it happens, and is never replayed — so an ack that landed while
+    // the gateway was down, or before the row was ever written, is lost for good unless it is read
+    // back off the handset like this. The insert below uses orIgnore and would skip these entirely.
+    await advanceSeenDeliveryStatus(
+      chunkIds.filter(x => seen.has(x)).map(x => byId.get(x)!),
+      id,
+      messageRepository,
+      logger,
+    );
+
     const rows = chunkIds
       .filter(x => !seen.has(x))
       .map(x => {
@@ -81,7 +94,15 @@ export async function persistHistoryMessages(
           type: m.type,
           direction: m.fromMe ? MessageDirection.OUTGOING : MessageDirection.INCOMING,
           timestamp: m.timestamp,
-          status: MessageStatus.SENT,
+          // The state WhatsApp itself is holding, where it gave us one. `SENT` was written for every
+          // row regardless, so an imported message the customer had read two weeks ago still showed
+          // one tick — 506 of 520 outbound rows on the live account, against two blue ticks on the
+          // handset. A live `message_ack` never fixes them: the event fires once, when it happens,
+          // and is not replayed for anything already sent.
+          //
+          // Inbound rows keep SENT: an inbound message's ack describes the *sender's* copy, and the
+          // column on our side means "what happened to the thing we sent".
+          status: (m.fromMe && m.deliveryStatus && deliveryStatusToMessageStatus(m.deliveryStatus)) || MessageStatus.SENT,
           metadata,
         });
         // The chat panel orders by createdAt; stamp the real time so history sorts correctly.
@@ -108,6 +129,74 @@ export async function persistHistoryMessages(
       sessionId: id,
       inserted,
       action: 'history_messages_persisted',
+    });
+  }
+}
+
+/**
+ * Move an already-stored message's delivery status forward to what the handset now says.
+ *
+ * `message_ack` is a live event: it fires once, when the tick moves, and WhatsApp never replays it.
+ * So every ack that landed while this gateway was restarting, or before the row existed at all, is
+ * simply gone — and the row sits at `sent` for ever while the phone shows two blue ticks. Reading
+ * the state back off the message during a history import is the only second chance there is.
+ *
+ * **Forward only**, through the same guard the live ack path uses: `ackStatusTransitionFrom` names
+ * the statuses a transition may advance from, so a stale copy of a message can never pull a `read`
+ * row back to `delivered`. That guard is in the WHERE clause rather than in a read-then-write, so a
+ * live ack arriving mid-import cannot be overwritten by a slower one from here.
+ *
+ * Grouped by target status so a batch costs one UPDATE per distinct status — three at most — instead
+ * of one per message. Best-effort throughout: a tick that failed to move is not a reason to abandon
+ * an import that is otherwise storing conversations.
+ */
+async function advanceSeenDeliveryStatus(
+  seen: IncomingMessage[],
+  id: string,
+  messageRepository: Repository<Message>,
+  logger: LoggerService,
+): Promise<void> {
+  // Only our own messages carry a delivery state that means anything on this side: an inbound
+  // message's ack describes the sender's copy of it, not ours.
+  const byTarget = new Map<MessageStatus, string[]>();
+  for (const m of seen) {
+    if (!m.fromMe || !m.id || !m.deliveryStatus) continue;
+    const target = deliveryStatusToMessageStatus(m.deliveryStatus);
+    // null for pending/sent — already at or below where the row starts, so there is nothing to move.
+    if (!target) continue;
+    const ids = byTarget.get(target);
+    if (ids) ids.push(m.id);
+    else byTarget.set(target, [m.id]);
+  }
+  if (byTarget.size === 0) return;
+
+  let advanced = 0;
+  for (const [target, ids] of byTarget) {
+    try {
+      const result = await messageRepository
+        .createQueryBuilder()
+        .update(Message)
+        .set({ status: target })
+        .where('sessionId = :id', { id })
+        .andWhere('waMessageId IN (:...ids)', { ids })
+        .andWhere('status IN (:...from)', { from: ackStatusTransitionFrom(target) })
+        .execute();
+      advanced += result.affected ?? 0;
+    } catch (error) {
+      logger.warn('Could not advance history delivery statuses', {
+        sessionId: id,
+        target,
+        error: error instanceof Error ? error.message : String(error),
+        action: 'history_ack_reconcile_failed',
+      });
+    }
+  }
+
+  if (advanced) {
+    logger.log(`Advanced ${advanced} message tick(s) to what the handset reports`, {
+      sessionId: id,
+      advanced,
+      action: 'history_ack_reconciled',
     });
   }
 }

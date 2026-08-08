@@ -97,6 +97,20 @@ export interface IncomingMessage {
    * message kinds without asking, so this will happen again — and next time the token is in the row.
    */
   rawType?: string;
+  /**
+   * The delivery state the ENGINE currently holds for this message, when it knows one.
+   *
+   * Live `message_ack` events are the normal way a tick advances, and they cover a message sent
+   * while we are connected. They do not cover the rest: an ack that landed while the gateway was
+   * down is never replayed, and a message read back out of the phone's own history arrives with its
+   * real state on it and no event at all. Without this the row is stamped `sent` and stays there —
+   * 506 of 520 outbound rows on the live account were single-ticked while the handset showed two
+   * blue ones.
+   *
+   * Only ever used to move a status FORWARD (see the ack transition rules), so a stale copy can
+   * never pull a read message back to sent.
+   */
+  deliveryStatus?: DeliveryStatus;
   /** WhatsApp ephemeral/disappearing-messages timer in seconds. Set per-chat on each message
    *  in the raw payload. 0 or undefined = no disappearing timer.
    *  Known values: 86400 (24h), 604800 (7d), 7776000 (90d). */

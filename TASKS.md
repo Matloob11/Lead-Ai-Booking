@@ -27,6 +27,107 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-08 · Codex session · `openwa` — sanitized legacy identity audit built and run read-only
+
+Added the missing pre-mutation gate from the approved lossless-history design.
+`ops/openwa/identity-audit.sh` transpiles the tested TypeScript source locally,
+sends it over pinned SSH as base64, and runs one Node process inside the healthy
+OpenWA container. That process opens SQLite with `readOnly: true`; it does not
+boot Nest, TypeORM, or a WhatsApp engine. A second local allowlist refuses to
+print anything except safe session labels, counts, decisions, and the overall
+decision. Exit codes are PASS 0, INCONCLUSIVE 1, FAIL 2.
+
+Live read-only result:
+
+| session | rows | resolved | unresolved | decision |
+|---|---:|---:|---:|---|
+| asma | 675 | 674 | 1 | INCONCLUSIVE |
+| marketting | 67 | 66 | 1 | INCONCLUSIVE |
+| minahil | 62 | 62 | 0 | PASS |
+
+Overall: **INCONCLUSIVE**, exit 1. Aggregate read-only follow-up proved why:
+both inconclusive sessions have exactly one account-side LID without a persisted
+phone mapping. Missing owner-side identity count is **0** for all three. This is
+the repairable mapping-gap case, not old-release rows that never stored owner
+identity. The audit worked while `asma` remained offline; no engine was needed.
+
+TDD: focused audit suite **10/10**. `npm run build`, focused ESLint/Prettier, and
+`bash -n` pass. The live stdout was checked against known identities plus generic
+JID/path/secret patterns; no phone, JID, message/content field, key/token,
+credential, path, or raw error appeared. The requested full Windows command is
+not green in the current untouched baseline: 38 suites / 1,781 tests pass, while
+two unmodified engine specs fail 17 tests initially. Making Git's Unix tools
+visible reduces that to six known platform failures: three orphan-sweep tests
+whose Linux-only branch returns early on win32, and three `symlinkSync` EPERM
+tests. They were neither fixed nor skipped. Excluding only those two unrelated
+files leaves **38 suites / 1,304 tests green**.
+
+Files: `ops/openwa/identity-audit.sh`,
+`openwa/src/modules/session/legacy-identity-audit.ts`,
+`openwa/src/modules/session/legacy-identity-audit.spec.ts`,
+`docs/superpowers/plans/2026-08-08-openwa-legacy-identity-audit.md`, `TASKS.md`.
+
+Not done: no deploy, DB write, UPDATE, migration, session restart/start,
+identity enforcement, Django/Bitrix/wa-qr change, or `asma` recovery attempt.
+
+### 2026-08-08 · Opus session · `openwa` — one tick against two blue ones on the handset
+
+A conversation the agent had plainly finished still showed a single ✓ on every
+message she sent. **506 of 521 outbound rows** were `sent`; 7 read, 7 delivered.
+
+The rendering was never the problem: the thread already draws `✓✓` for delivered
+and read, and the CSS already paints `read` in WhatsApp's own `#53bdeb`. The data
+was wrong. Two causes, and the second is the one that mattered:
+
+1. **The history import stamped `status: SENT` on every row it wrote**, regardless
+   of what WhatsApp said about it. A message the customer read a fortnight ago was
+   imported as one tick.
+2. **`message_ack` is a live event and is never replayed.** It fires once, when
+   the tick moves. Every ack that landed while this gateway was restarting — and it
+   restarts on every deploy — is gone for good. Nothing existed to recover it.
+
+So the ack is now read off the message itself (`msg.ack`, falling back to
+`_data.ack`, which some builds populate when the wrapper's getter is undefined),
+mapped through the same `wwebjsAckToDeliveryStatus` the live path uses, and carried
+on `IncomingMessage.deliveryStatus`. Only for `fromMe` messages — an inbound
+message's ack describes the *sender's* copy, not ours.
+
+**Rows already stored are the point**, and `orIgnore` on the insert would have
+skipped every one of them, so there is a separate reconcile: for the ids the import
+finds already present, advance the status. **Forward only**, through
+`ackStatusTransitionFrom` — the same guard the live path uses — and with the guard
+in the WHERE clause rather than a read-then-write, so a live ack arriving mid-import
+cannot be overwritten by a slower one from here. Grouped by target status, so a
+batch costs at most three UPDATEs instead of one per message.
+
+**The first pass only moved 2 ticks, and that was informative.** The import reads
+from the watermark forward, and the messages on screen were from two days before
+it — never re-read, so never reconciled. Clearing `historyImportedAt` on the ready
+sessions turned the next connect into a full ten-day pass:
+
+| | before | after |
+|---|---|---|
+| outbound `read` | 7 | **39** |
+| outbound `delivered` | 7 | 8 |
+| outbound `sent` | 506 | **473** |
+| the chat in the screenshot | every row `sent` | **every row `read`** |
+| marketting single ticks | many | **zero** |
+
+Of the 473 still single-ticked, **464 belong to session `asma`, whose status is
+`failed`** — it never connects, so no import runs and nothing can be read back.
+That is the pre-existing `asma` problem, not this one. The other 9 are older than
+the ten-day window and were never re-read. Genuine.
+
+Verified in a browser: 13 tick icons in that chat, every one class `read`, glyph
+`✓✓`, computed colour `rgb(83, 189, 235)`. Tests **2126/2126**, 51 suites.
+
+**Worth knowing:** clearing the watermark is how you force a deep reconcile. It is
+idempotent — the unique index refuses everything already stored — and costs one
+ten-day import per session.
+
+Files: `engine/interfaces/whatsapp-engine.interface.ts`,
+`engine/adapters/message-mapper.ts`, `modules/session/message-history-projector.ts`.
+
 ### 2026-08-08 · Opus session · `openwa` — nine rows in ten said "Unknown user", and none of them was a conversation
 
 The chat list was mostly `Unknown user / No messages yet`. **That string is
