@@ -27,6 +27,12 @@ interface ChatThreadProps {
   onReply: (message: ChatMessageView) => void;
   onReact: (message: ChatMessageView, emoji: string) => void;
   onDelete: (message: ChatMessageView) => void;
+  /**
+   * A7: fetch this chat's media, which the first history read deliberately left out. Resolves with
+   * how many messages came back carrying bytes — zero is a real and common answer, because WhatsApp
+   * stops serving old media, and it must be told apart from a request that failed.
+   */
+  onLoadMedia: () => Promise<number>;
 }
 
 // The messages area of the active chat room: the bubble list (media, quotes, reactions, hover
@@ -44,6 +50,7 @@ function ChatThread({
   onReply,
   onReact,
   onDelete,
+  onLoadMedia,
 }: ChatThreadProps) {
   const { t } = useTranslation();
 
@@ -63,6 +70,31 @@ function ChatThread({
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   });
+
+  // A7: one request per chat, not per bubble. Every omitted bubble in a chat is waiting on the same
+  // fetch, so the state is held here and shared: pressing one loads them all, and pressing a second
+  // while the first is in flight does nothing rather than asking twice for the same bytes.
+  const [loadingMedia, setLoadingMedia] = useState(false);
+  // Three outcomes, not two. 'failed' is the request itself going wrong; 'gone' is the request
+  // working and WhatsApp having nothing to give — every download for a month-old file times out,
+  // which is retention, not an error. Telling the agent to try again in that case is a lie.
+  const [mediaOutcome, setMediaOutcome] = useState<'none' | 'failed' | 'gone'>('none');
+  const loadMedia = useCallback(() => {
+    if (loadingMedia) return;
+    setLoadingMedia(true);
+    setMediaOutcome('none');
+    void onLoadMedia()
+      .then(arrived => setMediaOutcome(arrived > 0 ? 'none' : 'gone'))
+      .catch(() => setMediaOutcome('failed'))
+      .finally(() => setLoadingMedia(false));
+  }, [loadingMedia, onLoadMedia]);
+
+  // A different chat's media is a different question — and the previous chat's failure must not
+  // greet the agent on a chat that has not been asked yet.
+  useEffect(() => {
+    setLoadingMedia(false);
+    setMediaOutcome('none');
+  }, [activeChat?.id]);
 
   const handleJumpToBottom = useCallback(() => {
     const el = messagesContainerRef.current;
@@ -214,8 +246,35 @@ function ChatThread({
               );
             }
             if (!mediaInfo) return null;
+            // A7: the bytes were never fetched, not lost. History is read media-free so a chat full
+            // of video cannot be turned into heap, which left every imported photo and clip showing
+            // this placeholder for ever — 187 of 190 media rows on the live account. It is a button
+            // now: the agent who wants the file says so, and the chat's media is fetched then.
             if (mediaInfo.omitted) {
-              return <div className="message-media-omitted">📎 {t('chats.media.omitted')}</div>;
+              return (
+                <button
+                  type="button"
+                  className="message-media-fetch"
+                  onClick={loadMedia}
+                  // 'gone' is not retryable: WhatsApp will not start serving the file again.
+                  disabled={loadingMedia || mediaOutcome === 'gone'}
+                  title={mediaInfo.filename || undefined}
+                >
+                  {loadingMedia ? <Loader2 className="animate-spin" size={14} /> : '📎'}
+                  <span>
+                    {mediaOutcome === 'gone'
+                      ? 'WhatsApp no longer has this file'
+                      : mediaOutcome === 'failed'
+                        ? 'Could not load'
+                        : t('chats.media.omitted')}
+                  </span>
+                  {!loadingMedia && mediaOutcome !== 'gone' && (
+                    <span className="message-media-fetch-hint">
+                      {mediaOutcome === 'failed' ? 'Tap to try again' : 'Tap to load'}
+                    </span>
+                  )}
+                </button>
+              );
             }
             const mediaSrc = getMediaSrc(mediaInfo);
             if (!mediaSrc) return null;

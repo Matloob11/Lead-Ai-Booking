@@ -27,6 +27,58 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-08 · Opus session · `openwa` — the video that reads `📎 Media`, and why it cannot be played
+
+A video in the thread showed the omitted marker and its filename, with nothing to
+play or download. **187 of 190 media rows on the live account had no bytes** — only
+3 did, all fetched live.
+
+That much is by design: history is read media-free on purpose, because a chat full
+of video would otherwise sit in heap as base64, held twice as a `data:` URI. The
+defect was that there was no way to ever ask for it. So the placeholder is a button
+now — one press fetches that chat's media, bounded by the gateway's existing
+aggregate budget and per-message cap, and merged so the DB copy still wins (which
+is what carries live media and the delivery ticks).
+
+**Then the measurement changed the answer.** Every download timed out:
+
+```
+Inbound media download timed out (MEDIA_DOWNLOAD_TIMEOUT_MS); emitting message without media
+```
+
+…once per file, thirty seconds apart, for all ten. **WhatsApp no longer serves the
+bytes for these files** — the video is dated 9 July, a month old. The code comment
+on the history importer predicted exactly this: *"the bytes for anything old enough
+to be in a backfill are mostly no longer served anyway."* It is retention, not a
+bug, and nothing on our side recovers it.
+
+So the bubble had to tell three outcomes apart, not two: the request failing, the
+request working and WhatsApp having nothing, and success. `gone` is not retryable
+and the button disables itself — inviting an agent to press again for a file that no
+longer exists is a lie the panel would tell every time they opened that chat.
+
+**A bug in the first version of that, caught by testing it rather than reasoning
+about it.** The success count was "how many messages in the slice have bytes",
+which is a different question: a chat holding one live photo reported success while
+every bubble the agent pressed stayed omitted — so it said "Tap to load" again. It
+now counts only the ids that were *waiting before the fetch* and arrived with
+bytes.
+
+Verified in a browser, end to end: 10 buttons reading `📎 Media · Tap to load`,
+pressed one, and after the downloads timed out the bubble read **"WhatsApp no
+longer has this file"** and stopped offering.
+
+**Known weakness, not fixed:** the wait before that message is long — ten files ×
+a thirty-second timeout is about five minutes of spinner. The right fix is a
+per-message fetch (`getMessageById(id).downloadMedia()` behind a narrow route) so
+one press costs one timeout instead of the chat's worth. That is engine +
+controller + service work and was not started here; the chat-level fetch is what
+exists today.
+
+Files: `dashboard/src/hooks/useChatMessages.ts`,
+`dashboard/src/components/chats/ChatThread.tsx`, `pages/Chats.tsx` (one prop),
+`pages/Chats.css`.
+
 ### 2026-08-08 · Codex session · `openwa` — sanitized legacy identity audit built and run read-only
 
 Added the missing pre-mutation gate from the approved lossless-history design.

@@ -195,7 +195,7 @@ export function Chats() {
     isLoading: loadingMessages,
     isError: messagesError,
   } = useChatMessages(selectedSessionId, activeChat?.id ?? null);
-  const { appendMessage, updateMessage } = useChatMessagesActions();
+  const { appendMessage, updateMessage, loadChatMedia } = useChatMessagesActions();
   const queryClient = useQueryClient();
 
   // Lightbox state for media viewer
@@ -282,8 +282,21 @@ export function Chats() {
         const isSynced = (s: Session) =>
           s.syncProgress === undefined || s.syncProgress === null || s.syncProgress >= 100;
         const readySessions = list.filter(s => s.status === 'ready' && isSynced(s));
-        setSessions(readySessions);
         setImportingSessions(list.filter(s => s.status === 'ready' && !isSynced(s)));
+
+        // A7: a number that is not connected still has its conversations in our
+        // own tables, and the server now answers the chat list from those when no
+        // engine is loaded. Leaving those sessions out of the picker was the last
+        // thing keeping them off the screen — a phone going offline took months of
+        // history with it, which is the opposite of why any of it is stored.
+        //
+        // Live ones first so the common case is still the top of the list, and
+        // offline ones after, labelled. Read-only over there: no unread counts, no
+        // presence, and sending stays unavailable because that needs the handset.
+        const offlineSessions = list
+          .filter(s => s.status !== 'ready')
+          .map(s => ({ ...s, name: `${s.name} (offline)` }));
+        setSessions([...readySessions, ...offlineSessions]);
         // Functional: a poll must not pull the selection back to the first session while an agent
         // is reading a different one. Only an empty selection is filled in.
         if (readySessions.length > 0) {
@@ -1025,6 +1038,9 @@ export function Chats() {
                   onReply={setReplyingTo}
                   onReact={handleReactMessage}
                   onDelete={handleDeleteMessage}
+                  // A7: history is read media-free, so an imported photo or clip has no bytes until
+                  // somebody asks. The thread owns the button; this fetches the chat's media.
+                  onLoadMedia={() => loadChatMedia(selectedSessionId, activeChat.id)}
                 />
 
                 {/* Composer: attachment preview, emoji panel, reply banner, input bar —

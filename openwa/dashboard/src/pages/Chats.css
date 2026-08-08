@@ -1849,3 +1849,41 @@
   font-size: 0.8125em;
   color: var(--text-muted);
 }
+
+/* "Tap to load" on a media bubble whose bytes were never fetched
+ *
+ * History is read media-free on purpose — a chat full of video would otherwise sit in heap as
+ * base64 — so an imported photo or clip arrives as a placeholder. This turns that placeholder into
+ * the affordance it should always have been: it looks like the omitted marker it replaces, so a
+ * thread does not suddenly grow buttons, and only the hint and the cursor say it can be pressed.
+ */
+.chats-page .message-media-fetch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.9em;
+  font-style: italic;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: start;
+}
+
+.chats-page .message-media-fetch:disabled {
+  cursor: progress;
+}
+
+.chats-page .message-media-fetch-hint {
+  font-style: normal;
+  font-size: 0.8em;
+  text-decoration: underline;
+}
+
+.chats-page .message-media-fetch:hover:not(:disabled) .message-media-fetch-hint,
+.chats-page .message-media-fetch:focus-visible .message-media-fetch-hint {
+  color: var(--primary);
+}
