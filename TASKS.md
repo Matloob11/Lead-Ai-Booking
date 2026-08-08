@@ -27,6 +27,114 @@ anybody proved it works*, which is the part a commit message cannot carry.
 
 ## The log
 
+### 2026-08-08 · Opus session · `openwa` — nine rows in ten said "Unknown user", and none of them was a conversation
+
+The chat list was mostly `Unknown user / No messages yet`. **That string is
+WhatsApp Web's own** — it appears in no source file of ours and in no built
+bundle; the adapter passes `chat.name` straight through, and its own fallback
+would be the chat id, not those words.
+
+What those rows actually are: chat **shells** WhatsApp Web reports for
+address-book entries and for chats opened once and never used. No name it could
+resolve, no last message, and `timestamp: 0`. They carry nothing, so there was
+nothing to resolve — and they accumulate.
+
+**A first theory that measurement killed.** It looked like a new-session problem:
+`minahil` linked the day before and was full of them, `marketting` had been linked
+two days and looked clean. Checking `marketting` again showed **63 of 222** — it
+had simply grown from 157 chats to 222, unknowns included. Not a sync-lag
+symptom; the ordinary state of an established account.
+
+**The test is the emptiness, never the name.** Measured on both live numbers
+before writing a line: every row named `Unknown user` also had `timestamp: 0`,
+**no** such row had a real date, and no dated row lacked a name. One population,
+two descriptions — so keying on the emptiness is exact here *and* survives
+WhatsApp translating or renaming its label.
+
+A conversation older than the ten-day import window keeps its real timestamp: the
+rows that read `Mar 10 · No messages yet` are genuine chats whose messages fall
+outside what we import, and they are untouched. Only rows with nothing whatsoever
+are dropped.
+
+`withoutEmptyShells` runs **after** `overlayStoredMessages`, and the order is the
+point: the overlay is what gives a chat its date and preview back from our own
+rows, so filtering first would drop chats we hold messages for. There is a test
+pinning exactly that.
+
+Resolving the ids to phone numbers was the other option and is the wrong first
+move: `lid_mappings` holds one row, `RESOLVE_LID_TO_PHONE` is unset, and it would
+mean ~99 page evaluations per list draw to label rows that hold nothing. An agent
+who needs to reach one of those people uses **New contact**, which takes a number.
+
+| | before | after |
+|---|---|---|
+| minahil | 110 chats, **99** `Unknown user` | **11 chats, 0** |
+| marketting | 222 chats, **63** `Unknown user` | **156 chats, 0** |
+| dated chats kept | 11 / 156 | **11 / 156** — none lost |
+
+Tests: **2126/2126**, 51 suites, including 5 new ones for the filter. Seen in a
+browser, both themes: 11 rows, real names, real dates, no error toast.
+
+**One failure that was not mine, and how it resolved.** The suite came back with
+`getChats › should throw BadRequestException when session is not started` failing.
+That is another session's change — with no engine, `getChats` now answers from our
+stored rows instead of refusing — and their **updated spec was in the working tree
+but the server still had the old one**. Pushing the current spec made it green. If
+you see a lone spec failure here, check whether the server's copy is behind the
+tree before editing anything.
+
+Files: `modules/session/chat-list-overlay.ts` + spec, `session.service.ts` (one
+call and one import). `session.service.spec.ts` was pushed unchanged to bring the
+server level with the tree.
+
+### 2026-08-08 · Opus session · `openwa` — a disconnected number's chats are readable again, and the OOM that was killing every phone
+
+**The reason phones would not stay connected.** `openwa-api` carried a 2 GB
+memory limit. Each whatsapp-web.js session is a whole Chromium — **measured at
+~430 MB** — so three sessions plus Node sat at 1.7 GB, 84% of the cap. A history
+import adds roughly 500 MB to the session running it; that spike crossed 2 GB,
+the kernel OOM-killed the container, and all three phones fell over together and
+restarted. `OOMKilled: true`, over and over.
+
+Nothing was wrong with the handsets, and nothing was wrong with `asma` — the
+limit was ours. Raised to 6 GB and the churn stopped dead: all three held `ready`
+for 20+ minutes where they had been dropping every 15 seconds. Matloob then
+upgraded the box (KVM 4 → KVM 8: 8 cores, 31 GB, 387 GB), so the limit is now
+20 GB.
+
+**A correction worth recording:** I twice said `wa-qr` had no memory limit, from
+misreading a `docker stats` column. `docker inspect` says it has had a 4 GB limit
+all along. Nothing was needed there.
+
+**Database-first chat list.** `getChats` threw `Session is not started` whenever
+no engine was loaded, so a number going offline took every conversation off the
+screen with it — while the messages sat in our own tables the whole time. With no
+engine it now builds the list from stored rows (`chatsFromStoredMessages`), and
+the dashboard's session picker includes non-ready sessions, labelled `(offline)`.
+
+`unreadCount` is 0 there rather than a guess: unread is a fact about the handset,
+and a stale badge is worse than none. Sending stays unavailable, which genuinely
+does need the phone.
+
+The old spec asserted the exception; its contract really did change, so it now
+asserts the stored-chat answer instead. `src/modules/session`: **19 suites, 528
+tests, all green.**
+
+Verified live, and by luck on the hardest case: `asma` was `failed` at the time,
+and `GET /sessions/<asma>/chats` returned **91 chats** with names and previews
+where it would previously have refused.
+
+Files: `openwa/src/modules/session/chat-list-overlay.ts`, `session.service.ts`,
+`session.service.spec.ts`, `openwa/dashboard/src/pages/Chats.tsx`.
+
+**Open, and needs Matloob:** `asma` will not start —
+`Protocol error (Runtime.callFunctionOn): Execution context was destroyed`. The
+app's own message names the cause and the cure: a stale browser profile at
+`/app/data/sessions/session-asma`, to be deleted before a fresh QR scan. Not done
+here, because it forces a re-scan on a live number. Its messages are unaffected —
+they live in SQLite, not the profile — and thanks to the change above they stay
+readable meanwhile.
+
 ### 2026-08-07 · Opus session · `backend` + `bitrix` — `[unsupported]` was true, and read like our fault
 
 A chat showed `[unsupported]` in the list and `[unknown]` in the bubble. The

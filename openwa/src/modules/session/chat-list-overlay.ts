@@ -96,3 +96,65 @@ export function overlayStoredMessages(chats: ChatSummary[], newest: Map<string, 
     };
   });
 }
+
+/**
+ * Drop the chats that are not conversations — the empty shells WhatsApp Web reports.
+ *
+ * A linked phone's `getChats()` returns rows for chats that hold nothing at all: no name, no last
+ * message, and `timestamp: 0`. They come from address-book entries and from chats opened once and
+ * never used. WhatsApp Web labels them **"Unknown user"** — that string is its own, not ours — and
+ * they accumulate: 99 of 110 on one number, 63 of 222 on another that had been linked for days.
+ * An agent reading a list where nine rows in ten say "Unknown user / No messages yet" cannot find
+ * the one that matters, and reasonably concludes the panel is broken.
+ *
+ * The test is the emptiness, never the name. Checked against two live numbers before writing this:
+ * every row named "Unknown user" also had `timestamp: 0`, **no** such row had a real date, and no
+ * dated row lacked a name. So the two describe one population, and keying on the emptiness is both
+ * exact here and safe against WhatsApp changing its wording or translating it.
+ *
+ * A conversation older than the history window keeps its real timestamp — the ones that read
+ * "Mar 10 · No messages yet" are genuine chats whose messages fall outside the ten days we import,
+ * and they survive this. Only rows with nothing whatsoever are removed.
+ *
+ * Run AFTER {@link overlayStoredMessages}, never before: the overlay is what gives a chat its date
+ * and preview back from our own rows, and filtering first would drop chats we hold messages for.
+ *
+ * An agent who needs to reach one of these people uses New contact, which takes a number.
+ */
+export function withoutEmptyShells(chats: ChatSummary[]): ChatSummary[] {
+  return chats.filter(chat => Boolean(chat.timestamp) || Boolean(chat.lastMessage));
+}
+
+/**
+ * A chat list built from stored messages alone, for when no engine is loaded.
+ *
+ * The phone is normally the authority on which chats exist, and
+ * {@link overlayStoredMessages} deliberately refuses to invent a chat the engine
+ * did not list. That rule is right while a phone is connected and wrong the
+ * moment it is not: a number that has disconnected still has months of
+ * conversation in our own tables, and answering "no chats" because nobody is
+ * holding the handset loses the reason the messages were stored in the first
+ * place.
+ *
+ * `unreadCount` is 0 rather than a guess. Unread is a fact about the handset,
+ * and this list is drawn without one; showing a stale badge would be worse than
+ * showing none.
+ */
+export function chatsFromStoredMessages(newest: Map<string, Message>): ChatSummary[] {
+  const chats: ChatSummary[] = [];
+  for (const [chatId, message] of newest) {
+    const isGroup = chatId.endsWith('@g.us');
+    chats.push({
+      id: chatId,
+      // The name WhatsApp gave when the message was stored, or the number itself.
+      // Never a blank row: a chat with no label is still a chat somebody had.
+      name: message.chatName || chatId.split('@')[0],
+      isGroup,
+      kind: isGroup ? 'group' : 'individual',
+      unreadCount: 0,
+      timestamp: message.timestamp ?? 0,
+      lastMessage: previewOf(message),
+    });
+  }
+  return chats.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+}

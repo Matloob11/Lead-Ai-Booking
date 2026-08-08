@@ -23,7 +23,12 @@ import { PresenceStore, type ChatPresence } from './presence-store.service';
 import { SessionEngineLifecycle } from './session-engine-lifecycle.service';
 import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
-import { newestPerChat, overlayStoredMessages } from './chat-list-overlay';
+import {
+  chatsFromStoredMessages,
+  newestPerChat,
+  overlayStoredMessages,
+  withoutEmptyShells,
+} from './chat-list-overlay';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
@@ -456,8 +461,22 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     const session = await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);
 
+    // No engine — stopped, disconnected, failed, or simply not started yet. The
+    // conversations are still ours, so they are answered from our own rows
+    // instead of refusing. Refusing was right when the engine was the only place
+    // a chat could come from; it stopped being right once the messages were
+    // being stored, and it meant a number going offline took months of history
+    // off the screen with it.
+    //
+    // Read-only by nature: no unread counts, no presence, and sending stays
+    // unavailable because that genuinely needs the handset.
     if (!engine) {
-      throw new BadRequestException('Session is not started');
+      const stored = await this.messageRepository.find({
+        where: { sessionId: id },
+        order: { timestamp: 'DESC' },
+        take: CHAT_LIST_MESSAGE_SCAN,
+      });
+      return paginate(chatsFromStoredMessages(newestPerChat(stored)), opts.limit, opts.offset);
     }
 
     // A history import that is still running has read some chats and not others, and the engine
@@ -492,7 +511,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // Most-recent first, then bound the response window. Sorting before the cap means a capped
     // response is the N newest chats (what clients show first) rather than an arbitrary slice —
     // and it runs after the overlay, so a chat our rows moved forward sorts where it now belongs.
-    const chats = overlayStoredMessages(engineChats, newestPerChat(stored)).sort(
+    // The empty shells go after the overlay, not before it: the overlay is what gives a chat its
+    // date and preview back from our own rows, so filtering first would drop chats we hold messages
+    // for. See withoutEmptyShells for what these rows are and why the name is not the test.
+    const chats = withoutEmptyShells(overlayStoredMessages(engineChats, newestPerChat(stored))).sort(
       (a, b) => (b.timestamp || 0) - (a.timestamp || 0),
     );
     return paginate(chats, opts.limit, opts.offset);

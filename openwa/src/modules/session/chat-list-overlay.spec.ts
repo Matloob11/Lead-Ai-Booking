@@ -1,4 +1,4 @@
-import { newestPerChat, overlayStoredMessages, previewOf } from './chat-list-overlay';
+import { newestPerChat, overlayStoredMessages, previewOf, withoutEmptyShells } from './chat-list-overlay';
 import type { Message } from '../message/entities/message.entity';
 import type { ChatSummary } from '../../engine/interfaces/whatsapp-engine.interface';
 
@@ -110,5 +110,45 @@ describe('overlayStoredMessages', () => {
     const original = chat({ id: 'z@lid', lastMessage: 'engine' });
     const [out] = overlayStoredMessages([original], newestPerChat([]));
     expect(out).toBe(original);
+  });
+});
+
+describe('withoutEmptyShells', () => {
+  // What WhatsApp Web reports for an address-book entry or a chat opened once and never used: no
+  // name it can resolve, no last message, no date. 99 of 110 rows on one live number were these.
+  it('drops a row that holds nothing at all', () => {
+    const shell = chat({ id: 'a@lid', name: 'Unknown user', timestamp: 0, lastMessage: undefined });
+    expect(withoutEmptyShells([shell])).toEqual([]);
+  });
+
+  // The discriminator is the emptiness, never the name — so WhatsApp translating or renaming
+  // "Unknown user" cannot quietly turn the filter off, and a real chat that happens to carry that
+  // name is not thrown away.
+  it('keeps a row named "Unknown user" that has a date', () => {
+    const real = chat({ id: 'b@lid', name: 'Unknown user', timestamp: 1700000000 });
+    expect(withoutEmptyShells([real])).toEqual([real]);
+  });
+
+  // The "Mar 10 · No messages yet" rows: genuine conversations whose messages fall outside the
+  // ten-day import window. They have a real timestamp and must survive.
+  it('keeps a dated chat whose messages are outside the history window', () => {
+    const old = chat({ id: 'c@lid', name: '+92 309 4484504', timestamp: 1773146059, lastMessage: undefined });
+    expect(withoutEmptyShells([old])).toEqual([old]);
+  });
+
+  it('keeps a chat that has a preview but no date', () => {
+    const previewOnly = chat({ id: 'd@lid', timestamp: 0, lastMessage: 'hi' });
+    expect(withoutEmptyShells([previewOnly])).toEqual([previewOnly]);
+  });
+
+  // The ordering that matters: a chat the engine reported empty, which our own stored rows then
+  // filled in, must not be dropped. Filtering before the overlay would lose it.
+  it('keeps an engine-empty chat that the overlay has already filled in', () => {
+    const filled = overlayStoredMessages(
+      [chat({ id: 'e@lid', name: 'Unknown user', timestamp: 0, lastMessage: undefined })],
+      newestPerChat([row({ chatId: 'e@lid', body: 'we spoke', timestamp: 1700000000 })]),
+    );
+    expect(withoutEmptyShells(filled)).toHaveLength(1);
+    expect(withoutEmptyShells(filled)[0].lastMessage).toBe('we spoke');
   });
 });
