@@ -153,6 +153,7 @@
   flex-direction: column;
   width: 100%;
   font-size: 0.875rem;
+  overflow-x: auto;
 }
 
 .dashboard .sessions-table .table-header,

@@ -6,7 +6,7 @@ from .models import AccessRequest, Agent
 
 @admin.register(Agent)
 class AgentAdmin(UserAdmin):
-    list_display = ["username", "display_name", "bitrix_user_id", "is_wa_admin", "is_bitrix_admin", "is_active", "last_seen_at"]
+    list_display = ["username", "display_name", "community", "bitrix_user_id", "is_wa_admin", "is_bitrix_admin", "is_active", "last_seen_at"]
     list_filter = ["is_wa_admin", "is_bitrix_admin", "is_active", "is_staff"]
     search_fields = ["username", "display_name", "bitrix_user_id", "email"]
 
@@ -18,6 +18,7 @@ class AgentAdmin(UserAdmin):
                     "bitrix_user_id",
                     "bitrix_portal",
                     "display_name",
+                    "community",
                     "avatar_url",
                     "is_wa_admin",
                     "is_bitrix_admin",

@@ -74,9 +74,29 @@ const ICONS = {
     ["path", { d: "M12 19v3" }],
   ],
 
+  play: [
+    ["polygon", { points: "8 5 19 12 8 19 8 5", fill: "currentColor", stroke: "none" }],
+  ],
+
+  pause: [
+    ["rect", { x: 7, y: 5, width: 4, height: 14, rx: 1, fill: "currentColor", stroke: "none" }],
+    ["rect", { x: 13, y: 5, width: 4, height: 14, rx: 1, fill: "currentColor", stroke: "none" }],
+  ],
+
   video: [
     ["path", { d: "m23 7-7 5 7 5V7Z" }],
     ["rect", { x: 1, y: 5, width: 15, height: 14, rx: 2 }],
+  ],
+
+  pin: [
+    ["path", { d: "M12 17v5" }],
+    ["path", { d: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" }],
+  ],
+
+  archive: [
+    ["path", { d: "M21 8v13H3V8" }],
+    ["path", { d: "M23 3H1v5h22z" }],
+    ["path", { d: "M10 12h4" }],
   ],
 
   download: [
@@ -130,6 +150,10 @@ const ICONS = {
   menu: [["path", { d: "M4 6h16M4 12h16M4 18h16" }]],
   phone: [
     ["path", { d: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" }],
+  ],
+  copy: [
+    ["rect", { x: 9, y: 9, width: 13, height: 13, rx: 2, ry: 2 }],
+    ["path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }],
   ],
   user: [
     ["path", { d: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" }],
@@ -243,6 +267,8 @@ export const KIND_ICON = {
   video: "video",
   audio: "mic",
   document: "file",
+  album: "image",
+  pinned_message: "pin",
 };
 
 export const iconForKind = (kind, options) => {

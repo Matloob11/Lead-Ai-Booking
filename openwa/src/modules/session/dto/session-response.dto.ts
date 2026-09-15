@@ -97,6 +97,16 @@ export class SessionResponseDto {
   @ApiProperty({ description: 'History import sync progress percentage (0-100)', example: 100 })
   syncProgress!: number;
 
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When the session was soft-removed. Messages stay in the database; the session is out of ' +
+      'active use until Start + re-link. Null means the record is still active.',
+  })
+  removedAt?: string | null;
+
   /**
    * Map a Session entity to the public response shape, stripping sensitive
    * engine config fields (`config`, `proxyUrl`, `proxyType`) that must not
@@ -130,6 +140,7 @@ export class SessionResponseDto {
         : null,
       engineLoaded,
       syncProgress: session.syncProgress ?? 100,
+      removedAt: session.removedAt ? new Date(session.removedAt).toISOString() : null,
     };
   }
 }

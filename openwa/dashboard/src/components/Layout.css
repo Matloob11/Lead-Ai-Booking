@@ -452,3 +452,162 @@
     margin-right: 0;
   }
 }
+
+/* ===========================================================================
+   A7: pic-1 app menu — permanent left rail removed; dropdown opens from the
+   hamburger. Main content is always full width so Chats fills the page.
+   =========================================================================== */
+
+.layout.a7-menu-shell {
+  position: relative;
+}
+
+.layout.a7-menu-shell .main-content.a7-full,
+.layout.a7-menu-shell .main-content.a7-full.expanded,
+.layout.a7-menu-shell .main-content.a7-full.mobile {
+  margin-left: 0;
+  margin-right: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.a7-app-menu-trigger {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 120;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.65rem;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+}
+
+/* Non-Chats embedded routes: smaller FAB so it fights filters less. */
+:root[data-embedded] .layout:not(:has(.chats-page)) .a7-app-menu-trigger {
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 2.35rem;
+  height: 2.35rem;
+  opacity: 0.92;
+}
+
+.a7-app-menu-trigger:hover,
+.a7-app-menu-trigger.open {
+  border-color: rgba(37, 211, 102, 0.55);
+  color: #4ade80;
+}
+
+.a7-app-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  background: rgba(2, 8, 23, 0.45);
+}
+
+.a7-app-menu {
+  position: fixed;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 140;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 1.25rem));
+  max-height: min(85vh, 640px);
+  overflow: auto;
+  padding: 0.4rem 0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 1rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme='light'] .a7-app-menu {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
+}
+
+.a7-app-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 1rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.a7-app-menu-item:hover,
+.a7-app-menu-item.active {
+  background: rgba(37, 211, 102, 0.12);
+  color: #4ade80;
+}
+
+.a7-app-menu-item svg {
+  flex: none;
+  opacity: 0.9;
+}
+
+.a7-app-menu-divider {
+  height: 1px;
+  margin: 0.35rem 0.85rem;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.a7-app-menu-footer {
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.a7-app-menu-theme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.a7-app-menu-theme:hover {
+  border-color: rgba(37, 211, 102, 0.55);
+  color: #4ade80;
+}
+
+.a7-app-menu-logout {
+  border-radius: 0.5rem;
+}
+
+.a7-app-menu-logout:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+}

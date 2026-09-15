@@ -40,6 +40,11 @@ export class SessionStatusBroadcaster {
 
   async updateStatus(id: string, status: SessionStatus): Promise<void> {
     await this.sessionRepository.update(id, { status });
+    this.publishPersistedStatus(id, status);
+  }
+
+  /** Emit a status already written by a token-scoped CAS without issuing an unsafe second write. */
+  publishPersistedStatus(id: string, status: SessionStatus): void {
     this.logger.debug(`Session status updated to ${status}`, {
       sessionId: id,
       status,

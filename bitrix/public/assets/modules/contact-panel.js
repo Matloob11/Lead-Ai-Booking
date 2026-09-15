@@ -1,17 +1,7 @@
 /**
- * The person behind a chat, in a drawer beside it.
- *
- * Everything the panel knows about one customer, on one surface: what to call
- * them, what has been agreed with them, who is handling them and on which of
- * our numbers, every handover the chat has been through, and every file that
- * has passed either way.
- *
- * Two of those fields are ours to write — the name and the notes — and they are
- * saved where they are read rather than behind an edit mode, because the moment
- * an agent learns a customer's real name is the moment they are looking at this.
- *
- * Phone-width and fixed to the right edge: it sits beside the thread the way a
- * profile does in WhatsApp, and the conversation stays visible behind it.
+ * Contact profile drawer beside the Official API thread — WhatsApp-style:
+ * teal head, hero identity, Pin / Archive quick actions, blur-save name/notes,
+ * media grid, tags, handovers. Click the dimmed chat (backdrop) to close.
  */
 
 import { apiFetch } from "../core/bitrix-sso.js";
@@ -41,7 +31,9 @@ function fullStamp(iso) {
 }
 
 function section(title, ...children) {
-  return el("section.cp-block", {}, [el("h3.cp-block__title", {}, [title]), ...children.flat()]);
+  const titleNode =
+    typeof title === "string" ? el("h3.cp-block__title", {}, [title]) : title;
+  return el("section.cp-block", {}, [titleNode, ...children.flat()]);
 }
 
 function row(label, value) {
@@ -58,13 +50,10 @@ let current = null;
 /**
  * @param {number|string} conversationId
  * @param {object}  [options]
- * @param {function} [options.onSaved]  (contact) => void, after a name or note
- *                                      is written — the list shows the name too
- * @param {function} [options.onOpenConversation] (id) => void, for the other
- *                                      chats this customer has with us
+ * @param {function} [options.onSaved]  (contact) => void
+ * @param {function} [options.onOpenConversation] (id) => void
  */
 export function openContactPanel(conversationId, { onSaved, onOpenConversation } = {}) {
-  // Only ever one open, and clicking the same profile again closes it.
   if (current) {
     const same = String(current.conversationId) === String(conversationId);
     current.close();
@@ -72,11 +61,19 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
   }
 
   const body = el("div.cp-body", {}, [el("div.cp-hint", {}, ["Loading…"])]);
-  const closeBtn = el("button.cp-x", { type: "button", title: "Close" }, [icon("close", { size: 18 })]);
-  const drawer = el("aside.cp", {}, [
-    el("header.cp-head", {}, [el("div.cp-head__title", {}, ["Contact"]), closeBtn]),
-    body,
+  const closeBtn = el("button.cp-x", { type: "button", title: "Close", "aria-label": "Close" }, [
+    icon("close", { size: 18 }),
   ]);
+  const backdrop = el("button.cp-backdrop", {
+    type: "button",
+    "aria-label": "Close contact panel",
+    onclick: () => close(),
+  });
+  const drawer = el(
+    "aside.cp",
+    { role: "dialog", "aria-modal": "true", "aria-label": "Contact" },
+    [el("header.cp-head", {}, [el("div.cp-head__title", {}, ["Contact info"]), closeBtn]), body]
+  );
 
   const onKey = (event) => {
     if (event.key === "Escape") close();
@@ -84,6 +81,7 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
 
   function close() {
     document.removeEventListener("keydown", onKey, true);
+    backdrop.remove();
     drawer.remove();
     document.body.classList.remove("has-cp");
     if (current?.drawer === drawer) current = null;
@@ -91,58 +89,135 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
 
   closeBtn.addEventListener("click", close);
   document.addEventListener("keydown", onKey, true);
-  document.body.append(drawer);
+  document.body.append(backdrop, drawer);
   document.body.classList.add("has-cp");
   current = { conversationId, drawer, close };
 
   fetchContact(conversationId).then(
     (data) => render(data),
-    (error) => clear(body).append(el("div.alert", {}, [`Could not load the profile: ${error.message}`]))
+    (error) =>
+      clear(body).append(el("div.cp-alert", {}, [`Could not load the profile: ${error.message}`]))
   );
-
-  /* ---------------------------------------------------------- rendering */
 
   function render(data) {
     clear(body);
-
     body.append(
       identity(data),
+      quickActions(data),
       editable(data),
+      gallery(data),
       tagPicker(data),
       handledBy(data),
       activity(data),
       history(data),
-      gallery(data),
       elsewhere(data)
     );
   }
 
   function identity(data) {
     const label = data.display_name || data.profile_name || data.wa_id;
-    return el("div.cp-identity", {}, [
-      el("div.cp-avatar", {}, [initials(label)]),
-      el("div.cp-identity__text", {}, [
-        el("div.cp-identity__name", {}, [label]),
-        el("div.cp-identity__wa", {}, [`+${data.wa_id}`]),
-        // What they call themselves on WhatsApp, kept visible even once an
-        // agent has renamed them — it is how the customer signs their own
-        // messages, and worth being able to check against.
-        data.profile_name && data.profile_name !== data.display_name
-          ? el("div.cp-identity__profile", {}, [`WhatsApp name: ${data.profile_name}`])
-          : null,
-      ]),
+    const phone = data.wa_id ? `+${data.wa_id}` : "";
+    const phoneBtn = phone
+      ? el(
+          "button.cp-hero__phone",
+          {
+            type: "button",
+            title: "Copy number",
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(phone);
+                toast("Number copied", "ok");
+              } catch {
+                toast("Could not copy", "err");
+              }
+            },
+          },
+          [phone]
+        )
+      : null;
+
+    return el("div.cp-hero", {}, [
+      el("div.cp-avatar.cp-avatar--lg", {}, [initials(label)]),
+      el("div.cp-hero__name", {}, [label]),
+      phoneBtn,
+      data.profile_name && data.profile_name !== data.display_name
+        ? el("div.cp-hero__wa", {}, [`WhatsApp · ${data.profile_name}`])
+        : null,
     ]);
   }
 
-  /** The two fields that are ours to write. Saved where they are read. */
-  function editable(data) {
-    const flash = el("span.cp-saved", { hidden: true }, ["Saved"]);
+  function quickActions(data) {
+    const conv = data.conversation || {};
+    let pinned = !!conv.is_pinned;
+    let busy = false;
+    const rowEl = el("div.cp-quick");
 
-    const name = el("input.cp-input", {
+    async function toggle(field, value) {
+      if (busy) return;
+      busy = true;
+      try {
+        const updated = await inbox.setFlags(conversationId, { [field]: value });
+        if (data.conversation) Object.assign(data.conversation, updated);
+        pinned = !!updated.is_pinned;
+        onSaved?.(data);
+        paint();
+        if (field === "is_pinned") {
+          toast(value ? "Chat pinned" : "Chat unpinned", "ok");
+        }
+      } catch (err) {
+        toast(err.message || "Could not save", "err");
+      } finally {
+        busy = false;
+      }
+    }
+
+    function paint() {
+      clear(rowEl).append(
+        el(
+          "button.cp-quick__btn",
+          {
+            type: "button",
+            class: pinned ? "is-on" : "",
+            onclick: () => toggle("is_pinned", !pinned),
+          },
+          [icon("pin", { size: 18 }), el("span", {}, [pinned ? "Unpin" : "Pin"])]
+        )
+      );
+    }
+    paint();
+    return rowEl;
+  }
+
+  function editable(data) {
+    const flash = el("span.cp-status.cp-status--ok", { hidden: true }, ["Saved"]);
+    const fieldError = el("div.cp-field-error", { hidden: true });
+
+    const name = el("input.cp-input.cp-input--with-clear", {
       type: "text",
       value: data.display_name || "",
-      placeholder: data.profile_name || "Name this contact",
+      placeholder: data.profile_name || "Type a team name…",
       maxlength: "255",
+      "aria-label": "Team name",
+    });
+    const clearBtn = el(
+      "button.cp-clear",
+      {
+        type: "button",
+        title: "Clear name",
+        "aria-label": "Clear name",
+        hidden: !name.value,
+        onmousedown: (e) => e.preventDefault(),
+        onclick: () => {
+          name.value = "";
+          clearBtn.hidden = true;
+          name.focus();
+        },
+      },
+      [icon("close", { size: 14 })]
+    );
+    name.addEventListener("input", () => {
+      clearBtn.hidden = !name.value;
+      fieldError.hidden = true;
     });
 
     const notes = el("textarea.cp-input.cp-notes", {
@@ -150,6 +225,15 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
       placeholder: "What has been agreed, what they are looking for, budget…",
     });
     notes.value = data.notes || "";
+    notes.addEventListener("input", () => {
+      fieldError.hidden = true;
+    });
+
+    const hint = data.display_name
+      ? el("span.cp-field__hint", {}, [`Current: ${data.display_name}`])
+      : data.profile_name
+        ? el("span.cp-field__hint", {}, [`From WhatsApp: ${data.profile_name}`])
+        : null;
 
     let saving = false;
     async function save() {
@@ -158,23 +242,25 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
       if (next.display_name === (data.display_name || "") && next.notes === (data.notes || "")) return;
 
       saving = true;
+      fieldError.hidden = true;
+      flash.hidden = true;
       try {
         const fresh = await patchContact(conversationId, next);
         data.display_name = fresh.display_name;
         data.notes = fresh.notes;
         flash.hidden = false;
-        setTimeout(() => (flash.hidden = true), 1600);
-        onSaved?.(fresh);
-        // The heading carries the name, so it has to follow the field.
-        const heading = body.querySelector(".cp-identity__name");
-        if (heading) heading.textContent = fresh.display_name || fresh.profile_name || fresh.wa_id;
-      } catch (error) {
-        flash.hidden = false;
-        flash.textContent = error.message;
+        flash.textContent = "Saved";
+        flash.className = "cp-status cp-status--ok";
         setTimeout(() => {
           flash.hidden = true;
-          flash.textContent = "Saved";
-        }, 4000);
+        }, 1600);
+        onSaved?.(fresh);
+        const heading = body.querySelector(".cp-hero__name");
+        if (heading) heading.textContent = fresh.display_name || fresh.profile_name || fresh.wa_id;
+      } catch (error) {
+        fieldError.hidden = false;
+        clear(fieldError).append(error.message || "Could not save");
+        toast(error.message || "Could not save profile", "err");
       } finally {
         saving = false;
       }
@@ -186,65 +272,100 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
 
     return el("section.cp-block", {}, [
       el("h3.cp-block__title", {}, ["Name and notes", flash]),
-      el("label.cp-field", {}, [el("span", {}, ["Name"]), name]),
-      el("label.cp-field", {}, [el("span", {}, ["Notes"]), notes]),
+      el("label.cp-field", {}, [
+        el("span.cp-field__label", {}, ["Team name", hint]),
+        el("div.cp-input-wrap", {}, [name, clearBtn]),
+      ]),
+      el("label.cp-field", {}, [el("span.cp-field__label", {}, ["Notes"]), notes]),
+      fieldError,
       el("div.cp-note", {}, ["Only your team sees this. The customer never does."]),
     ]);
   }
 
   function tagPicker(data) {
-    const container = el("div.cp-tags", { style: "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;" });
+    const container = el("div.cp-tags");
+    const addRow = el("div.cp-tag-add");
     const conv = data.conversation || {};
     let activeIds = new Set((conv.labels || []).map((l) => l.id));
+    let allLabels = [];
 
     async function loadTags() {
-      clear(container).append(el("span.cp-note", {}, ["Loading tags…"]));
+      clear(container).append(el("span.cp-muted", {}, ["Loading tags…"]));
       try {
-        const allLabels = await inbox.labels();
-        renderTags(allLabels);
+        allLabels = await inbox.labels();
+        renderTags();
       } catch (err) {
-        clear(container).append(el("span.cp-note", {}, [`Failed: ${err.message}`]));
+        clear(container).append(el("span.cp-muted", {}, [`Failed: ${err.message}`]));
       }
     }
 
-    function renderTags(allLabels) {
+    function renderTags() {
       clear(container);
+      if (!allLabels.length) {
+        container.append(el("span.cp-muted", {}, ["No labels yet — create one below."]));
+      }
       for (const label of allLabels) {
         const isActive = activeIds.has(label.id);
-        const tagChip = el(
-          "button.cp-tag-chip",
-          {
-            type: "button",
-            style: `cursor: pointer; border: 1px solid ${label.colour}; background: ${isActive ? label.colour : "transparent"}; color: ${isActive ? "#fff" : label.colour}; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; transition: all 0.15s ease;`,
-            onclick: async () => {
-              if (isActive) {
-                activeIds.delete(label.id);
-              } else {
-                activeIds.add(label.id);
-              }
-              renderTags(allLabels);
-              try {
-                const updated = await inbox.setFlags(conversationId, { label_ids: [...activeIds] });
-                if (data.conversation) data.conversation.labels = updated.labels;
-                onSaved?.(data);
-              } catch (err) {
-                toast(`Tag update failed: ${err.message}`, "err");
-              }
+        container.append(
+          el(
+            "button.cp-tag-chip",
+            {
+              type: "button",
+              style: `border-color:${label.colour};background:${isActive ? label.colour : "transparent"};color:${isActive ? "#fff" : label.colour}`,
+              onclick: async () => {
+                if (isActive) activeIds.delete(label.id);
+                else activeIds.add(label.id);
+                renderTags();
+                try {
+                  const updated = await inbox.setFlags(conversationId, { label_ids: [...activeIds] });
+                  if (data.conversation) data.conversation.labels = updated.labels;
+                  onSaved?.(data);
+                } catch (err) {
+                  toast(`Tag update failed: ${err.message}`, "err");
+                }
+              },
             },
-          },
-          [label.name]
+            [label.name]
+          )
         );
-        container.append(tagChip);
       }
     }
 
+    const nameInput = el("input.cp-input", {
+      type: "text",
+      placeholder: "New label name",
+      maxlength: 64,
+    });
+    const addBtn = el("button.cp-btn", { type: "button" }, ["Add label"]);
+    addBtn.addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      addBtn.disabled = true;
+      try {
+        const created = await inbox.createLabel({ name, colour: "#25D366" });
+        allLabels.push(created);
+        activeIds.add(created.id);
+        nameInput.value = "";
+        renderTags();
+        const updated = await inbox.setFlags(conversationId, { label_ids: [...activeIds] });
+        if (data.conversation) data.conversation.labels = updated.labels;
+        onSaved?.(data);
+        toast("Label added", "ok");
+      } catch (err) {
+        toast(err.message || "Could not create label", "err");
+      } finally {
+        addBtn.disabled = false;
+      }
+    });
+    clear(addRow).append(nameInput, addBtn);
     loadTags();
 
-    return el("section.cp-block", {}, [
-      el("h3.cp-block__title", {}, ["Customer Tags & Labels"]),
+    return section(
+      "Tags",
       container,
-      el("div.cp-note", {}, ["Click tag to toggle on/off for this customer"]),
-    ]);
+      addRow,
+      el("div.cp-note", {}, ["Click a tag to toggle it on this chat. New labels are shared with the team."])
+    );
   }
 
   function handledBy(data) {
@@ -254,12 +375,8 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
     ];
 
     if (agent) {
-      rows.push(row("Agent", agent.display_name));
+      rows.push(row("Agent", agent.community ? `${agent.display_name} · ${agent.community}` : agent.display_name));
       if (agent.bitrix_user_id) rows.push(row("Bitrix ID", agent.bitrix_user_id));
-      // Which of our numbers that agent holds, so whoever is reading knows
-      // where to reach them and what else they are carrying. Saying "none"
-      // out loud beats an absent row: an owner with no number of their own is
-      // usually an admin covering for somebody, which is worth knowing.
       const held = agent.numbers || [];
       rows.push(
         el("div.cp-row", {}, [
@@ -281,22 +398,6 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
       rows.push(
         el("div.cp-note", {}, [
           "Nobody owns this chat yet. Anyone on the number can answer it; Transfer assigns it.",
-        ])
-      );
-    }
-
-    const labels = data.conversation?.labels || [];
-    if (labels.length) {
-      rows.push(
-        el("div.cp-row", {}, [
-          el("span.cp-row__label", {}, ["Labels"]),
-          el(
-            "span.cp-row__value",
-            {},
-            labels.map((l) =>
-              el("span.cp-label", { style: l.colour ? `background:${l.colour}` : "" }, [l.name])
-            )
-          ),
         ])
       );
     }
@@ -323,8 +424,6 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
         "Reply window",
         conversation.is_session_open
           ? `Open until ${fullStamp(conversation.session_expires_at)}`
-          // Closed until the customer writes, not until a template is sent —
-          // sending one does not reopen anything.
           : "Closed — only a template can be sent"
       )
     );
@@ -361,31 +460,50 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
 
   function gallery(data) {
     const media = data.media || [];
+    const title = el("h3.cp-block__title", {}, [
+      "Media",
+      media.length ? el("span.cp-count", {}, [String(media.length)]) : null,
+    ]);
     if (!media.length) {
-      return section("Files", el("div.cp-note", {}, ["Nothing has been sent either way yet."]));
+      return section(title, el("div.cp-note", {}, ["No photos, videos, or files in this chat yet."]));
     }
 
-    const images = media.filter((m) => IMAGE_KINDS.has(m.kind));
-    const files = media.filter((m) => !IMAGE_KINDS.has(m.kind));
+    const images = media.filter((m) => IMAGE_KINDS.has(m.kind) || m.kind === "video");
+    const files = media.filter((m) => !IMAGE_KINDS.has(m.kind) && m.kind !== "video");
     const parts = [];
 
     if (images.length) {
+      const lightboxItems = images
+        .filter((i) => i.url && IMAGE_KINDS.has(i.kind))
+        .map((i) => ({ url: i.url, name: i.name, mime: i.mime }));
       parts.push(
         el(
           "div.cp-grid",
           {},
-          images.map((m, index) =>
-            el("button.cp-thumb", {
-              type: "button",
-              title: m.name || "",
-              style: `background-image:url("${m.url}")`,
-              onclick: () =>
-                openLightbox(
-                  images.map((i) => ({ url: i.url, name: i.name, mime: i.mime })),
-                  index
-                ),
-            })
-          )
+          images.map((m) => {
+            const isVideo = m.kind === "video";
+            if (m.url && IMAGE_KINDS.has(m.kind)) {
+              const lbIndex = lightboxItems.findIndex((i) => i.url === m.url);
+              return el("button.cp-thumb", {
+                type: "button",
+                title: m.name || m.kind,
+                style: `background-image:url("${m.url}")`,
+                onclick: () => openLightbox(lightboxItems, Math.max(0, lbIndex)),
+              });
+            }
+            return el(
+              "button.cp-tile",
+              {
+                type: "button",
+                class: `cp-tile--${m.kind || "file"}`,
+                title: m.name || m.kind,
+                onclick: () => {
+                  if (m.url) window.open(m.url, "_blank", "noopener,noreferrer");
+                },
+              },
+              [icon(isVideo ? "video" : "image", { size: 18 }), el("span", {}, [m.kind || "file"])]
+            );
+          })
         )
       );
     }
@@ -400,22 +518,26 @@ export function openContactPanel(conversationId, { onSaved, onOpenConversation }
       );
     }
 
-    return section(`Files (${media.length})`, parts);
+    return section(title, parts);
   }
 
   function elsewhere(data) {
     const others = data.other_conversations || [];
     if (!others.length) return el("div", { hidden: true });
 
-    // The same person writing to two of our numbers is two chats, and an agent
-    // who cannot see that answers half a conversation.
     return section(
       "Also talking to us on",
       el("div.cp-note", {}, ["The same customer, on another of our numbers."]),
       others.map((other) =>
         el(
           "button.cp-other",
-          { type: "button", onclick: () => { close(); onOpenConversation?.(other.id); } },
+          {
+            type: "button",
+            onclick: () => {
+              close();
+              onOpenConversation?.(other.id);
+            },
+          },
           [
             el("span.cp-other__num", {}, [other.contact?.name || `Chat #${other.id}`]),
             el("span.cp-other__when", {}, [stamp(other.last_message_at)]),

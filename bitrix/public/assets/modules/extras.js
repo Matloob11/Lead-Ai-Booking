@@ -61,27 +61,101 @@ const ICON_SHAPES = {
   hash: "M4 9h16M4 15h16M10 3 8 21M16 3l-2 18",
 };
 
-export function mountThemeSwitcher() {
-  // Create background blobs container for glass themes if not existing
-  if (!document.querySelector(".wa-x-glass-bg")) {
-    const bg = document.createElement("div");
-    bg.className = "wa-x-glass-bg";
-    bg.innerHTML = `
+const THEMES = [
+  { id: "glass-dark", label: "Liquid Glass (Dark)", iconKey: "moon" },
+  { id: "glass-light", label: "Liquid Glass (Light)", iconKey: "sun" },
+  { id: "classic", label: "Classic Bitrix", iconKey: "layout" },
+];
+
+function applyTheme(id) {
+  let theme = id;
+  if (!theme) {
+    try {
+      theme = localStorage.getItem("wa_theme") || "glass-dark";
+    } catch {
+      theme = "glass-dark";
+    }
+  }
+  document.documentElement.setAttribute("data-wa-theme", theme);
+  if (document.body) document.body.setAttribute("data-wa-theme", theme);
+  try {
+    localStorage.setItem("wa_theme", theme);
+  } catch {
+    /* private mode — the attribute still paints this session */
+  }
+  return theme;
+}
+
+function ensureGlassBg() {
+  if (document.querySelector(".wa-x-glass-bg")) return;
+  const bg = document.createElement("div");
+  bg.className = "wa-x-glass-bg";
+  bg.setAttribute("aria-hidden", "true");
+  bg.innerHTML = `
       <div class="wa-x-blob wa-x-b1"></div>
       <div class="wa-x-blob wa-x-b2"></div>
       <div class="wa-x-blob wa-x-b3"></div>
       <div class="wa-x-blob wa-x-b4"></div>
     `;
-    document.body.prepend(bg);
+  document.body.prepend(bg);
+}
+
+applyTheme();
+
+function themeRow(t, current, onPick) {
+  const active = t.id === current;
+  return el(
+    "button.btn.menu__item.wa-x-theme-item",
+    {
+      type: "button",
+      class: active ? "wa-x-theme-item--active" : "",
+      onclick: (e) => {
+        e.stopPropagation();
+        onPick(t.id);
+      },
+    },
+    [
+      el("div.wa-x-theme-item-left", {}, [
+        createIcon(ICON_SHAPES[t.iconKey], 14),
+        el("span", {}, [t.label]),
+      ]),
+      active ? createIcon(ICON_SHAPES.check, 13) : null,
+    ]
+  );
+}
+
+export function mountThemeSwitcher() {
+  ensureGlassBg();
+  applyTheme();
+
+  const slot = document.querySelector("#wa-theme-slot");
+  if (slot) {
+    if (slot.dataset.mounted === "1") return;
+    slot.dataset.mounted = "1";
+    const paint = () => {
+      const current = applyTheme();
+      clear(slot);
+      THEMES.forEach((t) =>
+        slot.append(
+          themeRow(t, current, (id) => {
+            applyTheme(id);
+            paint();
+          })
+        )
+      );
+    };
+    paint();
+    return;
   }
 
-  // Read saved theme or default to glass-dark
-  const savedTheme = localStorage.getItem("wa_theme") || "glass-dark";
-  document.body.setAttribute("data-wa-theme", savedTheme);
+  const menu = document.querySelector(".sidebar__menu");
+  if (menu) {
+    menu.append(el("div.menu__section", {}, ["Design"]), el("div.slot", { id: "wa-theme-slot" }));
+    return mountThemeSwitcher();
+  }
 
   const sidebarTop = document.querySelector(".sidebar__top");
   const topbarSlot = document.querySelector("#wa-topbar-slot");
-
   if (!sidebarTop && !topbarSlot) return;
   if (document.querySelector(".wa-x-theme-container")) return;
 
@@ -89,102 +163,37 @@ export function mountThemeSwitcher() {
     createIcon(ICON_SHAPES.dots, 14),
     el("span.wa-x-theme-label", {}, ["Theme"]),
   ]);
-
   const dropdown = el("div.wa-x-theme-dropdown", { hidden: true });
-
-  const themes = [
-    { id: "glass-dark", label: "Liquid Glass (Dark)", iconKey: "moon" },
-    { id: "glass-light", label: "Liquid Glass (Light)", iconKey: "sun" },
-    { id: "classic", label: "Classic Bitrix", iconKey: "layout" },
-  ];
-
   const renderDropdown = () => {
     clear(dropdown);
-    const current = document.body.getAttribute("data-wa-theme") || "glass-dark";
-
-    const head = el("div.wa-x-theme-head", {}, ["Design / Theme"]);
-    dropdown.append(head);
-
-    themes.forEach((t) => {
-      const active = t.id === current;
-      const row = el(
-        "button.wa-x-theme-item",
-        {
-          type: "button",
-          class: active ? "wa-x-theme-item--active" : "",
-          onclick: (e) => {
-            e.stopPropagation();
-            document.body.setAttribute("data-wa-theme", t.id);
-            localStorage.setItem("wa_theme", t.id);
-            dropdown.hidden = true;
-            renderDropdown();
-          },
-        },
-        [
-          el("div.wa-x-theme-item-left", {}, [
-            createIcon(ICON_SHAPES[t.iconKey], 14),
-            el("span", {}, [t.label]),
-          ]),
-          active ? createIcon(ICON_SHAPES.check, 13) : null,
-        ]
-      );
-      dropdown.append(row);
-    });
-
-    // Check if Numbers button exists in sidebar top (if admin)
-    if (sidebarTop) {
-      const existingNumbersBtn = sidebarTop.querySelector(".btn--ghost");
-      if (existingNumbersBtn) {
-        existingNumbersBtn.style.display = "none"; // Clean header
-
-        dropdown.append(el("div.wa-x-theme-divider"));
-
-        const numbersRow = el(
-          "button.wa-x-theme-item",
-          {
-            type: "button",
-            onclick: (e) => {
-              e.stopPropagation();
-              dropdown.hidden = true;
-              existingNumbersBtn.click();
-            },
-          },
-          [
-            el("div.wa-x-theme-item-left", {}, [
-              createIcon(ICON_SHAPES.hash, 14),
-              el("span", {}, ["Numbers Admin"]),
-            ]),
-          ]
-        );
-        dropdown.append(numbersRow);
-      }
-    }
+    const current = applyTheme();
+    dropdown.append(el("div.wa-x-theme-head", {}, ["Design / Theme"]));
+    THEMES.forEach((t) =>
+      dropdown.append(
+        themeRow(t, current, (id) => {
+          applyTheme(id);
+          dropdown.hidden = true;
+          renderDropdown();
+        })
+      )
+    );
   };
-
   renderDropdown();
 
   const container = el("div.wa-x-theme-container", {}, [themeBtn, dropdown]);
-
-  if (sidebarTop) {
+  if (topbarSlot) topbarSlot.prepend(container);
+  else {
     const newBtn = sidebarTop.querySelector(".btn--primary") || sidebarTop.querySelector(".btn");
-    if (newBtn) {
-      sidebarTop.insertBefore(container, newBtn);
-    } else {
-      sidebarTop.append(container);
-    }
-  } else if (topbarSlot) {
-    topbarSlot.prepend(container);
+    if (newBtn) sidebarTop.insertBefore(container, newBtn);
+    else sidebarTop.append(container);
   }
 
   themeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     dropdown.hidden = !dropdown.hidden;
   });
-
   document.addEventListener("click", (e) => {
-    if (!container.contains(e.target)) {
-      dropdown.hidden = true;
-    }
+    if (!container.contains(e.target)) dropdown.hidden = true;
   });
 }
 

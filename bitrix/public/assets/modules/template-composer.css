@@ -476,46 +476,151 @@
 
 /* ------------------------------------------------------------ dark theme */
 
-body[data-wa-theme="glass-dark"] .tplc-search,
-body[data-wa-theme="glass-dark"] .tplc-item.is-selected {
+[data-wa-theme="glass-dark"] .tplc-search,
+[data-wa-theme="glass-dark"] .tplc-item.is-selected {
   background: rgba(255, 255, 255, 0.07);
   border-color: var(--menu-line);
   color: var(--menu-ink);
 }
 
-body[data-wa-theme="glass-dark"] .tplc-list,
-body[data-wa-theme="glass-dark"] .tplc-empty,
-body[data-wa-theme="glass-dark"] .tplc-note {
+[data-wa-theme="glass-dark"] .tplc-list,
+[data-wa-theme="glass-dark"] .tplc-empty,
+[data-wa-theme="glass-dark"] .tplc-note {
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--menu-line);
   color: var(--menu-ink);
 }
 
-body[data-wa-theme="glass-dark"] .tplc-item {
+[data-wa-theme="glass-dark"] .tplc-item {
   border-bottom-color: var(--menu-line);
   color: var(--menu-ink);
 }
 
-body[data-wa-theme="glass-dark"] .tplc-phone__screen {
+[data-wa-theme="glass-dark"] .tplc-phone__screen {
   background-color: #0b141a;
   background-image:
     radial-gradient(circle at 20% 25%, rgba(255, 255, 255, 0.06) 0 2px, transparent 2px),
     radial-gradient(circle at 70% 65%, rgba(255, 255, 255, 0.04) 0 3px, transparent 3px);
 }
 
-body[data-wa-theme="glass-dark"] .tplc-bubble {
+[data-wa-theme="glass-dark"] .tplc-bubble {
   background: #005c4b;
   color: #e9edef;
 }
 
-body[data-wa-theme="glass-dark"] .tplc-bubble__footer,
-body[data-wa-theme="glass-dark"] .tplc-bubble__meta {
+[data-wa-theme="glass-dark"] .tplc-bubble__footer,
+[data-wa-theme="glass-dark"] .tplc-bubble__meta {
   color: rgba(233, 237, 239, 0.6);
 }
 
-body[data-wa-theme="glass-dark"] .tplc-btn {
+[data-wa-theme="glass-dark"] .tplc-btn {
   background: #1f2c33;
   color: #53bdeb;
+}
+
+/* Create-form fields — inbox `.field` hardcodes white; override inside .tplc */
+[data-wa-theme="glass-dark"] .tplc .field,
+[data-wa-theme="glass-dark"] .tplc input.field,
+[data-wa-theme="glass-dark"] .tplc select.field,
+[data-wa-theme="glass-dark"] .tplc textarea.field {
+  background: rgba(8, 16, 30, 0.55);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef3f9;
+  box-shadow: none;
+}
+
+[data-wa-theme="glass-dark"] .tplc .field:focus,
+[data-wa-theme="glass-dark"] .tplc input.field:focus,
+[data-wa-theme="glass-dark"] .tplc select.field:focus,
+[data-wa-theme="glass-dark"] .tplc textarea.field:focus {
+  outline: none;
+  border-color: rgba(200, 163, 74, 0.55);
+  box-shadow: 0 0 0 2px rgba(200, 163, 74, 0.18);
+}
+
+[data-wa-theme="glass-dark"] .tplc .field::placeholder {
+  color: rgba(238, 243, 249, 0.38);
+}
+
+[data-wa-theme="glass-dark"] .tplc-vars,
+[data-wa-theme="glass-dark"] .tplc-btnedit__row {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.tplc-field__hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tplc-deploy-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tplc-deploy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tplc-deploy-list[hidden] {
+  display: none !important;
+}
+
+.tplc-deploy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tplc-deploy-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tplc-deploy-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tplc-deploy-row__phone {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.tplc-deploy-row__name {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-wa-theme="glass-dark"] .tplc-deploy-list {
+  background: rgba(8, 16, 30, 0.45);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-wa-theme="glass-dark"] .tplc-deploy-row__phone {
+  color: #eef3f9;
 }
 
 /* ------------------------------------------------------------ narrow */

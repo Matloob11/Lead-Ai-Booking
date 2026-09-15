@@ -16,6 +16,7 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { StatusStoreService } from '../status-store/status-store.service';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { AutomationRulesService } from '../automation/automation-rules.service';
+import { ConversationHealthEnqueueService } from '../conversation-health/conversation-health.enqueue.service';
 import { buildIncomingStatus } from '../status-store/incoming-status';
 import type { StatusUpdate } from '../status-store/entities/status-update.entity';
 import {
@@ -109,6 +110,9 @@ export class MessageProjector {
     // Optional for the same reason. Absent simply means no autoreply rules are evaluated.
     @Optional()
     private readonly automationRules?: AutomationRulesService,
+    // Optional: Bitrix Conversation Health sync. Absent when the module is not wired.
+    @Optional()
+    private readonly conversationHealth?: ConversationHealthEnqueueService,
   ) {
     this.mutationProjector = new MessageMutationProjector(
       this.messageRepository,
@@ -351,6 +355,19 @@ export class MessageProjector {
     void this.automationRules?.evaluateInbound(id, finalMessage).catch(() => undefined);
     // Emit real-time event to WebSocket clients
     this.eventsGateway.emitMessage(id, finalMessage);
+    if (persisted) {
+      this.conversationHealth?.enqueueMirror({
+        kind: 'mirror',
+        sessionId: id,
+        chatId: dbMessage.chatId,
+        messageId: dbMessage.id,
+        waMessageId: dbMessage.waMessageId,
+        body: dbMessage.body || '',
+        type: dbMessage.type,
+        fromMe: dbMessage.direction === MessageDirection.OUTGOING,
+        chatName: dbMessage.chatName,
+      });
+    }
   }
 
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
@@ -448,6 +465,17 @@ export class MessageProjector {
                 { sessionId: id, source: 'SessionService' },
               )
               .catch(() => undefined);
+            this.conversationHealth?.enqueueMirror({
+              kind: 'mirror',
+              sessionId: id,
+              chatId: dbMessage.chatId,
+              messageId: dbMessage.id,
+              waMessageId: dbMessage.waMessageId,
+              body: dbMessage.body || '',
+              type: dbMessage.type,
+              fromMe: true,
+              chatName: dbMessage.chatName,
+            });
           }
         }
 

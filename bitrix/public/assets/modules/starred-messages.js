@@ -35,16 +35,19 @@ export function openStarredMessagesModal({ conversationId, onNavigateToMessage }
       const conv = item.conversation || {};
       const contactName = conv.contact?.name || conv.contact?.wa_id || "Customer";
 
-      const card = el("div.na-row", { style: "padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);" }, [
-        el("div.na-head", {}, [
-          el("div.na-who", {}, [
-            el("div.na-title", { style: "font-weight: 600; display: flex; align-items: center; gap: 6px;" }, [
+      const card = el("div.akit-card", {}, [
+        el("div.akit-row", {}, [
+          el("div.akit-row__main", {}, [
+            el("div.akit-row__top", {}, [
               icon("starFill", { size: 14, className: "star-gold" }),
-              contactName,
+              el("strong", {}, [contactName]),
             ]),
-            el("div.na-phone", { style: "font-size: 11px; opacity: 0.7;" }, [stamp(item.created_at)]),
+            el("div.akit-asset-card__meta", {}, [stamp(item.created_at)]),
+            item.body
+              ? el("div.akit-body", {}, [item.body])
+              : el("div.akit-asset-card__meta", {}, [`[${item.kind || "Attachment"}]`]),
           ]),
-          el("div.na-flags", {}, [
+          el("div.akit-actions", {}, [
             el("button.btn.btn--ghost.btn--sm", {
               type: "button",
               title: "Unstar message",
@@ -65,9 +68,6 @@ export function openStarredMessagesModal({ conversationId, onNavigateToMessage }
               },
             }, ["Go to Chat"]),
           ]),
-        ]),
-        el("div.na-body", { style: "grid-template-columns: 1fr; margin-top: 8px;" }, [
-          item.body ? el("div", { style: "font-size: 13px; white-space: pre-wrap;" }, [item.body]) : el("div", { style: "font-size: 12px; font-style: italic; opacity: 0.7;" }, [`[${item.kind || "Attachment"}]`]),
         ]),
       ]);
 

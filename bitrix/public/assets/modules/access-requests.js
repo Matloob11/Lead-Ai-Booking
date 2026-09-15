@@ -17,7 +17,7 @@ import { icon } from "../core/icons.js";
  * @param {{me: object, onAssigned: () => void}} options
  *        onAssigned reloads the panel once the agent has been given a number.
  */
-export function renderNoNumbersScreen(host, { me, onAssigned }) {
+export function renderNoNumbersScreen(host, { me, onAssigned, onLinkedDevices } = {}) {
   const note = el("textarea.field.access__note", {
     rows: 4,
     placeholder: "Example: Please assign 971555484423 to me — I manage the Damac Hills 2 property portfolio.",
@@ -66,6 +66,22 @@ export function renderNoNumbersScreen(host, { me, onAssigned }) {
           icon("refresh", { size: 14 }),
           "Number assigned? Recheck now",
         ]),
+        // The QR-linked phones are a separate channel with a separate roster, so
+        // an agent can hold one of those and no Business Platform number at all.
+        // Without this they were shut out of it entirely: this screen replaces
+        // the whole inbox, menu included, so the only door to Linked devices was
+        // behind a number they had not been given.
+        //
+        // Offered whether or not a phone is assigned. What they may actually
+        // open is decided on the far side by their OpenWA key, and an empty chat
+        // list is the honest answer to "nothing has been assigned to you yet" —
+        // better than a missing button, which reads as the feature not existing.
+        onLinkedDevices
+          ? el("button.btn.btn--ghost.access__linked", { type: "button", onclick: onLinkedDevices }, [
+              icon("smartphone", { size: 14 }),
+              "Open Linked devices",
+            ])
+          : null,
       ]),
     ])
   );

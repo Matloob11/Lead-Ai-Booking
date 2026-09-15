@@ -4,16 +4,54 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A7 WhatsApp Inbox</title>
-    <link rel="stylesheet" href="./assets/modules/panel.css" />
-    <link rel="stylesheet" href="./assets/modules/inbox.css" />
-    <link rel="stylesheet" href="./assets/core/lightbox.css" />
-    <link rel="stylesheet" href="./assets/modules/template-composer.css" />
-    <link rel="stylesheet" href="./assets/modules/numbers-admin.css" />
-    <link rel="stylesheet" href="./assets/modules/contact-panel.css" />
-    <link rel="stylesheet" href="./assets/modules/extras.css" />
-    <link rel="stylesheet" href="./assets/modules/reports.css" />
+    <!-- window.name before the SDK: official BX24.js throws without APP_SID.
+         Do not postMessage getInitData here — a dummy handshake hides Bitrix's
+         overlay and then starves BX24.init of AUTH_ID, leaving this page on
+         "Signing you in…" forever. The SDK in bx24-early.js must own that call. -->
+    <script>
+      (function () {
+        try {
+          document.documentElement.setAttribute(
+            "data-wa-theme",
+            localStorage.getItem("wa_theme") || "glass-dark"
+          );
+        } catch (e) {
+          document.documentElement.setAttribute("data-wa-theme", "glass-dark");
+        }
+        if (String(window.name || "").split("|").filter(Boolean).length >= 3) return;
+        var q = new URLSearchParams(location.search);
+        var d = q.get("DOMAIN");
+        var s = q.get("APP_SID");
+        if (d && s) window.name = d + "|" + (q.get("PROTOCOL") === "0" ? "0" : "1") + "|" + s;
+      })();
+    </script>
+    <!-- Root-absolute URLs: if Bitrix opens /app (no trailing slash), ./assets/*
+         resolves to /assets/* and every stylesheet 404s. /app/assets always
+         hits the panel location. -->
+    <script src="/app/assets/core/bx24-early.js"></script>
+    <link rel="stylesheet" href="/app/assets/modules/panel.css" />
+    <link rel="stylesheet" href="/app/assets/modules/inbox.css" />
+    <link rel="stylesheet" href="/app/assets/core/lightbox.css" />
+    <link rel="stylesheet" href="/app/assets/modules/template-composer.css" />
+    <link rel="stylesheet" href="/app/assets/modules/template-center.css" />
+    <link rel="stylesheet" href="/app/assets/modules/campaigns.css" />
+    <link rel="stylesheet" href="/app/assets/modules/numbers-admin.css" />
+    <link rel="stylesheet" href="/app/assets/modules/agent-numbers.css" />
+    <link rel="stylesheet" href="/app/assets/modules/contact-panel.css" />
+    <link rel="stylesheet" href="/app/assets/modules/extras.css" />
+    <link rel="stylesheet" href="/app/assets/modules/inbox-ai.css" />
+    <link rel="stylesheet" href="/app/assets/modules/report-feedback.css" />
+    <link rel="stylesheet" href="/app/assets/modules/reports.css" />
+    <link rel="stylesheet" href="/app/assets/modules/admin-kit.css" />
+    <link rel="stylesheet" href="/app/assets/modules/official-glass.css" />
   </head>
   <body>
+    <script>
+      document.body.setAttribute(
+        "data-wa-theme",
+        document.documentElement.getAttribute("data-wa-theme") || "glass-dark"
+      );
+    </script>
     <!--
       LEFT_MENU placement handler. Bitrix opens this in an iframe and POSTs the
       placement params; we pick the same values up through the JS SDK instead
@@ -21,6 +59,12 @@
       inbox. The boot card below is only what the agent sees for that first
       second — and the surface where any failure is reported.
     -->
+    <div class="wa-x-glass-bg" aria-hidden="true">
+      <div class="wa-x-blob wa-x-b1"></div>
+      <div class="wa-x-blob wa-x-b2"></div>
+      <div class="wa-x-blob wa-x-b3"></div>
+      <div class="wa-x-blob wa-x-b4"></div>
+    </div>
     <main class="boot" id="root">
       <section class="card">
         <div class="brand">
@@ -45,8 +89,7 @@
     </main>
 
     <script type="module">
-      import { ensureSession, ensurePlacement, getBitrixAuth, SsoError } from "./assets/core/bitrix-sso.js";
-      import { mountInbox } from "./assets/modules/inbox.js";
+      import { ensureSession, ensurePlacement, getBitrixAuth, SsoError } from "/app/assets/core/bitrix-sso.js";
 
       const root = document.getElementById("root");
       const els = {
@@ -85,6 +128,7 @@
         let step = "bitrix";
         try {
           setStep("bitrix", "active");
+          els.title.textContent = "Signing you in…";
           const auth = await getBitrixAuth();
           console.info("[a7-wa] bitrix portal:", auth.DOMAIN, "member:", auth.member_id);
           setStep("bitrix", "done");
@@ -113,6 +157,7 @@
                 "CRM_DEAL_DETAIL_TAB",
                 "CRM_CONTACT_DETAIL_TAB",
                 "CRM_COMPANY_DETAIL_TAB",
+                "CRM_DYNAMIC_1042_DETAIL_TAB",
               ];
               const menu = await ensurePlacement();
               console.info("[a7-wa] LEFT_MENU:", menu.status);
@@ -133,18 +178,23 @@
           // Where to land, when Bitrix sent the agent here rather than them
           // opening the panel themselves. BX24.openApplication carries these
           // through as the placement's options — the CRM tab passes a
-          // conversation to open, or a number to start one with.
+          // conversation / Omni number, or linked_phone for Linked devices.
           let openRequest = null;
           try {
             const info =
               typeof window.BX24.placement?.info === "function" ? window.BX24.placement.info() : null;
             const opts = info?.options || {};
-            if (opts.conversation_id) openRequest = { conversationId: opts.conversation_id };
+            if (opts.linked_phone) openRequest = { linkedPhone: opts.linked_phone };
+            else if (opts.conversation_id) openRequest = { conversationId: opts.conversation_id };
             else if (opts.phone) openRequest = { phone: opts.phone };
           } catch (e) {
             console.warn("[a7-wa] no placement options:", e);
           }
 
+          // Inbox is a large module graph. Load it after SSO so a broken
+          // import cannot stall BX24.init — that handshake already ran from
+          // bx24-early.js; this only paints the panel.
+          const { mountInbox } = await import("/app/assets/modules/inbox.js");
           await mountInbox(root, { me, openRequest });
         } catch (error) {
           fail(step, error);
@@ -153,6 +203,8 @@
 
       boot();
     </script>
-    <script type="module" src="./assets/modules/extras.js"></script>
+    <script type="module" src="/app/assets/modules/extras.js"></script>
+    <script type="module" src="/app/assets/modules/inbox-ai.js"></script>
+    <script type="module" src="/app/assets/modules/report-feedback.js"></script>
   </body>
 </html>

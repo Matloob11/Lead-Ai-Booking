@@ -7,29 +7,77 @@
  * functions they take the query as an argument and can be tested.
  */
 
+/** Digits only — so "+971 50 999 8888" matches a JID stored as "971509998888@c.us". */
+export function digitsOnly(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+/**
+ * Whether a chat JID/name is the given E.164-ish phone (CRM deep-link / search).
+ * Accepts with or without UAE country code on either side.
+ */
+export function chatMatchesPhone(
+  chat: { id: string; name?: string },
+  phoneDigits: string,
+): boolean {
+  const want = digitsOnly(phoneDigits);
+  if (want.length < 8) return false;
+  const hay = `${chat.id} ${chat.name || ''}`;
+  const have = digitsOnly(hay);
+  if (!have) return false;
+  if (have.includes(want) || want.includes(have)) return true;
+  const strip971 = (d: string) => (d.startsWith('971') && d.length > 9 ? d.slice(3) : d);
+  const a = strip971(want);
+  const b = strip971(have);
+  return a.length >= 8 && b.length >= 8 && (b.includes(a) || a.includes(b));
+}
+
 /** Case-insensitive "does any of these fields contain the query". Absent fields never match. */
 const matches = (query: string, ...fields: (string | undefined)[]): boolean => {
   const needle = query.toLowerCase();
   return fields.some(f => (f ?? '').toLowerCase().includes(needle));
 };
 
+/** Match when the query's digits appear in any field's digits (phone search with spaces/+). */
+const matchesDigits = (query: string, ...fields: (string | undefined)[]): boolean => {
+  const needle = digitsOnly(query);
+  if (needle.length < 3) return false;
+  return fields.some(f => digitsOnly(f ?? '').includes(needle));
+};
+
 interface ChatLike {
   id: string;
   name?: string;
   kind?: string;
+  sessionName?: string;
+  sessionPhone?: string | null;
 }
 
 /**
  * Chats tab: real conversations only. Channel- and status-kind rows are hidden here and surfaced on
  * their own tabs instead, so a channel never appears twice.
+ *
+ * Search matches display name, raw id/JID, and digit-normalized phone forms so typing a formatted
+ * number still finds the chat.
  */
 export function filterChats<T extends ChatLike>(chats: T[], query: string): T[] {
-  return chats.filter(c => c.kind !== 'channel' && c.kind !== 'status' && matches(query, c.name, c.id));
+  const q = query.trim();
+  return chats.filter(c => {
+    if (c.kind === 'channel' || c.kind === 'status') return false;
+    if (!q) return true;
+    return (
+      matches(q, c.name, c.id, c.sessionName, c.sessionPhone ?? undefined) ||
+      matchesDigits(q, c.name, c.id, c.sessionPhone ?? undefined)
+    );
+  });
 }
 
 /** Channels tab: same search box, matched on the channel's own name/id. */
 export function filterChannels<T extends { id: string; name: string }>(channels: T[], query: string): T[] {
-  return channels.filter(ch => matches(query, ch.name, ch.id));
+  const q = query.trim();
+  return channels.filter(
+    ch => !q || matches(q, ch.name, ch.id) || matchesDigits(q, ch.name, ch.id),
+  );
 }
 
 interface StatusItemLike<C> {
@@ -65,7 +113,13 @@ export function groupStatusesByContact<
     }
   }
   for (const group of byContact.values()) group.items.reverse();
+  const q = query.trim();
   return Array.from(byContact.values())
-    .filter(g => matches(query, g.contact.name, g.contact.pushName, g.contact.id))
+    .filter(
+      g =>
+        !q ||
+        matches(q, g.contact.name, g.contact.pushName, g.contact.id) ||
+        matchesDigits(q, g.contact.name, g.contact.pushName, g.contact.id),
+    )
     .sort((a, b) => (a.latest < b.latest ? 1 : a.latest > b.latest ? -1 : 0));
 }

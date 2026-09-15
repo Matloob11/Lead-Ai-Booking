@@ -58,6 +58,39 @@ describe('EngineRegistry', () => {
     });
   });
 
+  describe('identity acceptance generations', () => {
+    it('keeps a pending generation out of public access until drain is published', () => {
+      const engine = engineStub('pending');
+      const token = registry.beginGeneration('s1', engine);
+
+      expect(registry.getLifecycle('s1')).toBe(engine);
+      expect(registry.get('s1')).toBeUndefined();
+      expect(() => registry.require('s1')).toThrow('Session is not started');
+
+      expect(registry.acceptForDrain('s1', token)).toBe(true);
+      expect(registry.get('s1')).toBeUndefined();
+      expect(registry.publishGeneration('s1', token)).toBe(true);
+      expect(registry.get('s1')).toBe(engine);
+      expect(registry.require('s1')).toBe(engine);
+    });
+
+    it('revokes permanently and stale tokens cannot publish a replacement', () => {
+      const stale = engineStub('stale');
+      const fresh = engineStub('fresh');
+      const staleToken = registry.beginGeneration('s1', stale);
+      expect(registry.revokeGeneration('s1', staleToken)).toBe(true);
+      const freshToken = registry.beginGeneration('s1', fresh);
+
+      expect(registry.acceptForDrain('s1', staleToken)).toBe(false);
+      expect(registry.publishGeneration('s1', staleToken)).toBe(false);
+      expect(registry.acceptForDrain('s1', freshToken)).toBe(true);
+      expect(registry.publishGeneration('s1', freshToken)).toBe(true);
+      expect(registry.get('s1')).toBe(fresh);
+      expect(registry.isAcceptedToken('s1', staleToken)).toBe(false);
+      expect(registry.isAcceptedToken('s1', freshToken)).toBe(true);
+    });
+  });
+
   describe('liveness by identity', () => {
     it('isLive() is true only for the currently registered instance', () => {
       const engine = engineStub('a');

@@ -21,6 +21,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { RequireRole, CurrentApiKey, SessionScoped, RequireUnscopedKey } from '../auth/decorators/auth.decorators';
 import { ApiKey, ApiKeyRole } from '../auth/entities/api-key.entity';
+import { ConfirmDeleteSessionDto } from './dto/confirm-delete-session.dto';
 
 @ApiTags('sessions')
 @Controller('sessions')
@@ -84,6 +85,36 @@ export class SessionController {
     return sessions.map(s => this.transformSession(s));
   }
 
+  @Get('chats/all')
+  @RequireRole(ApiKeyRole.ADMIN)
+  @RequireUnscopedKey()
+  @ApiOperation({
+    summary: 'Admin All chats — merged conversation list across every session (including soft-removed)',
+  })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max chats to return (1–1000, default 1000)' })
+  @ApiQuery({ name: 'offset', required: false, description: 'Number of chats to skip (for paging)' })
+  @ApiResponse({ status: 200, description: 'Merged chats, newest first' })
+  async getAllChats(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ): Promise<
+    Array<
+      ChatSummary & {
+        sessionId: string;
+        sessionName: string;
+        sessionStatus: string;
+        sessionPhone: string | null;
+        removed: boolean;
+        canOpenThread: boolean;
+      }
+    >
+  > {
+    return this.sessionService.getAllChats({
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get session by ID' })
   @ApiParam({ name: 'id', description: 'Session ID' })
@@ -98,12 +129,28 @@ export class SessionController {
     return this.transformSession(session);
   }
 
+  @Get(':id/delete-impact')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({
+    summary: 'Count stored messages kept when soft-removing a session (messages are not wiped)',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Exact current stored-message count' })
+  async getDeleteImpact(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ messageCount: number; softRemove: true }> {
+    const impact = await this.sessionService.getDeleteImpact(id);
+    return { ...impact, softRemove: true };
+  }
+
   @Delete(':id')
   @RequireRole(ApiKeyRole.OPERATOR)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a session' })
+  @ApiOperation({
+    summary: 'Soft-remove a session (keeps messages; purges local auth; marks removedAt)',
+  })
   @ApiParam({ name: 'id', description: 'Session ID' })
-  @ApiResponse({ status: 204, description: 'Session deleted' })
+  @ApiResponse({ status: 204, description: 'Session soft-removed; messages retained' })
   @ApiResponse({ status: 404, description: 'Session not found' })
   @ApiResponse({
     status: 409,
@@ -111,15 +158,38 @@ export class SessionController {
       'A credential teardown for the same session name is still in flight (retryable — the body ' +
       "carries `code: 'SESSION_NAME_TEARDOWN_PENDING'`; wait for it to settle and retry), OR " +
       "another node currently holds this session's live engine and deleting it here would strip a " +
-      'session the owner is running. No destructive side effect runs before either refusal.',
+      'session the owner is running, OR the stored-message count changed (`SESSION_DELETE_COUNT_CHANGED`). ' +
+      'Review the new impact and confirm again; no database row is deleted on any refusal.',
   })
-  async delete(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  async delete(@Param('id', ParseUUIDPipe) id: string, @Query() confirmation: ConfirmDeleteSessionDto): Promise<void> {
     const session = await this.sessionService.findOne(id);
-    await this.sessionService.delete(id);
+    await this.sessionService.delete(id, confirmation.confirmMessageCount);
     await this.auditService.logInfo(AuditAction.SESSION_DELETED, {
       sessionId: id,
       sessionName: session.name,
     });
+  }
+
+  @Post(':id/reset-profile')
+  @RequireRole(ApiKeyRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset local WhatsApp profile without deleting session identity or messages',
+    description:
+      'Stops the engine, purges local auth directories, and leaves the same session disconnected. ' +
+      'No QR is generated; an operator must explicitly Start the session afterwards.',
+  })
+  @ApiParam({ name: 'id', description: 'Session ID' })
+  @ApiResponse({ status: 200, description: 'Profile reset; session/history preserved', type: SessionResponseDto })
+  @ApiResponse({ status: 404, description: 'Session not found' })
+  @ApiResponse({ status: 409, description: 'Session is owned by another node or credential teardown is pending' })
+  async resetProfile(@Param('id', ParseUUIDPipe) id: string): Promise<SessionResponseDto> {
+    const session = await this.sessionService.resetProfile(id);
+    await this.auditService.logInfo(AuditAction.SESSION_PROFILE_RESET, {
+      sessionId: session.id,
+      sessionName: session.name,
+    });
+    return this.transformSession(session);
   }
 
   @Post(':id/start')

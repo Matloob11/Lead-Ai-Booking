@@ -34,7 +34,7 @@ import { SessionEngineLeafEvents } from './session-engine-leaf-events';
 export interface SessionEngineWiringHost {
   /** Liveness gate: true only while `engine` is still the live engine registered for `id`. */
   isLiveEngine(id: string, engine: IWhatsAppEngine): boolean;
-  handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): void;
+  handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): Promise<void>;
   handleEngineDisconnected(id: string, engine: IWhatsAppEngine, reason: string): Promise<void>;
   updateStatus(id: string, status: SessionStatus): Promise<void>;
   cancelReconnect(id: string): void;
@@ -111,14 +111,15 @@ export class SessionEngineEventWiring {
 
         void host.updateStatus(id, SessionStatus.QR_READY);
       },
-      onReady: (phone, pushName): void => host.handleEngineReady(id, engine, phone, pushName),
+      onReady: (phone, pushName): Promise<void> => host.handleEngineReady(id, engine, phone, pushName),
       onMessage: (message): void => host.messages.handleInboundMessage(id, engine, message),
-      onHistoryMessages: (messages): void => {
+      onHistoryMessages: (messages): void | Promise<void> => {
         if (!host.isLiveEngine(id, engine)) return;
         // Persist for the chat view only; no dispatch (these predate the live session).
-        void host.messages
-          .persistHistoryMessages(id, messages)
-          .catch(err => this.logger.error(`Failed to persist history messages for ${id}`, String(err)));
+        return host.messages.persistHistoryMessages(id, messages).catch(err => {
+          this.logger.error(`Failed to persist history messages for ${id}`, String(err));
+          throw err;
+        });
       },
       onMessageCreate: (message): void => host.messages.handleOwnSendEcho(id, engine, message),
       onMessageAck: (messageId, status): void => host.messages.handleMessageAck(id, engine, messageId, status),

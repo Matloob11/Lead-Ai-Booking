@@ -67,6 +67,9 @@ INSTALLED_APPS = [
     "apps.gateway",
     "apps.reports",
     "apps.crmlink",
+    "apps.campaigns",
+    "apps.inboxai",
+    "apps.feedback",
 ]
 
 MIDDLEWARE = [
@@ -153,6 +156,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.inbox.tasks.warn_closing_windows",
         "schedule": 15 * 60,
     },
+    # Campaign failed recipients: re-queue every minute; each row waits 5 min between tries (max 5).
+    "retry-due-campaign-recipients": {
+        "task": "apps.campaigns.tasks.retry_due_campaign_recipients",
+        "schedule": 60,
+    },
 }
 
 # Localisation
@@ -167,6 +175,12 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(env("MEDIA_ROOT", BASE_DIR / "media"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Inbox attachments (and Feedback) travel as multipart. Files larger than
+# FILE_UPLOAD_MAX_MEMORY_SIZE spill to disk; this cap is the whole request.
+# Official nginx is 1024m so a ~90 MB video is not 413'd before Django runs.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
@@ -187,6 +201,13 @@ ALOTS_TIMEOUT = float(env("ALOTS_TIMEOUT", "30"))
 # Shared secret alots sends back on every webhook call, configured per number in
 # their panel as a Bearer token. Requests without it are rejected.
 ALOTS_WEBHOOK_TOKEN = env("ALOTS_WEBHOOK_TOKEN", "")
+
+# Meta Graph API — template DELETE only. alots forwards GET/POST on
+# message_templates but returns HTTP 405 on DELETE, so removal bypasses the
+# gateway. Use the System User token from Meta Business Manager with
+# whatsapp_business_management (same permanent token as in alots WABA settings).
+META_GRAPH_ACCESS_TOKEN = env("META_GRAPH_ACCESS_TOKEN", "")
+META_GRAPH_BASE_URL = env("META_GRAPH_BASE_URL", "https://graph.facebook.com").rstrip("/")
 
 # Meta closes the free-form window 24h after the customer's last inbound message.
 SESSION_WINDOW_HOURS = int(env("SESSION_WINDOW_HOURS", "24"))
@@ -241,6 +262,8 @@ BITRIX_WEBHOOK_URL = env("BITRIX_WEBHOOK_URL", "").strip()
 OPENAI_API_KEY = env("OPENAI_API_KEY", "")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT = int(env("OPENAI_TIMEOUT", "45"))
+# Official Conversation Health — same default as OpenWA linked-device monitor.
+CONVERSATION_HEALTH_OVERRIDE_PASSWORD = env("CONVERSATION_HEALTH_OVERRIDE_PASSWORD", "222007")
 
 # How many messages may pass before the summary is rewritten. Every message
 # would cost a model call per message on a busy number; ten keeps it current

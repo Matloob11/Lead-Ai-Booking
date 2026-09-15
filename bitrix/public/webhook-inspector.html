@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A7 Gateway Live Webhook Inspector</title>
+  <style>
+    :root {
+      --bg: #0a1020;
+      --card-bg: rgba(255, 255, 255, 0.07);
+      --card-hover: rgba(255, 255, 255, 0.12);
+      --card-border: rgba(255, 255, 255, 0.16);
+      --text: #eef3f9;
+      --text-muted: #9fb0c6;
+      --accent: #c8a34a;
+      --accent-glow: rgba(200, 163, 74, 0.3);
+      --success: #34d399;
+      --success-bg: rgba(52, 211, 153, 0.15);
+      --danger: #f87171;
+      --danger-bg: rgba(248, 113, 113, 0.15);
+      --warning: #e6c979;
+      --warning-bg: rgba(230, 201, 121, 0.15);
+      --info: #e6c979;
+      --info-bg: rgba(200, 163, 74, 0.15);
+      --wbx-purple: #c8a34a;
+      --wbx-purple-bg: rgba(200, 163, 74, 0.15);
+      --font-sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      max-height: 100%;
+      overflow: hidden;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.4;
+      font-size: 0.85rem;
+    }
+
+    /* Top compact navbar */
+    header {
+      background: rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(28px) saturate(170%);
+      -webkit-backdrop-filter: blur(28px) saturate(170%);
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 0.6rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.85rem;
+      color: #241b06;
+    }
+
+    .brand-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-subtitle {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .live-status {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: #0b1120;
+      border: 1px solid var(--card-border);
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse 1.6s infinite;
+    }
+
+    .pulse-dot.paused {
+      background: var(--warning);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      padding: 0.3rem 0.7rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover { background: rgba(255, 255, 255, 0.16); }
+    .btn-primary {
+      background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9));
+      border-color: rgba(255, 235, 180, 0.5);
+      color: #241b06;
+    }
+    .btn-primary:hover { filter: brightness(1.05); }
+
+    /* Main body — fill the Bitrix iframe, not the outer portal */
+    main {
+      max-width: 1380px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0.875rem 1rem;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      overflow: hidden;
+    }
+
+    /* Color Guide & Stats Bar */
+    .guide-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.6rem 0.875rem;
+    }
+
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      font-size: 0.75rem;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .stats-counters {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.75rem;
+    }
+
+    .stat-badge {
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+
+    /* Compact Toolbar */
+    .toolbar {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.6rem 0.875rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.625rem;
+    }
+
+    .filter-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .search-box {
+      position: relative;
+      min-width: 260px;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      outline: none;
+    }
+
+    .search-input:focus { border-color: var(--accent); }
+
+    .search-icon {
+      display: none;
+    }
+
+    .select {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      outline: none;
+      max-width: 250px;
+    }
+
+    .pill-group {
+      display: flex;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .pill {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.25rem 0.55rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.12s;
+    }
+
+    .pill.active {
+      background: var(--accent);
+      color: #241b06;
+    }
+
+    .pill.active-danger {
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .pill.active-success {
+      background: var(--success);
+      color: #fff;
+    }
+
+    .pill.active-purple {
+      background: var(--wbx-purple);
+      color: #fff;
+    }
+
+    /* Compact Event Rows */
+    .events-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .event-row {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      overflow: hidden;
+      transition: background 0.1s, border-color 0.1s;
+    }
+
+    .event-row:hover {
+      background: var(--card-hover);
+      border-color: #334155;
+    }
+
+    .event-row.is-wbx {
+      border-left: 4px solid var(--wbx-purple);
+    }
+
+    .event-row.is-nobody {
+      border-left: 4px solid var(--danger);
+    }
+
+    .event-row.is-body {
+      border-left: 4px solid var(--success);
+    }
+
+    .event-row.flash-new {
+      animation: highlightFlash 1.6s ease-out;
+    }
+
+    @keyframes highlightFlash {
+      0% { background: rgba(16, 185, 129, 0.25); border-color: #10b981; }
+      100% { background: var(--card-bg); border-color: var(--card-border); }
+    }
+
+    .row-header {
+      padding: 0.45rem 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.6rem;
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.8rem;
+    }
+
+    .row-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .row-time {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      min-width: 80px;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.12rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .badge-danger {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .badge-success {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .badge-info {
+      background: var(--info-bg);
+      color: var(--info);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+    }
+
+    .badge-wbx {
+      background: var(--wbx-purple-bg);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+    }
+
+    .badge-gray {
+      background: #1e293b;
+      color: var(--text-muted);
+    }
+
+    .row-summary {
+      color: #e2e8f0;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    .row-summary .highlight-text {
+      color: #38bdf8;
+      font-weight: 600;
+    }
+
+    .row-right {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      white-space: nowrap;
+    }
+
+    .icon-btn {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 0.15rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .icon-btn:hover {
+      background: #334155;
+      color: #fff;
+    }
+
+    /* JSON Body Drawer */
+    .row-json {
+      display: none;
+      background: #050811;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 0.6rem 0.85rem;
+      position: relative;
+    }
+
+    .json-code {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #93c5fd;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 350px;
+      overflow-y: auto;
+    }
+
+    .json-code .key { color: #f472b6; }
+    .json-code .string { color: #34d399; }
+    .json-code .number { color: #fbbf24; }
+    .json-code .boolean { color: #60a5fa; }
+    .json-code .status-highlight { background: rgba(239, 68, 68, 0.25); color: #f87171; font-weight: bold; }
+    .json-code .body-highlight { background: rgba(16, 185, 129, 0.25); color: #4ade80; font-weight: bold; }
+
+    .copy-json-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.75rem;
+      background: rgba(30, 41, 59, 0.85);
+      color: #cbd5e1;
+      border: 1px solid var(--card-border);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      cursor: pointer;
+    }
+
+    .copy-json-btn:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2.5rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">A7</div>
+      <div>
+        <div class="brand-title">Gateway Webhook Inspector</div>
+        <div class="brand-subtitle">Live Alots/Meta Payload Diagnostic Stream</div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="live-status">
+        <span class="pulse-dot" id="liveDot"></span>
+        <span id="liveStatusText">Live Feed (1.5s)</span>
+      </div>
+      <button class="btn" id="togglePauseBtn" onclick="togglePause()">Pause</button>
+      <button class="btn btn-primary" onclick="fetchEvents(true)">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Color Guide & Stats Bar -->
+    <div class="guide-bar">
+      <div class="legend">
+        <span style="font-weight: 700; color: var(--text-muted);">Legend:</span>
+        <span class="legend-item"><span class="legend-dot" style="background: var(--danger);"></span> <strong>No body:</strong> status only (phone sends)</span>
+        <span class="legend-item"><span class="legend-dot" style="background: var(--success);"></span> <strong>Has body:</strong> message with text</span>
+        <span class="legend-item"><span class="legend-dot" style="background: var(--accent);"></span> <strong>Gold mark:</strong> coexistence WBX numbers</span>
+      </div>
+
+      <div class="stats-counters">
+        <span>Total: <span class="stat-badge" style="background:rgba(255,255,255,0.1);" id="countTotal">0</span></span>
+        <span>With body: <span class="stat-badge" style="background:var(--success-bg); color:var(--success);" id="countBody">0</span></span>
+        <span>No body: <span class="stat-badge" style="background:var(--danger-bg); color:var(--danger);" id="countNoBody">0</span></span>
+      </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="toolbar">
+      <div class="filter-left">
+        <!-- Live Instant Search -->
+        <div class="search-box">
+          <span class="search-icon"></span>
+          <input type="text" class="search-input" id="searchInput" placeholder='Search "body", "status", number, text...' oninput="renderFilteredEvents()">
+        </div>
+
+        <!-- Channel Selector -->
+        <select class="select" id="channelFilter" onchange="renderFilteredEvents()">
+          <option value="">All Channels / Numbers</option>
+        </select>
+
+        <!-- Filter Pills -->
+        <div class="pill-group">
+          <button class="pill active" id="tab-all" onclick="setQuickFilter('')">All</button>
+          <button class="pill" id="tab-body" onclick="setQuickFilter('body')">With body</button>
+          <button class="pill" id="tab-nobody" onclick="setQuickFilter('nobody')">No body</button>
+          <button class="pill" id="tab-wbx" onclick="setQuickFilter('wbx')">WBX numbers</button>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <button class="btn" onclick="toggleAllJson(true)" style="font-size: 0.72rem;">Expand All</button>
+        <button class="btn" onclick="toggleAllJson(false)" style="font-size: 0.72rem;">Collapse All</button>
+        <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);" id="matchCounter">0 events</span>
+      </div>
+    </div>
+
+    <!-- Compact Events List -->
+    <div class="events-list" id="eventsList">
+      <div class="empty-state">
+        <div>Loading live events…</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // List of 11 Coexistence / WBX Numbers
+    const WBX_NUMBERS = new Set([
+      "971563523109", "971559632895", "971527514497", "971558448678",
+      "971559791401", "971525531548", "971529312577", "971507563104",
+      "971543752608", "971564821835", "971559783176"
+    ]);
+
+    let isPaused = false;
+    let authBlocked = false;
+    let pollTimer = null;
+    let quickFilter = '';
+    let knownEventIds = new Set();
+    let rawEvents = [];
+    let channelsList = [];
+    let openJsonIds = new Set();
+
+    function showAdminRequired() {
+      authBlocked = true;
+      isPaused = true;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      const list = document.getElementById('eventsList');
+      list.replaceChildren();
+      const box = document.createElement('div');
+      box.className = 'empty-state';
+      const title = document.createElement('div');
+      title.style.fontWeight = '700';
+      title.style.marginBottom = '0.4rem';
+      title.textContent = 'Admin sign-in required';
+      const line = document.createElement('div');
+      line.textContent = 'Sign in as a WhatsApp admin on /app/ first, then reopen this page.';
+      box.append(title, line);
+      list.append(box);
+      const statusText = document.getElementById('liveStatusText');
+      if (statusText) statusText.textContent = 'Access denied';
+      const dot = document.getElementById('liveDot');
+      if (dot) dot.classList.add('paused');
+    }
+
+    async function fetchEvents(forceFlash = false) {
+      if (authBlocked) return;
+      if (isPaused && !forceFlash) return;
+
+      try {
+        const res = await fetch('/api/gateway/inspector/events/?limit=80', { credentials: 'include' });
+        if (res.status === 401 || res.status === 403) {
+          showAdminRequired();
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        if (data.channels && data.channels.length && channelsList.length === 0) {
+          channelsList = data.channels;
+          populateChannelDropdown();
+        }
+
+        rawEvents = data.events || [];
+        updateStatsCounters();
+        renderFilteredEvents(forceFlash);
+      } catch (err) {
+        console.error('Inspector poll error:', err);
+      }
+    }
+
+    function populateChannelDropdown() {
+      const select = document.getElementById('channelFilter');
+      select.innerHTML = '<option value="">All Channels / Numbers</option>';
+
+      // Group 1: 11 WBX Numbers
+      const wbxGroup = document.createElement('optgroup');
+      wbxGroup.label = "WBX coexistence numbers";
+
+      // Group 2: Other Numbers
+      const otherGroup = document.createElement('optgroup');
+      otherGroup.label = "Standard WABA Numbers";
+
+      channelsList.forEach(ch => {
+        const opt = document.createElement('option');
+        opt.value = ch.phone;
+        const isWbx = WBX_NUMBERS.has(ch.phone) || ch.community === 'coexistence';
+        opt.textContent = `${ch.phone} — ${ch.label}${isWbx ? ' [WBX]' : ''}`;
+        if (isWbx) {
+          wbxGroup.appendChild(opt);
+        } else {
+          otherGroup.appendChild(opt);
+        }
+      });
+
+      select.appendChild(wbxGroup);
+      select.appendChild(otherGroup);
+    }
+
+    function updateStatsCounters() {
+      document.getElementById('countTotal').textContent = rawEvents.length;
+      document.getElementById('countBody').textContent = rawEvents.filter(e => e.has_body).length;
+      document.getElementById('countNoBody').textContent = rawEvents.filter(e => !e.has_body).length;
+    }
+
+    function setQuickFilter(f) {
+      quickFilter = f;
+      document.querySelectorAll('.pill').forEach(p => p.className = 'pill');
+      if (!f) document.getElementById('tab-all').classList.add('active');
+      if (f === 'body') document.getElementById('tab-body').classList.add('active-success');
+      if (f === 'nobody') document.getElementById('tab-nobody').classList.add('active-danger');
+      if (f === 'wbx') document.getElementById('tab-wbx').classList.add('active-purple');
+      renderFilteredEvents();
+    }
+
+    function renderFilteredEvents(forceRender = false) {
+      const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+      const channelSelect = document.getElementById('channelFilter').value;
+      const listEl = document.getElementById('eventsList');
+
+      const filtered = rawEvents.filter(ev => {
+        // Channel filter
+        if (channelSelect && ev.waba_phone !== channelSelect && ev.peer !== channelSelect) {
+          return false;
+        }
+
+        const isWbx = WBX_NUMBERS.has(ev.waba_phone) || ev.waba_label.toLowerCase().includes('wbx');
+
+        // Quick filter
+        if (quickFilter === 'body' && !ev.has_body) return false;
+        if (quickFilter === 'nobody' && ev.has_body) return false;
+        if (quickFilter === 'wbx' && !isWbx) return false;
+
+        // Search box
+        if (query) {
+          if (query === 'body' || query === 'has body' || query === 'with body') return ev.has_body;
+          if (query === 'no body' || query === 'nobody' || query === 'status only') return !ev.has_body;
+          if (query === 'wbx' || query === 'coexistence') return isWbx;
+          const searchHaystack = (
+            JSON.stringify(ev.payload) + ' ' +
+            (ev.summary || '') + ' ' +
+            (ev.waba_label || '') + ' ' +
+            (ev.waba_phone || '') + ' ' +
+            (ev.kind || '') + ' ' +
+            (ev.peer || '') + ' ' +
+            (ev.id || '')
+          ).toLowerCase();
+          return searchHaystack.includes(query);
+        }
+
+        return true;
+      });
+
+      document.getElementById('matchCounter').textContent = `${filtered.length} of ${rawEvents.length} events`;
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = `
+          <div class="empty-state">
+            <div>No webhook events matched your search or filters.</div>
+          </div>`;
+        return;
+      }
+
+      const html = filtered.map(ev => {
+        const isNew = !knownEventIds.has(ev.id);
+        if (isNew) knownEventIds.add(ev.id);
+
+        const isWbx = WBX_NUMBERS.has(ev.waba_phone) || (ev.waba_label || '').toLowerCase().includes('wbx');
+        const isOpen = openJsonIds.has(ev.id);
+
+        // Styling based on Body vs No Body
+        let rowClass = 'event-row';
+        let badgeHtml = '';
+        if (ev.has_body) {
+          rowClass += ' is-body';
+          if (ev.kind === 'inbound_message') {
+            badgeHtml = `<span class="badge badge-info">Inbound</span>`;
+          } else {
+            badgeHtml = `<span class="badge badge-success">Has body</span>`;
+          }
+        } else {
+          rowClass += ' is-nobody';
+          badgeHtml = `<span class="badge badge-danger">No body</span>`;
+        }
+
+        if (isWbx) {
+          rowClass += ' is-wbx';
+        }
+
+        if (isNew) {
+          rowClass += ' flash-new';
+        }
+
+        const channelBadge = isWbx
+          ? `<span class="badge badge-wbx" title="WBX coexistence number">${escapeHtml(ev.waba_label || ev.waba_phone)}</span>`
+          : `<span class="badge badge-gray">${escapeHtml(ev.waba_label || ev.waba_phone)}</span>`;
+
+        const timeStr = ev.received_at ? new Date(ev.received_at).toLocaleTimeString() : '';
+        const jsonFormatted = highlightJson(ev.payload);
+
+        return `
+          <div class="${rowClass}" id="event-row-${ev.id}">
+            <div class="row-header" onclick="toggleJson(${ev.id})">
+              <div class="row-left">
+                <span class="row-time">${timeStr}</span>
+                ${badgeHtml}
+                ${channelBadge}
+                <span class="row-summary" title="${escapeHtml(ev.summary || '')}">${formatSummary(ev)}</span>
+              </div>
+              <div class="row-right">
+                <span style="color: var(--text-muted); font-size: 0.7rem; font-family: var(--font-mono);">#${ev.id}</span>
+                <button class="icon-btn" onclick="event.stopPropagation(); copyRawJson(${ev.id})">📋 Copy</button>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">${isOpen ? '▲' : '▼'}</span>
+              </div>
+            </div>
+
+            <div class="row-json" id="json-drawer-${ev.id}" style="display: ${isOpen ? 'block' : 'none'};">
+              <button class="copy-json-btn" onclick="copyRawJson(${ev.id})">Copy Full JSON</button>
+              <div class="json-code">${jsonFormatted}</div>
+            </div>
+          </div>`;
+      }).join('');
+
+      listEl.innerHTML = html;
+    }
+
+    function formatSummary(ev) {
+      if (ev.has_body) {
+        return `<span class="highlight-text">${escapeHtml(ev.summary || '')}</span>`;
+      }
+      return `<span style="color: #fca5a5;">${escapeHtml(ev.summary || '')}</span>`;
+    }
+
+    function toggleJson(id) {
+      if (openJsonIds.has(id)) {
+        openJsonIds.delete(id);
+      } else {
+        openJsonIds.add(id);
+      }
+      const el = document.getElementById(`json-drawer-${id}`);
+      if (el) el.style.display = openJsonIds.has(id) ? 'block' : 'none';
+    }
+
+    function toggleAllJson(open) {
+      if (open) {
+        rawEvents.forEach(e => openJsonIds.add(e.id));
+      } else {
+        openJsonIds.clear();
+      }
+      renderFilteredEvents();
+    }
+
+    function copyRawJson(id) {
+      const ev = rawEvents.find(e => e.id === id);
+      if (!ev) return;
+      navigator.clipboard.writeText(JSON.stringify(ev.payload, null, 2));
+      alert(`Copied Event #${id} JSON to clipboard!`);
+    }
+
+    function highlightJson(jsonObj) {
+      const json = JSON.stringify(jsonObj, null, 2);
+      return escapeHtml(json)
+        .replace(/("statuses"|"status"|"delivered"|"read"|"failed")/g, '<span class="status-highlight">$1</span>')
+        .replace(/("body"|"text"|"messages"|"messageText")/g, '<span class="body-highlight">$1</span>');
+    }
+
+    function togglePause() {
+      isPaused = !isPaused;
+      const btn = document.getElementById('togglePauseBtn');
+      const dot = document.getElementById('liveDot');
+      const text = document.getElementById('liveStatusText');
+
+      if (isPaused) {
+        btn.textContent = 'Resume';
+        dot.classList.add('paused');
+        text.textContent = 'Paused';
+      } else {
+        btn.textContent = 'Pause';
+        dot.classList.remove('paused');
+        text.textContent = 'Live Feed (1.5s)';
+        fetchEvents(true);
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Start auto polling
+    fetchEvents(true);
+    pollTimer = setInterval(() => fetchEvents(false), 1500);
+  </script>
+</body>
+</html>

@@ -10,10 +10,8 @@ import {
 import {
   Plus,
   Copy,
-  RefreshCw,
   Trash2,
-  Eye,
-  EyeOff,
+  Ban,
   Loader2,
   Check,
   KeyRound,
@@ -56,7 +54,6 @@ export function ApiKeys() {
   const createMutation = useCreateApiKeyMutation();
   const deleteMutation = useDeleteApiKeyMutation();
   const revokeMutation = useRevokeApiKeyMutation();
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [newKey, setNewKey] = useState({ name: '', role: 'operator' });
   const [createdKey, setCreatedKey] = useState<string | null>(null);
@@ -111,15 +108,6 @@ export function ApiKeys() {
     setConfirmAction(null);
   };
 
-  const toggleKeyVisibility = (id: string) => {
-    setVisibleKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const handleCopy = async (text: string, id: string) => {
     if (await copyToClipboard(text)) {
       setCopied(id);
@@ -136,21 +124,11 @@ export function ApiKeys() {
       columnHelper.accessor('keyPrefix', {
         id: 'key',
         header: () => t('apiKeys.columns.key'),
-        cell: info => {
-          const apiKey = info.row.original;
-          return (
-            <span className="key-cell">
-              <code>{visibleKeys.has(apiKey.id) ? apiKey.keyPrefix + '...' : apiKey.keyPrefix + '****'}</code>
-              <button
-                className="icon-btn-sm"
-                onClick={() => toggleKeyVisibility(apiKey.id)}
-                aria-label={visibleKeys.has(apiKey.id) ? t('common.hideApiKey') : t('common.showApiKey')}
-              >
-                {visibleKeys.has(apiKey.id) ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </span>
-          );
-        },
+        cell: info => (
+          <span className="key-cell" title="Full key is shown only once when created">
+            <code>{info.getValue()}…</code>
+          </span>
+        ),
       }),
       columnHelper.accessor('role', {
         header: () => t('apiKeys.columns.role'),
@@ -188,7 +166,7 @@ export function ApiKeys() {
                   onClick={() => setConfirmAction({ type: 'revoke', id: apiKey.id, name: apiKey.name })}
                   title={t('apiKeys.actions.revoke')}
                 >
-                  <RefreshCw size={16} />
+                  <Ban size={16} />
                 </button>
               )}
               <button
@@ -203,7 +181,7 @@ export function ApiKeys() {
         },
       }),
     ],
-    [visibleKeys, t],
+    [t],
   );
 
   const table = useReactTable({

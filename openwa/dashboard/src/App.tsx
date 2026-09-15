@@ -112,22 +112,40 @@ function AppContent() {
     );
   }
 
+  // A7: agents (operator/viewer) only work chats. Landing them on Dashboard is
+  // how Pic-2 happened — sessions table + Disconnect with no way to the inbox.
+  // Admin keeps the full tree. While role is still null, keep admin routes so a
+  // refresh as admin does not flash a chats-only shell.
+  const isAgent = role === 'operator' || role === 'viewer';
+
   return (
     <ToastProvider>
       <BrowserRouter>
         <Suspense fallback={loadingFallback}>
           <Routes>
             <Route path="/" element={<Layout onLogout={handleLogout} userRole={role} />}>
-              <Route index element={<Dashboard />} />
-              <Route path="sessions" element={<Sessions />} />
-              <Route path="chats" element={<Chats />} />
-              <Route path="webhooks" element={<Webhooks />} />
-              <Route path="templates" element={<Templates />} />
-              {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
-              <Route path="logs" element={<Logs />} />
-              <Route path="message-tester" element={<MessageTester />} />
-              {role === 'admin' && <Route path="infrastructure" element={<Infrastructure />} />}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              {isAgent ? (
+                <>
+                  <Route index element={<Navigate to="/chats" replace />} />
+                  <Route path="chats" element={<Chats />} />
+                  <Route path="*" element={<Navigate to="/chats" replace />} />
+                </>
+              ) : (
+                <>
+                  {/* A7: land on Chats full-page; other screens open from the app menu. */}
+                  <Route index element={<Navigate to="/chats" replace />} />
+                  <Route path="chats" element={<Chats />} />
+                  <Route path="dashboard" element={<Dashboard />} />
+                  <Route path="sessions" element={<Sessions />} />
+                  <Route path="webhooks" element={<Webhooks />} />
+                  <Route path="templates" element={<Templates />} />
+                  {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
+                  <Route path="logs" element={<Logs />} />
+                  <Route path="message-tester" element={<MessageTester />} />
+                  {role === 'admin' && <Route path="infrastructure" element={<Infrastructure />} />}
+                  <Route path="*" element={<Navigate to="/chats" replace />} />
+                </>
+              )}
             </Route>
           </Routes>
         </Suspense>

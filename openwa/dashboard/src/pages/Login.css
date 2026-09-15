@@ -6,22 +6,35 @@
   align-items: center;
   justify-content: center;
   background: var(--bg-light);
-  padding: 2rem;
+  padding: 1.25rem;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
+  overflow: auto;
+}
+
+:root[data-embedded] .login-container {
+  background: transparent;
+  padding: 0.75rem;
 }
 
 .login-container .login-card {
   background: var(--bg-white);
   border-radius: 12px;
   box-shadow: var(--shadow-lg);
-  padding: 3rem;
+  padding: 2rem 1.75rem;
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
   text-align: center;
+}
+
+:root[data-embedded] .login-container .login-card {
+  background: #0f1c2e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #eef3f9;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
 }
 
 .login-container .login-logo {
@@ -29,14 +42,19 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
 }
 
 .login-container .logo-icon {
-  width: 127px;
-  height: 127px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
+}
+
+:root[data-embedded] .login-container .logo-icon {
+  width: 56px;
+  height: 56px;
 }
 
 .login-container .version-info {
@@ -128,6 +146,15 @@
   color: var(--text-muted);
   cursor: pointer;
   padding: 0.25rem;
+}
+
+.login-container [dir='rtl'] .toggle-visibility {
+  right: auto;
+  left: 0.75rem;
+}
+
+.login-container [dir='rtl'] .input-wrapper input {
+  padding: 0.75rem 1rem 0.75rem 3rem;
 }
 
 .login-container .toggle-visibility:hover {

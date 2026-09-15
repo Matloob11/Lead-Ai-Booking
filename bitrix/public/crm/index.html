@@ -4,17 +4,27 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A7 WhatsApp — CRM Tab</title>
-    <link rel="stylesheet" href="./crm-tab.css" />
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        var domain = q.get("DOMAIN");
+        var sid = q.get("APP_SID");
+        var protocol = q.get("PROTOCOL") === "0" ? "0" : "1";
+        if (domain && sid && String(window.name || "").split("|").filter(Boolean).length < 3) {
+          window.name = domain + "|" + protocol + "|" + sid;
+        }
+      })();
+    </script>
+    <script src="/app/assets/core/bx24-early.js"></script>
+    <link rel="stylesheet" href="/app/crm/crm-tab.css" />
   </head>
   <body>
     <!--
-      Handler for the four CRM detail tabs. It lists this record's phone numbers
-      and says, for each, whether a WhatsApp chat already exists — and the icon
-      opens the panel on that chat, inside Bitrix, through
-      BX24.openApplication.
+      Handler for CRM detail tabs (lead / deal / contact / company / Owner Data).
+      Lists this record's phone numbers and offers Open with Omni (WABA panel)
+      and Open with WhatsApp (Linked devices / OpenWA) for each.
 
-      No thread, no composer. Answering a customer needs templates, the 24-hour
-      window and the rest of the conversation, all of which live in the panel.
+      No thread, no composer here — answering happens in Omni or Linked devices.
     -->
     <main id="root">
       <div class="loading-state">
@@ -22,6 +32,6 @@
         <span>Looking for WhatsApp chats…</span>
       </div>
     </main>
-    <script type="module" src="./crm-tab.js"></script>
+    <script type="module" src="/app/crm/crm-tab.js"></script>
   </body>
 </html>

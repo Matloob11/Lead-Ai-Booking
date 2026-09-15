@@ -97,6 +97,26 @@ export class Session {
   @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
   historyImportedAt!: Date | null;
 
+  /** Immutable first accepted-link anchor. Legacy bound sessions conservatively use createdAt. */
+  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  historyFirstLinkedAt!: Date | null;
+
+  /** Generation-scoped history CAS token. Never exposed as public session state. */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  historySyncToken!: string | null;
+
+  /** Durable sanitized history/identity failure that survives process restart. */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  historySyncError!: string | null;
+
+  /**
+   * Soft-remove marker. When set, the session is out of active use (auth purged, engine down) but
+   * the row and every stored message stay so All chats / a later reconnect can still see them.
+   * Null means the session is still an active record (connected or not).
+   */
+  @Column({ type: dateColumnType(), nullable: true, transformer: DateTransformer })
+  removedAt!: Date | null;
+
   @Column({ type: 'integer', default: 100 })
   syncProgress!: number;
 

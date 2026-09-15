@@ -145,8 +145,16 @@ export function modal(title, content, { wide = false, onClose } = {}) {
 
 /** Initials for the avatar circle. */
 export function initials(name) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "#";
+  // Letters only — "Matloob (test)" must not become "M(".
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .map((part) => part.replace(/[^A-Za-z\u00C0-\u024F]/g, ""))
+    .filter(Boolean);
+  if (!parts.length) {
+    const digits = String(name || "").replace(/\D/g, "");
+    return digits ? digits.slice(-2) : "#";
+  }
   return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
 }
 

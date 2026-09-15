@@ -4,6 +4,8 @@ import './i18n';
 import './index.css';
 // A7: read after index.css so it can override the page layout it adjusts.
 import './a7-embedded.css';
+// A7: Omni-style liquid glass when Linked devices frames this dashboard.
+import './a7-glass-embedded.css';
 import App from './App.tsx';
 
 // A7: mark the document when this dashboard is not the top window.
@@ -19,20 +21,28 @@ import App from './App.tsx';
 // because reading window.top throws across origins in some browsers, and a
 // dashboard that fails to start is a far worse outcome than an untrimmed one.
 try {
-  if (window.self !== window.top) {
+  const framed = window.self !== window.top;
+  const wantEmbed = new URLSearchParams(window.location.search).get('embedded') === '1';
+  if (framed || wantEmbed) {
     document.documentElement.dataset.embedded = 'true';
+    // Linked panel always uses the glass-dark palette (matches Omni WhatsApp).
+    document.documentElement.setAttribute('data-theme', 'dark');
   }
 } catch {
   // Cross-origin frame: being unable to see the top window is itself the answer.
   document.documentElement.dataset.embedded = 'true';
+  document.documentElement.setAttribute('data-theme', 'dark');
 }
 
 // Apply the stored theme BEFORE first paint: useTheme() only runs inside Layout, so standalone
 // routes (Login) otherwise flash the OS theme on reload even when the user explicitly picked one.
 // Mirrors applyTheme: an explicit choice sets data-theme; system/absent leaves it to the media query.
-const storedTheme = localStorage.getItem('openwa_theme');
-if (storedTheme === 'light' || storedTheme === 'dark') {
-  document.documentElement.setAttribute('data-theme', storedTheme);
+// Embedded Linked devices keeps dark (set above) so it matches the Omni glass theme.
+if (document.documentElement.dataset.embedded !== 'true') {
+  const storedTheme = localStorage.getItem('openwa_theme');
+  if (storedTheme === 'light' || storedTheme === 'dark') {
+    document.documentElement.setAttribute('data-theme', storedTheme);
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

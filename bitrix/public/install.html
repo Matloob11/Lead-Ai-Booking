@@ -4,8 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A7 WhatsApp Inbox — install</title>
-    <link rel="stylesheet" href="./assets/modules/panel.css" />
-    <link rel="stylesheet" href="./assets/modules/install.css" />
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        var domain = q.get("DOMAIN");
+        var sid = q.get("APP_SID");
+        var protocol = q.get("PROTOCOL") === "0" ? "0" : "1";
+        if (domain && sid && String(window.name || "").split("|").filter(Boolean).length < 3) {
+          window.name = domain + "|" + protocol + "|" + sid;
+        }
+      })();
+    </script>
+    <script src="/app/assets/core/bx24-early.js"></script>
+    <link rel="stylesheet" href="/app/assets/modules/panel.css" />
+    <link rel="stylesheet" href="/app/assets/modules/install.css" />
   </head>
   <body>
     <!--
@@ -44,7 +56,7 @@
     </main>
 
     <script type="module">
-      import { loadBX24, callBitrix, ensurePlacement } from "./assets/core/bitrix-sso.js";
+      import { loadBX24, callBitrix, ensurePlacement } from "/app/assets/core/bitrix-sso.js";
 
       /**
        * Every placement this app owns.
@@ -86,6 +98,12 @@
           title: "WhatsApp",
           handler: CRM_HANDLER,
           what: "The same tab on a company.",
+        },
+        {
+          placement: "CRM_DYNAMIC_1042_DETAIL_TAB",
+          title: "WhatsApp",
+          handler: CRM_HANDLER,
+          what: "The same tab on Owner Data (smart process 1042), including cards opened from its kanban.",
         },
       ];
 

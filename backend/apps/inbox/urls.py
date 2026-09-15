@@ -9,6 +9,7 @@ urlpatterns = [
     path("conversations/<int:pk>/messages/", views.message_list, name="message-list"),
     path("conversations/<int:pk>/send/", views.send, name="send"),
     path("conversations/<int:pk>/send-template/", views.send_template, name="send-template"),
+    path("conversations/<int:pk>/templates/", views.conversation_templates, name="conversation-templates"),
     path("conversations/<int:pk>/assign/", views.assign, name="assign"),
     path("conversations/<int:pk>/read/", views.mark_read, name="mark-read"),
     path("conversations/<int:pk>/contact/", views.contact_detail, name="contact-detail"),

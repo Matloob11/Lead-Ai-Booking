@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -17,13 +17,13 @@ import {
   Monitor,
   Menu,
   X,
-  ChevronLeft,
-  ChevronRight,
-  Languages,
+  SquarePen,
+  UserRound,
+  HeartPulse,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
-import { languageOptions, resolveSupportedLanguage, rtlLanguages, type SupportedLanguage } from '../i18n';
+import { AppMenuProvider, useAppMenu } from '../hooks/useAppMenu';
 import { healthApi } from '../services/api';
 import './Layout.css';
 
@@ -33,239 +33,205 @@ interface LayoutProps {
 }
 
 // A7: an agent gets Chats and nothing else. Everything else on this list is
-// somebody administering the system rather than answering a customer — webhooks,
-// templates, the message tester, the logs — and putting those in front of an
-// agent invites a question they should never have to think about.
-//
-// This is the menu, not the lock. What an agent can actually reach is decided by
-// their API key: `role` refuses the admin routes and `allowedSessions` confines
-// every read to the numbers assigned to them, both server-side. Hiding a link
-// only stops it being clicked.
-//
-// The Plugins page is gone rather than hidden. The plugin *system* stays, and has
-// to — the whatsapp-web.js engine is itself loaded through it, so tearing that out
-// would take WhatsApp with it. It is the page that has no business here.
+// somebody administering the system rather than answering a customer.
 const allNavItems = [
-  { to: '/', icon: LayoutDashboard, key: 'dashboard' as const, adminOnly: true },
-  { to: '/sessions', icon: Smartphone, key: 'sessions' as const, adminOnly: true },
-  { to: '/chats', icon: MessageSquare, key: 'chats' as const, adminOnly: false },
-  { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: true },
-  { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: true },
-  { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true },
-  { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: true },
-  // Backend /infra/* is ADMIN-only; hide the nav item from non-admins (UX + defense-in-depth).
-  { to: '/infrastructure', icon: Server, key: 'infrastructure' as const, adminOnly: true },
-  { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: true },
+  { to: '/dashboard', icon: LayoutDashboard, key: 'dashboard' as const, adminOnly: true, core: true },
+  { to: '/sessions', icon: Smartphone, key: 'sessions' as const, adminOnly: true, core: true },
+  { to: '/chats', icon: MessageSquare, key: 'chats' as const, adminOnly: false, core: true },
+  { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true, core: true },
+  // Advanced / upstream ops — hidden in Bitrix Linked phones embed (clutter).
+  { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: true, core: false },
+  { to: '/templates', icon: ClipboardList, key: 'templates' as const, adminOnly: true, core: false },
+  { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: true, core: false },
+  { to: '/infrastructure', icon: Server, key: 'infrastructure' as const, adminOnly: true, core: false },
+  { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: true, core: false },
 ];
 
 const themeIcons = { light: Sun, dark: Moon, system: Monitor };
 
-export function Layout({ onLogout, userRole }: LayoutProps) {
-  const { t, i18n } = useTranslation();
+function LayoutShell({ onLogout, userRole }: LayoutProps) {
+  const { t } = useTranslation();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const ThemeIcon = themeIcons[theme];
-  const themeLabel = t(`theme.${theme}`);
+  const { menuOpen, closeMenu, toggleMenu, chatsHostsMenu, chatsActions } = useAppMenu();
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  const navItems = allNavItems.filter(item => !item.adminOnly || userRole === 'admin');
+  const embedded = document.documentElement.dataset.embedded === 'true';
+  const navItems = allNavItems.filter(item => {
+    if (item.adminOnly && userRole !== 'admin') return false;
+    // In the Bitrix iframe, keep desk tools only — Webhooks/Infra/Tester are Advanced.
+    if (embedded && !item.core) return false;
+    return true;
+  });
 
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  // Show the build-time version immediately, then replace it with the live running version from the
-  // backend so a stale-built bundle can't display the wrong number. Falls back silently on error.
-  const [version, setVersion] = useState(__APP_VERSION__);
-  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
-  const languageMenuRef = useRef<HTMLDivElement>(null);
-
+  // Framed agent → mark document so a7-embedded.css can trim page chrome.
   useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) setIsMobileOpen(false);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    healthApi
-      .check()
-      .then(info => {
-        if (active && info?.version) setVersion(info.version);
-      })
-      .catch(() => {
-        /* keep the build-time fallback */
-      });
+    const embedded = document.documentElement.dataset.embedded === 'true';
+    const agent = embedded && userRole !== null && userRole !== 'admin';
+    if (agent) {
+      document.documentElement.dataset.agentEmbed = 'true';
+    } else {
+      delete document.documentElement.dataset.agentEmbed;
+    }
     return () => {
-      active = false;
+      delete document.documentElement.dataset.agentEmbed;
     };
+  }, [userRole]);
+
+  // Live version is unused in the dropdown shell (no brand rail). Still ping
+  // health so a dead API surfaces elsewhere; keep the call for compatibility.
+  useEffect(() => {
+    void healthApi.check().catch(() => undefined);
   }, []);
 
-  const handleNavClick = () => {
-    if (isMobile) setIsMobileOpen(false);
-  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      // Hamburger buttons set data-a7-menu-trigger so a second click toggles
+      // rather than immediately re-closing from the outside-click handler.
+      if (event.target instanceof Element && event.target.closest('[data-a7-menu-trigger]')) {
+        return;
+      }
+      closeMenu();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen, closeMenu]);
 
   useEffect(() => {
-    document.body.style.overflow = isMobileOpen ? 'hidden' : '';
+    document.body.style.overflow = menuOpen ? 'hidden' : '';
     return () => {
       document.body.style.overflow = '';
     };
-  }, [isMobileOpen]);
+  }, [menuOpen]);
 
-  useEffect(() => {
-    if (!isLanguageMenuOpen) return;
-
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!languageMenuRef.current?.contains(event.target as Node)) {
-        setIsLanguageMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsLanguageMenuOpen(false);
-    };
-
-    document.addEventListener('mousedown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('mousedown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [isLanguageMenuOpen]);
-
-  const toggleCollapse = () => setIsCollapsed(!isCollapsed);
-  const toggleMobile = () => setIsMobileOpen(!isMobileOpen);
-
-  const currentLang = resolveSupportedLanguage(i18n.resolvedLanguage || i18n.language);
-  const languageLabel = languageOptions.find(option => option.value === currentLang)?.compactLabel ?? 'EN';
-  const changeLanguage = (language: SupportedLanguage) => {
-    setIsLanguageMenuOpen(false);
-    void i18n.changeLanguage(language);
+  const runAndClose = (fn: () => void) => {
+    closeMenu();
+    fn();
   };
-  const isRtl = rtlLanguages.includes(currentLang);
 
   return (
-    <div className="layout">
-      {isMobile && (
-        <header className="mobile-header">
-          <button className="mobile-menu-btn" onClick={toggleMobile} aria-label={t('common.expand')}>
-            {isMobileOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
-          <div className="mobile-brand">
-            <img src="/a7-logo.png" alt="A7 Group" className="sidebar-logo" />
-            <span className="brand-name">{t('common.appName')}</span>
-          </div>
-          <div style={{ width: 40 }} />
-        </header>
-      )}
+    <div className="layout a7-menu-shell">
+      {/* Global trigger when Chats is not hosting the hamburger (other routes). */}
+      {!chatsHostsMenu ? (
+        <button
+          type="button"
+          className={`a7-app-menu-trigger ${menuOpen ? 'open' : ''}`}
+          data-a7-menu-trigger
+          aria-expanded={menuOpen}
+          aria-controls="a7-app-menu"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          onClick={toggleMenu}
+        >
+          {menuOpen ? <X size={20} strokeWidth={2.25} /> : <Menu size={20} strokeWidth={2.25} />}
+        </button>
+      ) : null}
 
-      {isMobile && isMobileOpen && <div className="sidebar-overlay" onClick={() => setIsMobileOpen(false)} />}
-
-      <aside
-        className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${isMobile ? 'mobile' : ''} ${isMobileOpen ? 'open' : ''}`}
-      >
-        <div className="sidebar-header">
-          <img src="/a7-logo.png" alt="A7 Group" className="sidebar-logo" />
-          {!isCollapsed && (
-            <div className="sidebar-brand">
-              <span className="brand-name">{t('common.appName')}</span>
-              <span className="brand-version">v{version}</span>
-            </div>
-          )}
-        </div>
-
-        {!isMobile && (
-          <button
-            className="collapse-toggle"
-            onClick={toggleCollapse}
-            title={isCollapsed ? t('common.expand') : t('common.collapse')}
-            aria-label={isCollapsed ? t('common.expand') : t('common.collapse')}
+      {menuOpen ? (
+        <>
+          <div className="a7-app-menu-backdrop" onClick={closeMenu} aria-hidden="true" />
+          <div
+            id="a7-app-menu"
+            className="a7-app-menu"
+            ref={menuRef}
+            role="menu"
+            aria-label="App menu"
           >
-            {isCollapsed ? (
-              isRtl ? (
-                <ChevronLeft size={16} />
-              ) : (
-                <ChevronRight size={16} />
-              )
-            ) : isRtl ? (
-              <ChevronRight size={16} />
-            ) : (
-              <ChevronLeft size={16} />
-            )}
-          </button>
-        )}
-
-        <nav className="sidebar-nav">
-          {navItems.map(({ to, icon: Icon, key }) => {
-            const label = t(`nav.${key}`);
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                end={to === '/'}
-                onClick={handleNavClick}
-                title={isCollapsed ? label : undefined}
-              >
-                <Icon size={20} />
-                {!isCollapsed && <span>{label}</span>}
-              </NavLink>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="language-menu" ref={languageMenuRef}>
-            <button
-              className="theme-toggle-btn"
-              onClick={() => setIsLanguageMenuOpen(open => !open)}
-              title={t('common.language')}
-              aria-label={t('common.language')}
-              aria-haspopup="menu"
-              aria-expanded={isLanguageMenuOpen}
-            >
-              <Languages size={18} />
-              {!isCollapsed && <span>{languageLabel}</span>}
-            </button>
-            {isLanguageMenuOpen && (
-              <div className="language-menu-list" role="menu" aria-label={t('common.language')}>
-                {languageOptions.map(option => (
+            {chatsActions ? (
+              <>
+                {/* Conversation Health is admin-only — agents must not see colour monitor. */}
+                {userRole === 'admin' ? (
                   <button
-                    key={option.value}
-                    className={`language-menu-item ${option.value === currentLang ? 'active' : ''}`}
-                    onClick={() => changeLanguage(option.value)}
-                    role="menuitemradio"
-                    aria-checked={option.value === currentLang}
+                    type="button"
+                    className="a7-app-menu-item"
+                    role="menuitem"
+                    onClick={() => runAndClose(chatsActions.onOpenHealth)}
                   >
-                    <span>{option.label}</span>
+                    <HeartPulse size={18} />
+                    <span>Conversation Health</span>
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="appearance-menu">
-            <button
-              className="theme-toggle-btn"
-              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-              title={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
-              aria-label={t('theme.toggleTo', { value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark') })}
-            >
-              <span className="appearance-button-cue" aria-hidden="true">
-                <ThemeIcon size={16} />
-              </span>
-              {!isCollapsed && <span>{themeLabel}</span>}
-            </button>
-          </div>
-          <button className="logout-btn" onClick={onLogout} title={isCollapsed ? t('common.logout') : undefined}>
-            <LogOut size={20} />
-            {!isCollapsed && <span>{t('common.logout')}</span>}
-          </button>
-        </div>
-      </aside>
+                ) : null}
+                <button
+                  type="button"
+                  className="a7-app-menu-item"
+                  role="menuitem"
+                  onClick={() => runAndClose(chatsActions.onNewContact)}
+                >
+                  <SquarePen size={18} />
+                  <span>New contact</span>
+                </button>
+                <button
+                  type="button"
+                  className="a7-app-menu-item"
+                  role="menuitem"
+                  onClick={() => runAndClose(chatsActions.onOpenProfile)}
+                >
+                  <UserRound size={18} />
+                  <span>My desk</span>
+                </button>
+                <div className="a7-app-menu-divider" role="separator" />
+              </>
+            ) : null}
 
-      <main className={`main-content ${isCollapsed ? 'expanded' : ''} ${isMobile ? 'mobile' : ''}`}>
+            {navItems.map(({ to, icon: Icon, key }) => {
+              const label = t(`nav.${key}`);
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  role="menuitem"
+                  className={({ isActive }) => `a7-app-menu-item ${isActive ? 'active' : ''}`}
+                  onClick={closeMenu}
+                >
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </NavLink>
+              );
+            })}
+
+            <div className="a7-app-menu-footer">
+              {/* Embedded CRM uses the glass dark shell — Theme light fights it and blanks labels. */}
+              {document.documentElement.dataset.embedded !== 'true' ? (
+                <button
+                  type="button"
+                  className="a7-app-menu-theme"
+                  onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                  title={t('theme.toggleTo', {
+                    value: t(resolvedTheme === 'dark' ? 'theme.light' : 'theme.dark'),
+                  })}
+                >
+                  <ThemeIcon size={16} />
+                  <span>Theme</span>
+                </button>
+              ) : null}
+              <button type="button" className="a7-app-menu-item a7-app-menu-logout" onClick={onLogout}>
+                <LogOut size={18} />
+                <span>{t('common.logout')}</span>
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      <main className="main-content a7-full">
         <Outlet />
       </main>
     </div>
+  );
+}
+
+export function Layout({ onLogout, userRole }: LayoutProps) {
+  return (
+    <AppMenuProvider>
+      <LayoutShell onLogout={onLogout} userRole={userRole} />
+    </AppMenuProvider>
   );
 }

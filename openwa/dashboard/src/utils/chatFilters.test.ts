@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filterChats, filterChannels, groupStatusesByContact } from './chatFilters.ts';
+import { filterChats, filterChannels, groupStatusesByContact, chatMatchesPhone } from './chatFilters.ts';
 
 const chat = (id: string, name?: string, kind?: string) => ({ id, name, kind });
 
@@ -27,6 +27,26 @@ test('search matches name or id, case-insensitively, and an absent name never th
   assert.deepEqual(
     filterChats(all, 'zzz').map(c => c.id),
     [],
+  );
+});
+
+test('chatMatchesPhone accepts with or without country code', () => {
+  assert.equal(chatMatchesPhone(chat('971508512115@c.us', 'X'), '971508512115'), true);
+  assert.equal(chatMatchesPhone(chat('971508512115@c.us', 'X'), '508512115'), true);
+  assert.equal(chatMatchesPhone(chat('508512115@c.us', 'X'), '971508512115'), true);
+  assert.equal(chatMatchesPhone(chat('971509998888@c.us', 'X'), '971508512115'), false);
+});
+
+test('search matches formatted phone numbers against digit JIDs', () => {
+  const all = [chat('971509998888@c.us', 'Neha'), chat('923166753715@c.us', 'Market')];
+
+  assert.deepEqual(
+    filterChats(all, '+971 50 999 8888').map(c => c.id),
+    ['971509998888@c.us'],
+  );
+  assert.deepEqual(
+    filterChats(all, '92 316 6753715').map(c => c.id),
+    ['923166753715@c.us'],
   );
 });
 

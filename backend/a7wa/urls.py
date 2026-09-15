@@ -15,6 +15,9 @@ urlpatterns = [
     path("api/catalog/", include("apps.catalog.urls")),
     path("api/inbox/", include("apps.inbox.urls")),
     path("api/crm/", include("apps.crmlink.urls")),
+    path("api/campaigns/", include("apps.campaigns.urls")),
+    path("api/inboxai/", include("apps.inboxai.urls")),
+    path("api/feedback/", include("apps.feedback.urls")),
     path("api/auth/", include("apps.accounts.urls")),
     # The same app under the name it actually has. /api/auth/ came first and the
     # panel's sign-in path is wired to it, so it stays; everything added since

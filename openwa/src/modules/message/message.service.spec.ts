@@ -14,6 +14,7 @@ import { Template } from '../template/entities/template.entity';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { SendPacingService } from './send-pacing.service';
+import { ApiKeyRole } from '../auth/entities/api-key.entity';
 
 /** Pacing is off by default in these tests; the governor's own spec covers its behaviour. */
 const inertPacing = (): SendPacingService =>
@@ -1339,7 +1340,24 @@ describe('MessageService', () => {
     it('threads an abort signal through to the engine when one is given', async () => {
       const { signal } = new AbortController();
       await service.getChatHistory('sess-1', 'test@c.us', 50, true, false, signal);
-      expect(mockEngine.getChatHistory).toHaveBeenCalledWith('test@c.us', 50, true, undefined, signal);
+      expect(mockEngine.getChatHistory).toHaveBeenCalledWith('test@c.us', 50, true, undefined, signal, undefined);
+    });
+
+    it('threads mediaFor through, and keeps the short call shape when neither it nor a signal is given', async () => {
+      await service.getChatHistory('sess-1', 'test@c.us', 50, true, false, undefined, 'true_92@c.us_ABC');
+      expect(mockEngine.getChatHistory).toHaveBeenLastCalledWith(
+        'test@c.us',
+        50,
+        true,
+        undefined,
+        undefined,
+        'true_92@c.us_ABC',
+      );
+
+      // The three-argument shape is what every existing adapter and mock has always seen; passing
+      // trailing undefineds instead would be invisible in behaviour and loud in every other test.
+      await service.getChatHistory('sess-1', 'test@c.us', 50, true);
+      expect(mockEngine.getChatHistory).toHaveBeenLastCalledWith('test@c.us', 50, true);
     });
 
     describe('deep mode (#347)', () => {
@@ -1366,16 +1384,32 @@ describe('MessageService', () => {
   });
 
   describe('deleteMessage', () => {
+    const storedRow = {
+      id: 'row-1',
+      sessionId: 'sess-1',
+      waMessageId: 'wa-msg-1',
+      body: 'keep me',
+      type: 'text',
+      metadata: {},
+    };
+
     it('should call engine.deleteMessage with forEveryone default true', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(storedRow);
       await service.deleteMessage('sess-1', {
         chatId: 'test@c.us',
         messageId: 'wa-msg-1',
       });
 
       expect(mockEngine.deleteMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', true);
+      // Stored body is never wiped — admin still sees content + Deleted label.
+      expect(repository.update).toHaveBeenCalledWith(
+        { id: 'row-1' },
+        expect.objectContaining({ metadata: expect.objectContaining({ agentDeleted: true }) }),
+      );
     });
 
     it('should pass forEveryone=false when specified', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(storedRow);
       await service.deleteMessage('sess-1', {
         chatId: 'test@c.us',
         messageId: 'wa-msg-1',
@@ -1383,6 +1417,51 @@ describe('MessageService', () => {
       });
 
       expect(mockEngine.deleteMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', false);
+    });
+
+    it('soft-deletes for an agent: keeps body, never calls WhatsApp', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValueOnce({
+        id: 'row-1',
+        sessionId: 'sess-1',
+        waMessageId: 'wa-msg-1',
+        body: 'secret text',
+        type: 'text',
+        metadata: { quotedMessage: { id: 'q', body: 'hi' } },
+      });
+
+      await service.deleteMessage(
+        'sess-1',
+        { chatId: 'test@c.us', messageId: 'wa-msg-1' },
+        { role: ApiKeyRole.OPERATOR },
+      );
+
+      expect(mockEngine.deleteMessage).not.toHaveBeenCalled();
+      expect(repository.update).toHaveBeenCalledWith(
+        { id: 'row-1' },
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            agentDeleted: true,
+            quotedMessage: { id: 'q', body: 'hi' },
+          }),
+        }),
+      );
+      // Body/type must not be wiped — admin still reads the real message.
+      const updateArg = (repository.update as jest.Mock).mock.calls.at(-1)?.[1] as Record<string, unknown>;
+      expect(updateArg.body).toBeUndefined();
+      expect(updateArg.type).toBeUndefined();
+    });
+
+    it('admin delete still revokes on WhatsApp but keeps the stored body', async () => {
+      (repository.findOne as jest.Mock).mockResolvedValueOnce(storedRow);
+      await service.deleteMessage(
+        'sess-1',
+        { chatId: 'test@c.us', messageId: 'wa-msg-1', forEveryone: true },
+        { role: ApiKeyRole.ADMIN },
+      );
+      expect(mockEngine.deleteMessage).toHaveBeenCalledWith('test@c.us', 'wa-msg-1', true);
+      const updateArg = (repository.update as jest.Mock).mock.calls.at(-1)?.[1] as Record<string, unknown>;
+      expect(updateArg.body).toBeUndefined();
+      expect(updateArg.type).toBeUndefined();
     });
   });
 

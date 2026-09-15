@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, CornerUpLeft, Loader2, MessageSquare, Smile, Trash2 } from 'lucide-react';
 import type { Chat } from '../../services/api';
-import { getMediaSrc, senderKey, type ChatMessageView } from '../../utils/chatMessages';
+import { getMediaSrc, isAgentDeleted, senderKey, type ChatMessageView } from '../../utils/chatMessages';
 import MessageBody from './MessageBody';
+import VoicePlayer from './VoicePlayer';
+import ChatVideo from './ChatVideo';
 import { parseVCards } from './vcard';
 
 // Stable per-sender colour for group message labels, like WhatsApp gives each participant a colour.
@@ -28,11 +30,13 @@ interface ChatThreadProps {
   onReact: (message: ChatMessageView, emoji: string) => void;
   onDelete: (message: ChatMessageView) => void;
   /**
-   * A7: fetch this chat's media, which the first history read deliberately left out. Resolves with
-   * how many messages came back carrying bytes — zero is a real and common answer, because WhatsApp
-   * stops serving old media, and it must be told apart from a request that failed.
+   * A7: fetch one message's media, which the first history read deliberately left out. Resolves
+   * true when the bytes arrived — false is a real and common answer, because WhatsApp stops serving
+   * old media, and it must be told apart from a request that failed.
    */
-  onLoadMedia: () => Promise<number>;
+  onLoadMedia: (messageId: string) => Promise<boolean>;
+  /** Admin sees agent soft-deletes with a tag; agents never receive the original body. */
+  isAdmin?: boolean;
 }
 
 // The messages area of the active chat room: the bubble list (media, quotes, reactions, hover
@@ -51,6 +55,7 @@ function ChatThread({
   onReact,
   onDelete,
   onLoadMedia,
+  isAdmin = false,
 }: ChatThreadProps) {
   const { t } = useTranslation();
 
@@ -71,29 +76,57 @@ function ChatThread({
     return () => el.removeEventListener('scroll', onScroll);
   });
 
-  // A7: one request per chat, not per bubble. Every omitted bubble in a chat is waiting on the same
-  // fetch, so the state is held here and shared: pressing one loads them all, and pressing a second
-  // while the first is in flight does nothing rather than asking twice for the same bytes.
-  const [loadingMedia, setLoadingMedia] = useState(false);
+  // A7: one request per bubble, and one piece of state per bubble with it.
+  //
+  // This was per chat, on the reasoning that every omitted bubble wants the same fetch. Measuring it
+  // showed the opposite: WhatsApp stops serving old media without saying so, so each dead file is
+  // waited on for the gateway's full download timeout before it can be called gone. Ten of them in
+  // one chat charged about five minutes of spinner to answer for the single bubble that was pressed
+  // — and then condemned all ten with that one answer, though a chat can hold a dead file from
+  // February beside a live one from this morning.
+  const [loadingMedia, setLoadingMedia] = useState<Set<string>>(new Set());
   // Three outcomes, not two. 'failed' is the request itself going wrong; 'gone' is the request
   // working and WhatsApp having nothing to give — every download for a month-old file times out,
   // which is retention, not an error. Telling the agent to try again in that case is a lie.
-  const [mediaOutcome, setMediaOutcome] = useState<'none' | 'failed' | 'gone'>('none');
-  const loadMedia = useCallback(() => {
-    if (loadingMedia) return;
-    setLoadingMedia(true);
-    setMediaOutcome('none');
-    void onLoadMedia()
-      .then(arrived => setMediaOutcome(arrived > 0 ? 'none' : 'gone'))
-      .catch(() => setMediaOutcome('failed'))
-      .finally(() => setLoadingMedia(false));
-  }, [loadingMedia, onLoadMedia]);
+  const [mediaOutcome, setMediaOutcome] = useState<Record<string, 'failed' | 'gone'>>({});
+  const loadMedia = useCallback(
+    (messageId: string) => {
+      // Pressing a bubble already in flight must not ask twice; a different bubble may go in
+      // parallel, because each is a separate file with a separate answer.
+      let started = false;
+      setLoadingMedia(prev => {
+        if (prev.has(messageId)) return prev;
+        started = true;
+        return new Set(prev).add(messageId);
+      });
+      if (!started) return;
+      setMediaOutcome(prev => {
+        if (!(messageId in prev)) return prev;
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+      void onLoadMedia(messageId)
+        .then(arrived =>
+          setMediaOutcome(prev => (arrived ? prev : { ...prev, [messageId]: 'gone' as const })),
+        )
+        .catch(() => setMediaOutcome(prev => ({ ...prev, [messageId]: 'failed' as const })))
+        .finally(() =>
+          setLoadingMedia(prev => {
+            const next = new Set(prev);
+            next.delete(messageId);
+            return next;
+          }),
+        );
+    },
+    [onLoadMedia],
+  );
 
   // A different chat's media is a different question — and the previous chat's failure must not
   // greet the agent on a chat that has not been asked yet.
   useEffect(() => {
-    setLoadingMedia(false);
-    setMediaOutcome('none');
+    setLoadingMedia(new Set());
+    setMediaOutcome({});
   }, [activeChat?.id]);
 
   const handleJumpToBottom = useCallback(() => {
@@ -249,28 +282,33 @@ function ChatThread({
             // A7: the bytes were never fetched, not lost. History is read media-free so a chat full
             // of video cannot be turned into heap, which left every imported photo and clip showing
             // this placeholder for ever — 187 of 190 media rows on the live account. It is a button
-            // now: the agent who wants the file says so, and the chat's media is fetched then.
+            // now: the agent who wants THIS file says so, and only this file is fetched.
             if (mediaInfo.omitted) {
+              // The WhatsApp id, which is what the gateway matches `mediaFor` against. A DB row
+              // carries it as waMessageId (its own `id` is our UUID); a history row already is one.
+              const waId = msg.waMessageId ?? msg.id;
+              const loading = loadingMedia.has(waId);
+              const outcome = mediaOutcome[waId];
               return (
                 <button
                   type="button"
                   className="message-media-fetch"
-                  onClick={loadMedia}
+                  onClick={() => loadMedia(waId)}
                   // 'gone' is not retryable: WhatsApp will not start serving the file again.
-                  disabled={loadingMedia || mediaOutcome === 'gone'}
+                  disabled={loading || outcome === 'gone'}
                   title={mediaInfo.filename || undefined}
                 >
-                  {loadingMedia ? <Loader2 className="animate-spin" size={14} /> : '📎'}
+                  {loading ? <Loader2 className="animate-spin" size={14} /> : '📎'}
                   <span>
-                    {mediaOutcome === 'gone'
+                    {outcome === 'gone'
                       ? 'WhatsApp no longer has this file'
-                      : mediaOutcome === 'failed'
+                      : outcome === 'failed'
                         ? 'Could not load'
                         : t('chats.media.omitted')}
                   </span>
-                  {!loadingMedia && mediaOutcome !== 'gone' && (
+                  {!loading && outcome !== 'gone' && (
                     <span className="message-media-fetch-hint">
-                      {mediaOutcome === 'failed' ? 'Tap to try again' : 'Tap to load'}
+                      {outcome === 'failed' ? 'Tap to try again' : 'Tap to load'}
                     </span>
                   )}
                 </button>
@@ -296,14 +334,14 @@ function ChatThread({
               case 'video':
                 return (
                   <div className="message-media-video">
-                    <video src={mediaSrc} controls className="chat-video-media" onLoadedData={onMediaLoad} />
+                    <ChatVideo src={mediaSrc} onLoadedData={onMediaLoad} />
                   </div>
                 );
               case 'audio':
               case 'voice':
                 return (
                   <div className="message-media-audio">
-                    <audio src={mediaSrc} controls className="chat-audio-media" />
+                    <VoicePlayer src={mediaSrc} outgoing={isMe} />
                   </div>
                 );
               case 'document':
@@ -322,6 +360,7 @@ function ChatThread({
           const hasReactions = Object.keys(reactions).length > 0;
           const isRevoked = msg.type === 'revoked';
           const isMasked = msg.type === 'masked';
+          const agentSoftDeleted = isAdmin && isAgentDeleted(msg);
 
           return (
             <div
@@ -333,7 +372,7 @@ function ChatThread({
                 <div
                   className={`message-bubble ${isMe ? 'outgoing' : 'incoming'} ${msg.status} ${
                     isMediaMessage ? 'media-type' : ''
-                  } ${isRevoked ? 'revoked-type' : ''}`}
+                  } ${isRevoked ? 'revoked-type' : ''} ${agentSoftDeleted ? 'agent-deleted' : ''}`}
                 >
                   {/* Group sender label (WhatsApp-style: coloured name atop the bubble) */}
                   {/* Group sender label (WhatsApp-style: coloured name atop the bubble).
@@ -344,6 +383,8 @@ function ChatThread({
                       {msg.chatName}
                     </div>
                   )}
+
+                  {agentSoftDeleted && <div className="message-deleted-tag">{t('chats.agentDeletedTag')}</div>}
 
                   {/* Quoted message display */}
                   {msg.metadata?.quotedMessage && (

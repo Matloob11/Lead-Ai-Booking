@@ -79,6 +79,15 @@ export const BLANK_SHADOWED_ENV_KEYS: string[] = [
   'REDIS_ENABLED',
   'REDIS_HOST',
   'REDIS_PORT',
+  // BullMQ. Blank-forwarded like REDIS_* so host/.env.generated can enable the queue.
+  'QUEUE_ENABLED',
+  // Conversation Health → Bitrix (blank-forwarded in compose)
+  'CONVERSATION_HEALTH_ENABLED',
+  'BITRIX_WEBHOOK_BASE',
+  'OPENAI_API_KEY',
+  'OPENAI_MODEL',
+  'CONVERSATION_HEALTH_CONCURRENCY',
+  'CONVERSATION_HEALTH_OVERRIDE_PASSWORD',
   // Engine launch options the dashboard saves (data/.env.generated). Compose blank-forwards these so a
   // dashboard edit is not shadowed by a pinned container default; the app layer (configuration.ts)
   // supplies the sane default when nothing is set.

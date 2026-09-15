@@ -1,12 +1,14 @@
-import { BadGatewayException, BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ConflictException,
+  HttpStatus,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Repository, DataSource } from 'typeorm';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message } from '../message/entities/message.entity';
-import { MessageBatch } from '../message/entities/message-batch.entity';
-import { Webhook } from '../webhook/entities/webhook.entity';
-import { Template } from '../template/entities/template.entity';
-import { BaileysStoredMessage } from '../../engine/adapters/baileys-stored-message.entity';
 import { EngineFactory } from '../../engine/engine.factory';
 import { EngineRegistry } from '../../engine/engine-registry.service';
 import { SessionErrorStore } from './session-error-store.service';
@@ -17,6 +19,7 @@ import { type createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
 import { SessionLifecycleFences } from './session-lifecycle-fences';
 import { SessionStatusBroadcaster } from './session-status-broadcaster';
+import { requireManualStart } from './session-profile-reset';
 // The two pure config resolvers stay exported from the lifecycle module (its export surface is
 // unchanged — session.service re-exports them from there), so this unit imports them back. The
 // resulting import cycle is deferred-usage only — the bindings are read inside method bodies,
@@ -68,8 +71,8 @@ export interface SessionEngineControlsHost {
 }
 
 /**
- * The 7 public control verbs extracted from SessionEngineLifecycle: start/stop/logout/forceKill/
- * delete/shutdown/stopOrphanEngines, plus the private findOne-or-404 requireSession. Plain class
+ * Public control verbs extracted from SessionEngineLifecycle: start/stop/resetProfile/logout/
+ * forceKill/delete/shutdown/stopOrphanEngines, plus private findOne-or-404 requireSession. Plain class
  * (NOT a NestJS provider — the lifecycle's constructor signature is frozen by specs), built inside
  * the lifecycle's constructor; the lifecycle keeps all 7 verbs as one-line NON-async delegates, so
  * SessionService's public API path and every spec calling the verbs on the lifecycle stay
@@ -217,7 +220,7 @@ export class SessionEngineControls {
         // teardownEngineSafely's race, after which the orphaned Chromium process is never actually
         // killed. forceDestroy() SIGKILLs the OS process directly, the same recovery force-kill uses
         // for a wedged engine, which is exactly the state this catch block is handling.
-        const orphan = this.engines.get(id);
+        const orphan = this.engines.getLifecycle(id);
         if (orphan) {
           this.engines.delete(id);
           this.sessionErrors.set(id, err instanceof Error ? err.message : String(err));
@@ -237,7 +240,7 @@ export class SessionEngineControls {
       // delete() clears its teardown mark before this slow init resolves, so re-check the session row
       // exists, not just the mark; the requireSession below then surfaces a deleted session as NotFound.
       if (await this.host.isSessionRetired(id)) {
-        const resurrected = this.engines.get(id);
+        const resurrected = this.engines.getLifecycle(id);
         if (resurrected) {
           await this.fences.teardownEngineSafely(id, resurrected, e => e.destroy(), 'destroy');
           this.engines.deleteIfLive(id, resurrected);
@@ -263,7 +266,7 @@ export class SessionEngineControls {
     // Disconnect the engine — time-bounded + isolated so a stuck socket can't wedge the stop; the
     // Map is reconciled regardless. (The stop mark is intentionally left set, matching the prior
     // behaviour: a later start() clears it; it guards against a late reconnect resurrecting the id.)
-    const engine = this.engines.get(id);
+    const engine = this.engines.getLifecycle(id);
     if (engine) {
       // Await THIS engine's in-flight INITIALIZING write before teardown / the final DISCONNECTED
       // write so a delayed pre-initialize status update can never settle after the retirement and
@@ -277,7 +280,49 @@ export class SessionEngineControls {
       sessionId: id,
       action: 'stop',
     });
+    await this.sessionRepository.update(id, { historySyncToken: null });
     await this.host.updateStatus(id, SessionStatus.DISCONNECTED);
+    return this.requireSession(id);
+  }
+
+  /**
+   * Remove only engine credentials/profile. Session row, immutable phone identity, and every stored
+   * message remain. Final DISCONNECTED + manualStartRequired prevents global auto-start from silently
+   * generating a QR on the next process boot; a successful future READY clears that flag.
+   */
+  async resetProfile(id: string): Promise<Session> {
+    const session = await this.requireSession(id);
+    await this.fences.awaitPendingTeardown(session.name);
+    this.stoppingSessions.add(id);
+    this.host.cancelReconnect(id);
+
+    const engine = this.engines.getLifecycle(id);
+    if (engine) {
+      await this.fences.awaitInitialStatus(id, engine);
+      await this.fences.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
+      this.engines.deleteIfLive(id, engine);
+    }
+
+    // A logout may have begun after the first fence but before engine eviction. Do not race its rm
+    // against this explicit purge; fail closed with the established retryable 409.
+    await this.fences.awaitPendingTeardown(session.name);
+    await this.engineFactory.purgeSessionDataOrThrow(session.name);
+    await this.sessionRepository.update(id, {
+      status: SessionStatus.DISCONNECTED,
+      config: requireManualStart(session.config) as never,
+      historySyncToken: null,
+      historySyncError: null,
+      nodeId: null,
+      claimedAt: null,
+      leaseExpiresAt: null,
+    });
+    this.sessionErrors.clear(id);
+    this.presence.clear(id);
+    this.broadcaster.publishPersistedStatus(id, SessionStatus.DISCONNECTED);
+    this.logger.warn(`Session profile reset: ${session.name}`, {
+      sessionId: id,
+      action: 'profile_reset',
+    });
     return this.requireSession(id);
   }
 
@@ -309,14 +354,13 @@ export class SessionEngineControls {
    * when an accepted engine-backed attempt stopped locally but the unlink operation did NOT complete
    * — no identity/no send, no IQ acknowledgement, timeout/transport error, OR local credential
    * cleanup failure. After EVERY engine-backed attempt (200 OR 502) the session is torn down locally
-   * (map reconciled, status DISCONNECTED) and `phone` is cleared so the boot auto-start does not
-   * resurrect the session into an uncertain/invalid credential state. No success audit is written on
+   * (map reconciled, status ACTION_REQUIRED) while identity/checkpoint/data remain bound. No success audit is written on
    * the 502 path (the controller audits SESSION_LOGGED_OUT only after the service resolves). The
    * operator can start the session and retry the logout.
    */
   async logout(id: string): Promise<Session> {
     const session = await this.requireSession(id);
-    const engine = this.engines.get(id);
+    const engine = this.engines.getLifecycle(id);
 
     if (!engine) {
       throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
@@ -335,24 +379,24 @@ export class SessionEngineControls {
     // later deleted/recreated.
     const unlinked = await this.fences.teardownEngineSafely(id, engine, e => e.logout(), 'logout', session.name);
     this.engines.deleteIfLive(id, engine);
-    await this.host.updateStatus(id, SessionStatus.DISCONNECTED);
 
     if (!unlinked) {
       this.logger.warn(`Session stopped locally but the logout operation did not complete: ${session.name}`, {
         sessionId: id,
         action: 'logout_incomplete',
       });
-      // The local teardown already ran (map reconciled, status DISCONNECTED), but the unlink operation
-      // did not complete. Clear `phone` AFTER the attempt and BEFORE throwing so the boot auto-start
-      // does not resurrect the session into a credential state that can no longer reach READY — the
-      // local credentials were torn down, so re-entering auto-start would only wedge it. The retryable
-      // 502 carries a stable machine code so the dashboard can branch on origin without guessing from
-      // the status/message; no success audit is written on this path.
-      //
-      // The history watermark goes with the phone, for the reason spelled out on the success path
-      // below: whatever links here next is a fresh link, and the watermark describes a handset that
-      // is no longer attached.
-      await this.sessionRepository.update(id, { phone: null, historyImportedAt: null });
+      // Preserve immutable identity/history ownership. ACTION_REQUIRED excludes boot auto-start and
+      // leaves a durable reason; an operator may explicitly start and retry after reviewing the device.
+      this.sessionErrors.set(
+        id,
+        'Logout did not complete. Bound identity and stored history were preserved; start manually and retry.',
+      );
+      await this.sessionRepository.update(id, {
+        status: SessionStatus.ACTION_REQUIRED,
+        historySyncToken: null,
+        historySyncError: 'LOGOUT_INCOMPLETE',
+      });
+      await this.host.updateStatus(id, SessionStatus.ACTION_REQUIRED);
       throw new BadGatewayException({
         statusCode: HttpStatus.BAD_GATEWAY,
         message:
@@ -363,18 +407,14 @@ export class SessionEngineControls {
       });
     }
 
-    // A completed engine-backed unlink wipes the stored credentials, so this session can never
-    // reach READY again without a fresh QR/pairing. Clear `phone` to take it out of the boot
-    // auto-start query (phone IS NOT NULL) instead of resurrecting it into a QR it can never pass
-    // on every restart. onReady rewrites it on the next successful link.
-    //
-    // The history watermark is cleared with it, and that is the point rather than tidiness. The
-    // watermark is what tells the importer "read from here to now" instead of "read the last ten
-    // days". After an unlink the next QR can be scanned by ANY handset — a different agent, a
-    // different number — and that phone has never been read at all. Left in place, a number linking
-    // for the first time would be given a stranger's watermark and fetch from a date that means
-    // nothing to it.
-    await this.sessionRepository.update(id, { phone: null, historyImportedAt: null });
+    // Credentials are gone, but identity/history ownership is permanent. CREATED is manually
+    // startable and excluded from boot auto-start; the next QR must validate as the same phone.
+    await this.sessionRepository.update(id, {
+      status: SessionStatus.CREATED,
+      historySyncToken: null,
+      historySyncError: null,
+    });
+    await this.host.updateStatus(id, SessionStatus.CREATED);
 
     this.logger.log(`Session logged out: ${session.name}`, {
       sessionId: id,
@@ -382,8 +422,7 @@ export class SessionEngineControls {
     });
     // Told at once, unlike a dropped connection: an unlink is not coming back on
     // its own, and until somebody scans a QR nothing arrives on that number. The
-    // row's phone was cleared two lines up, so the number is read from the copy
-    // taken before the teardown — which is the whole reason that copy exists.
+    // Use the captured phone so alerting is independent of the post-teardown read.
     this.deviceAlerts.reportUnlinked(id, session.phone, session.name);
     return this.requireSession(id);
   }
@@ -396,7 +435,7 @@ export class SessionEngineControls {
    */
   async forceKill(id: string): Promise<Session> {
     const session = await this.requireSession(id);
-    const engine = this.engines.get(id);
+    const engine = this.engines.getLifecycle(id);
 
     // No live engine means there is nothing to SIGKILL. Resolving would let the controller write a
     // SESSION_FORCE_KILLED audit row for a kill that never happened — mirror logout()'s not-started
@@ -420,11 +459,12 @@ export class SessionEngineControls {
       sessionId: id,
       action: 'force_kill',
     });
+    await this.sessionRepository.update(id, { historySyncToken: null });
     await this.host.updateStatus(id, SessionStatus.DISCONNECTED);
     return this.requireSession(id);
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, confirmedMessageCount: number): Promise<void> {
     const session = await this.requireSession(id);
 
     // FENCE #1 — fail-fast on an ALREADY-PENDING credential teardown for this session NAME, BEFORE
@@ -451,7 +491,7 @@ export class SessionEngineControls {
       // the Map is reconciled and the DB removal proceeds regardless of the outcome. Use forceDestroy()
       // (SIGKILL) rather than a graceful destroy(): the session is being removed permanently, so there is
       // no session state worth saving, and a wedged Chromium must be reaped, not left to time out.
-      const engine = this.engines.get(id);
+      const engine = this.engines.getLifecycle(id);
       if (engine) {
         // Await THIS engine's in-flight INITIALIZING write before teardown and the parent-row
         // deletion below, so a delayed pre-initialize status update can never settle after the row
@@ -483,7 +523,34 @@ export class SessionEngineControls {
         throw fenceError;
       }
 
-      // Execute hook BEFORE delete so plugins can access session data
+      // Soft-remove: confirm the operator still sees the same message count, then keep every
+      // stored message and the session row. Auth is purged so the handset must re-link; removedAt
+      // marks the record for All chats (list-only) until Start + reconnect clears it.
+      await this.host.dataSource().transaction(async manager => {
+        const messageCount = await manager.count(Message, { where: { sessionId: id } });
+        if (messageCount !== confirmedMessageCount) {
+          throw new ConflictException({
+            statusCode: HttpStatus.CONFLICT,
+            code: 'SESSION_DELETE_COUNT_CHANGED',
+            message: 'Stored message count changed. Review the new impact and confirm again.',
+            confirmedMessageCount,
+            messageCount,
+          });
+        }
+        const removedAt = new Date();
+        await manager.update(Session, id, {
+          status: SessionStatus.DISCONNECTED,
+          removedAt,
+          config: requireManualStart(session.config) as never,
+          historySyncToken: null,
+          historySyncError: null,
+          nodeId: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+        });
+      });
+      parentDeleted = true;
+
       await this.hookManager.execute(
         'session:deleted',
         {
@@ -491,6 +558,7 @@ export class SessionEngineControls {
           name: session.name,
           phone: session.phone,
           pushName: session.pushName,
+          softRemoved: true,
         },
         {
           sessionId: id,
@@ -498,37 +566,14 @@ export class SessionEngineControls {
         },
       );
 
-      // DB removal is NOT best-effort: a genuine failure must surface (500) rather than be swallowed.
-      // Delete every child row explicitly, in one transaction, children before the parent. For
-      // messages/message_batches this is load-bearing: they carry a plain sessionId with no FK, so
-      // nothing else would ever remove them. webhooks/templates/baileys_stored_messages (and
-      // automation_rules) DO declare an ON DELETE CASCADE FK that fires on BOTH engines —
-      // better-sqlite3 defaults `foreign_keys` ON and TypeORM's driver re-asserts it at connection
-      // creation — so their explicit deletes are belt-and-braces rather than required; they stay
-      // because depending on a pragma neither this file nor a test pins is a thinner guarantee than
-      // an explicit delete, and the ordering mirrors the restore path's explicit-clear.
-      await this.host.dataSource().transaction(async manager => {
-        await manager.delete(Message, { sessionId: id });
-        await manager.delete(MessageBatch, { sessionId: id });
-        await manager.delete(Webhook, { sessionId: id });
-        await manager.delete(Template, { sessionId: id });
-        await manager.delete(BaileysStoredMessage, { sessionId: id });
-        await manager.remove(session);
-      });
-      parentDeleted = true;
-      this.logger.log(`Session deleted: ${session.name}`, {
+      this.logger.log(`Session soft-removed (messages kept): ${session.name}`, {
         sessionId: id,
-        action: 'delete',
+        action: 'soft_remove',
       });
 
-      // Purge the persistent on-disk auth/store dirs — BOTH engine shapes (see EngineFactory), since
-      // an engine switch may have left a live link for the other engine behind. They're keyed by
-      // session NAME and live independently of the (now torn-down, and on delete often never-loaded)
-      // engine instance, so the teardown above doesn't touch them. Without this, recreating a session
-      // under the same name reloads a stale store. Best-effort inside the factory — never fails an
-      // otherwise-successful delete. By this point both fences passed, so no old remover is live
-      // against this name (the transaction freed the name; the dirs are safe to purge).
+      // Purge auth dirs so a later Start under this same name cannot silently reuse a dead link.
       await this.engineFactory.purgeSessionData(session.name);
+      this.broadcaster.publishPersistedStatus(id, SessionStatus.DISCONNECTED);
     } finally {
       // Always clear the teardown mark so a later recreate/start with this id isn't suppressed. This
       // stop mark was set after fence #1, so clearing it on a rejected 409 only undoes what THIS
@@ -536,19 +581,11 @@ export class SessionEngineControls {
       // state (those are gated on parentDeleted below).
       this.stoppingSessions.delete(id);
       if (parentDeleted) {
-        this.broadcaster.clear(id);
-        // Drop the FAILED-reason entry too: it's keyed by a now-deleted UUID that can never be read
-        // again, so leaving it would grow the map without bound across create/fail/delete churn.
+        // Soft-remove keeps the UUID: clear only runtime maps that describe a live link. Do not
+        // broadcaster.clear — the same session will Start again and must keep publishing status.
         this.sessionErrors.clear(id);
-        // Same unbounded-growth argument for the restriction entry, and the gauge it feeds must not
-        // keep counting an account whose session no longer exists.
         this.sessionRestrictions.clear(id);
-        // Presence is per-connection state that the deleted session can never receive again, and it
-        // is keyed by an id that will never be read.
         this.presence.clear(id);
-        // The stuck-auth recovery budget is keyed by id; a committed delete frees it (and a recreated
-        // session under the same name gets a fresh UUID + fresh budget). Left only on a committed
-        // delete so a failed/409 delete — the session still exists — keeps the budget intact.
         this.stuckAuthRecoveryUsed.delete(id);
       }
       // NOTE: pendingTeardowns is intentionally NOT cleared here. It is keyed by session NAME and
@@ -609,7 +646,7 @@ export class SessionEngineControls {
         this.stoppingSessions.add(id);
         this.host.cancelReconnect(id);
 
-        const engine = this.engines.get(id);
+        const engine = this.engines.getLifecycle(id);
         if (!engine) {
           // Either never started, or still inside initializeEngine (no Map entry yet). The stop mark
           // above is what aborts the initializing case via start()'s existing guard.

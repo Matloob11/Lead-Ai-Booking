@@ -1,13 +1,14 @@
 /* A7 WhatsApp Inbox — chat panel layout.
    Loaded after panel.css, which owns the boot screen, brand colours and buttons. */
 
-/* The frame's own height is claimed from the portal in frame.js. Nothing here
-   may exceed it: the page itself never scrolls, only the conversation list and
-   the message thread do, so the header and composer are always in view. */
+/* Fill the Bitrix iframe only — never the outer portal `vh`, which is taller
+   than this frame and is what used to hang the composer below the fold.
+   inbox.js also pins these heights to visualViewport on resize. */
 html,
 body {
   height: 100%;
   width: 100%;
+  max-height: 100%;
   overflow: hidden;
 }
 
@@ -17,13 +18,19 @@ body {
 #root {
   position: fixed;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* The boot/error card is the one thing that may be taller than the frame —
    a long stack trace must stay readable rather than get clipped. */
 #root.boot {
   overflow: auto;
+  display: block;
 }
 
 .app {
@@ -36,14 +43,28 @@ body {
      list, and the columns' `height: 100%` then resolves against that grown row
      instead of the frame — which is what pushed the composer off-screen. */
   grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
   background: #fff;
+}
+
+/* Grid children default to min-height:auto and can refuse to shrink, which
+   clips the composer under .app { overflow:hidden }. Force both panes to stay
+   inside the frame. */
+.app > .sidebar,
+.app > .thread {
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------- sidebar */
 
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -51,6 +72,68 @@ body {
   overflow: hidden;
   border-right: 1px solid var(--line);
   background: #fbfcfd;
+}
+
+/* Floating New contact — green pill only, no bar behind it. */
+.sidebar__fab {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(11, 122, 69, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.sidebar__fab:hover {
+  background: #1ebe57;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(11, 122, 69, 0.42);
+}
+
+.sidebar__fab:active {
+  transform: translateY(0);
+}
+
+.sidebar__fab:focus-visible {
+  outline: 2px solid rgba(37, 211, 102, 0.55);
+  outline-offset: 3px;
+}
+
+.sidebar__fab svg {
+  flex: none;
+  stroke: currentColor;
+}
+
+.sidebar__fab-label {
+  line-height: 1;
+}
+
+/* Old foot wrapper — hide if a stale tab still has it. */
+.sidebar__foot {
+  display: none !important;
+}
+
+[data-wa-theme="glass-dark"] .sidebar__fab {
+  background: #25d366;
+  color: #052e16;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+[data-wa-theme="glass-dark"] .sidebar__fab:hover {
+  background: #34e27a;
 }
 
 .sidebar__top {
@@ -78,6 +161,10 @@ body {
   right: 14px;
   z-index: 30;
   min-width: 230px;
+  max-width: min(320px, calc(100% - 20px));
+  max-height: min(72vh, calc(100vh - 72px));
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -137,12 +224,53 @@ body {
   justify-content: flex-start;
 }
 
+/* panel.css `.btn` is the boot-card primary (navy fill + 16px top margin).
+   Companion rows nested in a .slot are not `> *`, so they inherited that
+   and sat as separate white/navy blocks at the foot of the hamburger. */
+.sidebar__menu .btn {
+  margin-top: 0;
+}
+
 .menu__badge {
   margin-left: auto;
 }
 
 .menu__badge[hidden] {
   display: none;
+}
+
+.menu__section {
+  margin: 10px 12px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #64748b);
+}
+
+.tag-filter {
+  display: none !important;
+}
+
+.menu__tags-slot {
+  padding: 0 10px 8px;
+}
+
+.tag-filter__chip {
+  border: 1px solid var(--line, #e2e8f0);
+  background: transparent;
+  color: var(--ink, #0f172a);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.tag-filter__chip.is-active {
+  background: var(--navy-soft, #334155);
+  border-color: var(--navy-soft, #334155);
+  color: #fff;
 }
 
 /* ------------------------------------------- no-number / access requests */
@@ -308,12 +436,6 @@ body {
   line-height: 0;
 }
 
-.conv__kind {
-  vertical-align: -0.16em;
-  margin-right: 4px;
-  opacity: 0.75;
-}
-
 .msg__pending,
 .msg__sent-media,
 .msg__media-failed,
@@ -410,19 +532,216 @@ body {
   }
 }
 
+/* Title + filters — transparent over sidebar glass (no solid navy strip). */
+.sidebar__chrome {
+  flex: none;
+  position: relative;
+  z-index: 4;
+  min-width: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+
 .filter {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 14px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 0 12px 10px;
+  min-width: 0;
 }
 
-/* currentColor, not a fixed grey: the placeholder then tracks whatever colour
-   the input itself ends up with, so it stays legible on a light field and on a
-   themed dark one without either side knowing about the other. */
+/* Number picker — inline accordion only (no position:absolute). */
+.np {
+  min-width: 0;
+}
+
+.np[hidden] {
+  display: none !important;
+}
+
+.np__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  cursor: pointer;
+}
+
+.np__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.np__chevron {
+  flex: none;
+  opacity: 0.55;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.np.is-open .np__chevron {
+  transform: rotate(-90deg);
+}
+
+.np__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.np__body[hidden] {
+  display: none !important;
+}
+
+.np__search {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.np__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.np__option {
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.np__option-waba {
+  font-weight: 650;
+}
+
+.np__option:hover {
+  background: #f2f5f8;
+}
+
+.np__option.is-active {
+  background: #eaf0f6;
+  font-weight: 650;
+}
+
+.np__empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.filter__quick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.filter__quick::-webkit-scrollbar {
+  display: none;
+}
+
+.filter__quick-btn {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter__quick-btn:hover {
+  color: var(--ink);
+  border-color: var(--navy-soft, #94a3b8);
+}
+
+.filter__quick-btn.is-active {
+  background: var(--navy-soft, #334155);
+  border-color: var(--navy-soft, #334155);
+  color: #fff;
+}
+
+.menu__tags-slot {
+  padding: 0 10px 8px;
+}
+
+.menu__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.menu__tags-empty {
+  margin: 0 12px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.menu__tag-chip {
+  border: 1px solid var(--line, #e2e8f0);
+  background: transparent;
+  color: var(--tag-colour, var(--ink, #0f172a));
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.menu__tag-chip.is-active {
+  background: var(--navy-soft, #334155);
+  border-color: var(--navy-soft, #334155);
+  color: #fff;
+}
+
+.filter__numbers,
+.filter__numbers-picker,
+.filter__number-panel,
+.filter__number-trigger,
+.filter__number-search,
+.filter__number-list,
+.filter__number-option {
+  /* Old absolute picker — keep dead classes from painting if a stale JS tab loads. */
+  display: none !important;
+}
+
 .filter__search::placeholder,
+.np__search::placeholder,
 .composer__input::placeholder,
 .field::placeholder {
   color: currentcolor;
@@ -440,9 +759,17 @@ body {
 }
 
 .convs__wrap {
-  flex: 1;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  overflow-x: hidden;
   overflow-y: auto;
   min-height: 0;
+  min-width: 0;
+  /* Space so last chats scroll clear of the floating New button. */
+  padding-bottom: 72px;
+  /* Create a containing block so nothing inside can escape over the chrome. */
+  isolation: isolate;
 }
 
 .convs {
@@ -460,7 +787,8 @@ body {
 .conv {
   display: flex;
   gap: 10px;
-  padding: 10px 14px;
+  align-items: flex-start;
+  padding: 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--line);
 }
@@ -471,6 +799,23 @@ body {
 
 .conv--active {
   background: #eaf0f6;
+}
+
+.conv--transferred {
+  box-shadow: inset 3px 0 0 var(--gold, #c9a227);
+}
+
+.msg--system {
+  align-self: center;
+  max-width: 92%;
+  margin: 8px 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f4f1e6;
+  color: #5c5340;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .conv__avatar {
@@ -484,22 +829,33 @@ body {
   place-items: center;
   font-size: 13px;
   font-weight: 650;
+  margin-top: 1px;
 }
 
 .conv__body {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .conv__line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+  flex: none;
+  min-height: 1.25em;
 }
 
 .conv__name {
+  min-width: 0;
+  flex: 1;
   font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -508,27 +864,74 @@ body {
 .conv__time {
   flex: none;
   font-size: 11px;
+  line-height: 1.25;
   color: var(--muted);
 }
 
 .conv__preview {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  height: 1.3em;
+  overflow: hidden;
+}
+
+.conv__preview-text {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.conv__kind {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  display: block;
+  opacity: 0.75;
+}
+
+.conv__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  flex: none;
+}
+
+.conv__label-chip {
+  display: inline-block;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .conv__meta {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 3px;
+  min-width: 0;
+  flex: none;
   font-size: 11px;
+  line-height: 1.3;
   color: var(--muted);
 }
 
 .conv__number {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -626,12 +1029,17 @@ body {
 
 /* Flex, not grid: the connection bar is `hidden` while the socket is healthy,
    and a display:none child silently shifts grid rows — which handed the 1fr to
-   the composer and squashed the message list to its content height. */
+   the composer and squashed the message list to its content height.
+   min-height:0 + overflow:hidden keep the composer inside the frame on short
+   Bitrix sliders (the failure that hid the bottom bar for some agents). */
 .thread {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .connbar {
@@ -644,16 +1052,17 @@ body {
 
 .thread__header {
   flex: none;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--line);
-  min-height: 62px;
-  /* The header and composer are the two things that must never move; a long
-     contact name wraps or truncates rather than widening the panel. */
-  flex-wrap: wrap;
+  min-height: 56px;
+  /* Do not wrap into a second row on short frames — that used to steal height
+     from the message list and push the composer under the Bitrix chrome. */
+  flex-wrap: nowrap;
   min-width: 0;
 }
 
@@ -671,6 +1080,7 @@ body {
 .connbar,
 .thread__composer {
   flex: none;
+  flex-shrink: 0;
 }
 
 .thread__who {
@@ -697,8 +1107,18 @@ body {
 .thread__tools {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
   flex: none;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: min(100%, 460px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.thread__tools::-webkit-scrollbar {
+  display: none;
 }
 
 .pill--open {
@@ -894,23 +1314,256 @@ body {
   font-style: italic;
 }
 
+.msg__image-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: min(320px, 100%);
+  margin-bottom: 6px;
+}
+
+.msg__image-skeleton {
+  width: min(280px, 100%);
+  height: 200px;
+  border-radius: 10px;
+  background: linear-gradient(
+    110deg,
+    rgba(16, 24, 40, 0.06) 25%,
+    rgba(16, 24, 40, 0.12) 37%,
+    rgba(16, 24, 40, 0.06) 63%
+  );
+  background-size: 200% 100%;
+  animation: msg-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes msg-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .msg__image,
 .msg__video {
   max-width: min(320px, 100%);
   max-height: 320px;
-  border-radius: 8px;
+  border-radius: 10px;
   display: block;
-  margin-bottom: 6px;
+}
+
+.msg__image-wrap .msg__image {
+  margin-bottom: 0;
 }
 
 .msg__image {
   cursor: zoom-in;
+  width: 100%;
+  height: auto;
 }
 
-.msg__audio {
-  display: block;
+.msg__video-wrap {
+  position: relative;
+  max-width: min(320px, 100%);
   margin-bottom: 6px;
-  max-width: 260px;
+}
+
+.msg__video-wrap .msg__video {
+  margin-bottom: 0;
+  width: 100%;
+  background: #0a1020;
+}
+
+.msg__video-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+/* WhatsApp-style voice note */
+.msg__voice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(280px, 100%);
+  max-width: min(320px, 100%);
+  padding: 8px 10px 8px 8px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.06);
+  border: 1px solid rgba(16, 24, 40, 0.08);
+}
+
+.msg--out .msg__voice {
+  background: rgba(16, 24, 40, 0.08);
+  border-color: rgba(16, 24, 40, 0.1);
+}
+
+.voice__play {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(180deg, #2ea883, #1f8f6d);
+  box-shadow: 0 4px 12px rgba(31, 143, 109, 0.35);
+  cursor: pointer;
+}
+
+.voice__play:hover {
+  filter: brightness(1.05);
+}
+
+.voice__play:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.voice__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice__footrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voice__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.voice__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.voice__tool:hover {
+  color: var(--ink);
+  background: rgba(16, 24, 40, 0.08);
+}
+
+.voice__tool--dl svg {
+  display: block;
+}
+
+.voice__play:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.voice__wave {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+
+.voice__bar {
+  flex: 1;
+  max-width: 4px;
+  min-width: 2px;
+  height: var(--h, 40%);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.28;
+  transform-origin: center bottom;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  cursor: pointer;
+}
+
+.voice__bar.is-heard {
+  opacity: 0.95;
+  transform: scaleY(1.05);
+}
+
+.voice__bar.is-scrub {
+  opacity: 1;
+  transform: scaleY(1.12);
+  box-shadow: 0 0 0 1px rgba(46, 168, 131, 0.35);
+}
+
+.msg__voice.is-playing .voice__bar:not(.is-heard):not(.is-scrub) {
+  animation: voice-pulse 0.85s ease-in-out infinite alternate;
+}
+
+.msg__voice.is-playing .voice__bar.is-heard {
+  animation: none;
+  opacity: 1;
+}
+
+.msg__voice.is-playing .voice__bar:nth-child(3n):not(.is-heard) {
+  animation-delay: 0.12s;
+}
+
+.msg__voice.is-playing .voice__bar:nth-child(3n + 1):not(.is-heard) {
+  animation-delay: 0.24s;
+}
+
+@keyframes voice-pulse {
+  from {
+    transform: scaleY(0.55);
+    opacity: 0.35;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 0.85;
+  }
+}
+
+.voice__time {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .msg__doc {
@@ -940,7 +1593,38 @@ body {
 .msg__doc-icon {
   flex: none;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   color: var(--navy);
+  background: rgba(16, 24, 40, 0.06);
+}
+
+.msg__doc-icon--pdf {
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.1);
+}
+
+.msg__doc-icon--word {
+  color: #175cd3;
+  background: rgba(23, 92, 211, 0.1);
+}
+
+.msg__doc-icon--sheet {
+  color: #067647;
+  background: rgba(6, 118, 71, 0.1);
+}
+
+.msg__doc-icon--slide {
+  color: #b54708;
+  background: rgba(181, 71, 8, 0.1);
+}
+
+.msg__doc-icon--zip {
+  color: #6941c6;
+  background: rgba(105, 65, 198, 0.1);
 }
 
 .msg__doc-meta {
@@ -991,13 +1675,182 @@ body {
   border-color: #f0c6c2;
   background: #fdf3f2;
   color: var(--err);
+  flex-wrap: wrap;
+}
+
+.msg__media-failed-hint {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 23px;
 }
 
 /* Our own attachment: sent to the gateway, never stored here to show back. */
 .msg__sent-media {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
   margin-bottom: 6px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: rgba(16, 24, 40, 0.04);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.msg__sent-media-label {
+  font-weight: 650;
+}
+
+.msg__sent-media-hint {
+  flex: 1 1 100%;
+  font-size: 11px;
   color: var(--muted);
+  margin-left: 24px;
+}
+
+.msg__empty-hint,
+.msg__template-line {
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.msg__empty-hint {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(180, 35, 24, 0.08);
+  border: 1px solid rgba(180, 35, 24, 0.18);
+  color: #8f1d1d;
+}
+
+.msg__special {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+}
+
+.msg__special-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.msg__contact-row {
+  margin-top: 6px;
+}
+
+.msg__contact-name {
+  font-weight: 600;
+}
+
+.msg__contact-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.msg__album-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.msg__pin-preview {
+  opacity: 0.85;
+  font-size: 12px;
+}
+
+.msg__template-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg__template-badge {
+  display: inline-flex;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: rgba(16, 24, 40, 0.08);
+  color: var(--navy);
+}
+
+.msg__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(320px, 100%);
+}
+
+.msg__button-reply-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.msg__template-footer {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.msg__template-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.msg__template-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  color: #027eb5;
+  font-size: 12.5px;
+  font-weight: 550;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.13);
+  pointer-events: none;
+  user-select: none;
+}
+
+.msg__template-btn--more {
+  color: rgba(17, 27, 33, 0.65);
 }
 
 .spinner--sm {
@@ -1058,6 +1911,9 @@ body {
 .thread__composer {
   border-top: 1px solid var(--line);
   background: #fff;
+  /* Stay painted above the scrolling message list if anything still overflows. */
+  position: relative;
+  z-index: 8;
 }
 
 .composer {
@@ -1200,19 +2056,42 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   padding: 12px 16px;
   background: #f8f9fb;
+}
+
+.locked__main {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .locked__text {
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.4;
+}
+
+.locked__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.92;
 }
 
 .locked .btn {
   margin: 0;
   flex: none;
+}
+
+.convs__more {
+  width: 100%;
+  justify-content: center;
 }
 
 /* -------------------------------------------------------------- modals */
@@ -1442,7 +2321,7 @@ body {
   background: var(--menu-hover);
 }
 
-body[data-wa-theme="glass-dark"] .quoted {
+[data-wa-theme="glass-dark"] .quoted {
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -1552,60 +2431,120 @@ body[data-wa-theme="glass-dark"] .quoted {
 /* A screen of its own, filling the panel. Sized from its parent rather than in
    vh: this panel already sits inside Bitrix's iframe, where vh is the outer
    window's height, so anything measured in it hangs off the bottom and takes
-   the composer with it. */
+   the composer with it.
+
+   Glass shell mirrors Omni `glass-dark` so Linked WhatsApp matches pic-1. */
 .linked {
   position: absolute;
   inset: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: #0a1020;
+  color: #eef3f9;
+  overflow: hidden;
+}
+
+.linked__glass-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.linked__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.85;
+}
+
+.linked__b1 {
+  width: 780px;
+  height: 780px;
+  left: -6%;
+  top: -12%;
+  background: radial-gradient(circle at 30% 30%, #1d6f7a, #0e3550 65%, transparent 72%);
+}
+
+.linked__b2 {
+  width: 900px;
+  height: 900px;
+  right: -12%;
+  top: -22%;
+  background: radial-gradient(circle at 60% 40%, #c8a34a, #6b4f16 60%, transparent 70%);
+  opacity: 0.55;
+}
+
+.linked__b3 {
+  width: 820px;
+  height: 820px;
+  left: 24%;
+  bottom: -34%;
+  background: radial-gradient(circle at 50% 50%, #2a4f9c, #16265a 60%, transparent 70%);
+  opacity: 0.8;
+}
+
+.linked__b4 {
+  width: 520px;
+  height: 520px;
+  right: 12%;
+  bottom: -16%;
+  background: radial-gradient(circle at 50% 50%, #14806a, #0b3b36 60%, transparent 70%);
+  opacity: 0.6;
 }
 
 .linked__bar {
+  position: relative;
+  z-index: 1;
   flex: none;
   display: flex;
   align-items: center;
   gap: 9px;
+  margin: 10px 12px 0;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--menu-bg);
-  color: var(--menu-ink);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef3f9;
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .linked__title {
-  font-weight: 650;
-  font-size: 14px;
-}
-
-.linked__note {
   flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
 .linked__close {
   flex: none;
+  margin-left: auto;
+  color: #eef3f9;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+.linked__close:hover {
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* flex:1 with min-height:0 — without the second, a flex child refuses to
    shrink below its content and pushes the composer out of sight again. */
 .linked__frame {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
   width: 100%;
   border: 0;
-  background: var(--bg);
-}
-
-@media (max-width: 720px) {
-  .linked__note {
-    display: none;
-  }
+  margin: 8px 0 0;
+  background: transparent;
+  color-scheme: dark;
 }
 
 /* Where a number appears in the CRM, when it appears in more than one place.

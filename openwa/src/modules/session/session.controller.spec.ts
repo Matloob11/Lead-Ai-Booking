@@ -98,6 +98,70 @@ describe('SessionController — create() response contract', () => {
   });
 });
 
+describe('SessionController - destructive delete handshake and profile reset', () => {
+  const entity: Session = {
+    id: 'sess-uuid-1',
+    name: 'test-session',
+    status: SessionStatus.DISCONNECTED,
+    phone: '15551234567',
+    pushName: null,
+    config: {},
+    proxyUrl: null,
+    proxyType: null,
+    connectedAt: null,
+    lastActiveAt: null,
+    nodeId: null,
+    claimedAt: null,
+    nodeUrl: null,
+    leaseExpiresAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  let sessionService: {
+    findOne: jest.Mock;
+    getDeleteImpact: jest.Mock;
+    delete: jest.Mock;
+    resetProfile: jest.Mock;
+    isActive: jest.Mock;
+  };
+  let auditService: { logInfo: jest.Mock };
+  let controller: SessionController;
+
+  beforeEach(() => {
+    sessionService = {
+      findOne: jest.fn().mockResolvedValue(entity),
+      getDeleteImpact: jest.fn().mockResolvedValue({ messageCount: 675 }),
+      delete: jest.fn().mockResolvedValue(undefined),
+      resetProfile: jest.fn().mockResolvedValue(entity),
+      isActive: jest.fn().mockReturnValue(false),
+    };
+    auditService = { logInfo: jest.fn().mockResolvedValue(undefined) };
+    controller = new SessionControllerClass(
+      sessionService as unknown as SessionService,
+      auditService as unknown as AuditService,
+    );
+  });
+
+  it('returns exact delete impact and passes same confirmed count into destructive service call', async () => {
+    await expect(controller.getDeleteImpact(entity.id)).resolves.toEqual({ messageCount: 675 });
+    await controller.delete(entity.id, { confirmMessageCount: 675 });
+
+    expect(sessionService.delete).toHaveBeenCalledWith(entity.id, 675);
+  });
+
+  it('resetProfile returns same session identity and audits non-message-destructive action', async () => {
+    const result = await controller.resetProfile(entity.id);
+
+    expect(result.id).toBe(entity.id);
+    expect(result.phone).toBe(entity.phone);
+    expect(auditService.logInfo).toHaveBeenCalledWith(
+      AuditAction.SESSION_PROFILE_RESET,
+      expect.objectContaining({ sessionId: entity.id, sessionName: entity.name }),
+    );
+  });
+});
+
 // POST /sessions/:id/logout audits SESSION_LOGGED_OUT only after the service resolves — an
 // incomplete engine-backed attempt (502 SESSION_LOGOUT_INCOMPLETE) must NOT record a success
 // audit row, and the service's structured rejection must be forwarded verbatim.

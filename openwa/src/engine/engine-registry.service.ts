@@ -1,5 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
+
+type GenerationPhase = 'PENDING' | 'DRAINING' | 'READY' | 'REVOKED';
+
+interface EngineGeneration {
+  token: string;
+  phase: GenerationPhase;
+}
 
 /**
  * The single source of truth for which engine instance is live for a session.
@@ -20,6 +28,7 @@ import type { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
 export class EngineRegistry {
   /** Live engines by session (DB) id. Presence here means "started"; identity means "not superseded". */
   private readonly engines = new Map<string, IWhatsAppEngine>();
+  private readonly generations = new Map<string, EngineGeneration>();
 
   /**
    * Sessions whose engine is being constructed but is not in `engines` yet. Held so concurrency
@@ -35,11 +44,62 @@ export class EngineRegistry {
   // ── Map-compatible surface (used by the lifecycle owner) ──────────────
 
   get(id: string): IWhatsAppEngine | undefined {
+    const generation = this.generations.get(id);
+    if (generation && generation.phase !== 'READY') return undefined;
     return this.engines.get(id);
+  }
+
+  /** Lifecycle-only raw access. Pending/revoked engines remain reachable solely for teardown. */
+  getLifecycle(id: string): IWhatsAppEngine | undefined {
+    return this.engines.get(id);
+  }
+
+  getAccepted(id: string): IWhatsAppEngine | undefined {
+    return this.get(id);
   }
 
   set(id: string, engine: IWhatsAppEngine): void {
     this.engines.set(id, engine);
+    this.generations.delete(id);
+  }
+
+  /** Register a fresh engine behind the identity gate and return its unforgeable generation token. */
+  beginGeneration(id: string, engine: IWhatsAppEngine): string {
+    const token = randomUUID();
+    this.engines.set(id, engine);
+    this.generations.set(id, { token, phase: 'PENDING' });
+    return token;
+  }
+
+  tokenFor(id: string, engine?: IWhatsAppEngine): string | undefined {
+    if (engine && this.engines.get(id) !== engine) return undefined;
+    return this.generations.get(id)?.token;
+  }
+
+  acceptForDrain(id: string, token: string): boolean {
+    const generation = this.generations.get(id);
+    if (!generation || generation.token !== token || generation.phase !== 'PENDING') return false;
+    generation.phase = 'DRAINING';
+    return true;
+  }
+
+  publishGeneration(id: string, token: string): boolean {
+    const generation = this.generations.get(id);
+    if (!generation || generation.token !== token || generation.phase !== 'DRAINING') return false;
+    generation.phase = 'READY';
+    return true;
+  }
+
+  revokeGeneration(id: string, token: string): boolean {
+    const generation = this.generations.get(id);
+    if (!generation || generation.token !== token || generation.phase === 'REVOKED') return false;
+    generation.phase = 'REVOKED';
+    return true;
+  }
+
+  isAcceptedToken(id: string, token: string): boolean {
+    const generation = this.generations.get(id);
+    return generation?.token === token && (generation.phase === 'DRAINING' || generation.phase === 'READY');
   }
 
   has(id: string): boolean {
@@ -47,11 +107,13 @@ export class EngineRegistry {
   }
 
   delete(id: string): boolean {
+    this.generations.delete(id);
     return this.engines.delete(id);
   }
 
   clear(): void {
     this.engines.clear();
+    this.generations.clear();
   }
 
   get size(): number {
@@ -82,7 +144,7 @@ export class EngineRegistry {
    * presence check does not cover.
    */
   isLive(id: string, engine: IWhatsAppEngine): boolean {
-    return this.engines.get(id) === engine;
+    return this.engines.get(id) === engine && this.generations.get(id)?.phase !== 'REVOKED';
   }
 
   /**
@@ -91,9 +153,10 @@ export class EngineRegistry {
    * lifecycle paths.
    */
   deleteIfLive(id: string, engine: IWhatsAppEngine): boolean {
-    if (!this.isLive(id, engine)) {
+    if (this.engines.get(id) !== engine) {
       return false;
     }
+    this.generations.delete(id);
     return this.engines.delete(id);
   }
 
@@ -108,7 +171,7 @@ export class EngineRegistry {
     id: string,
     onMissing: () => Error = () => new BadRequestException('Session is not started'),
   ): IWhatsAppEngine {
-    const engine = this.engines.get(id);
+    const engine = this.get(id);
     if (!engine) {
       throw onMissing();
     }

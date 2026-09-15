@@ -1,7 +1,17 @@
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CircleDashed, Loader2, Megaphone, Search, SquarePen, UserRound } from 'lucide-react';
+import { AlertCircle, CircleDashed, Loader2, Megaphone, Menu, Pin, Plus, Search, X } from 'lucide-react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { Channel, Chat, ContactStatusGroup, Session } from '../../services/api';
+import {
+  ALL_CHATS_SESSION_ID,
+  type Channel,
+  type Chat,
+  type ContactStatusGroup,
+  type SearchHit,
+  type Session,
+} from '../../services/api';
+import { renderHighlightedSnippet } from '../../utils/search-highlight';
+import { useAppMenu } from '../../hooks/useAppMenu';
 import ChatAvatar from './ChatAvatar';
 
 export type ChatsTab = 'chats' | 'channels' | 'status';
@@ -10,19 +20,27 @@ interface ChatSidebarProps {
   sessions: Session[];
   selectedSessionId: string;
   onSelectSession: (sessionId: string) => void;
+  /** Admin-only: All chats option in the session picker. */
+  showAllChats?: boolean;
+  allChatsSelected?: boolean;
   activeTab: ChatsTab;
   onSwitchTab: (tab: ChatsTab) => void;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
   onComposeStatus: () => void;
-  /** A7: the two things an agent can do that are not answering somebody. */
-  onNewContact: () => void;
-  onOpenProfile: () => void;
+  /** Kept for Chats.tsx call-site stability; app menu owns these actions now. */
+  onNewContact?: () => void;
+  onOpenProfile?: () => void;
+  /** A7: what the search box found inside the messages, shown under the chats. */
+  messageHits: SearchHit[];
+  messageHitsLoading: boolean;
+  onSelectMessageHit: (hit: SearchHit) => void;
   formatChatTime: (timestamp?: number) => string;
   chatsTab: {
     loading: boolean;
     chats: Chat[];
     activeChatId?: string;
+    activeSessionId?: string;
     pictures?: Record<string, string | null>;
     onSelectChat: (chat: Chat) => void;
   };
@@ -54,36 +72,59 @@ function ChatSidebar({
   sessions,
   selectedSessionId,
   onSelectSession,
+  showAllChats = false,
+  allChatsSelected = false,
   activeTab,
   searchQuery,
   onSearchQueryChange,
   onNewContact,
-  onOpenProfile,
+  messageHits,
+  messageHitsLoading,
+  onSelectMessageHit,
   formatChatTime,
   chatsTab,
   channelsTab,
   statusTab,
 }: ChatSidebarProps) {
   const { t } = useTranslation();
+  const { menuOpen, toggleMenu, setChatsHostsMenu } = useAppMenu();
+
+  // This screen owns the hamburger (pic-1 style). Hide Layout's floating trigger.
+  useEffect(() => {
+    setChatsHostsMenu(true);
+    return () => setChatsHostsMenu(false);
+  }, [setChatsHostsMenu]);
 
   const formatLastMessageSnippet = (chat: Chat) => chat.lastMessage || '';
+
+  const sessionStatusLabel = (chat: Chat): string => {
+    if (chat.removed) return 'removed';
+    if (chat.sessionStatus === 'ready') return 'connected';
+    return chat.sessionStatus || 'offline';
+  };
 
   // Shared row markup for the Chats and Status lists — a plain function (not memoized) since it
   // closes over render-scoped props (chatsTab.activeChatId, chatsTab.pictures) that already
   // change every render.
   const renderChatRow = (chat: Chat) => {
-    const isActive = chatsTab.activeChatId === chat.id;
+    const rowKey = chat.sessionId ? `${chat.sessionId}:${chat.id}` : chat.id;
+    const isActive =
+      chatsTab.activeChatId === chat.id &&
+      (!chat.sessionId || chatsTab.activeSessionId === chat.sessionId);
+    const locked = chat.canOpenThread === false;
     return (
       <div
-        key={chat.id}
-        className={`chat-item-card ${isActive ? 'active' : ''}`}
+        key={rowKey}
+        className={`chat-item-card ${isActive ? 'active' : ''} ${locked ? 'chat-item-locked' : ''}`}
         onClick={() => chatsTab.onSelectChat(chat)}
+        title={locked ? 'Session removed — history is listed only' : undefined}
       >
         <ChatAvatar pictureUrl={chatsTab.pictures?.[chat.id]} kind={chat.kind} />
 
         <div className="chat-item-info">
           <div className="chat-item-top">
             <span className="chat-item-name" title={chat.name || chat.id}>
+              {chat.teamPinned ? <Pin size={12} className="chat-item-pin" aria-hidden /> : null}
               {chat.name || chat.id.split('@')[0]}
             </span>
             {chat.kind !== 'individual' && chat.kind !== 'unknown' && (
@@ -108,6 +149,14 @@ function ChatSidebar({
               </span>
             )}
           </div>
+          {chat.sessionName ? (
+            <div className="chat-item-session">
+              <span>{chat.sessionName}</span>
+              <span className={`chat-session-status status-${sessionStatusLabel(chat)}`}>
+                {sessionStatusLabel(chat)}
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -116,43 +165,38 @@ function ChatSidebar({
   return (
     <aside className="chats-sidebar">
       <div className="sidebar-header-box">
-        {/* Session selector */}
+        {/* Pic-1: "WhatsApp session" + hamburger opens the app dropdown (nav +
+            Conversation Health / New contact / Profile). Chats stay full-width. */}
         <div className="session-select-group">
-          <label className="form-label">{t('chats.sessionLabel')}</label>
-          <select
-            value={selectedSessionId}
-            onChange={e => onSelectSession(e.target.value)}
-            className="session-selector"
-          >
-            {sessions.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.phone || t('chats.noPhone')})
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="a7-session-label-row">
+            <label className="form-label">{t('chats.sessionLabel')}</label>
+            <button
+              type="button"
+              className={`a7-tools-menu-btn ${menuOpen ? 'open' : ''}`}
+              data-a7-menu-trigger
+              aria-expanded={menuOpen}
+              aria-controls="a7-app-menu"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              onClick={toggleMenu}
+            >
+              {menuOpen ? <X size={18} strokeWidth={2.25} /> : <Menu size={18} strokeWidth={2.25} />}
+            </button>
+          </div>
 
-        {/* A7: the Chats / Channels / Status tab bar is gone.
-            A7 does not use WhatsApp channels or statuses, and the two tabs were
-            two thirds of a switch that only ever had one useful position. The
-            lists below still key off `activeTab`, which nothing can move off
-            'chats' now that the only control that set it has been removed —
-            they are left in place rather than deleted so an upstream merge
-            stays readable. */}
-
-        {/* A7: the two things on this screen that are not answering somebody —
-            reaching a number for the first time, and seeing how the day has
-            gone. Above the search rather than below it: the list underneath is
-            people who already wrote, and neither of these is about them. */}
-        <div className="a7-sidebar-actions">
-          <button type="button" className="a7-side-btn" onClick={onNewContact}>
-            <SquarePen size={16} />
-            New contact
-          </button>
-          <button type="button" className="a7-side-btn" onClick={onOpenProfile}>
-            <UserRound size={16} />
-            Profile
-          </button>
+          <div className="session-select-row">
+            <select
+              value={allChatsSelected ? ALL_CHATS_SESSION_ID : selectedSessionId}
+              onChange={e => onSelectSession(e.target.value)}
+              className="session-selector"
+            >
+              {showAllChats ? <option value={ALL_CHATS_SESSION_ID}>All chats</option> : null}
+              {sessions.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.phone || t('chats.noPhone')})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Search bar */}
@@ -169,7 +213,10 @@ function ChatSidebar({
         {/* A7: the "compose a status" button went with the Status tab. */}
       </div>
 
-      {/* Chat list */}
+      {/* Chat list, and — while something is typed — what the same box found
+          inside the messages, underneath it. Chats first because a name is what
+          an agent usually means; the message hits are the fallback for "I know
+          what was said but not who said it". */}
       {activeTab === 'chats' && (
         <div className="chats-list">
           {chatsTab.loading ? (
@@ -177,12 +224,63 @@ function ChatSidebar({
               <Loader2 className="animate-spin" size={24} />
               <span>{t('chats.loadingChats')}</span>
             </div>
-          ) : chatsTab.chats.length === 0 ? (
+          ) : chatsTab.chats.length === 0 && !searchQuery.trim() ? (
             <div className="chats-list-empty">
               <span>{t('chats.empty')}</span>
             </div>
           ) : (
-            chatsTab.chats.map(renderChatRow)
+            <>
+              {chatsTab.chats.length > 0 && (
+                <>
+                  {searchQuery.trim() && <div className="a7-search-group">Chats</div>}
+                  {chatsTab.chats.map(renderChatRow)}
+                </>
+              )}
+
+              {searchQuery.trim() && (
+                <>
+                  <div className="a7-search-group">
+                    Messages
+                    {messageHitsLoading && <Loader2 className="animate-spin" size={13} />}
+                  </div>
+
+                  {!messageHitsLoading && messageHits.length === 0 && (
+                    <div className="a7-search-none">No messages match.</div>
+                  )}
+
+                  {messageHits.map(hit => {
+                    // A hit carries only the chat's id. The loaded chat list
+                    // usually knows its name, and a name is what the agent
+                    // recognises; the bare id is the honest fallback.
+                    const named = chatsTab.chats.find(c => c.id === hit.chatId);
+                    return (
+                      <button
+                        key={hit.messageId}
+                        type="button"
+                        className="a7-hit"
+                        onClick={() => onSelectMessageHit(hit)}
+                      >
+                        <span className="a7-hit__who">
+                          {named?.name || hit.chatId.split('@')[0]}
+                          <span className="a7-hit__when">
+                            {new Date(hit.timestamp * 1000).toLocaleDateString()}
+                          </span>
+                        </span>
+                        {/* The server marks the matched run and
+                            renderHighlightedSnippet returns it as segments. Built
+                            as nodes, never innerHTML — this is whatever a customer
+                            typed. */}
+                        <span className="a7-hit__text">
+                          {renderHighlightedSnippet(hit.snippet).map((seg, i) =>
+                            seg.marked ? <mark key={i}>{seg.text}</mark> : <span key={i}>{seg.text}</span>,
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </>
           )}
         </div>
       )}
@@ -288,6 +386,20 @@ function ChatSidebar({
           )}
         </div>
       )}
+
+      {/* Always visible over the chat list — same idea as Official API FAB. */}
+      {onNewContact ? (
+        <button
+          type="button"
+          className="a7-new-contact-fab"
+          title="New contact"
+          aria-label="New contact"
+          onClick={onNewContact}
+        >
+          <Plus size={22} strokeWidth={2.4} />
+          <span>New</span>
+        </button>
+      ) : null}
     </aside>
   );
 }

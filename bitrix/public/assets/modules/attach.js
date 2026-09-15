@@ -10,20 +10,23 @@ import { inbox } from "../api/api.js";
 import { el, clear, formatBytes, modal } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
-/** Meta Cloud API media limits, in bytes. */
+/** What this panel will attempt to send. Official Meta video is 16 MB; a
+ *  larger clip is uploaded as a document (Meta file max 100 MB). */
 export const MEDIA_LIMITS = {
   image: 5 * 1024 * 1024,
-  video: 16 * 1024 * 1024,
+  video: 100 * 1024 * 1024,
   audio: 16 * 1024 * 1024,
   document: 100 * 1024 * 1024,
 };
 
 const LIMIT_LABEL = {
   image: "5 MB",
-  video: "16 MB",
+  video: "100 MB",
   audio: "16 MB",
   document: "100 MB",
 };
+
+const META_VIDEO_BYTES = 16 * 1024 * 1024;
 
 /** Which WhatsApp message kind a file maps to. */
 export function kindForFile(file) {
@@ -76,9 +79,17 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
   const sendBtn = el("button.btn.btn--primary", { type: "button", disabled: Boolean(problem) }, ["Send"]);
   const cancelBtn = el("button.btn.btn--ghost", { type: "button" }, ["Cancel"]);
 
+  const asFile =
+    !problem && kind === "video" && file.size > META_VIDEO_BYTES
+      ? el("div.attach__size", {}, [
+          "Videos larger than 16 MB send as a file. The customer can still play it.",
+        ])
+      : null;
+
   const body = el("div.modal__body", {}, [
     previewNode(file, kind),
     problem ? null : caption,
+    asFile,
     error,
     progress,
     el("div.modal__actions", {}, [cancelBtn, sendBtn]),
@@ -109,6 +120,7 @@ export function openAttachmentDialog(file, { conversationId, onSent }) {
 
       const message = await inbox.send(conversationId, {
         kind,
+        filename: file.name,
         media_id: uploaded.media_id,
         // The stored asset the upload just created. The backend can find it
         // from media_id alone, but naming it keeps the send off that lookup —

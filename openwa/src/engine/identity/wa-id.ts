@@ -27,6 +27,23 @@ export type WaIdKind = 'user' | 'group' | 'lid' | 'status' | 'newsletter' | 'bro
 
 /** Domains that denote a phone-addressed user (the two are the same entity, different dialects). */
 const USER_DOMAINS = new Set(['c.us', 's.whatsapp.net']);
+const PHONE_DIGITS = /^[1-9][0-9]{6,14}$/;
+const FORMATTED_PHONE = /^\+?[0-9](?:[0-9 ()-]*[0-9])?$/;
+const PHONE_JID = /^([1-9][0-9]{6,14})(?::[0-9]+)?@(c\.us|s\.whatsapp\.net)$/i;
+
+/**
+ * Canonical owner identity used to bind a session for its lifetime. Only explicit phone dialects
+ * are accepted; LIDs, groups, channels, empty strings, and malformed values fail closed.
+ */
+export function normalizePhoneIdentity(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const jid = PHONE_JID.exec(trimmed);
+  if (jid) return jid[1];
+  if (!FORMATTED_PHONE.test(trimmed)) return null;
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  return PHONE_DIGITS.test(digits) ? digits : null;
+}
 
 export interface ParsedWaId {
   kind: WaIdKind;

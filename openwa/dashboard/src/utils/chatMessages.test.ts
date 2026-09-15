@@ -79,6 +79,42 @@ test('mergeChatMessages: the DB row wins over the engine copy of the same messag
   assert.equal(merged[0].status, 'read'); // DB status preserved, not the engine default
 });
 
+test('mergeChatMessages: history media bytes win over a DB omitted placeholder (Tap to load)', () => {
+  const sameId = 'true_c.us_MEDIA1';
+  const omittedDb = db({
+    waMessageId: sameId,
+    type: 'image',
+    status: 'delivered',
+    metadata: { media: { mimetype: 'image/jpeg', omitted: true } },
+  });
+  const withBytes = mapEngineHistoryMessage(
+    hist({
+      id: sameId,
+      type: 'image',
+      media: { mimetype: 'image/jpeg', data: 'abc123', omitted: false },
+    }),
+  );
+  const merged = mergeChatMessages([omittedDb], [withBytes]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].status, 'delivered'); // DB status kept
+  assert.equal(merged[0].metadata?.media?.data, 'abc123'); // bytes from history kept
+  assert.equal(merged[0].metadata?.media?.omitted, false);
+});
+
+test('mergeChatMessages: DB live media is not clobbered by a media-less history row', () => {
+  const sameId = 'true_c.us_MEDIA2';
+  const liveDb = db({
+    waMessageId: sameId,
+    type: 'image',
+    status: 'read',
+    metadata: { media: { mimetype: 'image/jpeg', data: 'livebytes' } },
+  });
+  const omittedHist = mapEngineHistoryMessage(hist({ id: sameId, type: 'image' }));
+  const merged = mergeChatMessages([liveDb], [omittedHist]);
+  assert.equal(merged[0].metadata?.media?.data, 'livebytes');
+  assert.equal(merged[0].status, 'read');
+});
+
 test('mergeChatMessages: returns ascending by timestamp (oldest first, newest last)', () => {
   const older = mapEngineHistoryMessage(hist({ id: 'a', timestamp: 1000 }));
   const newer = mapEngineHistoryMessage(hist({ id: 'b', timestamp: 2000 }));

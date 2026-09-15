@@ -74,10 +74,12 @@ interface NewContactModalProps {
   onClose: () => void;
   /** Hands the caller a chat to open once the first message has gone. */
   onStarted: (chat: Chat) => void;
+  /** Prefill from CRM / deep-link when there is no existing chat yet. */
+  initialPhone?: string;
 }
 
-function NewContactModal({ session, onClose, onStarted }: NewContactModalProps) {
-  const [typed, setTyped] = useState('');
+function NewContactModal({ session, onClose, onStarted, initialPhone = '' }: NewContactModalProps) {
+  const [typed, setTyped] = useState(initialPhone);
   const [body, setBody] = useState('');
   const [verdict, setVerdict] = useState<Verdict>({ state: 'idle' });
   const [sending, setSending] = useState(false);

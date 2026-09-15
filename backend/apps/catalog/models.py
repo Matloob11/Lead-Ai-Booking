@@ -16,6 +16,12 @@ class WabaNumber(models.Model):
         HIGH = "HIGH", "High"
         UNKNOWN = "UNKNOWN", "Unknown"
 
+    class Source(models.TextChoices):
+        # Pulled from alots channels — may be deactivated when missing from sync.
+        SYNC = "sync", "Synced from gateway"
+        # Typed in by an admin (webbox OTP/QR credentials) — sync must not kill it.
+        MANUAL = "manual", "Added manually"
+
     phone_number = models.CharField(max_length=32, unique=True)
     phone_number_id = models.CharField(max_length=64, unique=True, db_index=True)
     waba_business_id = models.CharField(max_length=64, db_index=True)
@@ -27,13 +33,33 @@ class WabaNumber(models.Model):
     # What we call it. Admins set this themselves — normally the agent who works
     # the number — and it is what the panel shows, so a sync can never wipe it.
     label = models.CharField(max_length=255, blank=True)
+
+    # Community / project this Official number belongs to (Damac Lagoon, The
+    # valley, …). Independent of ``label`` so the agent name and the area can
+    # both be on the number without overwriting each other.
+    community = models.CharField(max_length=120, blank=True)
+
+    # Alots / webbox login that owns this number (Dubai02WBX, A7GroupWBX).
+    # Several numbers share one account; this is not the Meta WABA id.
+    account_username = models.CharField(max_length=32, blank=True, db_index=True)
+
     quality_rating = models.CharField(max_length=16, choices=Quality.choices, default=Quality.UNKNOWN)
     verification_status = models.CharField(max_length=32, blank=True)
     messaging_limit = models.CharField(max_length=32, blank=True)
 
+    source = models.CharField(
+        max_length=16,
+        choices=Source.choices,
+        default=Source.SYNC,
+        db_index=True,
+    )
+
     is_active = models.BooleanField(default=True)
     webhook_configured = models.BooleanField(default=False)
     synced_at = models.DateTimeField(null=True, blank=True)
+    # Last template-list failure for this number's WABA (A7 key cannot read it).
+    # Cleared on a successful list. Empty means the last sync could read it.
+    template_sync_error = models.CharField(max_length=300, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -204,3 +230,64 @@ class WaTemplate(models.Model):
     def requires_header_media(self):
         header = self.header
         return bool(header and header["format"] in {"IMAGE", "VIDEO", "DOCUMENT"})
+
+
+class WaTemplateHide(models.Model):
+    """A template name agents chose to hide from this panel.
+
+    Meta is untouched — removal here is local only. Sync must not re-import
+    hidden names or they would pop back after every refresh.
+    """
+
+    waba_business_id = models.CharField(max_length=64, db_index=True)
+    name = models.CharField(max_length=255)
+    hidden_at = models.DateTimeField(auto_now_add=True)
+    hidden_by = models.ForeignKey(
+        "accounts.Agent",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["waba_business_id", "name"],
+                name="unique_hidden_template_per_waba",
+            )
+        ]
+        ordering = ["-hidden_at"]
+
+    def __str__(self):
+        return f"{self.name} @ {self.waba_business_id}"
+
+    @classmethod
+    def hide_from_panel(cls, waba_business_id, name, agent=None):
+        cls.objects.update_or_create(
+            waba_business_id=waba_business_id,
+            name=name,
+            defaults={"hidden_by": agent},
+        )
+        WaTemplate.objects.filter(waba_business_id=waba_business_id, name=name).delete()
+
+    @classmethod
+    def unhide_name(cls, waba_business_id, name):
+        cls.objects.filter(waba_business_id=waba_business_id, name=name).delete()
+
+    @classmethod
+    def visible(cls, queryset):
+        from django.db.models import Exists, OuterRef
+
+        return queryset.exclude(
+            Exists(
+                cls.objects.filter(
+                    waba_business_id=OuterRef("waba_business_id"),
+                    name=OuterRef("name"),
+                )
+            )
+        )
+
+    @classmethod
+    def hidden_names(cls, waba_business_id):
+        return set(cls.objects.filter(waba_business_id=waba_business_id).values_list("name", flat=True))

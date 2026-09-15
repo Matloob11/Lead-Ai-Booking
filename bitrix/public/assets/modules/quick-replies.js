@@ -16,7 +16,7 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
   const bodyTextarea = el("textarea.field", { rows: 3, placeholder: "Type the full quick reply response message..." });
   const sharedCheckbox = el("input", { type: "checkbox" });
   const sharedLabel = isWaAdmin
-    ? el("label", { style: "display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer;" }, [
+    ? el("label.akit-check", {}, [
         sharedCheckbox,
         "Share with everyone on the team",
       ])
@@ -28,7 +28,7 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
     " Save Quick Reply",
   ]);
 
-  const listContainer = el("div.na-rows", { style: "margin-top: 16px;" });
+  const listContainer = el("div.akit-list");
 
   shortcutInput.addEventListener("input", () => {
     shortcutInput.value = shortcutInput.value.toLowerCase().replace(/[^\w-]+/g, "");
@@ -47,8 +47,8 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
     clear(body);
     clear(listContainer);
 
-    const formBlock = el("div.tplc-form", { style: "gap: 10px; padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);" }, [
-      el("div.na-title", { style: "font-weight: 600;" }, ["Create New Quick Reply"]),
+    const formBlock = el("div.akit-card.tplc-form", {}, [
+      el("div.akit-card__title", {}, ["Create New Quick Reply"]),
       el("label.tplc-field", {}, [el("span", {}, ["Shortcut (typed after /)"]), shortcutInput]),
       el("label.tplc-field", {}, [el("span", {}, ["Message Body"]), bodyTextarea]),
       sharedLabel,
@@ -60,17 +60,17 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
       listContainer.append(el("div.tplc-empty", {}, ["No saved quick replies yet."]));
     } else {
       for (const reply of replies) {
-        const item = el("div.na-row", { style: "display: flex; justify-content: space-between; align-items: flex-start; padding: 10px;" }, [
-          el("div", { style: "flex: 1; min-width: 0; padding-right: 12px;" }, [
-            el("div", { style: "display: flex; align-items: center; gap: 8px;" }, [
-              el("span", { style: "font-weight: 700; color: #25D366; font-size: 13px;" }, [`/${reply.shortcut}`]),
+        const item = el("div.akit-row", {}, [
+          el("div.akit-row__main", {}, [
+            el("div.akit-row__top", {}, [
+              el("span.akit-shortcut", {}, [`/${reply.shortcut}`]),
               reply.is_shared
-                ? el("span.na-badge.na-badge--ok", { style: "font-size: 10px;" }, ["Shared"])
-                : el("span.na-badge", { style: "font-size: 10px; opacity: 0.7;" }, ["Personal"]),
+                ? el("span.na-badge.na-badge--ok", {}, ["Shared"])
+                : el("span.na-badge", {}, ["Personal"]),
             ]),
-            el("div", { style: "font-size: 13px; white-space: pre-wrap; margin-top: 4px;" }, [reply.body]),
+            el("div.akit-body", {}, [reply.body]),
           ]),
-          el("div", { style: "display: flex; gap: 6px;" }, [
+          el("div.akit-actions", {}, [
             onSelectReply
               ? el("button.btn.btn--primary.btn--sm", {
                   type: "button",
@@ -97,7 +97,7 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
       }
     }
 
-    body.append(formBlock, el("h3.cp-block__title", { style: "margin-top: 16px;" }, ["Saved Replies"]), listContainer);
+    body.append(formBlock, el("h3.akit-section-title", {}, ["Saved Replies"]), listContainer);
   }
 
   saveBtn.addEventListener("click", async () => {
@@ -139,9 +139,7 @@ export function openQuickRepliesModal({ isWaAdmin, onSelectReply } = {}) {
  * Binds inline `/shortcut` autocomplete popup on composer textarea.
  */
 export function bindSlashAutocomplete({ textarea, isWaAdmin, onApply }) {
-  const popup = el("div.slash-popup", {
-    style: "position: absolute; bottom: 100%; left: 10px; background: #1f2937; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; width: 320px; max-height: 220px; overflow-y: auto; z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: none;",
-  });
+  const popup = el("div.slash-popup");
 
   document.body.append(popup);
 
@@ -184,20 +182,20 @@ export function bindSlashAutocomplete({ textarea, isWaAdmin, onApply }) {
     for (let i = 0; i < matches.length; i++) {
       const r = matches[i];
       const row = el(
-        "div.slash-item",
+        "div.slash-popup__item",
         {
-          style: `padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); ${i === activeIndex ? "background: rgba(37,211,102,0.2);" : ""}`,
+          class: i === activeIndex ? "is-active" : "",
           onmousedown: (e) => {
             e.preventDefault();
             applyReply(r);
           },
         },
         [
-          el("div", {}, [
-            el("span", { style: "font-weight: 700; color: #25D366;" }, [`/${r.shortcut}`]),
-            el("span", { style: "font-size: 11px; opacity: 0.7; margin-left: 8px;" }, [(r.body || "").slice(0, 30)]),
+          el("div.slash-popup__meta", {}, [
+            el("span.akit-shortcut", {}, [`/${r.shortcut}`]),
+            el("span.slash-popup__preview", {}, [(r.body || "").slice(0, 30)]),
           ]),
-          r.is_shared ? el("span", { style: "font-size: 10px; opacity: 0.5;" }, ["Shared"]) : null,
+          r.is_shared ? el("span.slash-popup__tag", {}, ["Shared"]) : null,
         ]
       );
       popup.append(row);

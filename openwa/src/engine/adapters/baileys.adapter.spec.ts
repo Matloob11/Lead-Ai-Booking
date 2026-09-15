@@ -218,6 +218,26 @@ describe('BaileysAdapter lifecycle & status', () => {
     expect(adapter.getQRCode()).toBe(rendered);
   });
 
+  it('purges credentials only after this adapter generation exposed a fresh QR', async () => {
+    const rmSpy = jest.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    try {
+      let resolveQr!: () => void;
+      const qrPublished = new Promise<void>(resolve => (resolveQr = resolve));
+      const adapter = newAdapter();
+      await adapter.initialize(noopCallbacks({ onQRCode: () => resolveQr() }));
+
+      await adapter.purgeLocalCredentials();
+      expect(rmSpy).not.toHaveBeenCalled();
+
+      fakeSock.fire('connection.update', { qr: 'QR-STRING' });
+      await qrPublished;
+      await adapter.purgeLocalCredentials();
+      expect(rmSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
   it('captures phone/pushName and fires onReady on connection open', async () => {
     const onReady = jest.fn();
     const adapter = newAdapter();
@@ -3758,6 +3778,20 @@ describe('BaileysAdapter contact + chat reads', () => {
     expect((await adapter.getContactById('628111@s.whatsapp.net'))?.number).toBe('628111');
     expect((await adapter.getContactById('628111@c.us'))?.id).toBe('628111@c.us'); // neutral id round-trips
     expect(await adapter.getContactById('x@s.whatsapp.net')).toBeNull();
+  });
+
+  it('routes provider data through the pre-identity gate before mutating adapter stores', async () => {
+    const queued: Array<() => void | Promise<void>> = [];
+    const adapter = newAdapter();
+    await adapter.initialize({ onEngineData: (_payload, apply) => queued.push(apply) });
+    fakeSock.fire('connection.update', { connection: 'open' });
+
+    fakeSock.fire('contacts.upsert', [{ id: '628111@s.whatsapp.net', notify: 'Held' }]);
+    expect(await adapter.getContacts()).toHaveLength(0);
+    expect(queued).toHaveLength(2);
+
+    await queued[1]();
+    expect(await adapter.getContacts()).toHaveLength(1);
   });
 
   it('populates chats + last message and reads getChats', async () => {

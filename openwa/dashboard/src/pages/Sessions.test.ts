@@ -119,7 +119,7 @@ function installFetchStub(): void {
       );
     }
 
-    const sessionIdMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
+    const sessionIdMatch = path.match(/^\/api\/sessions\/([^/?]+)$/);
     if (method === 'GET' && sessionIdMatch) {
       const found = SESSIONS.find(s => s.id === sessionIdMatch[1]);
       return found
@@ -128,6 +128,22 @@ function installFetchStub(): void {
     }
     if (method === 'DELETE' && sessionIdMatch) {
       return Promise.resolve(new Response(null, { status: 204 }));
+    }
+
+    const deleteImpactMatch = path.match(/^\/api\/sessions\/([^/]+)\/delete-impact$/);
+    if (method === 'GET' && deleteImpactMatch) {
+      return Promise.resolve(jsonResponse({ messageCount: 675 }));
+    }
+
+    const confirmedDeleteMatch = path.match(/^\/api\/sessions\/([^/?]+)\?confirmMessageCount=(\d+)$/);
+    if (method === 'DELETE' && confirmedDeleteMatch) {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+
+    const resetProfileMatch = path.match(/^\/api\/sessions\/([^/]+)\/reset-profile$/);
+    if (method === 'POST' && resetProfileMatch) {
+      const found = SESSIONS.find(s => s.id === resetProfileMatch[1]) ?? SESSION_STALE_ENGINE;
+      return Promise.resolve(jsonResponse({ ...found, status: 'disconnected', engineLoaded: false }));
     }
 
     const qrMatch = path.match(/^\/api\/sessions\/([^/]+)\/qr$/);
@@ -330,4 +346,39 @@ test('an unrestricted session shows no restriction row', async () => {
   const card = (await screen.findByText('stale-engine')).closest('.session-card') as HTMLElement;
 
   assert.equal(within(card).queryByText('Restriction'), null);
+});
+
+test('delete fetches exact impact, shows 675 messages, and confirms same count on DELETE', async () => {
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
+  renderSessions();
+
+  const card = (await screen.findByText('stale-engine')).closest('.session-card') as HTMLElement;
+  fireEvent.click(within(card).getByRole('button', { name: 'Delete' }));
+
+  const dialog = await screen.findByRole('dialog');
+  await within(dialog).findByText(/675 stored messages/i);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete permanently' }));
+
+  await waitFor(() => {
+    assert.ok(findFetchCall('GET', '/api/sessions/sess-stale-1/delete-impact'));
+    assert.ok(findFetchCall('DELETE', '/api/sessions/sess-stale-1?confirmMessageCount=675'));
+  });
+});
+
+test('profile reset is separate from delete and calls reset endpoint after preservation warning', async () => {
+  const { screen, fireEvent, within, waitFor } = rtl;
+  resetFetchCalls();
+  renderSessions();
+
+  const card = (await screen.findByText('stale-engine')).closest('.session-card') as HTMLElement;
+  fireEvent.click(within(card).getByRole('button', { name: 'Reset profile' }));
+
+  const dialog = await screen.findByRole('dialog');
+  within(dialog).getByText(/session identity and stored messages stay intact/i);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Reset profile' }));
+
+  await waitFor(() => {
+    assert.ok(findFetchCall('POST', '/api/sessions/sess-stale-1/reset-profile'));
+  });
 });

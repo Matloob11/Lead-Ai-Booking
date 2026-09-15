@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Eye, EyeOff, Languages } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { GithubIcon } from '../components/GithubIcon';
-import { CustomSelect } from '../components/CustomSelect';
-import { languageOptions, resolveSupportedLanguage, type SupportedLanguage } from '../i18n';
 import { API_BASE_URL } from '../services/api';
 import './Login.css';
 
@@ -40,14 +38,17 @@ const TRUSTED_KEY_ORIGINS: readonly string[] = [
 ];
 
 export function Login({ onLogin }: LoginProps) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const currentLang = resolveSupportedLanguage(i18n.resolvedLanguage || i18n.language);
 
   useEffect(() => {
+    // Preserve CRM deep-link phone across the login paint (BrowserRouter mounts after auth).
+    const phone = (new URLSearchParams(window.location.search).get('phone') || '').replace(/\D/g, '');
+    if (phone.length >= 8) sessionStorage.setItem('openwa_open_phone', phone);
+
     const handleAutoLoginKey = async (key: string) => {
       if (!key || typeof key !== 'string') return;
       setIsLoading(true);
@@ -81,6 +82,10 @@ export function Login({ onLogin }: LoginProps) {
         if (typeof key === 'string' && key.trim()) {
           void handleAutoLoginKey(key.trim());
         }
+        if (event.data.type === 'openwa_open_phone') {
+          const p = String(event.data.phone || '').replace(/\D/g, '');
+          if (p.length >= 8) sessionStorage.setItem('openwa_open_phone', p);
+        }
       }
     };
 
@@ -104,10 +109,6 @@ export function Login({ onLogin }: LoginProps) {
       window.removeEventListener('message', handleMessage);
     };
   }, [onLogin, t]);
-
-  const changeLanguage = (language: SupportedLanguage) => {
-    void i18n.changeLanguage(language);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,16 +156,6 @@ export function Login({ onLogin }: LoginProps) {
           </span>
         </div>
 
-        <div className="login-language">
-          <Languages size={18} />
-          <CustomSelect
-            value={currentLang}
-            onChange={value => changeLanguage(value as SupportedLanguage)}
-            options={languageOptions.map(opt => ({ value: opt.value, label: opt.label }))}
-            ariaLabel={t('common.language')}
-          />
-        </div>
-
         <form onSubmit={handleSubmit} className="login-form">
           <div className="input-group">
             <label htmlFor="apiKey">{t('login.apiKey')}</label>
@@ -194,26 +185,35 @@ export function Login({ onLogin }: LoginProps) {
           </button>
         </form>
 
-        <p className="login-help">
-          {t('login.help')}{' '}
-          <a href="https://docs.open-wa.org" target="_blank" rel="noopener noreferrer">
-            {t('login.viewDocs')}
-          </a>
-        </p>
+        {document.documentElement.dataset.embedded === 'true' ? (
+          <p className="login-help">
+            Ask a panel admin for your Linked phones key if this screen appears. Do not use a
+            personal OpenWA cloud key here.
+          </p>
+        ) : (
+          <p className="login-help">
+            {t('login.help')}{' '}
+            <a href="https://docs.open-wa.org" target="_blank" rel="noopener noreferrer">
+              {t('login.viewDocs')}
+            </a>
+          </p>
+        )}
       </div>
 
-      <footer className="login-footer">
-        <span>{t('login.footer')}</span>
-        <a
-          href="https://github.com/rmyndharis/OpenWA"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="github-link"
-          aria-label="GitHub"
-        >
-          <GithubIcon size={18} />
-        </a>
-      </footer>
+      {document.documentElement.dataset.embedded === 'true' ? null : (
+        <footer className="login-footer">
+          <span>{t('login.footer')}</span>
+          <a
+            href="https://github.com/rmyndharis/OpenWA"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="github-link"
+            aria-label="GitHub"
+          >
+            <GithubIcon size={18} />
+          </a>
+        </footer>
+      )}
     </div>
   );
 }

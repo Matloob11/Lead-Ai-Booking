@@ -128,6 +128,42 @@ def _resolve_via_api(client, media_id, phone_number_id):
     return response.json().get("url")
 
 
+def candidate_media_urls(asset):
+    """Ordered URLs to try for one inbound attachment.
+
+    Alots voice-note ``filelink`` values end in ``.bin`` but the file on
+    gsauth.com is actually ``.ogg``. Images/docs use the real extension and
+    work as-is; audio always 404s on ``.bin`` and then Meta's lookaside URL
+    returns 401 with our gateway token — so voice notes never landed. Try the
+    mime-matched extension before falling back to Meta's short-lived link.
+    """
+    urls = []
+    source = (getattr(asset, "source_url", None) or "").strip()
+    fallback = (getattr(asset, "fallback_url", None) or "").strip()
+    mime = (getattr(asset, "mime_type", None) or "").lower()
+
+    def add(url):
+        if url and url not in urls:
+            urls.append(url)
+
+    add(source)
+    if source.lower().endswith(".bin"):
+        if mime.startswith("audio/"):
+            add(source[:-4] + ".ogg")
+            add(source[:-4] + ".opus")
+        elif mime.startswith("image/"):
+            add(source[:-4] + ".jpg")
+            add(source[:-4] + ".jpeg")
+            add(source[:-4] + ".png")
+            add(source[:-4] + ".webp")
+        elif mime.startswith("video/"):
+            add(source[:-4] + ".mp4")
+        elif "pdf" in mime:
+            add(source[:-4] + ".pdf")
+    add(fallback)
+    return urls
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def download_media(self, asset_id, phone_number_id):
     asset = MediaAsset.objects.filter(pk=asset_id).first()
@@ -142,7 +178,7 @@ def download_media(self, asset_id, phone_number_id):
 
     try:
         with httpx.Client(timeout=settings.ALOTS_TIMEOUT) as client:
-            urls = [u for u in (asset.source_url, asset.fallback_url) if u]
+            urls = candidate_media_urls(asset)
             if not urls and asset.alots_media_id:
                 resolved = _resolve_via_api(client, asset.alots_media_id, phone_number_id)
                 urls = [resolved] if resolved else []

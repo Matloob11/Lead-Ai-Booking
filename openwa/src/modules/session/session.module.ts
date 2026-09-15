@@ -19,16 +19,21 @@ import { WebhookModule } from '../webhook/webhook.module';
 import { StatusStoreModule } from '../status-store/status-store.module';
 import { ChatMediaModule } from '../chat-media/chat-media.module';
 import { AutomationModule } from '../automation/automation.module';
+import { ConversationHealthModule } from '../conversation-health/conversation-health.module';
+import { SessionEngineAcceptanceBuffer } from './session-engine-acceptance-buffer';
+import { SessionIdentityGuard } from './session-identity-guard';
+import { SessionEngineIdentityGate } from './session-engine-identity-gate';
 
 @Module({
-  // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule do not import SessionModule
-  // back, so the dependency is one-directional — no forwardRef() needed.
+  // WebhookModule/StatusStoreModule/ChatMediaModule/AutomationModule/ConversationHealthModule do not
+  // import SessionModule back, so the dependency is one-directional — no forwardRef() needed.
   imports: [
     TypeOrmModule.forFeature([Session, Message], 'data'),
     WebhookModule,
     StatusStoreModule,
     ChatMediaModule,
     AutomationModule,
+    ConversationHealthModule,
   ],
   controllers: [SessionController],
   providers: [
@@ -44,6 +49,9 @@ import { AutomationModule } from '../automation/automation.module';
     SessionLivenessWatchdog,
     SessionOwnershipService,
     MessageProjector,
+    SessionEngineAcceptanceBuffer,
+    SessionIdentityGuard,
+    SessionEngineIdentityGate,
   ],
   exports: [SessionService, MessageProjector, SessionOwnershipService],
 })

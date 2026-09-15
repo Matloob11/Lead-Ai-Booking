@@ -79,8 +79,12 @@ describe('SessionService logout() name-scoped teardown fence', () => {
       findOne: jest.fn().mockResolvedValue(createMockSession()),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
-    const messageRepository = { find: jest.fn().mockResolvedValue([]) };
-    const manager = { delete: jest.fn().mockResolvedValue({ affected: 1 }), remove: jest.fn() };
+    const messageRepository = { count: jest.fn().mockResolvedValue(0), find: jest.fn().mockResolvedValue([]) };
+    const manager = {
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      remove: jest.fn(),
+    };
     const dataSource: Partial<DataSource> = {
       transaction: jest.fn(async (cb: (m: unknown) => Promise<void>) =>
         cb(manager),
@@ -188,7 +192,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
       await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
       expect(pendingOf().has(SESSION_NAME)).toBe(true);
 
-      const deleteCall = service.delete(SESSION_UUID);
+      const deleteCall = service.delete(SESSION_UUID, 0);
       await jest.advanceTimersByTimeAsync(1_000); // inside the bounded wait
       expect(engineFactory.purgeSessionData).not.toHaveBeenCalled();
 
@@ -250,7 +254,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
       await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
       expect(pendingOf().has(SESSION_NAME)).toBe(true);
 
-      const deleteCall = service.delete(SESSION_UUID);
+      const deleteCall = service.delete(SESSION_UUID, 0);
       deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
       await jest.advanceTimersByTimeAsync(10_000); // first fence already pending → fail fast
       await expectNameTeardownPending(deleteCall);
@@ -315,7 +319,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
       await expect(logoutCall).rejects.toBeInstanceOf(BadGatewayException);
       expect(pendingOf().has(SESSION_NAME)).toBe(true);
 
-      const deleteCall = service.delete(SESSION_UUID);
+      const deleteCall = service.delete(SESSION_UUID, 0);
       deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
       await jest.advanceTimersByTimeAsync(10_000); // first fence exhausts its bounded wait → fail CLOSED
       await expectNameTeardownPending(deleteCall);
@@ -357,7 +361,7 @@ describe('SessionService logout() name-scoped teardown fence', () => {
 
     jest.useFakeTimers();
     try {
-      const deleteCall = service.delete(SESSION_UUID);
+      const deleteCall = service.delete(SESSION_UUID, 0);
       deleteCall.catch(() => undefined); // mark rejection handled across the timer advance below
       await jest.advanceTimersByTimeAsync(10_000); // second fence exhausts its bounded wait
       await expectNameTeardownPending(deleteCall);

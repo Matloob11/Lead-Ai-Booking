@@ -13,8 +13,24 @@
 
 .sessions-page .filters-bar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.sessions-page .sessions-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Standalone: Create stays in the page header. Embedded hides `.page-header`,
+   so only the toolbar copy shows (see a7-embedded.css). */
+.sessions-page .sessions-create-btn--toolbar {
+  display: none;
 }
 
 .sessions-page .search-input {
@@ -250,6 +266,11 @@
   .sessions-page .btn-primary {
     width: 100%;
     justify-content: center;
+  }
+
+  .sessions-page .sessions-create-btn {
+    margin-left: 0;
+    width: 100%;
   }
 
   .sessions-page .session-card {

@@ -180,6 +180,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private client: Client | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
+  /** True only after this adapter generation itself exposed a fresh pairing QR. */
+  private linkedByQrThisGeneration = false;
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
   private callbacks: EngineEventCallbacks = {};
@@ -545,6 +547,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           return;
         }
         this.qrCode = encodedQr;
+        this.linkedByQrThisGeneration = true;
         this.setStatus(EngineStatus.QR_READY);
         this.callbacks.onQRCode?.(this.qrCode);
       } catch (error) {
@@ -900,16 +903,25 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       this.phoneNumber = info?.wid?.user || null;
       this.pushName = info?.pushname || null;
       this.setStatus(EngineStatus.READY);
-      this.callbacks.onReady?.(this.phoneNumber || '', this.pushName || '');
+      void Promise.resolve(this.callbacks.onReady?.(this.phoneNumber || '', this.pushName || '')).catch(error =>
+        this.logger.error('WhatsApp identity admission callback failed', String(error)),
+      );
     } catch (error) {
       this.logger.error('Error getting client info', String(error));
       this.setStatus(EngineStatus.READY);
-      this.callbacks.onReady?.('', '');
+      void Promise.resolve(this.callbacks.onReady?.('', '')).catch(callbackError =>
+        this.logger.error('WhatsApp identity rejection callback failed', String(callbackError)),
+      );
     }
     // A freshly-linked account may show a "What's new" onboarding modal that, left unacknowledged,
     // gets the companion unlinked (~5m later → disconnected: LOGOUT, #982). Dismiss it best-effort
     // and fall back to ACTION_REQUIRED. Started after READY so a non-ready session never arms it.
-    this.startOnboardingWatcher();
+    const startPostIdentityWatcher = (): void => this.startOnboardingWatcher();
+    if (this.callbacks.onEngineData) {
+      this.callbacks.onEngineData(['post-ready-onboarding-watcher'], startPostIdentityWatcher);
+    } else {
+      startPostIdentityWatcher();
+    }
   }
 
   private scheduleReadyReconcile(): void {
@@ -1335,6 +1347,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     }
   }
 
+  purgeLocalCredentials(): Promise<void> {
+    if (!this.linkedByQrThisGeneration) return Promise.resolve();
+    this.linkedByQrThisGeneration = false;
+    return this.clearLocalAuth();
+  }
+
   async destroy(): Promise<void> {
     const client = this.beginClientTeardown();
     if (!client) return;
@@ -1602,8 +1620,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     includeMedia: boolean = false,
     mediaMaxBytes?: number,
     signal?: AbortSignal,
+    mediaFor?: string,
   ): Promise<IncomingMessage[]> {
-    return this.messaging.getChatHistory(chatId, limit, includeMedia, mediaMaxBytes, signal);
+    return this.messaging.getChatHistory(chatId, limit, includeMedia, mediaMaxBytes, signal, mediaFor);
   }
 
   // Delete Message
@@ -1785,7 +1804,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
    * replaces it, and a run belonging to the old client must stop rather than keep paging a handset
    * that has moved on.
    */
-  async importHistorySince(since: Date, onProgress?: (pct: number) => void): Promise<number> {
+  async importHistorySince(since: Date, onProgress?: (pct: number) => void | Promise<void>): Promise<number> {
     const client = this.client;
     if (!client) return 0;
 

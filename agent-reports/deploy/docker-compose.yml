@@ -1,0 +1,72 @@
+# Build context is agent-reports/ (parent of deploy/)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agent_reports
+      POSTGRES_USER: agent_reports
+      POSTGRES_PASSWORD: agent_reports
+    volumes:
+      - ar_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: ../.env
+    ports:
+      # Host 8090 is already taken on the VPS; keep container 8090, map 8091.
+      - "8091:8090"
+    volumes:
+      - ar_storage:/data/reports
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent_reports:agent_reports@postgres:5432/agent_reports
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/reports
+      PANEL_DIR: /panel
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8090
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: ../.env
+    volumes:
+      - ar_storage:/data/reports
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent_reports:agent_reports@postgres:5432/agent_reports
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/reports
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file: ../.env
+    depends_on:
+      - redis
+      - worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent_reports:agent_reports@postgres:5432/agent_reports
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/reports
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
+    restart: unless-stopped
+
+volumes:
+  ar_pg:
+  ar_storage:

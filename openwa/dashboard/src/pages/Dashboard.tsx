@@ -12,6 +12,7 @@ import {
   useStatsOverviewQuery,
 } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
+import { ConversationHealthPanel } from '../components/ConversationHealthPanel';
 import './Dashboard.css';
 
 // recharts is heavy (~150kB gzip); load the analytics section on demand so it never bloats the
@@ -118,6 +119,8 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+
+      <ConversationHealthPanel />
 
       <Suspense fallback={null}>
         <DashboardCharts />

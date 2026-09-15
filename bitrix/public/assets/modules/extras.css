@@ -733,14 +733,14 @@
   flex: none;
 }
 
-body[data-wa-theme="glass-light"] .wa-x-theme-btn {
+[data-wa-theme="glass-light"] .wa-x-theme-btn {
   background: rgba(255, 255, 255, 0.9);
   border-color: rgba(22, 48, 82, 0.14);
   color: #21395a;
   box-shadow: 0 2px 6px rgba(24, 48, 82, 0.08), inset 0 1px 0 #fff;
 }
 
-body[data-wa-theme="classic"] .wa-x-theme-btn {
+[data-wa-theme="classic"] .wa-x-theme-btn {
   background: #fff;
   border: 1px solid var(--line);
   color: var(--navy);
@@ -757,60 +757,60 @@ body[data-wa-theme="classic"] .wa-x-theme-btn {
   display: none;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-glass-bg,
-body[data-wa-theme="glass-light"] .wa-x-glass-bg {
+[data-wa-theme="glass-dark"] .wa-x-glass-bg,
+[data-wa-theme="glass-light"] .wa-x-glass-bg {
   display: block;
 }
 
 /* Glass Dark Blobs */
-body[data-wa-theme="glass-dark"] .wa-x-blob {
+[data-wa-theme="glass-dark"] .wa-x-blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(90px);
   opacity: 0.85;
 }
-body[data-wa-theme="glass-dark"] .wa-x-b1 {
+[data-wa-theme="glass-dark"] .wa-x-b1 {
   width: 780px; height: 780px; left: -6%; top: -12%;
   background: radial-gradient(circle at 30% 30%, #1d6f7a, #0e3550 65%, transparent 72%);
 }
-body[data-wa-theme="glass-dark"] .wa-x-b2 {
+[data-wa-theme="glass-dark"] .wa-x-b2 {
   width: 900px; height: 900px; right: -12%; top: -22%;
   background: radial-gradient(circle at 60% 40%, #c8a34a, #6b4f16 60%, transparent 70%);
   opacity: 0.55;
 }
-body[data-wa-theme="glass-dark"] .wa-x-b3 {
+[data-wa-theme="glass-dark"] .wa-x-b3 {
   width: 820px; height: 820px; left: 24%; bottom: -34%;
   background: radial-gradient(circle at 50% 50%, #2a4f9c, #16265a 60%, transparent 70%);
   opacity: 0.8;
 }
-body[data-wa-theme="glass-dark"] .wa-x-b4 {
+[data-wa-theme="glass-dark"] .wa-x-b4 {
   width: 520px; height: 520px; right: 12%; bottom: -16%;
   background: radial-gradient(circle at 50% 50%, #14806a, #0b3b36 60%, transparent 70%);
   opacity: 0.6;
 }
 
 /* Glass Light Blobs */
-body[data-wa-theme="glass-light"] .wa-x-blob {
+[data-wa-theme="glass-light"] .wa-x-blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(90px);
 }
-body[data-wa-theme="glass-light"] .wa-x-b1 {
+[data-wa-theme="glass-light"] .wa-x-b1 {
   width: 800px; height: 800px; left: -8%; top: -14%;
   background: radial-gradient(circle at 30% 30%, #a8dcea, #cfe6f2 60%, transparent 70%);
   opacity: 0.95;
 }
-body[data-wa-theme="glass-light"] .wa-x-b2 {
+[data-wa-theme="glass-light"] .wa-x-b2 {
   width: 900px; height: 900px; right: -14%; top: -20%;
   background: radial-gradient(circle at 60% 40%, #f6e0ae, #fbf1da 58%, transparent 70%);
   opacity: 0.95;
 }
-body[data-wa-theme="glass-light"] .wa-x-b3 {
+[data-wa-theme="glass-light"] .wa-x-b3 {
   width: 860px; height: 860px; left: 22%; bottom: -36%;
   background: radial-gradient(circle at 50% 50%, #c3d0f2, #e3eaf9 60%, transparent 70%);
   opacity: 0.95;
 }
-body[data-wa-theme="glass-light"] .wa-x-b4 {
+[data-wa-theme="glass-light"] .wa-x-b4 {
   width: 560px; height: 560px; right: 10%; bottom: -18%;
   background: radial-gradient(circle at 50% 50%, #b6e7d5, #dcf3ea 60%, transparent 70%);
   opacity: 0.9;
@@ -881,16 +881,53 @@ body[data-wa-theme="glass-light"] .wa-x-b4 {
   color: var(--navy);
 }
 
+#wa-theme-slot .wa-x-theme-item,
+.sidebar__menu .wa-x-theme-item {
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+}
+
+#wa-theme-slot .wa-x-theme-item:hover,
+#wa-theme-slot .wa-x-theme-item--active,
+.sidebar__menu .wa-x-theme-item:hover,
+.sidebar__menu .wa-x-theme-item--active {
+  background: var(--menu-hover, #f2f5f8);
+  color: inherit;
+}
+
+.sidebar__menu .wa-x-theme-dropdown {
+  position: static;
+  width: 100%;
+  box-shadow: none;
+  border: 0;
+  background: transparent;
+}
+
+[data-wa-theme="glass-dark"] .thread__hint {
+  color: #94a3b8;
+}
+
+[data-wa-theme="glass-light"] .thread__hint {
+  color: #5b6b80;
+}
+
+/* Theme picker lives in the hamburger now — do not let a leftover nested
+   popup paint white rectangles over the dark menu. */
+
 /* ==========================================================================
    LIQUID GLASS (DARK) Theme Styles (Exact 1-dark.html)
    ========================================================================== */
-body[data-wa-theme="glass-dark"] {
+[data-wa-theme="glass-dark"] {
   background: #0a1020 !important;
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] #root,
-body[data-wa-theme="glass-light"] #root {
+[data-wa-theme="glass-dark"] #root,
+[data-wa-theme="glass-light"] #root {
   padding: 12px !important;
   box-sizing: border-box !important;
   display: flex !important;
@@ -900,8 +937,8 @@ body[data-wa-theme="glass-light"] #root {
   overflow: hidden !important;
 }
 
-body[data-wa-theme="glass-dark"] .app,
-body[data-wa-theme="glass-light"] .app {
+[data-wa-theme="glass-dark"] .app,
+[data-wa-theme="glass-light"] .app {
   flex: 1 !important;
   min-height: 0 !important;
   height: 100% !important;
@@ -909,7 +946,7 @@ body[data-wa-theme="glass-light"] .app {
   box-sizing: border-box !important;
 }
 
-body[data-wa-theme="glass-dark"] .app {
+[data-wa-theme="glass-dark"] .app {
   border-radius: 24px !important;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.07) !important;
@@ -919,16 +956,16 @@ body[data-wa-theme="glass-dark"] .app {
   box-shadow: 0 30px 80px rgba(3, 8, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
 }
 
-body[data-wa-theme="glass-dark"] .sidebar {
+[data-wa-theme="glass-dark"] .sidebar {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)) !important;
   border-right: 1px solid rgba(255, 255, 255, 0.10) !important;
 }
 
-body[data-wa-theme="glass-dark"] .sidebar__title {
+[data-wa-theme="glass-dark"] .sidebar__title {
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] .btn--ghost {
+[data-wa-theme="glass-dark"] .btn--ghost {
   background: rgba(255, 255, 255, 0.10) !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
   color: #eef3f9 !important;
@@ -936,7 +973,7 @@ body[data-wa-theme="glass-dark"] .btn--ghost {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
 }
 
-body[data-wa-theme="glass-dark"] .btn--primary {
+[data-wa-theme="glass-dark"] .btn--primary {
   background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
   border: 1px solid rgba(255, 235, 180, 0.5) !important;
   color: #241b06 !important;
@@ -944,141 +981,274 @@ body[data-wa-theme="glass-dark"] .btn--primary {
   box-shadow: 0 6px 18px rgba(200, 163, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
 }
 
-body[data-wa-theme="glass-dark"] .filter {
+[data-wa-theme="glass-dark"] .sidebar__chrome {
+  background: transparent !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
-body[data-wa-theme="glass-dark"] .filter__select,
-body[data-wa-theme="glass-dark"] .filter__search,
-body[data-wa-theme="glass-dark"] .wa-x-search-input {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+/* Dead foot class — no dark bar under New. */
+[data-wa-theme="glass-dark"] .sidebar__foot {
+  display: none !important;
+}
+
+[data-wa-theme="glass-dark"] .filter {
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+
+/* Kill any leftover absolute number-panel styles from older deploys. */
+[data-wa-theme="glass-dark"] .filter__number-panel,
+[data-wa-theme="glass-dark"] .filter__number-panel[hidden],
+[data-wa-theme="glass-dark"] .filter__numbers-picker.is-open .filter__number-panel {
+  display: none !important;
+}
+
+[data-wa-theme="glass-dark"] .np__trigger,
+[data-wa-theme="glass-dark"] .np__body,
+[data-wa-theme="glass-dark"] .np__search,
+[data-wa-theme="glass-dark"] .filter__select,
+[data-wa-theme="glass-dark"] .filter__search,
+[data-wa-theme="glass-dark"] .wa-x-search-input {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
   color: #eef3f9 !important;
   border-radius: 12px !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26) !important;
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
   font-weight: 500 !important;
 }
 
-body[data-wa-theme="glass-dark"] .filter__select option {
+[data-wa-theme="glass-dark"] .np__option:hover,
+[data-wa-theme="glass-dark"] .np__option.is-active {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-wa-theme="glass-dark"] .filter__quick-btn {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+
+[data-wa-theme="glass-dark"] .filter__quick-btn.is-active {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .menu__tag-chip {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: rgba(238, 243, 249, 0.8) !important;
+}
+
+[data-wa-theme="glass-dark"] .filter__select option {
   background: #0f1c2e !important;
   color: #f1f5f9 !important;
   padding: 8px 12px !important;
   font-size: 13px !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv {
-  border-radius: 16px !important;
+[data-wa-theme="glass-dark"] .conv {
+  border-radius: 14px !important;
   border: 1px solid transparent !important;
-  margin: 0 4px 4px !important;
+  margin: 0 6px 6px !important;
+  padding: 12px !important;
   transition: all 0.15s ease !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv:hover {
+[data-wa-theme="glass-dark"] .conv:hover {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv--active {
+[data-wa-theme="glass-dark"] .conv--active {
   background: rgba(255, 255, 255, 0.13) !important;
   border-color: rgba(255, 255, 255, 0.22) !important;
   box-shadow: 0 8px 24px rgba(3, 8, 20, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv__avatar {
+[data-wa-theme="glass-dark"] .conv__avatar {
   border-radius: 14px !important;
   background: linear-gradient(160deg, #dfe9f5, #a9c2dd) !important;
   color: #0e1a2b !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv__name {
+[data-wa-theme="glass-dark"] .conv__name {
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] .conv__time,
-body[data-wa-theme="glass-dark"] .conv__preview,
-body[data-wa-theme="glass-dark"] .conv__meta {
+[data-wa-theme="glass-dark"] .conv__time,
+[data-wa-theme="glass-dark"] .conv__preview,
+[data-wa-theme="glass-dark"] .conv__meta {
   color: rgba(238, 243, 249, 0.62) !important;
 }
 
-body[data-wa-theme="glass-dark"] .badge {
+[data-wa-theme="glass-dark"] .badge {
   background: #37d39b !important;
   color: #06281c !important;
   box-shadow: 0 4px 12px rgba(55, 211, 155, 0.4) !important;
 }
 
-body[data-wa-theme="glass-dark"] .thread__header {
+[data-wa-theme="glass-dark"] .thread__header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
 }
 
-body[data-wa-theme="glass-dark"] .thread__name {
+[data-wa-theme="glass-dark"] .thread__name {
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] .thread__sub {
+[data-wa-theme="glass-dark"] .thread__sub {
   color: rgba(238, 243, 249, 0.55) !important;
 }
 
-body[data-wa-theme="glass-dark"] .pill {
+[data-wa-theme="glass-dark"] .pill {
   border-radius: 999px !important;
 }
 
-body[data-wa-theme="glass-dark"] .pill--open {
+[data-wa-theme="glass-dark"] .pill--open {
   background: rgba(55, 211, 155, 0.16) !important;
   border: 1px solid rgba(55, 211, 155, 0.35) !important;
   color: #7ff0c6 !important;
 }
 
-body[data-wa-theme="glass-dark"] .thread__messages {
+[data-wa-theme="glass-dark"] .thread__messages {
   background: transparent !important;
 }
 
-body[data-wa-theme="glass-dark"] .daysep span {
+[data-wa-theme="glass-dark"] .daysep span {
   background: rgba(255, 255, 255, 0.08) !important;
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
   color: rgba(238, 243, 249, 0.65) !important;
 }
 
-body[data-wa-theme="glass-dark"] .daysep::before,
-body[data-wa-theme="glass-dark"] .daysep::after {
+[data-wa-theme="glass-dark"] .daysep::before,
+[data-wa-theme="glass-dark"] .daysep::after {
   background: rgba(255, 255, 255, 0.12) !important;
 }
 
-body[data-wa-theme="glass-dark"] .msg__bubble {
+[data-wa-theme="glass-dark"] .msg__bubble {
   border-radius: 18px !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   box-shadow: 0 8px 22px rgba(3, 8, 20, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
 }
 
-body[data-wa-theme="glass-dark"] .msg--in .msg__bubble {
+[data-wa-theme="glass-dark"] .msg--in .msg__bubble {
   background: rgba(255, 255, 255, 0.11) !important;
   border: 1px solid rgba(255, 255, 255, 0.17) !important;
   border-bottom-left-radius: 7px !important;
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] .msg--out .msg__bubble {
+[data-wa-theme="glass-dark"] .msg--out .msg__bubble {
   background: linear-gradient(180deg, rgba(46, 168, 131, 0.34), rgba(30, 124, 99, 0.30)) !important;
   border: 1px solid rgba(120, 235, 195, 0.32) !important;
   border-bottom-right-radius: 7px !important;
   color: #eef3f9 !important;
 }
 
-body[data-wa-theme="glass-dark"] .msg__foot {
+[data-wa-theme="glass-dark"] .msg__foot {
   color: rgba(238, 243, 249, 0.6) !important;
 }
 
-body[data-wa-theme="glass-dark"] .tick--read {
+[data-wa-theme="glass-dark"] .msg__voice {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .msg--out .msg__voice {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-wa-theme="glass-dark"] .voice__time {
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+
+[data-wa-theme="glass-dark"] .voice__tool {
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+
+[data-wa-theme="glass-dark"] .voice__tool:hover {
+  color: #eef3f9 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__template-btn {
+  background: #1f2c33 !important;
+  color: #53bdeb !important;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__template-btn--more {
+  color: rgba(238, 243, 249, 0.55) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__template-footer,
+[data-wa-theme="glass-dark"] .msg__button-reply-tag {
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__doc-sub,
+[data-wa-theme="glass-dark"] .msg__media-failed-hint {
+  color: rgba(238, 243, 249, 0.6) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__image-skeleton {
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.06) 25%,
+    rgba(255, 255, 255, 0.14) 37%,
+    rgba(255, 255, 255, 0.06) 63%
+  ) !important;
+  background-size: 200% 100% !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__pending,
+[data-wa-theme="glass-dark"] .msg__sent-media,
+[data-wa-theme="glass-dark"] .msg__media-failed {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: rgba(238, 243, 249, 0.92) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__sent-media-hint,
+[data-wa-theme="glass-dark"] .msg__media-failed-hint {
+  color: rgba(238, 243, 249, 0.65) !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__empty-hint {
+  background: rgba(180, 35, 24, 0.18) !important;
+  border-color: rgba(255, 160, 150, 0.35) !important;
+  color: #ffd8d3 !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__error {
+  background: rgba(180, 35, 24, 0.22) !important;
+  color: #ffd8d3 !important;
+}
+
+[data-wa-theme="glass-dark"] .msg__template-badge {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .tick--read {
   color: #7fd2ff !important;
 }
 
-body[data-wa-theme="glass-dark"] .thread__composer {
+[data-wa-theme="glass-dark"] .thread__composer {
   border-top: 1px solid rgba(255, 255, 255, 0.10) !important;
   background: linear-gradient(0deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
 }
 
-body[data-wa-theme="glass-dark"] .composer__input {
+[data-wa-theme="glass-dark"] .composer__input {
   border-radius: 999px !important;
   background: rgba(255, 255, 255, 0.08) !important;
   border: 1px solid rgba(255, 255, 255, 0.16) !important;
@@ -1086,8 +1256,8 @@ body[data-wa-theme="glass-dark"] .composer__input {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
 }
 
-body[data-wa-theme="glass-dark"] .btn--icon,
-body[data-wa-theme="glass-dark"] .wa-x-btn-icon {
+[data-wa-theme="glass-dark"] .btn--icon,
+[data-wa-theme="glass-dark"] .wa-x-btn-icon {
   border-radius: 13px !important;
   background: rgba(255, 255, 255, 0.08) !important;
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
@@ -1095,7 +1265,7 @@ body[data-wa-theme="glass-dark"] .wa-x-btn-icon {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
 }
 
-body[data-wa-theme="glass-dark"] .btn--send {
+[data-wa-theme="glass-dark"] .btn--send {
   border-radius: 999px !important;
   background: linear-gradient(180deg, #5ee3ab, #23b483) !important;
   border: 1px solid rgba(150, 255, 215, 0.5) !important;
@@ -1104,46 +1274,66 @@ body[data-wa-theme="glass-dark"] .btn--send {
   box-shadow: 0 8px 22px rgba(35, 180, 131, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-theme-dropdown,
-body[data-wa-theme="glass-dark"] .wa-x-search-dropdown,
-body[data-wa-theme="glass-dark"] .wa-x-reminders-dropdown,
-body[data-wa-theme="glass-dark"] .wa-x-preset-menu,
-body[data-wa-theme="glass-dark"] .modal__box {
+[data-wa-theme="glass-dark"] .wa-x-theme-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-search-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-reminders-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-preset-menu,
+[data-wa-theme="glass-dark"] .modal__box {
   background: #0e1a2b !important;
   border: 1px solid rgba(255, 255, 255, 0.22) !important;
   color: #ffffff !important;
   box-shadow: 0 16px 48px rgba(3, 8, 20, 0.75) !important;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-theme-head,
-body[data-wa-theme="glass-dark"] .wa-x-reminders-head,
-body[data-wa-theme="glass-dark"] .modal__head {
+[data-wa-theme="glass-dark"] .wa-x-theme-head,
+[data-wa-theme="glass-dark"] .wa-x-reminders-head,
+[data-wa-theme="glass-dark"] .modal__head {
   border-bottom-color: rgba(255, 255, 255, 0.14) !important;
   color: #94a3b8 !important;
   font-weight: 700 !important;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-theme-item {
+[data-wa-theme="glass-dark"] .wa-x-theme-item {
   color: #e2e8f0 !important;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-theme-item:hover,
-body[data-wa-theme="glass-dark"] .wa-x-theme-item--active,
-body[data-wa-theme="glass-dark"] .wa-x-search-row:hover,
-body[data-wa-theme="glass-dark"] .wa-x-reminder-row:hover {
+[data-wa-theme="glass-dark"] .wa-x-theme-item:hover,
+[data-wa-theme="glass-dark"] .wa-x-theme-item--active,
+[data-wa-theme="glass-dark"] .wa-x-search-row:hover,
+[data-wa-theme="glass-dark"] .wa-x-reminder-row:hover {
   background: rgba(255, 255, 255, 0.16) !important;
+  color: #ffffff !important;
+}
+
+/* Reminder presets keep `color: var(--ink)` from the light base rules — on
+   glass-dark that is near-black on navy, so "30 minutes" etc. disappear. */
+[data-wa-theme="glass-dark"] .wa-x-preset-item {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .wa-x-preset-item:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+[data-wa-theme="glass-dark"] .attach-menu__item {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .attach-menu__item:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
   color: #ffffff !important;
 }
 
 /* ==========================================================================
    LIQUID GLASS (LIGHT) Theme Styles (Exact 2-light.html)
    ========================================================================== */
-body[data-wa-theme="glass-light"] {
+[data-wa-theme="glass-light"] {
   background: #dfe8f4 !important;
   color: #16202e !important;
 }
 
-body[data-wa-theme="glass-light"] .app {
+[data-wa-theme="glass-light"] .app {
   border-radius: 24px !important;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.55) !important;
@@ -1153,16 +1343,16 @@ body[data-wa-theme="glass-light"] .app {
   box-shadow: 0 28px 70px rgba(24, 48, 82, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
 }
 
-body[data-wa-theme="glass-light"] .sidebar {
+[data-wa-theme="glass-light"] .sidebar {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34)) !important;
   border-right: 1px solid rgba(22, 48, 82, 0.10) !important;
 }
 
-body[data-wa-theme="glass-light"] .sidebar__title {
+[data-wa-theme="glass-light"] .sidebar__title {
   color: #0e2a47 !important;
 }
 
-body[data-wa-theme="glass-light"] .btn--ghost {
+[data-wa-theme="glass-light"] .btn--ghost {
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(22, 48, 82, 0.14) !important;
   color: #21395a !important;
@@ -1170,7 +1360,7 @@ body[data-wa-theme="glass-light"] .btn--ghost {
   box-shadow: 0 2px 6px rgba(24, 48, 82, 0.08), inset 0 1px 0 #fff !important;
 }
 
-body[data-wa-theme="glass-light"] .btn--primary {
+[data-wa-theme="glass-light"] .btn--primary {
   background: linear-gradient(180deg, #f0d386, #d9b155) !important;
   border: 1px solid rgba(160, 124, 40, 0.45) !important;
   color: #3a2c08 !important;
@@ -1178,13 +1368,32 @@ body[data-wa-theme="glass-light"] .btn--primary {
   box-shadow: 0 6px 16px rgba(200, 163, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
 }
 
-body[data-wa-theme="glass-light"] .filter {
+[data-wa-theme="glass-light"] .sidebar__chrome {
+  background: transparent !important;
   border-bottom: 1px solid rgba(22, 48, 82, 0.10) !important;
 }
 
-body[data-wa-theme="glass-light"] .filter__select,
-body[data-wa-theme="glass-light"] .filter__search,
-body[data-wa-theme="glass-light"] .wa-x-search-input {
+[data-wa-theme="glass-light"] .sidebar__foot {
+  display: none !important;
+}
+
+[data-wa-theme="glass-light"] .filter {
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+
+[data-wa-theme="glass-light"] .filter__number-panel,
+[data-wa-theme="glass-light"] .filter__number-panel[hidden],
+[data-wa-theme="glass-light"] .filter__numbers-picker.is-open .filter__number-panel {
+  display: none !important;
+}
+
+[data-wa-theme="glass-light"] .np__trigger,
+[data-wa-theme="glass-light"] .np__body,
+[data-wa-theme="glass-light"] .np__search,
+[data-wa-theme="glass-light"] .filter__select,
+[data-wa-theme="glass-light"] .filter__search,
+[data-wa-theme="glass-light"] .wa-x-search-input {
   background: rgba(255, 255, 255, 0.8) !important;
   border: 1px solid rgba(22, 48, 82, 0.12) !important;
   color: #12243a !important;
@@ -1192,113 +1401,114 @@ body[data-wa-theme="glass-light"] .wa-x-search-input {
   box-shadow: inset 0 1px 0 #fff !important;
 }
 
-body[data-wa-theme="glass-light"] .conv {
-  border-radius: 16px !important;
+[data-wa-theme="glass-light"] .conv {
+  border-radius: 14px !important;
   border: 1px solid transparent !important;
-  margin: 0 4px 4px !important;
+  margin: 0 6px 6px !important;
+  padding: 12px !important;
   transition: all 0.15s ease !important;
 }
 
-body[data-wa-theme="glass-light"] .conv:hover {
+[data-wa-theme="glass-light"] .conv:hover {
   background: rgba(255, 255, 255, 0.6) !important;
 }
 
-body[data-wa-theme="glass-light"] .conv--active {
+[data-wa-theme="glass-light"] .conv--active {
   background: rgba(255, 255, 255, 0.95) !important;
   border-color: rgba(22, 48, 82, 0.12) !important;
   box-shadow: 0 8px 20px rgba(24, 48, 82, 0.12), inset 0 1px 0 #fff !important;
 }
 
-body[data-wa-theme="glass-light"] .conv__avatar {
+[data-wa-theme="glass-light"] .conv__avatar {
   border-radius: 14px !important;
   background: linear-gradient(160deg, #1b4470, #2f6ba3) !important;
   color: #fff !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 4px 10px rgba(24, 48, 82, 0.18) !important;
 }
 
-body[data-wa-theme="glass-light"] .conv__name {
+[data-wa-theme="glass-light"] .conv__name {
   color: #12243a !important;
 }
 
-body[data-wa-theme="glass-light"] .conv__time,
-body[data-wa-theme="glass-light"] .conv__preview,
-body[data-wa-theme="glass-light"] .conv__meta {
+[data-wa-theme="glass-light"] .conv__time,
+[data-wa-theme="glass-light"] .conv__preview,
+[data-wa-theme="glass-light"] .conv__meta {
   color: rgba(22, 38, 58, 0.62) !important;
 }
 
-body[data-wa-theme="glass-light"] .badge {
+[data-wa-theme="glass-light"] .badge {
   background: #17a06e !important;
   color: #fff !important;
   box-shadow: 0 3px 8px rgba(23, 160, 110, 0.35) !important;
 }
 
-body[data-wa-theme="glass-light"] .thread__header {
+[data-wa-theme="glass-light"] .thread__header {
   border-bottom: 1px solid rgba(22, 48, 82, 0.10) !important;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.25)) !important;
 }
 
-body[data-wa-theme="glass-light"] .thread__name {
+[data-wa-theme="glass-light"] .thread__name {
   color: #12243a !important;
 }
 
-body[data-wa-theme="glass-light"] .thread__sub {
+[data-wa-theme="glass-light"] .thread__sub {
   color: rgba(22, 38, 58, 0.55) !important;
 }
 
-body[data-wa-theme="glass-light"] .pill--open {
+[data-wa-theme="glass-light"] .pill--open {
   background: rgba(206, 244, 227, 0.9) !important;
   border: 1px solid rgba(96, 190, 155, 0.5) !important;
   color: #10704f !important;
 }
 
-body[data-wa-theme="glass-light"] .thread__messages {
+[data-wa-theme="glass-light"] .thread__messages {
   background: transparent !important;
 }
 
-body[data-wa-theme="glass-light"] .daysep span {
+[data-wa-theme="glass-light"] .daysep span {
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(22, 48, 82, 0.1) !important;
   color: rgba(22, 38, 58, 0.6) !important;
 }
 
-body[data-wa-theme="glass-light"] .daysep::before,
-body[data-wa-theme="glass-light"] .daysep::after {
+[data-wa-theme="glass-light"] .daysep::before,
+[data-wa-theme="glass-light"] .daysep::after {
   background: rgba(22, 48, 82, 0.12) !important;
 }
 
-body[data-wa-theme="glass-light"] .msg__bubble {
+[data-wa-theme="glass-light"] .msg__bubble {
   border-radius: 18px !important;
   box-shadow: 0 6px 16px rgba(24, 48, 82, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
 }
 
-body[data-wa-theme="glass-light"] .msg--in .msg__bubble {
+[data-wa-theme="glass-light"] .msg--in .msg__bubble {
   background: rgba(255, 255, 255, 0.95) !important;
   border: 1px solid rgba(22, 48, 82, 0.09) !important;
   border-bottom-left-radius: 7px !important;
   color: #16202e !important;
 }
 
-body[data-wa-theme="glass-light"] .msg--out .msg__bubble {
+[data-wa-theme="glass-light"] .msg--out .msg__bubble {
   background: linear-gradient(180deg, #d6f5e6, #b9e9d4) !important;
   border: 1px solid rgba(96, 190, 155, 0.4) !important;
   border-bottom-right-radius: 7px !important;
   color: #16202e !important;
 }
 
-body[data-wa-theme="glass-light"] .msg__foot {
+[data-wa-theme="glass-light"] .msg__foot {
   color: rgba(22, 38, 58, 0.55) !important;
 }
 
-body[data-wa-theme="glass-light"] .tick--read {
+[data-wa-theme="glass-light"] .tick--read {
   color: #2f7fd1 !important;
 }
 
-body[data-wa-theme="glass-light"] .thread__composer {
+[data-wa-theme="glass-light"] .thread__composer {
   border-top: 1px solid rgba(22, 48, 82, 0.10) !important;
   background: linear-gradient(0deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.25)) !important;
 }
 
-body[data-wa-theme="glass-light"] .composer__input {
+[data-wa-theme="glass-light"] .composer__input {
   border-radius: 999px !important;
   background: rgba(255, 255, 255, 0.92) !important;
   border: 1px solid rgba(22, 48, 82, 0.12) !important;
@@ -1306,8 +1516,8 @@ body[data-wa-theme="glass-light"] .composer__input {
   box-shadow: inset 0 1px 0 #fff !important;
 }
 
-body[data-wa-theme="glass-light"] .btn--icon,
-body[data-wa-theme="glass-light"] .wa-x-btn-icon {
+[data-wa-theme="glass-light"] .btn--icon,
+[data-wa-theme="glass-light"] .wa-x-btn-icon {
   border-radius: 13px !important;
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(22, 48, 82, 0.12) !important;
@@ -1315,7 +1525,7 @@ body[data-wa-theme="glass-light"] .wa-x-btn-icon {
   box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(24, 48, 82, 0.07) !important;
 }
 
-body[data-wa-theme="glass-light"] .btn--send {
+[data-wa-theme="glass-light"] .btn--send {
   border-radius: 999px !important;
   background: linear-gradient(180deg, #17a06e, #128257) !important;
   border: 1px solid rgba(10, 90, 62, 0.5) !important;
@@ -1324,26 +1534,35 @@ body[data-wa-theme="glass-light"] .btn--send {
   box-shadow: 0 8px 20px rgba(18, 130, 87, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
 }
 
-body[data-wa-theme="glass-light"] .wa-x-theme-dropdown,
-body[data-wa-theme="glass-light"] .wa-x-search-dropdown,
-body[data-wa-theme="glass-light"] .wa-x-reminders-dropdown,
-body[data-wa-theme="glass-light"] .wa-x-preset-menu,
-body[data-wa-theme="glass-light"] .modal__box {
+[data-wa-theme="glass-light"] .wa-x-theme-dropdown,
+[data-wa-theme="glass-light"] .wa-x-search-dropdown,
+[data-wa-theme="glass-light"] .wa-x-reminders-dropdown,
+[data-wa-theme="glass-light"] .wa-x-preset-menu,
+[data-wa-theme="glass-light"] .modal__box {
   background: rgba(255, 255, 255, 0.95) !important;
   border: 1px solid rgba(22, 48, 82, 0.14) !important;
   color: #12243a !important;
   box-shadow: 0 12px 36px rgba(24, 48, 82, 0.22) !important;
 }
 
-body[data-wa-theme="glass-light"] .wa-x-theme-item {
+[data-wa-theme="glass-light"] .wa-x-theme-item {
   color: #1e293b !important;
 }
 
-body[data-wa-theme="glass-light"] .wa-x-theme-item:hover,
-body[data-wa-theme="glass-light"] .wa-x-theme-item--active,
-body[data-wa-theme="glass-light"] .wa-x-search-row:hover,
-body[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
+[data-wa-theme="glass-light"] .wa-x-theme-item:hover,
+[data-wa-theme="glass-light"] .wa-x-theme-item--active,
+[data-wa-theme="glass-light"] .wa-x-search-row:hover,
+[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
   background: rgba(22, 48, 82, 0.1) !important;
+  color: #0f172a !important;
+}
+
+[data-wa-theme="glass-light"] .wa-x-preset-item {
+  color: #12243a !important;
+}
+
+[data-wa-theme="glass-light"] .wa-x-preset-item:hover {
+  background: rgba(22, 48, 82, 0.08) !important;
   color: #0f172a !important;
 }
 
@@ -1364,7 +1583,7 @@ body[data-wa-theme="glass-light"] .wa-x-reminder-row:hover {
   border-bottom: 1px solid var(--line);
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-profile-header {
+[data-wa-theme="glass-dark"] .wa-x-profile-header {
   border-bottom-color: rgba(255, 255, 255, 0.12) !important;
 }
 
@@ -1383,7 +1602,7 @@ body[data-wa-theme="glass-dark"] .wa-x-profile-header {
   color: var(--ink);
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-profile-name {
+[data-wa-theme="glass-dark"] .wa-x-profile-name {
   color: #ffffff !important;
 }
 
@@ -1432,7 +1651,7 @@ body[data-wa-theme="glass-dark"] .wa-x-profile-name {
   font-weight: 500;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-field-static {
+[data-wa-theme="glass-dark"] .wa-x-field-static {
   background: rgba(255, 255, 255, 0.06) !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: #e2e8f0 !important;
@@ -1461,7 +1680,7 @@ body[data-wa-theme="glass-dark"] .wa-x-field-static {
   align-items: center;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-profile-stat-card {
+[data-wa-theme="glass-dark"] .wa-x-profile-stat-card {
   background: rgba(255, 255, 255, 0.05) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
@@ -1480,7 +1699,7 @@ body[data-wa-theme="glass-dark"] .wa-x-profile-stat-card {
   color: var(--ink);
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-stat-val {
+[data-wa-theme="glass-dark"] .wa-x-stat-val {
   color: #ffffff !important;
 }
 
@@ -1511,7 +1730,7 @@ body[data-wa-theme="glass-dark"] .wa-x-stat-val {
   font-weight: 550;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-feature-tag {
+[data-wa-theme="glass-dark"] .wa-x-feature-tag {
   background: rgba(16, 185, 129, 0.15) !important;
   border-color: rgba(16, 185, 129, 0.3) !important;
   color: #6ee7b7 !important;
@@ -1530,8 +1749,144 @@ body[data-wa-theme="glass-dark"] .wa-x-feature-tag {
   color: #047857 !important;
 }
 
-body[data-wa-theme="glass-dark"] .wa-x-alert--ok {
+[data-wa-theme="glass-dark"] .wa-x-alert--ok {
   border-color: rgba(16, 185, 129, 0.4) !important;
   background: rgba(16, 185, 129, 0.15) !important;
   color: #6ee7b7 !important;
+}
+
+/* ---- Theme surface fixups (campaigns / attach / closing / access / z-index) */
+
+.modal {
+  z-index: 80;
+}
+
+.cp {
+  z-index: 50;
+}
+
+/* Backdrop visibility + click-to-close live in contact-panel.css (.cp-backdrop). */
+
+.access__lead,
+.access__status {
+  color: inherit;
+  opacity: 0.78;
+}
+
+[data-wa-theme="glass-dark"] .conv--closing {
+  background: rgba(217, 144, 34, 0.16) !important;
+}
+
+[data-wa-theme="glass-dark"] .conv--closing:hover {
+  background: rgba(217, 144, 34, 0.24) !important;
+}
+
+[data-wa-theme="glass-dark"] .conv--closing.conv--active {
+  background: rgba(217, 144, 34, 0.3) !important;
+  box-shadow: inset 3px 0 0 #d99022;
+}
+
+[data-wa-theme="glass-dark"] .closingbar {
+  background: rgba(217, 144, 34, 0.18) !important;
+  color: #f6d48a !important;
+  border-bottom-color: rgba(217, 144, 34, 0.35) !important;
+}
+
+[data-wa-theme="glass-dark"] .attach__preview {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e8eef7 !important;
+}
+
+[data-wa-theme="glass-dark"] .attach__thumb,
+[data-wa-theme="glass-dark"] .attach__icon {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #9fd4ff !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-shell,
+[data-wa-theme="glass-dark"] .camp-tabs,
+[data-wa-theme="glass-dark"] .camp.camp-pane.is-active,
+[data-wa-theme="glass-dark"] .camp-hist.camp-pane.is-active {
+  background: transparent;
+}
+
+[data-wa-theme="glass-dark"] .camp-tabs {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-wa-theme="glass-dark"] .camp-tab {
+  color: rgba(232, 238, 247, 0.7);
+}
+
+[data-wa-theme="glass-dark"] .camp-tab.is-active {
+  color: #25d366;
+}
+
+[data-wa-theme="glass-dark"] .camp-left,
+[data-wa-theme="glass-dark"] .camp-hist__list-wrap,
+[data-wa-theme="glass-dark"] .camp-hist__detail {
+  background: rgba(8, 18, 32, 0.55);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #e8eef7;
+}
+
+[data-wa-theme="glass-dark"] .camp-right,
+[data-wa-theme="glass-dark"] .camp-hist__chats {
+  background: rgba(6, 14, 26, 0.65);
+}
+
+[data-wa-theme="glass-dark"] .camp-note {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #dbeafe;
+}
+
+[data-wa-theme="glass-dark"] .camp-field__label,
+[data-wa-theme="glass-dark"] .camp-section__title,
+[data-wa-theme="glass-dark"] .camp-right__title,
+[data-wa-theme="glass-dark"] .camp-hist__heading,
+[data-wa-theme="glass-dark"] .camp-hist__empty-title {
+  color: #e8eef7;
+}
+
+[data-wa-theme="glass-dark"] .camp-field__hint,
+[data-wa-theme="glass-dark"] .camp-section__help,
+[data-wa-theme="glass-dark"] .camp-right__hint,
+[data-wa-theme="glass-dark"] .camp-hist__blurb,
+[data-wa-theme="glass-dark"] .camp-hist__empty,
+[data-wa-theme="glass-dark"] .camp-retry-note,
+[data-wa-theme="glass-dark"] .camp-progress__meta {
+  color: rgba(232, 238, 247, 0.7);
+}
+
+[data-wa-theme="glass-dark"] .camp-hist__item,
+[data-wa-theme="glass-dark"] .camp-progress,
+[data-wa-theme="glass-dark"] .camp-stat,
+[data-wa-theme="glass-dark"] .camp-chat-list__item,
+[data-wa-theme="glass-dark"] .camp-live {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(232, 238, 247, 0.75);
+}
+
+[data-wa-theme="glass-dark"] .camp-hist__item strong,
+[data-wa-theme="glass-dark"] .camp-chat-list__meta strong,
+[data-wa-theme="glass-dark"] .camp-stat__n {
+  color: #e8eef7;
+}
+
+[data-wa-theme="glass-dark"] .camp-live {
+  border-color: rgba(37, 211, 102, 0.35);
+  background: rgba(37, 211, 102, 0.08);
+}
+
+[data-wa-theme="glass-dark"] .camp-live__title {
+  color: #6ee7b7;
+}
+
+[data-wa-theme="glass-dark"] .cp-head__title,
+[data-wa-theme="glass-dark"] .cp-block__title,
+[data-wa-theme="glass-dark"] .cp-hint {
+  color: rgba(232, 238, 247, 0.72);
 }

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { Session, SessionStatus } from '../session/entities/session.entity';
-import { Message, MessageStatus } from '../message/entities/message.entity';
+import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { CacheService } from '../../common/cache';
 
 /**
@@ -62,11 +62,50 @@ export interface TimeSeriesPoint {
   received: number;
 }
 
+export type StatsPeriod = '24h' | '7d' | '30d' | '1y';
+
+/** First-reply median bands — same pace as Official Reports (agent performance). */
+const PERF_MIN_SAMPLES = 3;
+const PERF_BANDS: Array<{ key: string; label: string; ceiling: number | null }> = [
+  { key: 'excellent', label: 'Excellent', ceiling: 5 * 60 },
+  { key: 'good', label: 'Good', ceiling: 15 * 60 },
+  { key: 'fair', label: 'Fair', ceiling: 60 * 60 },
+  { key: 'bad', label: 'Bad', ceiling: 4 * 60 * 60 },
+  { key: 'critical', label: 'Critical', ceiling: null },
+];
+
+export interface ResponseSpread {
+  count: number;
+  avgSeconds: number | null;
+  medianSeconds: number | null;
+  p90Seconds: number | null;
+  slowestSeconds: number | null;
+}
+
+export interface ResponsePerformanceRow {
+  sessionId: string;
+  name: string;
+  phone: string | null;
+  sent: number;
+  received: number;
+  firstResponse: ResponseSpread;
+  performance: { key: string; label: string };
+}
+
+export interface ResponsePerformance {
+  bands: Array<{ key: string; label: string; detail: string }>;
+  phones: ResponsePerformanceRow[];
+  worst: ResponsePerformanceRow[];
+  best: ResponsePerformanceRow[];
+}
+
 export interface MessageStats {
   timeSeries: TimeSeriesPoint[];
   byType: Record<string, number>;
   bySession: Array<{ sessionId: string; name: string; sent: number; received: number }>;
   topChats: Array<{ chatId: string; chatName: string | null; messageCount: number }>;
+  /** Per linked phone — OpenWA has no Bitrix agent id on messages; session ≈ agent desk. */
+  responsePerformance: ResponsePerformance;
 }
 
 export interface SessionStats {
@@ -86,7 +125,7 @@ export class StatsService {
    * entries expire after stats.cacheTtlMs; there is no write-path hook. Session-scoped entries
    * are additionally re-validated on serve (getSessionStats), so a deleted session is not
    * resurrected from the memo. Key cardinality is
-   * bounded (4 global shapes + one per session), so no size eviction is needed.
+   * bounded (5 message periods + overview + one per session), so no size eviction is needed.
    */
   private readonly memo = new Map<string, { expiresAt: number; value: unknown }>();
 
@@ -187,11 +226,11 @@ export class StatsService {
     };
   }
 
-  async getMessageStats(period: '24h' | '7d' | '30d'): Promise<MessageStats> {
+  async getMessageStats(period: StatsPeriod): Promise<MessageStats> {
     return this.memoized(`messages:${period}`, () => this.loadMessageStats(period));
   }
 
-  private async loadMessageStats(period: '24h' | '7d' | '30d'): Promise<MessageStats> {
+  private async loadMessageStats(period: StatsPeriod): Promise<MessageStats> {
     const since = this.getPeriodStart(period);
     const interval = period === '24h' ? 'hour' : 'day';
 
@@ -259,6 +298,8 @@ export class StatsService {
       .limit(10)
       .getRawMany<{ chatId: string; messageCount: string; chatName: string | null }>();
 
+    const responsePerformance = await this.loadResponsePerformance(since, sessions, sessionMap);
+
     return {
       timeSeries,
       byType,
@@ -268,6 +309,7 @@ export class StatsService {
         chatName: c.chatName ?? null,
         messageCount: parseInt(c.messageCount),
       })),
+      responsePerformance,
     };
   }
 
@@ -345,7 +387,7 @@ export class StatsService {
     };
   }
 
-  private getPeriodStart(period: '24h' | '7d' | '30d'): Date {
+  private getPeriodStart(period: StatsPeriod): Date {
     const now = new Date();
     switch (period) {
       case '24h':
@@ -354,7 +396,153 @@ export class StatsService {
         return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       case '30d':
         return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      case '1y':
+        return new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
     }
+  }
+
+  private spread(gaps: number[]): ResponseSpread {
+    if (!gaps.length) {
+      return {
+        count: 0,
+        avgSeconds: null,
+        medianSeconds: null,
+        p90Seconds: null,
+        slowestSeconds: null,
+      };
+    }
+    const ordered = [...gaps].sort((a, b) => a - b);
+    const mid = Math.floor(ordered.length / 2);
+    const median =
+      ordered.length % 2 === 0
+        ? (ordered[mid - 1] + ordered[mid]) / 2
+        : ordered[mid];
+    const avg = ordered.reduce((a, b) => a + b, 0) / ordered.length;
+    const p90 = ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * 0.9))];
+    return {
+      count: ordered.length,
+      avgSeconds: Math.round(avg),
+      medianSeconds: Math.round(median),
+      p90Seconds: Math.round(p90),
+      slowestSeconds: Math.round(ordered[ordered.length - 1]),
+    };
+  }
+
+  private performanceBand(spread: ResponseSpread): { key: string; label: string } {
+    const median = spread.medianSeconds;
+    if (spread.count < PERF_MIN_SAMPLES || median == null) {
+      return { key: 'insufficient', label: 'Not enough data' };
+    }
+    for (const band of PERF_BANDS) {
+      if (band.ceiling == null || median < band.ceiling) {
+        return { key: band.key, label: band.label };
+      }
+    }
+    return { key: 'critical', label: 'Critical' };
+  }
+
+  private performanceLegend() {
+    return [
+      { key: 'excellent', label: 'Excellent', detail: 'Median first reply under 5 minutes' },
+      { key: 'good', label: 'Good', detail: 'Under 15 minutes' },
+      { key: 'fair', label: 'Fair', detail: 'Under 1 hour' },
+      { key: 'bad', label: 'Bad', detail: 'Under 4 hours' },
+      { key: 'critical', label: 'Critical', detail: '4 hours or more' },
+      {
+        key: 'insufficient',
+        label: 'Not enough data',
+        detail: `Fewer than ${PERF_MIN_SAMPLES} timed replies in this period`,
+      },
+    ];
+  }
+
+  /**
+   * First-reply gaps per linked phone (session). Customer inbound starts the
+   * clock; the next outbound closes it. OpenWA messages have no Bitrix agent
+   * id — session name is what the desk shows as the agent/phone label.
+   */
+  private async loadResponsePerformance(
+    since: Date,
+    sessions: Session[],
+    sessionMap: Map<string, { sent: number; received: number }>,
+  ): Promise<ResponsePerformance> {
+    const rows = await this.messageRepo
+      .createQueryBuilder('m')
+      .select('m.sessionId', 'sessionId')
+      .addSelect('m.chatId', 'chatId')
+      .addSelect('m.direction', 'direction')
+      .addSelect('m.createdAt', 'createdAt')
+      .where('m.createdAt >= :since', { since })
+      .orderBy('m.sessionId', 'ASC')
+      .addOrderBy('m.chatId', 'ASC')
+      .addOrderBy('m.createdAt', 'ASC')
+      .getRawMany<{ sessionId: string; chatId: string; direction: string; createdAt: Date | string }>();
+
+    const gapsBySession = new Map<string, number[]>();
+    let curSession = '';
+    let curChat = '';
+    let waitingSince: Date | null = null;
+
+    for (const row of rows) {
+      const createdAt = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+      if (row.sessionId !== curSession || row.chatId !== curChat) {
+        curSession = row.sessionId;
+        curChat = row.chatId;
+        waitingSince = null;
+      }
+      if (row.direction === MessageDirection.INCOMING || row.direction === 'incoming') {
+        if (waitingSince == null) waitingSince = createdAt;
+      } else if (waitingSince != null) {
+        const gap = (createdAt.getTime() - waitingSince.getTime()) / 1000;
+        if (Number.isFinite(gap) && gap >= 0) {
+          const list = gapsBySession.get(row.sessionId) || [];
+          list.push(gap);
+          gapsBySession.set(row.sessionId, list);
+        }
+        waitingSince = null;
+      }
+    }
+
+    const phones: ResponsePerformanceRow[] = sessions.map(session => {
+      const volume = sessionMap.get(session.id) || { sent: 0, received: 0 };
+      const firstResponse = this.spread(gapsBySession.get(session.id) || []);
+      return {
+        sessionId: session.id,
+        name: session.name || 'Unknown',
+        phone: session.phone || null,
+        sent: volume.sent,
+        received: volume.received,
+        firstResponse,
+        performance: this.performanceBand(firstResponse),
+      };
+    });
+
+    // Only phones with traffic in the window — empty desks clutter the ranks.
+    const active = phones.filter(p => p.sent > 0 || p.received > 0 || p.firstResponse.count > 0);
+    const ranked = active.filter(
+      p => p.performance.key !== 'insufficient' && p.firstResponse.medianSeconds != null,
+    );
+    const worst = [...ranked]
+      .sort(
+        (a, b) =>
+          (b.firstResponse.medianSeconds || 0) - (a.firstResponse.medianSeconds || 0) ||
+          (b.firstResponse.count || 0) - (a.firstResponse.count || 0),
+      )
+      .slice(0, 10);
+    const best = [...ranked]
+      .sort(
+        (a, b) =>
+          (a.firstResponse.medianSeconds || 0) - (b.firstResponse.medianSeconds || 0) ||
+          (b.firstResponse.count || 0) - (a.firstResponse.count || 0),
+      )
+      .slice(0, 10);
+
+    return {
+      bands: this.performanceLegend(),
+      phones: active.sort((a, b) => b.sent + b.received - (a.sent + a.received)),
+      worst,
+      best,
+    };
   }
 
   private async getTimeSeries(since: Date, interval: 'hour' | 'day'): Promise<TimeSeriesPoint[]> {

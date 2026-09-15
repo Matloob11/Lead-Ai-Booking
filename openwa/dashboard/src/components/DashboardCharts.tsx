@@ -15,12 +15,12 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Gauge, Timer } from 'lucide-react';
 import { useStatsMessagesQuery } from '../hooks/queries';
-import type { StatsPeriod } from '../services/api';
+import type { ResponsePerformanceRow, StatsPeriod } from '../services/api';
 import './DashboardCharts.css';
 
-const PERIODS: StatsPeriod[] = ['24h', '7d', '30d'];
+const PERIODS: StatsPeriod[] = ['24h', '7d', '30d', '1y'];
 
 // Stable, distinct color per message type (recharts needs literal colors). Keyed by type name —
 // not array index — so two types can never share a color, and a slice keeps its color even when the
@@ -50,7 +50,7 @@ function colorForType(name: string): string {
   return FALLBACK_COLORS[Math.abs(hash) % FALLBACK_COLORS.length];
 }
 
-// '2026-06-24 14:00:00' (hour buckets) → '14:00'; '2026-06-24' (day buckets) → '06-24'.
+// '2026-06-24 14:00:00' (hour buckets) → '14:00'; day buckets → '06-24' (1y thinned via XAxis interval).
 function formatTick(ts: string, period: StatsPeriod): string {
   return period === '24h' ? ts.slice(11, 16) : ts.slice(5);
 }
@@ -58,6 +58,60 @@ function formatTick(ts: string, period: StatsPeriod): string {
 // WhatsApp ids look like '62812...@c.us' / '...@g.us' / '...@lid' — show just the local part.
 function shortChat(chatId: string): string {
   return chatId.split('@')[0] || chatId;
+}
+
+function formatDuration(sec: number | null | undefined): string {
+  if (sec == null || !Number.isFinite(sec) || sec < 0) return '—';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  }
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function PerfBadge({ row }: { row: ResponsePerformanceRow }) {
+  const key = row.performance?.key || 'insufficient';
+  const label = row.performance?.label || 'Not enough data';
+  return <span className={`dc-perf dc-perf--${key}`}>{label}</span>;
+}
+
+function RankList({
+  title,
+  items,
+  empty,
+}: {
+  title: string;
+  items: ResponsePerformanceRow[];
+  empty: string;
+}) {
+  return (
+    <div className="dc-rank">
+      <h4 className="dc-rank__title">{title}</h4>
+      {!items.length ? (
+        <p className="dc-rank__empty">{empty}</p>
+      ) : (
+        <ol className="dc-rank__list">
+          {items.map(row => (
+            <li key={row.sessionId} className="dc-rank__item">
+              <div className="dc-rank__who">
+                <strong>{row.name}</strong>
+                <PerfBadge row={row} />
+              </div>
+              <div className="dc-rank__meta">
+                Avg {formatDuration(row.firstResponse.avgSeconds)} · Median{' '}
+                {formatDuration(row.firstResponse.medianSeconds)} · {row.firstResponse.count}{' '}
+                replies
+                {row.phone ? ` · ${row.phone}` : ''}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
 }
 
 export function DashboardCharts() {
@@ -78,7 +132,9 @@ export function DashboardCharts() {
   const topChats = (data?.topChats ?? [])
     .slice(0, 8)
     .map(c => ({ name: c.chatName || shortChat(c.chatId), count: c.messageCount }));
+  const perf = data?.responsePerformance;
   const hasData = timeSeries.length > 0 || byType.length > 0 || topChats.length > 0;
+  const xInterval = period === '1y' ? Math.max(0, Math.floor(timeSeries.length / 12) - 1) : 'preserveStartEnd';
 
   return (
     <section className="dashboard-charts">
@@ -125,7 +181,11 @@ export function DashboardCharts() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="label" tick={{ fontSize: 12, fill: 'var(--text-secondary)' }} />
+                <XAxis
+                  dataKey="label"
+                  interval={xInterval as number | 'preserveStartEnd'}
+                  tick={{ fontSize: 12, fill: 'var(--text-secondary)' }}
+                />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: 'var(--text-secondary)' }} />
                 <Tooltip />
                 <Legend />
@@ -191,6 +251,86 @@ export function DashboardCharts() {
           </div>
         </div>
       )}
+
+      {/* Agent / phone reply performance — same period toggle as Message Analytics */}
+      {!isLoading && !isError && perf ? (
+        <div className="dc-perf-section">
+          <div className="charts-header dc-perf-header">
+            <div className="charts-title">
+              <Gauge size={18} />
+              <h2>{t('dashboard.charts.responseTitle')}</h2>
+            </div>
+            <div className="dc-perf-period-hint">
+              <Timer size={14} />
+              <span>{t(`dashboard.charts.period.${period}`)}</span>
+            </div>
+          </div>
+          <p className="dc-perf-note">{t('dashboard.charts.responseNote')}</p>
+
+          <div className="dc-legend">
+            {(perf.bands || []).map(b => (
+              <div key={b.key} className="dc-legend__item">
+                <span className={`dc-perf dc-perf--${b.key}`}>{b.label}</span>
+                <span className="dc-legend__detail">{b.detail}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="dc-ranks">
+            <RankList
+              title={t('dashboard.charts.worstTitle')}
+              items={perf.worst || []}
+              empty={t('dashboard.charts.rankEmpty')}
+            />
+            <RankList
+              title={t('dashboard.charts.bestTitle')}
+              items={perf.best || []}
+              empty={t('dashboard.charts.rankEmpty')}
+            />
+          </div>
+
+          <div className="chart-card chart-wide dc-perf-table-card">
+            <h3>{t('dashboard.charts.allPhones')}</h3>
+            {!perf.phones?.length ? (
+              <div className="charts-empty small">{t('dashboard.charts.rankEmpty')}</div>
+            ) : (
+              <div className="dc-table-wrap">
+                <table className="dc-table">
+                  <thead>
+                    <tr>
+                      <th>{t('dashboard.charts.colPhone')}</th>
+                      <th>{t('dashboard.charts.colPerf')}</th>
+                      <th>{t('dashboard.charts.colAvg')}</th>
+                      <th>{t('dashboard.charts.colMedian')}</th>
+                      <th>{t('dashboard.charts.colReplies')}</th>
+                      <th>{t('dashboard.charts.sent')}</th>
+                      <th>{t('dashboard.charts.received')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {perf.phones.map(row => (
+                      <tr key={row.sessionId}>
+                        <td>
+                          <div className="dc-phone-name">{row.name}</div>
+                          {row.phone ? <div className="dc-phone-num">{row.phone}</div> : null}
+                        </td>
+                        <td>
+                          <PerfBadge row={row} />
+                        </td>
+                        <td>{formatDuration(row.firstResponse.avgSeconds)}</td>
+                        <td>{formatDuration(row.firstResponse.medianSeconds)}</td>
+                        <td>{row.firstResponse.count}</td>
+                        <td>{row.sent}</td>
+                        <td>{row.received}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

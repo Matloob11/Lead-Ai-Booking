@@ -75,32 +75,55 @@ SHARED_ASSET_TYPES = {
 
 
 def _visible_conversations(user):
-    """Every chat on every number the agent covers.
+    """Chats this agent may open.
 
-    Deliberately not filtered by ``assigned_agent``: a customer may message the
-    number directly because the agent handed the number out, and that chat must
-    not be invisible to them. Assignment is ownership, not access control.
+    Everyone assigned to a number sees every chat on it. A transferred chat is
+    also visible to the receiving agent — only that thread, not the rest of
+    the number.
     """
-    return Conversation.objects.filter(number__in=user.visible_numbers).select_related(
-        "contact", "number", "assigned_agent"
+    return (
+        Conversation.objects.filter(Q(number__in=user.visible_numbers) | Q(assigned_agent=user))
+        .select_related("contact", "number", "assigned_agent", "linked_conversation__number")
+        .distinct()
     )
+
+
+def _own_number_ids(user):
+    return list(user.visible_numbers.values_list("pk", flat=True))
+
+
+def _transferred_in_q(user, own_ids):
+    """Chats assigned to this agent that are not on a number they hold."""
+    extra = Q(assigned_agent=user)
+    if own_ids:
+        extra &= ~Q(number_id__in=own_ids)
+    return extra
 
 
 @api_view(["GET"])
 def conversation_list(request):
     queryset = _visible_conversations(request.user)
+    own_ids = _own_number_ids(request.user)
 
     number_id = request.GET.get("number")
     if number_id:
-        queryset = queryset.filter(number_id=number_id)
+        # A number dropdown must not hide a chat that was transferred onto
+        # this agent from a number they do not hold.
+        queryset = queryset.filter(Q(number_id=number_id) | _transferred_in_q(request.user, own_ids))
 
     search = request.GET.get("q", "").strip()
     if search:
-        queryset = queryset.filter(
+        digits = "".join(ch for ch in search if ch.isdigit())
+        q_obj = (
             Q(contact__wa_id__icontains=search)
             | Q(contact__profile_name__icontains=search)
             | Q(contact__display_name__icontains=search)
         )
+        if digits:
+            q_obj |= Q(contact__wa_id__icontains=digits)
+            if len(digits) >= 9:
+                q_obj |= Q(contact__wa_id__endswith=digits[-9:])
+        queryset = queryset.filter(q_obj)
 
     if request.GET.get("mine") == "1":
         queryset = queryset.filter(assigned_agent=request.user)
@@ -109,11 +132,17 @@ def conversation_list(request):
     if label_id:
         queryset = queryset.filter(labels__pk=label_id)
 
-    # Archived chats stay out of the way unless asked for.
-    if request.GET.get("archived") == "1":
+    # Archived chats stay in the list unless the client asks for archived-only.
+    archived = request.GET.get("archived")
+    if archived == "1":
         queryset = queryset.filter(is_archived=True)
-    else:
+    elif archived == "0":
         queryset = queryset.filter(is_archived=False)
+
+    # WhatsApp order: pinned first, then latest message activity. Opening a
+    # chat must not change this — only send/receive updates last_message_at.
+    # Transferred-in threads stay visible but are not forced above newer chats.
+    queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
 
     limit = min(int(request.GET.get("limit", 50)), 200)
     offset = int(request.GET.get("offset", 0))
@@ -421,7 +450,11 @@ def send(request, pk):
 @api_view(["POST"])
 def send_template(request, pk):
     conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
-    template = get_object_or_404(WaTemplate, pk=request.data.get("template_id"))
+    template = get_object_or_404(
+        WaTemplate,
+        pk=request.data.get("template_id"),
+        waba_business_id=conversation.number.waba_business_id,
+    )
 
     try:
         message = services.send_template(
@@ -441,6 +474,29 @@ def send_template(request, pk):
         return Response({"detail": f"Gateway rejected the template: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
     return Response(serialize_message(message, request), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+def conversation_templates(request, pk):
+    """Approved templates for this chat's WABA.
+
+    Transfer grants one thread, not the number roster. The receiving agent
+    still needs these when the 24-hour window is closed.
+    """
+    conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
+    from apps.catalog.models import WaTemplate, WaTemplateHide
+    from apps.catalog.views import serialize_template
+
+    templates = WaTemplateHide.visible(
+        WaTemplate.objects.filter(
+            waba_business_id=conversation.number.waba_business_id,
+            status=WaTemplate.Status.APPROVED,
+        )
+    )
+    search = request.GET.get("q", "").strip()
+    if search:
+        templates = templates.filter(name__icontains=search)
+    return Response([serialize_template(t) for t in templates])
 
 
 @api_view(["POST"])
@@ -496,8 +552,10 @@ def search(request):
             Q(body__icontains=term)
             | Q(conversation__contact__display_name__icontains=term)
             | Q(conversation__contact__profile_name__icontains=term)
+            | Q(conversation__contact__wa_id__icontains=term)
+            | Q(media__file_name__icontains=term)
         )
-        .select_related("conversation", "conversation__contact", "conversation__number", "sent_by")
+        .select_related("conversation", "conversation__contact", "conversation__number", "sent_by", "media")
     )
 
     if request.GET.get("conversation"):
@@ -669,7 +727,12 @@ def assign(request, pk):
     agent_id = request.data.get("agent_id")
     to_agent = get_object_or_404(get_user_model(), pk=agent_id) if agent_id else None
 
-    services.reassign(conversation, to_agent, request.user, request.data.get("reason", ""))
+    try:
+        conversation = services.reassign(
+            conversation, to_agent, request.user, request.data.get("reason", "")
+        )
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
     return Response(serialize_conversation(conversation))
 
 
@@ -719,6 +782,8 @@ def media_upload(request):
 
     try:
         media_id, asset = services.upload_media(number, upload, agent=request.user)
+    except services.SendBlocked as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     except AlotsError as exc:
         return Response({"detail": f"Upload failed: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 

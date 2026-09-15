@@ -91,7 +91,7 @@ services:
     # less, so the higher ceiling is a no-op there. Raise via OPENWA_PIDS_LIMIT for larger fleets;
     # do NOT set -1 (unlimited) — that drops the fork-bomb guard. See #636.
     pids_limit: ${OPENWA_PIDS_LIMIT:-2048}
-    mem_limit: ${OPENWA_MEM_LIMIT:-2g} # tune up for many concurrent sessions
+    mem_limit: ${OPENWA_MEM_LIMIT:-4g} # 1 GB base64 video send needs headroom above 2g
     ports:
       - '127.0.0.1:${API_PORT:-2785}:2785'
     expose:
@@ -155,6 +155,27 @@ services:
       # "true", so a blank forward (nothing set) keeps the default off. Without this line the value in
       # .env never reaches the container and the flag silently does nothing.
       - AUTO_START_SESSIONS=${AUTO_START_SESSIONS:-}
+      # @lid → phone on inbound + chat-list titles. Blank keeps the app default (off); set true in .env.
+      - RESOLVE_LID_TO_PHONE=${RESOLVE_LID_TO_PHONE:-}
+      # Conversation Health → Bitrix (WhatsApp Leads). Blank = feature idle until webhook is set.
+      - CONVERSATION_HEALTH_ENABLED=${CONVERSATION_HEALTH_ENABLED:-}
+      - BITRIX_WEBHOOK_BASE=${BITRIX_WEBHOOK_BASE:-}
+      - BITRIX_LEAD_URL_BASE=${BITRIX_LEAD_URL_BASE:-https://crm.a7grouprealestatedxb.com/crm/lead/details}
+      - BITRIX_OWNER_DATA_TYPE_ID=${BITRIX_OWNER_DATA_TYPE_ID:-1042}
+      - BITRIX_OWNER_DATA_URL_BASE=${BITRIX_OWNER_DATA_URL_BASE:-https://crm.a7grouprealestatedxb.com/crm/type/1042/details}
+      - BITRIX_OWNER_DATA_PHONE_FIELDS=${BITRIX_OWNER_DATA_PHONE_FIELDS:-}
+      - BITRIX_WA_LEAD_STATUS=${BITRIX_WA_LEAD_STATUS:-UC_WA_LEADS}
+      - BITRIX_HEALTH_FIELD=${BITRIX_HEALTH_FIELD:-UF_CRM_CONVERSATION_HEALTH}
+      - BITRIX_AI_MONITOR_FIELD=${BITRIX_AI_MONITOR_FIELD:-UF_CRM_AI_MONITOR}
+      - BITRIX_WA_CHAT_FIELD=${BITRIX_WA_CHAT_FIELD:-UF_CRM_WA_CHAT}
+      - BITRIX_OWNER_HEALTH_FIELD=${BITRIX_OWNER_HEALTH_FIELD:-}
+      - BITRIX_OWNER_AI_MONITOR_FIELD=${BITRIX_OWNER_AI_MONITOR_FIELD:-}
+      - BITRIX_OWNER_WA_CHAT_FIELD=${BITRIX_OWNER_WA_CHAT_FIELD:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - CONVERSATION_HEALTH_CONCURRENCY=${CONVERSATION_HEALTH_CONCURRENCY:-2}
+      # Admin UI password to move RED → GREEN (Allow). Default in app is 222007 if blank.
+      - CONVERSATION_HEALTH_OVERRIDE_PASSWORD=${CONVERSATION_HEALTH_OVERRIDE_PASSWORD:-222007}
       # Fetching status@broadcast immediately after a fresh pairing can make affected accounts lose
       # the companion at WhatsApp Web's first scheduled reload. Disabled by default; live statuses
       # still arrive normally. Opt in only after validating the account.
@@ -221,6 +242,8 @@ services:
       - REDIS_ENABLED=${REDIS_ENABLED:-}
       - REDIS_HOST=${REDIS_HOST:-}
       - REDIS_PORT=${REDIS_PORT:-}
+      # BullMQ (Conversation Health + webhooks). Needs reachable Redis; blank lets .env.generated win.
+      - QUEUE_ENABLED=${QUEUE_ENABLED:-}
       # Webhook
       - WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10000}
       - WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-5000}
@@ -233,9 +256,11 @@ services:
       - RATE_LIMIT_MEDIUM_LIMIT=${RATE_LIMIT_MEDIUM_LIMIT:-}
       - RATE_LIMIT_LONG_TTL=${RATE_LIMIT_LONG_TTL:-}
       - RATE_LIMIT_LONG_LIMIT=${RATE_LIMIT_LONG_LIMIT:-}
-      # Max request body size. Base64 media sends ride in the JSON body, so the default is generous;
-      # raise this for large documents (e.g. BODY_SIZE_LIMIT=50mb). Blank keeps the app default of 25mb.
-      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-}
+      # Max request body size. Base64 media rides in JSON (~4/3 of the file).
+      # 1400mb covers a 1 GB pick; blank used to keep the 25mb app default and
+      # silently drop 90 MB videos at the parser.
+      - BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-1400mb}
+      - MEDIA_DOWNLOAD_MAX_BYTES=${MEDIA_DOWNLOAD_MAX_BYTES:-1073741824}
       # Plugins
       - PLUGINS_DIR=${PLUGINS_DIR:-/app/data/plugins}
       # Plugin install-from-URL redirect policy (ssrf-guard): off unless the exact string 'true'.

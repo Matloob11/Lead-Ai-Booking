@@ -70,10 +70,10 @@ function AgentProfileModal({ session, openChats, onClose }: AgentProfileModalPro
   const busiest = hourly.reduce((most, h) => Math.max(most, h.sent + h.received), 0) || 1;
 
   return (
-    <div className="a7-modal" role="dialog" aria-modal="true" aria-label="Profile">
+    <div className="a7-modal" role="dialog" aria-modal="true" aria-label="My desk">
       <div className="a7-modal__box">
         <div className="a7-modal__head">
-          <h2>Profile</h2>
+          <h2>My desk</h2>
           <button type="button" className="a7-modal__x" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>

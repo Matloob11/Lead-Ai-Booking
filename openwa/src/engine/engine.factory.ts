@@ -176,6 +176,30 @@ export class EngineFactory implements OnModuleInit {
   }
 
   /**
+   * Explicit operator-requested profile reset. Unlike delete's best-effort cleanup, this fails the
+   * request if either credential directory cannot be removed: reporting a successful reset while a
+   * stale profile remains would send the next Start straight back into the fault being repaired.
+   */
+  async purgeSessionDataOrThrow(sessionName: string): Promise<void> {
+    if (!isSafeSessionName(sessionName)) {
+      throw new Error('Refusing to purge session data for an unsafe session name');
+    }
+    const dirs: Array<{ engine: string; dir: string }> = [
+      { engine: 'whatsapp-web.js', dir: this.wwjsAuthDir(sessionName) },
+      { engine: 'baileys', dir: this.baileysAuthDir(sessionName) },
+    ];
+    for (const { engine, dir } of dirs) {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      this.logger.log('Purged session auth directory for profile reset', {
+        action: 'engine_profile_reset_purge',
+        engine,
+        sessionName,
+        dir,
+      });
+    }
+  }
+
+  /**
    * The on-disk auth directory whatsapp-web.js keeps for `sessionName`, matching exactly what the
    * adapter constructs: sessionDataPath resolved, then `session-${name}` appended (mirrors
    * WhatsAppWebJsAdapter.clearLocalAuth).

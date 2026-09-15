@@ -44,8 +44,28 @@ export class SessionErrorStore {
   attachTo(session: Session): Session {
     session.lastError =
       session.status === SessionStatus.FAILED || session.status === SessionStatus.ACTION_REQUIRED
-        ? this.errors.get(session.id)
+        ? (this.errors.get(session.id) ?? this.operatorReason(session.historySyncError))
         : undefined;
     return session;
+  }
+
+  private operatorReason(code: string | null | undefined): string | undefined {
+    if (!code) return undefined;
+    if (code === 'IDENTITY_DIFFERENT_PHONE') {
+      return 'This session is permanently bound to another WhatsApp number. Create a new session for this number.';
+    }
+    if (code === 'IDENTITY_LEGACY_AMBIGUOUS' || code === 'IDENTITY_LEGACY_CONFLICT') {
+      return 'Stored history cannot be safely matched to one WhatsApp number. Operator review is required.';
+    }
+    if (code.startsWith('IDENTITY_BUFFER_')) {
+      return 'Identity validation exceeded its safety buffer. Start the session manually and try again.';
+    }
+    if (code === 'IDENTITY_INVALID') {
+      return 'WhatsApp did not provide a valid phone identity. Start the session manually and try again.';
+    }
+    if (code === 'LOGOUT_INCOMPLETE') {
+      return 'Logout did not complete. Bound identity and stored history were preserved; start manually and retry.';
+    }
+    return code;
   }
 }

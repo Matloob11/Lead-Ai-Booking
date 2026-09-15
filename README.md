@@ -15,12 +15,23 @@ which reopen the window when sent.
 
 ## Layout
 
+Live product code stays in these folders (do not dump spreadsheets or screenshots here):
+
 ```
-backend/     Django + DRF + Channels + Celery — API, webhook receiver, gateway client
-frontend/    The panel UI rendered inside the Bitrix placement iframe
-deploy/      Dockerfile, compose stack, environment template
-reference/   Superseded prototypes and notes, kept for context only
+backend/        Official API — Django + DRF + Channels + Celery
+bitrix/public/    Agent panel (iframe). Deployed to /opt/a7-wa/panel/
+deploy/           Official-API Docker compose + nginx
+ops/              Server script (wa.sh) + Bitrix AWS patches
+openwa/ + wa-qr/  Linked-devices (unofficial) stack
+agent-reports/    Daily agent PDF reports from Bitrix
+handoff/          Bitrix CRM access scripts (heads vs agents)
+docs/             Specs and plans
+reference/        Old prototypes — not deployed
+wa-ui-mockups/    Panel mockups
+files/            Working files (images, campaigns, briefs, CRM sheets, temp)
 ```
+
+How to mention the next change: see `files/README.md`.
 
 `reference/` is not built or deployed. The pre-rebuild tree, including the
 `vaestvita/thoth` fork this repository started from, is preserved on the

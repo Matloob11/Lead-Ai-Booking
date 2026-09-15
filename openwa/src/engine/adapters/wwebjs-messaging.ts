@@ -572,6 +572,7 @@ export class WwebjsMessaging {
     includeMedia: boolean = false,
     mediaMaxBytes?: number,
     signal?: AbortSignal,
+    mediaFor?: string,
   ): Promise<IncomingMessage[]> {
     this.host.ensureReady();
     const chat = await this.client().getChatById(chatId);
@@ -627,7 +628,12 @@ export class WwebjsMessaging {
           this.host.logger.warn(`Failed to resolve quoted message for ${msg.id._serialized}: ${String(error)}`);
         }
       }
-      if (includeMedia && msg.hasMedia) {
+      // `mediaFor` asks about one message, so only that one is downloaded. The rest are still
+      // returned — the caller merges the whole slice — but media-free, which is what makes the
+      // narrowed call worth having: an old file is not refused quickly, it is waited on for
+      // MEDIA_DOWNLOAD_TIMEOUT_MS and only then called gone, so downloading a chat's worth to
+      // answer for one bubble charges the agent every other bubble's timeout as well.
+      if (includeMedia && msg.hasMedia && (!mediaFor || msg.id._serialized === mediaFor)) {
         if (mediaBudget <= 0) {
           out.media = declaredOnlyMedia(msg);
         } else {

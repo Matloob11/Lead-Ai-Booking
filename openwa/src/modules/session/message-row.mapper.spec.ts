@@ -33,10 +33,18 @@ describe('buildMessageMetadata', () => {
         media: { mimetype: 'image/png' },
         quotedMessage: { id: 'q' },
         call: { video: false, missed: false },
+        senderPhone: '971501234567',
       } as Partial<IncomingMessage>),
     );
 
-    expect(Object.keys(built!).sort()).toEqual(['call', 'media', 'quotedMessage']);
+    expect(Object.keys(built!).sort()).toEqual(['call', 'media', 'quotedMessage', 'senderPhone']);
+    expect(built!.senderPhone).toBe('971501234567');
+  });
+
+  it('stores a resolved senderPhone for @lid senders', () => {
+    expect(buildMessageMetadata(msg({ senderPhone: ' 97150111222 ' }))).toEqual({
+      senderPhone: '97150111222',
+    });
   });
 
   describe('omitted-media synthesis', () => {

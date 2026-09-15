@@ -14,9 +14,11 @@ const cache = {
 };
 
 function formatDuration(sec) {
-  if (sec === null || sec === undefined || sec === 0) return null;
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
+  if (sec === null || sec === undefined) return null;
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return null;
+  const m = Math.floor(n / 60);
+  const s = Math.floor(n % 60);
   if (m >= 60) {
     const h = Math.floor(m / 60);
     const remM = m % 60;
@@ -24,6 +26,32 @@ function formatDuration(sec) {
   }
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+function perfBadge(performance) {
+  const key = performance?.key || "insufficient";
+  const label = performance?.label || "Not enough data";
+  return el("span.rep-perf", { class: `rep-perf--${key}`, title: label }, [label]);
+}
+
+function agentLabel(agent) {
+  if (typeof agent === "string") return agent;
+  const name = agent?.display_name || "";
+  const community = String(agent?.community || "").trim();
+  return community ? `${name} · ${community}` : name;
+}
+
+/** Agents API used to return a bare array; now `{ agents, worst, best, bands }`. */
+function normalizeAgentsPayload(data) {
+  if (Array.isArray(data)) {
+    return { agents: data, worst: [], best: [], bands: [] };
+  }
+  return {
+    agents: data?.agents || [],
+    worst: data?.worst || [],
+    best: data?.best || [],
+    bands: data?.bands || [],
+  };
 }
 
 export function openReportsModal() {
@@ -271,23 +299,128 @@ export function openReportsModal() {
   }
 
   /* -------------------------------------------------------------- AGENTS */
-  function renderAgents(list) {
-    if (!list || !list.length) {
+  function renderAgents(raw) {
+    const { agents: list, worst, best, bands } = normalizeAgentsPayload(raw);
+
+    if (!list.length) {
       contentArea.append(el("div.tplc-empty", {}, ["Nothing happened in this period."]));
       return;
     }
 
-    let sortCol = "sent";
+    let sortCol = "median_reply";
     let sortAsc = false;
+
+    function agentCells(ag) {
+      const failedHigh = ag.sent > 0 && ag.failed / ag.sent > 0.1;
+      const fr = ag.first_response || {};
+      const medianStr = formatDuration(fr.median_seconds) || "—";
+      const avgStr = formatDuration(fr.avg_seconds) || "—";
+      const samples = fr.count != null ? String(fr.count) : "—";
+      return [
+        el("td.rep-agent-name", {}, [agentLabel(ag)]),
+        el("td", {}, [perfBadge(ag.performance)]),
+        el("td", {}, [avgStr]),
+        el("td", {}, [medianStr]),
+        el("td", {}, [samples]),
+        el("td", {}, [String(ag.sent)]),
+        el("td", {}, [String(ag.delivered)]),
+        el("td", {}, [String(ag.read)]),
+        el("td", { class: failedHigh ? "rep-fail-high" : "" }, [String(ag.failed)]),
+        el("td", {}, [String(ag.templates)]),
+        el("td", {}, [String(ag.chats)]),
+      ];
+    }
+
+    function rankList(title, items, emptyCopy) {
+      const wrap = el("div.rep-rank");
+      wrap.append(el("h3.rep-rank__title", {}, [title]));
+      if (!items.length) {
+        wrap.append(el("p.rep-rank__empty", {}, [emptyCopy]));
+        return wrap;
+      }
+      const ol = el("ol.rep-rank__list");
+      for (const ag of items) {
+        const fr = ag.first_response || {};
+        ol.append(
+          el("li.rep-rank__item", {}, [
+            el("div.rep-rank__who", {}, [
+              el("strong", {}, [agentLabel(ag)]),
+              perfBadge(ag.performance),
+            ]),
+            el("div.rep-rank__meta", {}, [
+              `Avg ${formatDuration(fr.avg_seconds) || "—"} · Median ${
+                formatDuration(fr.median_seconds) || "—"
+              } · ${fr.count || 0} replies · ${ag.chats} chats`,
+            ]),
+          ])
+        );
+      }
+      wrap.append(ol);
+      return wrap;
+    }
 
     function renderTable() {
       clear(contentArea);
+
+      const legend = el(
+        "div.rep-legend",
+        {},
+        (bands.length
+          ? bands
+          : [
+              { key: "excellent", label: "Excellent", detail: "Under 5 minutes" },
+              { key: "good", label: "Good", detail: "Under 15 minutes" },
+              { key: "fair", label: "Fair", detail: "Under 1 hour" },
+              { key: "bad", label: "Bad", detail: "Under 4 hours" },
+              { key: "critical", label: "Critical", detail: "4 hours or more" },
+            ]
+        ).map((b) =>
+          el("div.rep-legend__item", {}, [
+            el("span.rep-perf", { class: `rep-perf--${b.key}` }, [b.label]),
+            el("span.rep-legend__detail", {}, [b.detail || ""]),
+          ])
+        )
+      );
+
+      const ranks = el("div.rep-ranks", {}, [
+        rankList(
+          "Top 10 slowest (needs attention)",
+          worst,
+          "Not enough timed replies yet to rank slow agents."
+        ),
+        rankList(
+          "Top 10 fastest",
+          best,
+          "Not enough timed replies yet to rank fast agents."
+        ),
+      ]);
+
       const sorted = [...list].sort((a, b) => {
         let va = a[sortCol];
         let vb = b[sortCol];
         if (sortCol === "median_reply") {
-          va = a.first_response?.median_seconds ?? 999999;
-          vb = b.first_response?.median_seconds ?? 999999;
+          va = a.first_response?.median_seconds ?? (sortAsc ? 999999999 : -1);
+          vb = b.first_response?.median_seconds ?? (sortAsc ? 999999999 : -1);
+        } else if (sortCol === "avg_reply") {
+          va = a.first_response?.avg_seconds ?? (sortAsc ? 999999999 : -1);
+          vb = b.first_response?.avg_seconds ?? (sortAsc ? 999999999 : -1);
+        } else if (sortCol === "replies") {
+          va = a.first_response?.count ?? 0;
+          vb = b.first_response?.count ?? 0;
+        } else if (sortCol === "performance") {
+          const order = {
+            critical: 5,
+            bad: 4,
+            fair: 3,
+            good: 2,
+            excellent: 1,
+            insufficient: 0,
+          };
+          va = order[a.performance?.key] ?? 0;
+          vb = order[b.performance?.key] ?? 0;
+        } else if (sortCol === "display_name") {
+          va = String(a.display_name || "").toLowerCase();
+          vb = String(b.display_name || "").toLowerCase();
         }
         if (va < vb) return sortAsc ? -1 : 1;
         if (va > vb) return sortAsc ? 1 : -1;
@@ -296,32 +429,21 @@ export function openReportsModal() {
 
       const tbody = el("tbody");
       for (const ag of sorted) {
-        const failedHigh = ag.sent > 0 && ag.failed / ag.sent > 0.1;
-        const medianStr = formatDuration(ag.first_response?.median_seconds) || "—";
-
-        tbody.append(
-          el("tr", {}, [
-            el("td", { style: "font-weight: 600;" }, [ag.display_name]),
-            el("td", {}, [String(ag.sent)]),
-            el("td", {}, [String(ag.delivered)]),
-            el("td", {}, [String(ag.read)]),
-            el("td", { style: failedHigh ? "color: #ef4444; font-weight: 700;" : "" }, [String(ag.failed)]),
-            el("td", {}, [String(ag.templates)]),
-            el("td", {}, [String(ag.chats)]),
-            el("td", {}, [medianStr]),
-          ])
-        );
+        tbody.append(el("tr", {}, agentCells(ag)));
       }
 
       const headers = [
         { id: "display_name", label: "Agent" },
+        { id: "performance", label: "Performance" },
+        { id: "avg_reply", label: "Avg reply" },
+        { id: "median_reply", label: "Median reply" },
+        { id: "replies", label: "Timed replies" },
         { id: "sent", label: "Sent" },
         { id: "delivered", label: "Delivered" },
         { id: "read", label: "Read" },
         { id: "failed", label: "Failed" },
         { id: "templates", label: "Templates" },
         { id: "chats", label: "Chats" },
-        { id: "median_reply", label: "Median reply" },
       ];
 
       const thead = el("thead", {}, [
@@ -336,7 +458,7 @@ export function openReportsModal() {
                   if (sortCol === h.id) sortAsc = !sortAsc;
                   else {
                     sortCol = h.id;
-                    sortAsc = false;
+                    sortAsc = h.id === "display_name" || h.id === "performance";
                   }
                   renderTable();
                 },
@@ -347,14 +469,16 @@ export function openReportsModal() {
         ),
       ]);
 
-      const tableWrap = el("div.rep-table-wrap", {}, [el("table.rep-table", {}, [thead, tbody])]);
-      const note = el(
-        "div",
-        { style: "margin-top: 10px; font-size: 12px; opacity: 0.6;" },
-        ["Only agents who sent something in this period appear here."]
+      contentArea.append(
+        el("p.rep-note", {}, [
+          "Performance uses median first-reply time (customer message → this agent’s answer). Average is shown beside it. Rankings need at least 3 timed replies.",
+        ]),
+        legend,
+        ranks,
+        el("h3.rep-rank__title", {}, ["All agents"]),
+        el("div.rep-table-wrap", {}, [el("table.rep-table", {}, [thead, tbody])]),
+        el("p.rep-note", {}, ["Only agents who sent something in this period appear here."])
       );
-
-      contentArea.append(tableWrap, note);
     }
 
     renderTable();
@@ -410,7 +534,7 @@ export function openReportsModal() {
         const agentsCell = el("td", {}, [
           noAgents
             ? el("span.rep-chip.rep-chip--amber", {}, ["Nobody assigned"])
-            : num.agents.map((a) => a.display_name || a).join(", "),
+            : num.agents.map(agentLabel).join(", "),
         ]);
 
         const templatesCell = el("td", {}, [

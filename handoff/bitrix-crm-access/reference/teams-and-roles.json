@@ -1,0 +1,89 @@
+{
+  "updated": "2026-09-03",
+  "crm": {
+    "host": "crm.a7grouprealestatedxb.com",
+    "ownerDataEntityTypeId": 1042,
+    "categories": {
+      "13": "Owner Data",
+      "14": "Availability (New Availability kanban)"
+    }
+  },
+  "roles": {
+    "36": {
+      "name": "Agent",
+      "boundTo": "G11 (intranet group 11)",
+      "scope": "SELF only (ATTR=A) — own assigned records"
+    },
+    "54": {
+      "name": "Team Leader",
+      "boundTo": "U2560 / U2551 / U2297 (per-head)",
+      "scope": "SELF + DEPARTMENT + SUBDEPARTMENTS (ATTR=D)"
+    },
+    "8": {
+      "name": "Sales Agent",
+      "note": "Template we mirrored for role 36 personal perms; not the main agent group role"
+    },
+    "6": {
+      "name": "Employee",
+      "boundTo": "G12",
+      "note": "Has almost no CRM entity perms; agents also have this but real CRM access is role 36"
+    }
+  },
+  "teams": [
+    {
+      "headId": 2560,
+      "headName": "Hassan T.L",
+      "deptId": 69,
+      "hrNodeHint": "SND59",
+      "agents": [
+        { "id": 2380, "name": "Khazeema" },
+        { "id": 2344, "name": "Aila Shehzadi" },
+        { "id": 2434, "name": "SAPNA" },
+        { "id": 2291, "name": "uzma jamshaid" },
+        { "id": 2378, "name": "Harm Fatima" },
+        { "id": 2376, "name": "Areeba" },
+        { "id": 2379, "name": "eman Fazal" },
+        { "id": 2303, "name": "Ruqia Faisal" },
+        { "id": 2560, "name": "Hassan T.L" }
+      ]
+    },
+    {
+      "headId": 2551,
+      "headName": "Rana Muhammad Hussnain Ali",
+      "deptId": 70,
+      "hrNodeHint": "SND60",
+      "agents": [
+        { "id": 2381, "name": "mehnaz" },
+        { "id": 2369, "name": "nimra akbar" },
+        { "id": 2371, "name": "tehreem Ijaaz" },
+        { "id": 2535, "name": "Mehreen" },
+        { "id": 2368, "name": "esha ghazi" },
+        { "id": 2367, "name": "Warda Hassan" },
+        { "id": 2351, "name": "momina Hamza" },
+        { "id": 2350, "name": "Irum Yasin" },
+        { "id": 2551, "name": "Rana Muhammad Hussnain Ali" }
+      ]
+    },
+    {
+      "headId": 2297,
+      "headName": "Javeria bibi",
+      "deptId": 71,
+      "hrNodeHint": "SND61",
+      "agents": [
+        { "id": 2299, "name": "Farhat Shahid" },
+        { "id": 2302, "name": "Fozia razzaq" },
+        { "id": 2392, "name": "minahil sanaullah" },
+        { "id": 2298, "name": "Asma Aslam" },
+        { "id": 2390, "name": "shareen Shahid" },
+        { "id": 2297, "name": "Javeria bibi" }
+      ]
+    }
+  ],
+  "tables": {
+    "rolePerms": "b_crm_role_perms",
+    "roleRelation": "b_crm_role_relation",
+    "leads": "b_crm_lead",
+    "ownerData": "b_crm_dynamic_items_1042",
+    "ownerAccessAttr": "b_crm_access_attr_dynamic_1042"
+  }
+}

@@ -25,6 +25,7 @@ import { SessionOwnershipService } from './session-ownership.service';
 import { paginate, ListOptions, resolveListWindow } from '../../common/utils/paginate';
 import {
   chatsFromStoredMessages,
+  isLidPlaceholderName,
   newestPerChat,
   overlayStoredMessages,
   withoutEmptyShells,
@@ -34,6 +35,7 @@ import { resolveFeatureFlags } from '../../config/feature-flags';
 import { IWhatsAppEngine, ChatSummary, ChatState } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../../core/hooks';
+import { requireManualStart, requiresManualStart } from './session-profile-reset';
 
 /**
  * How many of a session's newest stored messages are read to draw the chat list.
@@ -119,13 +121,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       SessionStatus.INITIALIZING,
       SessionStatus.QR_READY,
       SessionStatus.AUTHENTICATING,
-      SessionStatus.ACTION_REQUIRED,
     ];
 
     const claimable = this.ownership?.claimableWhere() ?? [{}];
     const result = await this.sessionRepository.update(
       claimable.map(clause => ({ ...clause, status: In(activeStatuses) })),
-      { status: SessionStatus.DISCONNECTED },
+      { status: SessionStatus.DISCONNECTED, historySyncToken: null },
     );
 
     if (result.affected && result.affected > 0) {
@@ -163,9 +164,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // races to launch the same engines, which is a WhatsApp account being opened twice, not merely
     // duplicated work.
     const claimable = this.ownership?.claimableWhere() ?? [{}];
-    const sessions = await this.sessionRepository.find({
-      where: claimable.map(clause => ({ ...clause, phone: Not(IsNull()), status: SessionStatus.DISCONNECTED })),
-    });
+    const sessions = (
+      await this.sessionRepository.find({
+        where: claimable.map(clause => ({ ...clause, phone: Not(IsNull()), status: SessionStatus.DISCONNECTED })),
+      })
+    ).filter(session => !requiresManualStart(session));
 
     if (sessions.length === 0) return;
 
@@ -215,6 +218,19 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     });
 
     if (existing) {
+      // Soft-removed rows keep their name + messages. Creating the same name again restores that
+      // record so a later Start/QR reattaches the existing history instead of orphaning it.
+      if (existing.removedAt) {
+        existing.removedAt = null;
+        existing.status = SessionStatus.CREATED;
+        existing.config = requireManualStart(existing.config);
+        const restored = await this.sessionRepository.save(existing);
+        this.logger.log(`Session restored from soft-remove: ${restored.name}`, {
+          sessionId: restored.id,
+          action: 'soft_restore',
+        });
+        return this.attachRuntimeState(restored);
+      }
       throw new ConflictException(`Session with name '${dto.name}' already exists`);
     }
 
@@ -224,6 +240,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       proxyUrl: dto.proxyUrl || null,
       proxyType: dto.proxyType || null,
       status: SessionStatus.CREATED,
+      removedAt: null,
     });
 
     // The findOne pre-check above is a fast path for the common case, but it's a check-then-insert
@@ -292,17 +309,52 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return session;
   }
 
-  /** Record removal + engine retirement + credential purge: owned by the lifecycle service. */
-  async delete(id: string): Promise<void> {
+  async getDeleteImpact(id: string): Promise<{ messageCount: number }> {
+    await this.findOne(id);
+    return { messageCount: await this.messageRepository.count({ where: { sessionId: id } }) };
+  }
+
+  /** Record removal + engine retirement + credential purge: owned by lifecycle service. */
+  async delete(id: string, confirmedMessageCount: number): Promise<void> {
+    if (!Number.isSafeInteger(confirmedMessageCount) || confirmedMessageCount < 0) {
+      throw new BadRequestException('confirmMessageCount must be a non-negative integer');
+    }
+    // Preserve the pre-initialize retirement fence: this mark must land synchronously, before the
+    // count read or ownership query awaits. A refused count leaves a harmless mark that next Start
+    // clears, same as the existing ownership/teardown 409 paths.
+    this.engineLifecycle.markStopping(id);
+    const messageCount = await this.messageRepository.count({ where: { sessionId: id } });
+    if (messageCount !== confirmedMessageCount) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'SESSION_DELETE_COUNT_CHANGED',
+        message: 'Stored message count changed. Review the new impact and confirm again.',
+        confirmedMessageCount,
+        messageCount,
+      });
+    }
     // Set the tearing-down mark SYNCHRONOUSLY, before the ownership fence's awaited query. The
     // pre-initialize retirement race needs this mark visible to an in-flight start()'s
     // post-INITIALIZING check by the time that write settles; awaiting anything first — the fence's
     // COUNT, or delete()'s own requireSession — would let the mark land after that window. A mark
     // left behind when the fence refuses (409) is harmless and is cleared by the next start().
+    if (this.ownership) await this.assertNotHeldElsewhere(id);
+    await this.engineLifecycle.delete(id, confirmedMessageCount);
+    await this.ownership?.release(id);
+  }
+
+  /** Reset local browser/auth profile while preserving identity, session row, and every message. */
+  async resetProfile(id: string): Promise<Session> {
+    const before = await this.messageRepository.count({ where: { sessionId: id } });
     this.engineLifecycle.markStopping(id);
     if (this.ownership) await this.assertNotHeldElsewhere(id);
-    await this.engineLifecycle.delete(id);
-    await this.ownership?.release(id);
+    const session = await this.engineLifecycle.resetProfile(id);
+    await this.releaseUnlessEngineActive(id);
+    const after = await this.messageRepository.count({ where: { sessionId: id } });
+    if (after !== before) {
+      throw new Error(`Profile reset message invariant failed for session ${id}: before=${before}, after=${after}`);
+    }
+    return session;
   }
 
   /**
@@ -331,6 +383,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       throw new ConflictException(`Session ${id} is running on another node`);
     }
     try {
+      const before = await this.findOne(id);
+      if (before.removedAt) {
+        await this.sessionRepository.update(id, { removedAt: null });
+      }
       return await this.engineLifecycle.start(id);
     } catch (error) {
       // A failed or refused start must not leave the claim pinned here — the heartbeat would renew
@@ -393,7 +449,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
 
   async getQRCode(id: string): Promise<{ qrCode: string; status: SessionStatus }> {
     const session = await this.findOne(id);
-    const engine = this.engines.get(id);
+    const engine = this.engines.getLifecycle(id);
 
     if (!engine) {
       throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
@@ -420,7 +476,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   async requestPairingCode(id: string, phoneNumber: string): Promise<{ pairingCode: string; status: SessionStatus }> {
     const session = await this.findOne(id);
-    const engine = this.engines.get(id);
+    const engine = this.engines.getLifecycle(id);
 
     if (!engine) {
       throw new BadRequestException('Session is not started. Call POST /sessions/:id/start first.');
@@ -457,6 +513,89 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     return paginate(mapped, opts.limit, opts.offset);
   }
 
+  /**
+   * Admin All-chats view: one merged list across every session (including soft-removed),
+   * newest conversation first. Each row carries the owning session's name/status so the UI
+   * can show who the chat belongs to and whether the thread may be opened.
+   */
+  async getAllChats(opts: ListOptions = {}): Promise<
+    Array<
+      ChatSummary & {
+        sessionId: string;
+        sessionName: string;
+        sessionStatus: SessionStatus;
+        sessionPhone: string | null;
+        removed: boolean;
+        canOpenThread: boolean;
+      }
+    >
+  > {
+    const sessions = await this.sessionRepository.find({ order: { updatedAt: 'DESC' } });
+    const merged: Array<
+      ChatSummary & {
+        sessionId: string;
+        sessionName: string;
+        sessionStatus: SessionStatus;
+        sessionPhone: string | null;
+        removed: boolean;
+        canOpenThread: boolean;
+      }
+    > = [];
+
+    for (const session of sessions) {
+      const stored = await this.messageRepository.find({
+        where: { sessionId: session.id },
+        order: { timestamp: 'DESC' },
+        take: CHAT_LIST_MESSAGE_SCAN,
+      });
+      const chats = await this.enrichLidChatNames(session.id, chatsFromStoredMessages(newestPerChat(stored)));
+      const removed = Boolean(session.removedAt);
+      const canOpenThread = !removed && session.status === SessionStatus.READY;
+      for (const chat of chats) {
+        merged.push({
+          ...chat,
+          sessionId: session.id,
+          sessionName: session.name,
+          sessionStatus: session.status,
+          sessionPhone: session.phone,
+          removed,
+          canOpenThread,
+        });
+      }
+    }
+
+    merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return paginate(merged, opts.limit, opts.offset);
+  }
+
+  /**
+   * After a number links, move stored messages from other soft-removed sessions that share the
+   * same phone onto this session id so history is not stranded under a tombstone name.
+   */
+  async reattachMessagesByPhone(sessionId: string, phone: string): Promise<number> {
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) return 0;
+    const donors = await this.sessionRepository.find({
+      where: { phone: digits, removedAt: Not(IsNull()) },
+    });
+    let moved = 0;
+    for (const donor of donors) {
+      if (donor.id === sessionId) continue;
+      const result = await this.messageRepository.update({ sessionId: donor.id }, { sessionId });
+      moved += result.affected ?? 0;
+      // Keep the tombstone row (name history) but drop identity so it cannot steal future links.
+      await this.sessionRepository.update(donor.id, { phone: null });
+    }
+    if (moved > 0) {
+      this.logger.log(`Reattached ${moved} message(s) by phone onto session`, {
+        sessionId,
+        action: 'reattach_by_phone',
+        moved,
+      });
+    }
+    return moved;
+  }
+
   async getChats(id: string, opts: ListOptions = {}): Promise<ChatSummary[]> {
     const session = await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);
@@ -476,7 +615,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         order: { timestamp: 'DESC' },
         take: CHAT_LIST_MESSAGE_SCAN,
       });
-      return paginate(chatsFromStoredMessages(newestPerChat(stored)), opts.limit, opts.offset);
+      const fromStore = await this.enrichLidChatNames(id, chatsFromStoredMessages(newestPerChat(stored)));
+      return paginate(fromStore, opts.limit, opts.offset);
     }
 
     // A history import that is still running has read some chats and not others, and the engine
@@ -514,10 +654,30 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     // The empty shells go after the overlay, not before it: the overlay is what gives a chat its
     // date and preview back from our own rows, so filtering first would drop chats we hold messages
     // for. See withoutEmptyShells for what these rows are and why the name is not the test.
-    const chats = withoutEmptyShells(overlayStoredMessages(engineChats, newestPerChat(stored))).sort(
-      (a, b) => (b.timestamp || 0) - (a.timestamp || 0),
+    const chats = await this.enrichLidChatNames(
+      id,
+      withoutEmptyShells(overlayStoredMessages(engineChats, newestPerChat(stored))).sort(
+        (a, b) => (b.timestamp || 0) - (a.timestamp || 0),
+      ),
     );
     return paginate(chats, opts.limit, opts.offset);
+  }
+
+  /**
+   * When RESOLVE_LID_TO_PHONE is on, replace @lid placeholder titles with the engine-mapped phone.
+   * Best-effort: unmapped LIDs keep the digit id. Human push-names are never overwritten.
+   */
+  private async enrichLidChatNames<T extends ChatSummary>(sessionId: string, chats: T[]): Promise<T[]> {
+    if (!resolveFeatureFlags(this.configService).resolveLidToPhone || chats.length === 0) {
+      return chats;
+    }
+    return Promise.all(
+      chats.map(async chat => {
+        if (!isLidPlaceholderName(chat.id, chat.name)) return chat;
+        const phone = await this.lidResolver.resolveSenderPhone(sessionId, chat.id);
+        return phone ? { ...chat, name: phone } : chat;
+      }),
+    );
   }
 
   /**

@@ -1,4 +1,12 @@
-import { newestPerChat, overlayStoredMessages, previewOf, withoutEmptyShells } from './chat-list-overlay';
+import {
+  chatsFromStoredMessages,
+  displayNameForStoredChat,
+  isLidPlaceholderName,
+  newestPerChat,
+  overlayStoredMessages,
+  previewOf,
+  withoutEmptyShells,
+} from './chat-list-overlay';
 import type { Message } from '../message/entities/message.entity';
 import type { ChatSummary } from '../../engine/interfaces/whatsapp-engine.interface';
 
@@ -13,6 +21,32 @@ const chat = (over: Partial<ChatSummary>): ChatSummary => ({
   unreadCount: 0,
   timestamp: 50,
   ...over,
+});
+
+describe('isLidPlaceholderName / displayNameForStoredChat', () => {
+  it('treats the bare LID user part as a placeholder', () => {
+    expect(isLidPlaceholderName('220671762296928@lid', '220671762296928')).toBe(true);
+    expect(isLidPlaceholderName('220671762296928@lid', 'Shahid')).toBe(false);
+    expect(isLidPlaceholderName('971501234567@c.us', '971501234567')).toBe(false);
+  });
+
+  it('prefers a human name, then senderPhone, then the LID digits', () => {
+    expect(
+      displayNameForStoredChat('220671762296928@lid', {
+        chatName: 'Shahid',
+        metadata: { senderPhone: '97150111222' },
+      }),
+    ).toBe('Shahid');
+    expect(
+      displayNameForStoredChat('220671762296928@lid', {
+        chatName: '220671762296928',
+        metadata: { senderPhone: '97150111222' },
+      }),
+    ).toBe('97150111222');
+    expect(
+      displayNameForStoredChat('220671762296928@lid', { chatName: '220671762296928', metadata: {} }),
+    ).toBe('220671762296928');
+  });
 });
 
 describe('previewOf', () => {
@@ -110,6 +144,41 @@ describe('overlayStoredMessages', () => {
     const original = chat({ id: 'z@lid', lastMessage: 'engine' });
     const [out] = overlayStoredMessages([original], newestPerChat([]));
     expect(out).toBe(original);
+  });
+
+  it('replaces a LID placeholder title with a stored senderPhone', () => {
+    const [out] = overlayStoredMessages(
+      [chat({ id: '220671762296928@lid', name: '220671762296928', timestamp: 300, lastMessage: 'ok' })],
+      newestPerChat([
+        row({
+          chatId: '220671762296928@lid',
+          chatName: '220671762296928',
+          timestamp: 100,
+          body: 'older',
+          metadata: { senderPhone: '97150111222' },
+        }),
+      ]),
+    );
+    expect(out.name).toBe('97150111222');
+    expect(out.timestamp).toBe(300);
+    expect(out.lastMessage).toBe('ok');
+  });
+});
+
+describe('chatsFromStoredMessages', () => {
+  it('uses senderPhone when the stored chatName is only the LID', () => {
+    const [out] = chatsFromStoredMessages(
+      newestPerChat([
+        row({
+          chatId: '220671762296928@lid',
+          chatName: '220671762296928',
+          metadata: { senderPhone: '97150111222' },
+          body: 'hi',
+          timestamp: 100,
+        }),
+      ]),
+    );
+    expect(out.name).toBe('97150111222');
   });
 });
 

@@ -687,7 +687,13 @@ export interface CallOutcomeEvent {
 
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
-  onReady?: (phone: string, pushName: string) => void;
+  onReady?: (phone: string, pushName: string) => void | Promise<void>;
+  /**
+   * Routes provider-native data mutations through the session's pre-identity acceptance gate.
+   * Adapters must call this before changing their own message/contact/chat stores. Lifecycle-only
+   * signals such as QR, disconnect, and credential teardown do not use this path.
+   */
+  onEngineData?: (payload: unknown, apply: () => void | Promise<void>) => void;
   onMessage?: (message: IncomingMessage) => void;
   /**
    * Fired for messages the account itself created (outgoing) — including sends composed on a
@@ -718,7 +724,7 @@ export interface EngineEventCallbacks {
    * Bulk historical messages from an engine's initial sync (e.g. Baileys `messaging-history.set`).
    * They predate the live session, so consumers persist them for the chat view but must not dispatch.
    */
-  onHistoryMessages?: (messages: IncomingMessage[]) => void;
+  onHistoryMessages?: (messages: IncomingMessage[]) => void | Promise<void>;
   onDisconnected?: (reason: string) => void;
   onStateChanged?: (state: EngineStatus) => void;
   /**
@@ -809,6 +815,8 @@ export interface IWhatsAppEngine {
   // session), then best-effort graceful teardown — used to recover a session that destroy() can't.
   // Each adapter kills only its own resources (never a process-wide pkill).
   forceDestroy(): Promise<void>;
+  /** Remove only this adapter generation's local credential namespace after a rejected link. */
+  purgeLocalCredentials?(): Promise<void>;
 
   // Status
   getStatus(): EngineStatus;
@@ -968,6 +976,12 @@ export interface IWhatsAppEngine {
    * running base64 total crosses the budget, later media messages carry the `omitted` marker instead
    * of a download. An optional `signal` (e.g. client disconnect) stops the read loop early; the
    * messages collected so far are returned.
+   *
+   * `mediaFor` narrows the download to ONE message id; every other message is still returned, but
+   * media-free. The cost of a media pass is not the bytes, it is the waiting: WhatsApp stops serving
+   * old media and each such file burns MEDIA_DOWNLOAD_TIMEOUT_MS before it can be called gone, so a
+   * chat holding ten of them charges ten timeouts to answer a question about one. Ignored unless
+   * `includeMedia` is set, and an id that is not in the slice simply downloads nothing.
    */
   getChatHistory(
     chatId: string,
@@ -975,6 +989,7 @@ export interface IWhatsAppEngine {
     includeMedia?: boolean,
     mediaMaxBytes?: number,
     signal?: AbortSignal,
+    mediaFor?: string,
   ): Promise<IncomingMessage[]>;
 
   // Calls
@@ -1077,7 +1092,7 @@ export interface IWhatsAppEngine {
    * Expected to be slow (minutes) and to run in the background. It must never block the live
    * socket, and a caller must not await it on a path that delivers messages.
    */
-  importHistorySince?(since: Date, onProgress?: (pct: number) => void): Promise<number>;
+  importHistorySince?(since: Date, onProgress?: (pct: number) => void | Promise<void>): Promise<number>;
   sendSeen(chatId: string): Promise<boolean>;
   markUnread(chatId: string): Promise<boolean>;
   deleteChat(chatId: string): Promise<boolean>;

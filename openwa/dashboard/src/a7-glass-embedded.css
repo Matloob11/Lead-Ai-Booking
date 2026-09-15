@@ -1,0 +1,335 @@
+/* ===========================================================================
+   A7: Linked-devices (embedded) glass theme — match the Omni / API WhatsApp
+   liquid-glass look (teal → gold gradient, frosted panels, soft chat rows).
+   Only applies when the dashboard is framed (`data-embedded` on <html>).
+   =========================================================================== */
+
+:root[data-embedded] {
+  color-scheme: dark;
+  --bg-light: #0a1020;
+  --bg-white: rgba(255, 255, 255, 0.07);
+  --bg-card: rgba(255, 255, 255, 0.1);
+  --bg-secondary: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.14);
+  --text-primary: #eef3f9;
+  --text-secondary: rgba(238, 243, 249, 0.62);
+  --text-muted: rgba(238, 243, 249, 0.45);
+  --primary: #37d39b;
+  --primary-hover: #2bb987;
+  --shadow-sm: 0 4px 14px rgba(3, 8, 20, 0.28);
+  --shadow-md: 0 12px 36px rgba(3, 8, 20, 0.4);
+  --radius: 12px;
+}
+
+:root[data-embedded],
+:root[data-embedded] body,
+:root[data-embedded] #root {
+  background-color: #0a1020 !important;
+  color: #eef3f9;
+}
+
+/* Teal / gold / navy blobs — same family as bitrix glass-dark. */
+:root[data-embedded] body {
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(29, 111, 122, 0.9), transparent 42%),
+    radial-gradient(circle at 88% -4%, rgba(200, 163, 74, 0.5), transparent 44%),
+    radial-gradient(circle at 38% 96%, rgba(42, 79, 156, 0.75), transparent 48%),
+    radial-gradient(circle at 92% 88%, rgba(20, 128, 106, 0.45), transparent 40%) !important;
+  background-color: #0a1020 !important;
+  background-attachment: fixed;
+}
+
+:root[data-embedded] .layout.a7-menu-shell,
+:root[data-embedded] .main-content.a7-full {
+  background: transparent !important;
+}
+
+:root[data-embedded] .chats-page {
+  background: transparent !important;
+}
+
+:root[data-embedded] .chats-page .chats-layout {
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: blur(34px) saturate(180%);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 30px 80px rgba(3, 8, 20, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+  margin: 4px !important;
+  overflow: hidden;
+}
+
+:root[data-embedded] .chats-page .chats-sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-embedded] .chats-page .sidebar-header-box {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: transparent;
+}
+
+:root[data-embedded] .chats-page .form-label {
+  color: #eef3f9 !important;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+:root[data-embedded] .chats-page .session-selector,
+:root[data-embedded] .chats-page .a7-all-chats-btn,
+:root[data-embedded] .chats-page .chat-search-input {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #eef3f9 !important;
+  border-radius: 12px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+:root[data-embedded] .chats-page .session-selector option {
+  background: #0f1c2e;
+  color: #f1f5f9;
+}
+
+:root[data-embedded] .chats-page .chat-search-input input {
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .chats-page .chat-search-input input::placeholder {
+  color: rgba(238, 243, 249, 0.45);
+}
+
+:root[data-embedded] .chats-page .chat-search-input svg {
+  color: rgba(238, 243, 249, 0.55);
+}
+
+:root[data-embedded] .chats-page .a7-tools-menu-btn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #eef3f9 !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+:root[data-embedded] .chats-page .a7-tools-menu-btn:hover,
+:root[data-embedded] .chats-page .a7-tools-menu-btn.open {
+  background: rgba(55, 211, 155, 0.16) !important;
+  border-color: rgba(55, 211, 155, 0.4) !important;
+  color: #7ff0c6 !important;
+}
+
+:root[data-embedded] .chats-page .chat-item-card {
+  margin: 0 6px 4px;
+  border-radius: 16px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+:root[data-embedded] .chats-page .chat-item-card:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-embedded] .chats-page .chat-item-card.active,
+:root .chats-page .chat-item-card.active {
+  background: rgba(255, 255, 255, 0.13) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow:
+    0 8px 24px rgba(3, 8, 20, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+}
+
+:root[data-embedded] .chats-page .chat-item-card.active::before {
+  display: none;
+}
+
+:root[data-embedded] .chats-page .chat-item-name {
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .chats-page .chat-item-card.active .chat-item-name {
+  color: #7ff0c6 !important;
+}
+
+:root[data-embedded] .chats-page .chat-item-time,
+:root[data-embedded] .chats-page .chat-item-snippet,
+:root[data-embedded] .chats-page .no-message {
+  color: rgba(238, 243, 249, 0.58) !important;
+}
+
+:root[data-embedded] .chats-page .chat-unread-badge {
+  background: #37d39b !important;
+  color: #06281c !important;
+  box-shadow: 0 4px 12px rgba(55, 211, 155, 0.4);
+}
+
+:root[data-embedded] .chats-page .chats-room,
+:root[data-embedded] .chats-page .room-container {
+  background: transparent !important;
+}
+
+:root[data-embedded] .chats-page .room-header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-embedded] .chats-page .room-messages {
+  background: transparent !important;
+}
+
+:root[data-embedded] .chats-page .message-bubble.incoming {
+  background: rgba(255, 255, 255, 0.11) !important;
+  border: 1px solid rgba(255, 255, 255, 0.17) !important;
+  color: #eef3f9 !important;
+  border-radius: 18px 18px 18px 7px !important;
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 8px 22px rgba(3, 8, 20, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root[data-embedded] .chats-page .message-bubble.outgoing {
+  background: linear-gradient(180deg, rgba(46, 168, 131, 0.38), rgba(30, 124, 99, 0.32)) !important;
+  border: 1px solid rgba(120, 235, 195, 0.32) !important;
+  color: #eef3f9 !important;
+  border-radius: 18px 18px 7px 18px !important;
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 8px 22px rgba(3, 8, 20, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root[data-embedded] .chats-page .room-input-footer,
+:root[data-embedded] .chats-page .attachment-preview-banner {
+  background: linear-gradient(0deg, rgba(10, 16, 32, 0.55), rgba(255, 255, 255, 0.04)) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(16px);
+}
+
+:root[data-embedded] .chats-page .room-input-footer textarea,
+:root[data-embedded] .chats-page .room-input-footer input {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  border-radius: 14px !important;
+}
+
+:root[data-embedded] .chats-page .voice-rec__label {
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .chats-page .voice-rec__cancel {
+  color: rgba(238, 243, 249, 0.8) !important;
+}
+
+:root[data-embedded] .chats-page .chats-list-empty,
+:root[data-embedded] .chats-page .chats-list-loading,
+:root[data-embedded] .chats-page .room-empty,
+:root[data-embedded] .chats-page .chats-error-state {
+  color: rgba(238, 243, 249, 0.7) !important;
+}
+
+/* App menu over glass — solid + light text always.
+   Layout.css light-theme rule paints #0f172a text on a white menu; glass
+   then swaps the menu to a dark panel, so labels vanish (Chats/Theme ghost). */
+:root[data-embedded] .a7-app-menu,
+:root[data-embedded][data-theme='light'] .a7-app-menu,
+:root[data-embedded][data-theme='dark'] .a7-app-menu {
+  background: #0f1c2e !important;
+  color: #eef3f9 !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55) !important;
+}
+
+:root[data-embedded] .a7-app-menu-item,
+:root[data-embedded][data-theme='light'] .a7-app-menu-item {
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .a7-app-menu-item:hover,
+:root[data-embedded] .a7-app-menu-item.active,
+:root[data-embedded][data-theme='light'] .a7-app-menu-item:hover,
+:root[data-embedded][data-theme='light'] .a7-app-menu-item.active {
+  background: rgba(37, 211, 102, 0.16) !important;
+  color: #4ade80 !important;
+}
+
+:root[data-embedded] .a7-app-menu-theme,
+:root[data-embedded][data-theme='light'] .a7-app-menu-theme {
+  color: #eef3f9 !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  background: #162636 !important;
+}
+
+:root[data-embedded] .a7-app-menu-divider {
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+
+:root[data-embedded] .a7-app-menu-footer {
+  border-top-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+:root[data-embedded] .a7-app-menu-backdrop {
+  background: rgba(3, 8, 20, 0.45) !important;
+}
+
+:root[data-embedded] .a7-health-modal,
+:root[data-embedded] .a7-health-modal-head {
+  background: #0f1c2e !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .a7-health-modal-close {
+  background: #162636 !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+:root[data-embedded] .a7-health-modal-body {
+  color: #eef3f9;
+}
+
+/* Sessions / Dashboard cards: glass --bg-white is translucent; keep readable panels. */
+:root[data-embedded] .sessions-page .session-card,
+:root[data-embedded] .sessions-page .search-input,
+:root[data-embedded] .sessions-page .filter-group,
+:root[data-embedded] .sessions-page .empty-state,
+:root[data-embedded] .dashboard .stat-card,
+:root[data-embedded] .dashboard .sessions-table {
+  background: #132334 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: #eef3f9;
+}
+
+:root[data-embedded] .sessions-page .session-card h3,
+:root[data-embedded] .sessions-page .session-meta,
+:root[data-embedded] .dashboard .stat-card h3,
+:root[data-embedded] .dashboard .stat-value {
+  color: #eef3f9;
+}
+
+:root[data-embedded] .chats-page .a7-voice-player {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-embedded] .chats-page .a7-voice-player.outgoing {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+:root[data-embedded] .chats-page .a7-modal__box,
+:root[data-embedded] .chats-page .a7-modal__head {
+  background: #0f1c2e !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}

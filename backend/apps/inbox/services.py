@@ -13,14 +13,14 @@ import os
 
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.catalog.models import WabaNumber, WaTemplate
 from apps.gateway.client import AlotsClient, AlotsError
 
-from .events import publish_conversation, publish_message, publish_status
-from .models import AssignmentLog, Contact, Conversation, MediaAsset, Message
+from .events import publish_message, publish_status
+from .models import Contact, Conversation, MediaAsset, Message
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,70 @@ class SendBlocked(Exception):
     """Raised when the request is valid but WhatsApp rules forbid it."""
 
 
-def _record_result(message, response):
-    """Attach the gateway's wamid, or the failure, to a queued message."""
+def recipient_digits(value):
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def format_recipient_for_gateway(wa_id):
+    """E.164 with a leading +.
+
+    Alots (India-hosted BSP) sometimes re-parses a bare UAE MSISDN as an Indian
+    number by prefixing ``91`` — ``971559298388`` becomes ``91971559298388``.
+    Meta then accepts the send and fails delivery with 131026. A leading ``+``
+    forces international parsing on their side.
+    """
+    digits = recipient_digits(wa_id)
+    return f"+{digits}" if digits else ""
+
+
+def recipient_mismatch_detail(intended, response):
+    """Explain when the gateway resolved a different WhatsApp id than we sent."""
+    want = recipient_digits(intended)
+    if not want or not isinstance(response, dict):
+        return None
+    contacts = response.get("contacts") or []
+    if not contacts or not isinstance(contacts[0], dict):
+        return None
+    got = recipient_digits(contacts[0].get("wa_id") or contacts[0].get("input") or "")
+    if not got or got == want:
+        return None
+    if got == f"91{want}":
+        return (
+            f"Gateway resolved +{want} as +{got} (added India 91). "
+            "That number is probably not on WhatsApp under this country code — "
+            "fix the digits and try again. Message was not delivered as intended."
+        )
+    return (
+        f"Gateway resolved the recipient as +{got} instead of +{want}. "
+        "Check the country code. Message was not delivered as intended."
+    )
+
+
+def _record_result(message, response, *, intended_to=None):
+    """Attach the gateway's wamid, or the failure, to a queued message.
+
+    Raises SendBlocked when the gateway accepted HTTP but the send is not
+    usable (wrong wa_id, no message id) so callers — especially campaigns —
+    do not mark the recipient as sent.
+    """
+    mismatch = recipient_mismatch_detail(intended_to, response) if intended_to else None
+    if mismatch:
+        wamid = None
+        if isinstance(response, dict):
+            entries = response.get("messages") or []
+            if entries:
+                wamid = entries[0].get("id")
+        message.status = Message.Status.FAILED
+        message.error_code = "RECIPIENT_MISMATCH"
+        message.error_detail = mismatch
+        if wamid:
+            message.wamid = wamid
+        message.save(
+            update_fields=["status", "error_code", "error_detail"]
+            + (["wamid"] if wamid else [])
+        )
+        raise SendBlocked(mismatch)
+
     wamid = None
     if isinstance(response, dict):
         entries = response.get("messages") or []
@@ -38,13 +100,28 @@ def _record_result(message, response):
             wamid = entries[0].get("id")
 
     if wamid:
-        message.wamid = wamid
-        message.status = Message.Status.SENT
-        message.save(update_fields=["wamid", "status"])
+        try:
+            with transaction.atomic():
+                message.wamid = wamid
+                message.status = Message.Status.SENT
+                message.save(update_fields=["wamid", "status"])
+        except IntegrityError:
+            # A status webhook already inserted this wamid as an external send.
+            stub = (
+                Message.objects.filter(wamid=wamid).exclude(pk=message.pk).first()
+            )
+            if stub is None:
+                raise
+            Message.objects.filter(pk=stub.pk).update(wamid=None)
+            stub.delete()
+            message.wamid = wamid
+            message.status = Message.Status.SENT
+            message.save(update_fields=["wamid", "status"])
     else:
         message.status = Message.Status.FAILED
         message.error_detail = "Gateway returned no message id"
         message.save(update_fields=["status", "error_detail"])
+        raise SendBlocked("Gateway returned no message id")
 
 
 def _touch(conversation, preview, kind=Message.Kind.TEXT):
@@ -56,7 +133,11 @@ def _touch(conversation, preview, kind=Message.Kind.TEXT):
     )
 
 
-def send_text(conversation, agent, body, reply_to=None):
+def _gateway_to(conversation):
+    return format_recipient_for_gateway(conversation.contact.wa_id)
+
+
+def send_text(conversation, agent, body, reply_to=None, payload=None):
     if not conversation.is_session_open:
         raise SendBlocked(
             "The 24-hour window is closed. Send an approved template to reopen the conversation."
@@ -72,13 +153,14 @@ def send_text(conversation, agent, body, reply_to=None):
         reply_to=reply_to,
         sent_by=agent,
         status=Message.Status.QUEUED,
+        payload=payload or {},
     )
     _touch(conversation, body)
 
     try:
         response = AlotsClient().send_text(
             conversation.number.phone_number_id,
-            conversation.contact.wa_id,
+            _gateway_to(conversation),
             body,
             # A quote only works if WhatsApp knows the message being quoted;
             # ours does not exist there until it has a wamid.
@@ -91,9 +173,13 @@ def send_text(conversation, agent, body, reply_to=None):
         publish_status(message)
         raise
 
-    _record_result(message, response)
+    _record_result(message, response, intended_to=conversation.contact.wa_id)
     publish_message(message)
     return message
+
+
+META_VIDEO_BYTES = 16 * 1024 * 1024
+META_FILE_BYTES = 100 * 1024 * 1024
 
 
 def send_media(conversation, agent, kind, media_id, caption="", filename="", asset=None):
@@ -102,9 +188,20 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
     ``asset`` is our own copy of that file. Linking it is what makes the sent
     photo visible in the thread — without it the message knows only the
     gateway's id, which nothing can render.
+
+    Meta's video slot is 16 MB. A larger clip is sent as a document so a
+    ~90 MB property video still arrives; the thread kind stays ``video`` when
+    we have the file, so the bubble still plays it.
     """
     if not conversation.is_session_open:
         raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
+
+    gateway_kind = kind
+    gateway_name = filename
+    size = getattr(asset, "size_bytes", 0) or 0
+    if kind == Message.Kind.VIDEO and size > META_VIDEO_BYTES:
+        gateway_kind = Message.Kind.DOCUMENT
+        gateway_name = filename or getattr(asset, "file_name", "") or "video.mp4"
 
     message = Message.objects.create(
         conversation=conversation,
@@ -116,6 +213,7 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
             "media_id": media_id,
             "filename": filename,
             "asset_id": asset.pk if asset else None,
+            "gateway_kind": gateway_kind,
         },
         sent_by=agent,
         status=Message.Status.QUEUED,
@@ -125,11 +223,11 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
     try:
         response = AlotsClient().send_media(
             conversation.number.phone_number_id,
-            conversation.contact.wa_id,
-            kind,
+            _gateway_to(conversation),
+            gateway_kind,
             media_id,
             caption=caption,
-            filename=filename,
+            filename=gateway_name,
         )
     except AlotsError as exc:
         message.status = Message.Status.FAILED
@@ -137,7 +235,7 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
         message.save(update_fields=["status", "error_detail"])
         raise
 
-    _record_result(message, response)
+    _record_result(message, response, intended_to=conversation.contact.wa_id)
     publish_message(message)
     return message
 
@@ -177,7 +275,7 @@ def send_location(conversation, agent, latitude, longitude, name="", address="")
     try:
         response = AlotsClient().send_location(
             conversation.number.phone_number_id,
-            conversation.contact.wa_id,
+            _gateway_to(conversation),
             latitude,
             longitude,
             name=name,
@@ -190,7 +288,7 @@ def send_location(conversation, agent, latitude, longitude, name="", address="")
         publish_status(message)
         raise
 
-    _record_result(message, response)
+    _record_result(message, response, intended_to=conversation.contact.wa_id)
     publish_message(message)
     return message
 
@@ -325,7 +423,7 @@ def send_buttons(conversation, agent, body, buttons, header="", footer=""):
 
     try:
         response = AlotsClient().send_interactive(
-            conversation.number.phone_number_id, conversation.contact.wa_id, interactive
+            conversation.number.phone_number_id, _gateway_to(conversation), interactive
         )
     except AlotsError as exc:
         message.status = Message.Status.FAILED
@@ -333,7 +431,7 @@ def send_buttons(conversation, agent, body, buttons, header="", footer=""):
         message.save(update_fields=["status", "error_detail"])
         raise
 
-    _record_result(message, response)
+    _record_result(message, response, intended_to=conversation.contact.wa_id)
     publish_message(message)
     return message
 
@@ -446,7 +544,7 @@ def send_template(
     try:
         response = AlotsClient().send_template(
             conversation.number.phone_number_id,
-            conversation.contact.wa_id,
+            _gateway_to(conversation),
             template.name,
             template.language,
             components,
@@ -457,7 +555,7 @@ def send_template(
         message.save(update_fields=["status", "error_detail"])
         raise
 
-    _record_result(message, response)
+    _record_result(message, response, intended_to=conversation.contact.wa_id)
 
     # Deliberately does not open the free-form window. Only a message *from* the
     # customer does that — a delivered template merely earns the right to be
@@ -557,6 +655,33 @@ def retry_message(message, agent):
     if message.kind == Message.Kind.TEXT:
         return send_text(conversation, agent, message.body)
 
+    if message.kind == Message.Kind.LOCATION:
+        pin = payload.get("location") or {}
+        if pin.get("latitude") is None and pin.get("longitude") is None:
+            raise SendBlocked("This pin has no coordinates to send again.")
+        return send_location(
+            conversation,
+            agent,
+            pin.get("latitude"),
+            pin.get("longitude"),
+            name=pin.get("name", ""),
+            address=pin.get("address", ""),
+        )
+
+    if message.kind == Message.Kind.INTERACTIVE:
+        interactive = payload.get("interactive") or {}
+        body = ((interactive.get("body") or {}).get("text") or message.body or "").strip()
+        header = ((interactive.get("header") or {}).get("text") or "")
+        footer = ((interactive.get("footer") or {}).get("text") or "")
+        buttons = []
+        for i, item in enumerate((interactive.get("action") or {}).get("buttons") or []):
+            reply = item.get("reply") or {}
+            title = reply.get("title")
+            if not title:
+                continue
+            buttons.append({"id": reply.get("id") or f"btn_{i}", "title": title})
+        return send_buttons(conversation, agent, body, buttons, header=header, footer=footer)
+
     media_id = payload.get("media_id")
     if not media_id:
         raise SendBlocked("The attachment is no longer available; please attach it again.")
@@ -572,19 +697,9 @@ def retry_message(message, agent):
 
 
 def reassign(conversation, to_agent, changed_by, reason=""):
-    previous = conversation.assigned_agent
-    conversation.assigned_agent = to_agent
-    conversation.save(update_fields=["assigned_agent"])
+    from .transfer import apply_handover
 
-    AssignmentLog.objects.create(
-        conversation=conversation,
-        from_agent=previous,
-        to_agent=to_agent,
-        changed_by=changed_by,
-        reason=reason,
-    )
-    publish_conversation(conversation, "conversation.assigned")
-    return conversation
+    return apply_handover(conversation, to_agent, changed_by, reason)
 
 
 def _upload_bytes(number: WabaNumber, payload: bytes, filename, mime_type, agent=None):
@@ -618,10 +733,18 @@ def _upload_bytes(number: WabaNumber, payload: bytes, filename, mime_type, agent
 
 def upload_media(number: WabaNumber, django_file, agent=None):
     """Upload what an agent picked in the composer. See ``_upload_bytes``."""
-    return _upload_bytes(
-        number,
-        django_file.read(),
-        django_file.name,
-        getattr(django_file, "content_type", "") or "application/octet-stream",
-        agent,
-    )
+    size = getattr(django_file, "size", 0) or 0
+    if size > META_FILE_BYTES:
+        raise SendBlocked(
+            "Official WhatsApp will not accept a file larger than 100 MB. "
+            "Compress the video, or send it from a Linked phone."
+        )
+    mime = getattr(django_file, "content_type", "") or "application/octet-stream"
+    name = django_file.name or "upload"
+    # Meta rejects a video/* upload over 16 MB at the media endpoint. The same
+    # bytes go through as a document, which is how a 90 MB clip is sendable.
+    if mime.startswith("video/") and size > META_VIDEO_BYTES:
+        mime = "application/octet-stream"
+        if "." not in name:
+            name = f"{name}.mp4"
+    return _upload_bytes(number, django_file.read(), name, mime, agent)

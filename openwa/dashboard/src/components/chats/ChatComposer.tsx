@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Paperclip, Send, Smile, X } from 'lucide-react';
+import { Loader2, Mic, Paperclip, Send, Smile, X } from 'lucide-react';
 import { messageApi, type Chat, type MessageType } from '../../services/api';
 import { mergeOrAppend, type ChatMessageView } from '../../utils/chatMessages';
 import { promoteChatWithSnippet } from '../../utils/chatList';
@@ -85,6 +85,15 @@ function ChatComposer({
 
   // References
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recStreamRef = useRef<MediaStream | null>(null);
+  const recChunksRef = useRef<Blob[]>([]);
+  const recTimerRef = useRef<number | null>(null);
+  const recStartedAtRef = useRef(0);
+  const recSendAfterStopRef = useRef(false);
+
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
 
   // Popular emojis
   const popularEmojis = [
@@ -112,6 +121,13 @@ function ChatComposer({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const maxBytes = 1024 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      showErrorToast('This file is larger than 1 GB. Compress it and try again.');
+      e.target.value = '';
+      return;
+    }
 
     if (file.type.startsWith('image/')) {
       setPreviewUrl(URL.createObjectURL(file));
@@ -141,6 +157,183 @@ function ChatComposer({
   const triggerFileSelect = () => {
     fileInputRef.current?.click();
   };
+
+  const stopRecTracks = () => {
+    recStreamRef.current?.getTracks().forEach(track => track.stop());
+    recStreamRef.current = null;
+    if (recTimerRef.current != null) {
+      window.clearInterval(recTimerRef.current);
+      recTimerRef.current = null;
+    }
+  };
+
+  const clock = (total: number) => {
+    const s = Math.max(0, Math.floor(total));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  const blobToBase64 = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+
+  const finishRecording = async (blob: Blob, mimeType: string) => {
+    if (blob.size < 800) {
+      showErrorToast(t('chats.voiceTooShort'));
+      return;
+    }
+    if (!selectedSessionId || !activeChat || sending) return;
+
+    setSending(true);
+    const tempId = `temp_${Date.now()}`;
+    const filename = mimeType.includes('ogg') ? 'voice-note.ogg' : 'voice-note.webm';
+    let base64 = await blobToBase64(blob);
+    let mimetype = mimeType || 'audio/webm';
+
+    try {
+      const converted = await messageApi.convertVoice(selectedSessionId, base64);
+      if (converted?.base64) {
+        base64 = converted.base64;
+        mimetype = converted.mimetype || 'audio/ogg; codecs=opus';
+      }
+    } catch {
+      // Conversion is optional. sendAudioAsVoice can still take the browser blob.
+    }
+
+    const tempMessage: ChatMessageView = {
+      id: tempId,
+      chatId: activeChat.id,
+      from: 'me',
+      to: activeChat.id,
+      body: '',
+      type: 'voice',
+      direction: 'outgoing',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      metadata: {
+        media: { mimetype, filename, data: base64 },
+      },
+    };
+
+    appendMessage(selectedSessionId, activeChat.id, tempMessage);
+    onMessageAppended('outgoing');
+
+    try {
+      const result = await messageApi.sendMedia(selectedSessionId, activeChat.id, 'audio', {
+        base64,
+        mimetype,
+        filename,
+        ptt: true,
+      });
+      const sendKey = messagesQueryKey(selectedSessionId, activeChat.id);
+      queryClient.setQueryData<ChatMessageView[]>(sendKey, (prev = []) => {
+        const reconciled: ChatMessageView = {
+          ...tempMessage,
+          id: result.messageId,
+          waMessageId: result.messageId,
+          status: 'sent',
+        };
+        const echoAlreadyAdded = prev.some(m => m.id === result.messageId || m.waMessageId === result.messageId);
+        if (echoAlreadyAdded) {
+          return mergeOrAppend(
+            prev.filter(m => m.id !== tempId),
+            reconciled,
+          );
+        }
+        return prev.map(m => (m.id === tempId ? reconciled : m));
+      });
+      setChats(prevChats => promoteChatWithSnippet(prevChats, activeChat.id, '[voice]', Math.floor(Date.now() / 1000)));
+    } catch (err) {
+      showErrorToast(t('chats.errors.send'), err instanceof Error ? err.message : undefined);
+      updateMessage(selectedSessionId, activeChat.id, tempId, { status: 'failed' });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const cancelRecording = () => {
+    recSendAfterStopRef.current = false;
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    recChunksRef.current = [];
+    if (rec && rec.state !== 'inactive') rec.stop();
+    stopRecTracks();
+    setRecording(false);
+    setRecSeconds(0);
+  };
+
+  const commitRecording = () => {
+    recSendAfterStopRef.current = true;
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    if (rec && rec.state !== 'inactive') rec.stop();
+    else stopRecTracks();
+    setRecording(false);
+  };
+
+  const startRecording = async () => {
+    if (recording || sending || !canWrite) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showErrorToast(t('chats.voiceMicUnavailable'));
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      showErrorToast(
+        err instanceof DOMException && err.name === 'NotAllowedError'
+          ? t('chats.voiceMicDenied')
+          : t('chats.voiceMicUnavailable'),
+      );
+      return;
+    }
+
+    const types = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm'];
+    const mimeType = types.find(type => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) || '';
+    recChunksRef.current = [];
+    recSendAfterStopRef.current = false;
+    recStartedAtRef.current = Date.now();
+    recStreamRef.current = stream;
+
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    recorderRef.current = recorder;
+    recorder.ondataavailable = event => {
+      if (event.data.size) recChunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(recChunksRef.current, { type: recorder.mimeType || mimeType || 'audio/webm' });
+      const shouldSend = recSendAfterStopRef.current;
+      recChunksRef.current = [];
+      stopRecTracks();
+      setRecording(false);
+      setRecSeconds(0);
+      if (shouldSend) void finishRecording(blob, blob.type);
+    };
+    recorder.start();
+    setRecording(true);
+    setRecSeconds(0);
+    recTimerRef.current = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - recStartedAtRef.current) / 1000);
+      setRecSeconds(elapsed);
+      if (elapsed >= 120) commitRecording();
+    }, 250);
+  };
+
+  useEffect(() => {
+    return () => {
+      recSendAfterStopRef.current = false;
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        recorderRef.current.stop();
+      }
+      stopRecTracks();
+    };
+    // Fresh cleanup when the open chat changes so a note is not sent to the next thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChat.id]);
 
   const handleEmojiClick = (emoji: string) => {
     setMessageInput(prev => prev + emoji);
@@ -321,6 +514,28 @@ function ChatComposer({
         <form onSubmit={handleSend} className="input-form">
           <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
 
+          {recording ? (
+            <div className="voice-rec" role="status">
+              <span className="voice-rec__dot" aria-hidden="true" />
+              <span className="voice-rec__label">
+                {t('chats.voiceRecording')} {clock(recSeconds)}
+              </span>
+              <button type="button" className="voice-rec__cancel" onClick={cancelRecording} disabled={sending}>
+                {t('chats.voiceCancel')}
+              </button>
+              <button
+                type="button"
+                className="btn-send-message"
+                onClick={commitRecording}
+                disabled={sending}
+                aria-label={t('chats.voiceSend')}
+                title={t('chats.voiceSend')}
+              >
+                {sending ? <Loader2 className="animate-spin" size={24} /> : <Send size={28} strokeWidth={2.5} />}
+              </button>
+            </div>
+          ) : (
+            <>
           <button
             type="button"
             onClick={triggerFileSelect}
@@ -355,14 +570,29 @@ function ChatComposer({
             disabled={!canWrite || sending}
             className="message-text-input"
           />
-          <button
-            type="submit"
-            disabled={!canWrite || (!messageInput.trim() && !attachment) || sending}
-            className="btn-send-message"
-            aria-label={t('chats.send')}
-          >
-            {sending ? <Loader2 className="animate-spin" size={24} /> : <Send size={28} strokeWidth={2.5} />}
-          </button>
+          {messageInput.trim() || attachment ? (
+            <button
+              type="submit"
+              disabled={!canWrite || sending}
+              className="btn-send-message"
+              aria-label={t('chats.send')}
+            >
+              {sending ? <Loader2 className="animate-spin" size={24} /> : <Send size={28} strokeWidth={2.5} />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={!canWrite || sending}
+              className="btn-send-message"
+              aria-label={t('chats.voiceTitle')}
+              title={t('chats.voiceTitle')}
+            >
+              {sending ? <Loader2 className="animate-spin" size={24} /> : <Mic size={26} strokeWidth={2.25} />}
+            </button>
+          )}
+            </>
+          )}
         </form>
       </footer>
     </>

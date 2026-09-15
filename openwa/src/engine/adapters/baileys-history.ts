@@ -76,7 +76,7 @@ export class BaileysHistory {
       this.host.upsertContacts(nameUpdates);
     }
     if (mapped.length) {
-      this.host.getOnHistoryMessages()?.(mapped);
+      await this.host.getOnHistoryMessages()?.(mapped);
     }
   }
 

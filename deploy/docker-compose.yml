@@ -63,11 +63,14 @@ services:
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      ALOTS_UI_COOKIE_FILE: /run/alots.ui.cookie
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     volumes:
       - ../media:/app/media
+      - ./alots.ui.cookie:/run/alots.ui.cookie:ro
     command: ["celery", "-A", "a7wa", "worker", "-l", "info", "--concurrency", "4"]
 
   beat:

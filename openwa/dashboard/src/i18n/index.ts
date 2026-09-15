@@ -1,6 +1,5 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
 import en from './locales/en.json';
 import de from './locales/de.json';
 import es from './locales/es.json';
@@ -13,6 +12,9 @@ import fr from './locales/fr.json';
 import it from './locales/it.json';
 import ptBR from './locales/pt-BR.json';
 import ko from './locales/ko.json';
+
+// A7: English only in the product UI. Locale files stay so an upstream merge
+// does not fight missing imports; they are never selected.
 
 export const supportedLanguages = [
   'en',
@@ -63,36 +65,35 @@ export function resolveSupportedLanguage(lang?: string): SupportedLanguage {
   return supportedLanguages.find(supported => supported === base) ?? 'en';
 }
 
-void i18n
-  .use(LanguageDetector)
-  .use(initReactI18next)
-  .init({
-    resources: {
-      en: { translation: en },
-      de: { translation: de },
-      es: { translation: es },
-      he: { translation: he },
-      'zh-CN': { translation: zhCN },
-      'zh-HK': { translation: zhHK },
-      ar: { translation: ar },
-      te: { translation: te },
-      fr: { translation: fr },
-      it: { translation: it },
-      'pt-BR': { translation: ptBR },
-      ko: { translation: ko },
-    },
-    fallbackLng: 'en',
-    supportedLngs: supportedLanguages as unknown as string[],
-    nonExplicitSupportedLngs: false,
-    interpolation: { escapeValue: false },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      lookupLocalStorage: 'openwa_language',
-      caches: ['localStorage'],
-      convertDetectedLanguage: (lang: string) => resolveSupportedLanguage(lang),
-    },
-    react: { useSuspense: false },
-  });
+try {
+  localStorage.removeItem('openwa_language');
+  localStorage.removeItem('i18nextLng');
+} catch {
+  /* private mode */
+}
+
+void i18n.use(initReactI18next).init({
+  resources: {
+    en: { translation: en },
+    de: { translation: de },
+    es: { translation: es },
+    he: { translation: he },
+    'zh-CN': { translation: zhCN },
+    'zh-HK': { translation: zhHK },
+    ar: { translation: ar },
+    te: { translation: te },
+    fr: { translation: fr },
+    it: { translation: it },
+    'pt-BR': { translation: ptBR },
+    ko: { translation: ko },
+  },
+  lng: 'en',
+  fallbackLng: 'en',
+  supportedLngs: ['en'],
+  nonExplicitSupportedLngs: false,
+  interpolation: { escapeValue: false },
+  react: { useSuspense: false },
+});
 
 function applyDirection(lang: string) {
   const resolved = resolveSupportedLanguage(lang);

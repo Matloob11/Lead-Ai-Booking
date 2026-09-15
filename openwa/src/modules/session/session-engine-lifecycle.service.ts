@@ -31,6 +31,8 @@ import { SessionStatusBroadcaster } from './session-status-broadcaster';
 import { SessionEngineLeafEvents } from './session-engine-leaf-events';
 import { SessionEngineEventWiring, SessionEngineWiringHost } from './session-engine-event-wiring';
 import { SessionEngineControls } from './session-engine-controls';
+import { SessionEngineIdentityGate } from './session-engine-identity-gate';
+import { clearManualStartRequirement } from './session-profile-reset';
 
 /**
  * Eager status-history reads are opt-in. On affected freshly paired whatsapp-web.js accounts,
@@ -257,6 +259,8 @@ export class SessionEngineLifecycle {
     // running gateway always has it.
     @Optional()
     private readonly auditService?: AuditService,
+    @Optional()
+    private readonly identityGate?: SessionEngineIdentityGate,
   ) {
     // The fence Maps are handed over BY REFERENCE: they stay lifecycle fields (specs poke them
     // through the lifecycle), while the fence logic operates on the same instances.
@@ -352,7 +356,7 @@ export class SessionEngineLifecycle {
   }
 
   // --- Control-verb delegates (SessionEngineControls) ------------------------------------------
-  // The 7 public control verbs forward onto the extracted unit, so SessionService's public API
+  // Public control verbs forward onto extracted unit, so SessionService's public API
   // path (and every spec calling the verbs on the lifecycle) stays byte-identical. The method
   // contracts (docblocks — including logout's 502 contract and delete's transaction-flow comments)
   // moved to session-engine-controls.ts with the bodies. These forwarders are deliberately
@@ -369,6 +373,11 @@ export class SessionEngineLifecycle {
     return this.controls.stop(id);
   }
 
+  /** Delegate: SessionEngineControls.resetProfile. */
+  resetProfile(id: string): Promise<Session> {
+    return this.controls.resetProfile(id);
+  }
+
   /** Delegate: SessionEngineControls.logout. */
   logout(id: string): Promise<Session> {
     return this.controls.logout(id);
@@ -380,8 +389,8 @@ export class SessionEngineLifecycle {
   }
 
   /** Delegate: SessionEngineControls.delete. */
-  delete(id: string): Promise<void> {
-    return this.controls.delete(id);
+  delete(id: string, confirmedMessageCount: number): Promise<void> {
+    return this.controls.delete(id, confirmedMessageCount);
   }
 
   /** Delegate: SessionEngineControls.shutdown. */
@@ -500,7 +509,8 @@ export class SessionEngineLifecycle {
       proxyUrl: session.proxyUrl || undefined,
       proxyType: session.proxyType || undefined,
     });
-    this.engines.set(id, engine);
+    const generationToken = this.identityGate ? this.engines.beginGeneration(id, engine) : undefined;
+    if (!generationToken) this.engines.set(id, engine);
     // Presence subscriptions live on the socket, so a fresh engine has none — whatever the previous
     // connection last reported is now unverifiable and would be served as if it were current.
     this.presence.clear(id);
@@ -522,7 +532,14 @@ export class SessionEngineLifecycle {
     // await, ownership is re-validated by object identity + the synchronous stop mark before the
     // adapter is allowed to initialize — a retired engine must never reach initialize() (which would
     // re-arm a torn-down adapter and open an untracked socket).
-    const initialStatusPromise = this.updateStatus(id, SessionStatus.INITIALIZING);
+    const initialStatusPromise = generationToken
+      ? this.sessionRepository
+          .update(id, { status: SessionStatus.INITIALIZING, historySyncToken: generationToken })
+          .then(result => {
+            if (result.affected !== 1) throw new Error('Failed to claim durable engine generation');
+            this.broadcaster.publishPersistedStatus(id, SessionStatus.INITIALIZING);
+          })
+      : this.updateStatus(id, SessionStatus.INITIALIZING);
     this.pendingInitialStatuses.set(id, { engine, promise: initialStatusPromise });
     try {
       await initialStatusPromise;
@@ -556,7 +573,13 @@ export class SessionEngineLifecycle {
     // order, and the synchronous one-shot stuck-auth claim are preserved there, reaching the
     // lifecycle's live methods/state through the wiringHost built in the constructor.
     // `session.name` is handed over as the immutable snapshot onCredentialTeardownStarted keys on.
-    const initPromise = engine.initialize(this.eventWiring.buildCallbacks(id, engine, session.name, this.wiringHost));
+    const acceptedCallbacks = this.eventWiring.buildCallbacks(id, engine, session.name, this.wiringHost);
+    const callbacks = generationToken
+      ? this.identityGate!.wrap(id, generationToken, engine, acceptedCallbacks, reason =>
+          this.rejectIdentityGeneration(id, session, engine, generationToken, reason),
+        )
+      : acceptedCallbacks;
+    const initPromise = engine.initialize(callbacks);
 
     // engine.initialize() launches Chromium and navigates to WhatsApp Web with no internal timeout:
     // whatsapp-web.js calls page.goto(..., { timeout: 0 }) and its web-version-cache fetch has none
@@ -629,13 +652,65 @@ export class SessionEngineLifecycle {
     }
   }
 
+  /** Terminal identity rejection. No reconnect; only this engine generation is unlinked and purged. */
+  private async rejectIdentityGeneration(
+    id: string,
+    session: Session,
+    engine: IWhatsAppEngine,
+    generationToken: string,
+    reason: string,
+  ): Promise<void> {
+    this.stoppingSessions.add(id);
+    this.cancelReconnect(id);
+    this.sessionErrors.set(id, this.identityOperatorReason(reason));
+
+    const rejected = await this.sessionRepository.update(
+      { id, historySyncToken: generationToken },
+      {
+        status: SessionStatus.ACTION_REQUIRED,
+        historySyncToken: null,
+        historySyncError: reason,
+        ...(!session.phone ? { phone: null, historyFirstLinkedAt: session.historyFirstLinkedAt ?? null } : {}),
+      },
+    );
+
+    const unlinked = await this.fences.teardownEngineSafely(id, engine, e => e.logout(), 'logout', session.name);
+    if (!unlinked) {
+      await this.fences.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
+      if (engine.purgeLocalCredentials) {
+        await engine.purgeLocalCredentials().catch(() =>
+          this.logger.error('Failed to purge rejected generation credentials', 'CREDENTIAL_PURGE_FAILED', {
+            sessionId: id,
+            action: 'identity_generation_purge_failed',
+          }),
+        );
+      }
+    }
+    this.engines.deleteIfLive(id, engine);
+    if (rejected.affected === 1) this.broadcaster.publishPersistedStatus(id, SessionStatus.ACTION_REQUIRED);
+  }
+
+  private identityOperatorReason(reason: string): string {
+    if (reason === 'IDENTITY_DIFFERENT_PHONE') {
+      return 'This session is permanently bound to another WhatsApp number. Create a new session for this number.';
+    }
+    if (reason === 'IDENTITY_LEGACY_AMBIGUOUS' || reason === 'IDENTITY_LEGACY_CONFLICT') {
+      return 'Stored history cannot be safely matched to one WhatsApp number. Operator review is required.';
+    }
+    if (reason.startsWith('IDENTITY_BUFFER_')) {
+      return 'Identity validation exceeded its safety buffer. Start the session manually and try again.';
+    }
+    return 'WhatsApp did not provide a valid phone identity. Start the session manually and try again.';
+  }
+
   /** Engine callback body, lifted out of initializeEngine so the wiring table stays readable. */
-  private handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): void {
+  private async handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): Promise<void> {
     if (!this.isLiveEngine(id, engine)) return;
-    this.logger.log(`Session ready: ${phone}`, {
+    await this.persistReadyState(id, engine, phone, pushName);
+    if (!this.isLiveEngine(id, engine)) return;
+    this.broadcaster.publishPersistedStatus(id, SessionStatus.READY);
+    this.logger.log('Session identity accepted and ready', {
       sessionId: id,
-      phone,
-      pushName,
       action: 'ready',
     });
 
@@ -674,13 +749,6 @@ export class SessionEngineLifecycle {
     // one-shot recovery budget is re-armed for a future episode.
     this.stuckAuthRecoveryUsed.delete(id);
 
-    const readyPersisted = this.persistReadyState(id, phone, pushName).catch(err =>
-      this.logger.warn('Failed to persist session ready state', {
-        sessionId: id,
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
-
     // Best-effort snapshot of the account's own contacts' currently-active statuses. Live status
     // posts arrive through onMessage below; this just backfills what was already up before we
     // connected. Not awaited — onReady must not block on it.
@@ -693,49 +761,90 @@ export class SessionEngineLifecycle {
       });
     }
 
+    // Soft-removed sessions that previously held this phone leave their messages under their old
+    // UUID. Pull those rows onto the live session before history import so catch-up and UI see one
+    // thread. Best-effort: a failed reattach must not block READY.
+    void this.reattachSoftRemovedMessagesByPhone(id, phone).catch(err =>
+      this.logger.warn('Failed to reattach soft-removed messages by phone', {
+        sessionId: id,
+        action: 'reattach_by_phone_failed',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+
     // Not awaited: an import takes minutes and this runs on the callback that also delivers live
     // messages. Anything that waited here would hold the socket open behind it.
     //
-    // It does wait for the ready write, though, and only for that — because that write is what may
-    // have cleared the watermark for a changed number, and the importer's first act is to read it.
-    // Started without it, the two race and a new handset can be handed the old one's watermark.
-    void readyPersisted.then(() => this.importHistory(id, engine));
+    // Identity admission awaited the token-scoped READY write above. History therefore cannot start
+    // on a stale generation or before its immutable phone binding is durable.
+    void this.importHistory(id, engine);
   }
 
-  /**
-   * Record a session reaching READY — and notice when the number on the other end has changed.
-   *
-   * A handset unlinked from the phone itself (WhatsApp → Linked devices → Log out) never runs our
-   * own `logout()`, so nothing clears the row: the session keeps the old number and the old history
-   * watermark, and the next QR can be scanned by anybody. Without this, that new number is treated
-   * as a reconnection of the old one and told to read "from the watermark to now" — a date that
-   * belongs to a phone it has never met — instead of its own first ten days.
-   *
-   * Only a *change* clears it. A session reconnecting as the same number keeps its watermark, which
-   * is the whole point of having one: a phone away for a fortnight brings back the fortnight.
-   */
-  private async persistReadyState(id: string, phone: string, pushName: string): Promise<void> {
-    const previous = await this.sessionRepository.findOne({ where: { id }, select: { id: true, phone: true } });
-    // Compared on digits: the two sides are written by different code paths and one of them may
-    // carry a `+` or spacing, and a formatting difference must not read as a different handset.
-    const digits = (value: string | null | undefined): string => (value ?? '').replace(/\D/g, '');
-    const numberChanged = Boolean(previous?.phone) && digits(previous?.phone) !== digits(phone);
+  /** Move messages from soft-removed sessions sharing this phone onto the live session id. */
+  private async reattachSoftRemovedMessagesByPhone(sessionId: string, phone: string): Promise<void> {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (!digits) return;
+    const donors = await this.sessionRepository
+      .createQueryBuilder('s')
+      .where('s.phone = :digits', { digits })
+      .andWhere('s.removedAt IS NOT NULL')
+      .andWhere('s.id != :sessionId', { sessionId })
+      .getMany();
+    if (donors.length === 0) return;
 
-    if (numberChanged) {
-      this.logger.log('A different number linked into this session — its history starts fresh', {
-        sessionId: id,
-        action: 'history_watermark_reset',
+    let moved = 0;
+    await this.dataSource.transaction(async manager => {
+      for (const donor of donors) {
+        const result = await manager
+          .createQueryBuilder()
+          .update('messages')
+          .set({ sessionId })
+          .where('sessionId = :donorId', { donorId: donor.id })
+          .execute();
+        moved += result.affected ?? 0;
+        await manager.update(Session, donor.id, { phone: null });
+      }
+    });
+    if (moved > 0) {
+      this.logger.log(`Reattached ${moved} message(s) from soft-removed session(s)`, {
+        sessionId,
+        action: 'reattach_by_phone',
+        moved,
+        donors: donors.length,
       });
     }
+  }
 
-    await this.sessionRepository.update(id, {
-      status: SessionStatus.READY,
-      phone,
-      pushName,
-      connectedAt: new Date(),
-      lastActiveAt: new Date(),
-      ...(numberChanged ? { historyImportedAt: null } : {}),
-    });
+  /** Record READY only through the accepted generation's durable token + immutable phone CAS. */
+  private async persistReadyState(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): Promise<void> {
+    const current = await this.sessionRepository.findOne({ where: { id } });
+    if (!current) throw new Error('Accepted engine generation has no session row');
+    const config = clearManualStartRequirement(current.config);
+    const generationToken = this.engines.tokenFor(id, engine);
+    if (!generationToken) {
+      await this.sessionRepository.update(id, {
+        status: SessionStatus.READY,
+        config: config as never,
+        pushName,
+        connectedAt: new Date(),
+        lastActiveAt: new Date(),
+        removedAt: null,
+      });
+      return;
+    }
+
+    const result = await this.sessionRepository.update(
+      { id, phone, historySyncToken: generationToken },
+      {
+        status: SessionStatus.READY,
+        config: config as never,
+        pushName,
+        connectedAt: new Date(),
+        lastActiveAt: new Date(),
+        removedAt: null,
+      },
+    );
+    if (result.affected !== 1) throw new Error('Accepted engine generation lost durable ownership');
   }
 
   /**
@@ -771,7 +880,7 @@ export class SessionEngineLifecycle {
 
       const firstLink = !session.historyImportedAt;
       const since = firstLink
-        ? new Date(Date.now() - FIRST_LINK_HISTORY_DAYS * DAY_MS)
+        ? new Date((session.historyFirstLinkedAt ?? session.createdAt).getTime() - FIRST_LINK_HISTORY_DAYS * DAY_MS)
         : // An overlap, in case the handset and this server disagree about the clock. Cheap: a
           // message read twice is written once.
           new Date(session.historyImportedAt!.getTime() - RECONNECT_OVERLAP_MS);
@@ -989,7 +1098,7 @@ export class SessionEngineLifecycle {
       // path (the same rationale: leaving the engine in the map wedges the session). The engine may
       // already be gone in the executeReconnect-catch path (it evicts the half-built engine before
       // scheduling a reconnect), so guard on its presence — evictAndForceDestroy takes a non-null engine.
-      const deadEngine = this.engines.get(id);
+      const deadEngine = this.engines.getLifecycle(id);
       if (deadEngine) {
         this.evictAndForceDestroy(id, deadEngine);
       }
@@ -1088,7 +1197,7 @@ export class SessionEngineLifecycle {
       // trigger) makes destroy() hang, and a raw await here would stall the reconnect forever —
       // the session would never re-init nor reach FAILED. teardownEngineSafely always resolves
       // (after 10s on a hang), so reconnection proceeds either way.
-      const oldEngine = this.engines.get(id);
+      const oldEngine = this.engines.getLifecycle(id);
       if (oldEngine) {
         await this.teardownEngineSafely(id, oldEngine, e => e.destroy(), 'destroy');
         this.engines.deleteIfLive(id, oldEngine);
@@ -1119,7 +1228,7 @@ export class SessionEngineLifecycle {
         retired = false;
       }
       if (retired) {
-        const resurrected = this.engines.get(id);
+        const resurrected = this.engines.getLifecycle(id);
         if (resurrected) {
           await this.teardownEngineSafely(id, resurrected, e => e.destroy(), 'destroy');
           this.engines.deleteIfLive(id, resurrected);
@@ -1139,7 +1248,7 @@ export class SessionEngineLifecycle {
       // re-init leaves a half-built engine behind. Evict + reap it: otherwise a reconnect that later
       // exhausts its attempts strands an orphaned Chromium holding a concurrency slot, and the next
       // start() sees the session as "already started".
-      const halfBuilt = this.engines.get(id);
+      const halfBuilt = this.engines.getLifecycle(id);
       if (halfBuilt) {
         this.evictAndForceDestroy(id, halfBuilt);
       }

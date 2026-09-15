@@ -109,6 +109,8 @@ def _is_a_person(entity_type, entity_id):
 # an exact numeric one: the stored value has no `+`, no spaces and no country
 # code unless whoever typed it included one.
 OWNER_DATA_TYPE_ID = 1042
+OWNER_DATA_CATEGORY_AVAILABILITY = 14
+OWNER_DATA_STAGE_NEW_AVAILABILITY = "DT1042_14:NEW"
 OWNER_DATA_PHONE_FIELDS = ("ufCrm5_1768317611513", "ufCrm5_1769416533028")
 
 
@@ -215,3 +217,75 @@ def add_comment(entity_type, entity_id, text):
 def update_fields(entity_type, entity_id, fields):
     """Writes custom fields on a lead or contact."""
     return call(f"crm.{entity_type}.update", {"id": int(entity_id), "fields": fields})
+
+
+# Creating the record a number does not have yet
+# ---------------------------------------------------------------------------
+
+
+def create_lead(wa_id, name=""):
+    """A new lead carrying this number. Returns the same shape as find_records.
+
+    The phone goes on as WORK rather than MOBILE: Bitrix's duplicate search
+    matches on the value and not the type, so the label only decides what a
+    person reads on the card — and WORK is the truthful one for a number a
+    business was contacted on.
+    """
+    digits = "".join(ch for ch in str(wa_id) if ch.isdigit())
+    if not digits:
+        raise BitrixError("No number to create a lead from")
+
+    title = name.strip() if name and name.strip() else f"WhatsApp +{digits}"
+    fields = {
+        "TITLE": title,
+        # "OTHER" rather than inventing a WhatsApp source: a SOURCE_ID Bitrix
+        # does not know is rejected outright, and adding one to the portal is a
+        # decision for whoever runs the CRM, not for this code.
+        "SOURCE_ID": "OTHER",
+        "PHONE": [{"VALUE": f"+{digits}", "VALUE_TYPE": "WORK"}],
+    }
+    if name and name.strip():
+        fields["NAME"] = name.strip()[:100]
+
+    lead_id = call("crm.lead.add", {"fields": fields})
+    if not lead_id:
+        raise BitrixError("Bitrix created no lead and gave no reason")
+    return {"type": "lead", "id": int(lead_id), "kind": "lead"}
+
+
+def create_owner_data(wa_id, name="", *, stage_id=None, category_id=None):
+    """A new Owner Data item carrying this number.
+
+    The phone fields on that smart process are numeric, which is why the search
+    side casts to int — so the same has to be done writing, or the value lands
+    as text and no later search will ever match it.
+
+    Campaign sends land on New Availability (category 14) so agents see them on
+    the kanban the business already works from.
+    """
+    digits = "".join(ch for ch in str(wa_id) if ch.isdigit())
+    if not digits:
+        raise BitrixError("No number to create an Owner Data record from")
+
+    fields = {
+        "title": name.strip() if name and name.strip() else f"WhatsApp +{digits}",
+        # Only the first field is written. The second exists so a person can
+        # record an alternative number by hand; filling both from one WhatsApp
+        # id would put the same number on the record twice.
+        OWNER_DATA_PHONE_FIELDS[0]: int(digits),
+    }
+    if category_id is not None:
+        fields["categoryId"] = int(category_id)
+    if stage_id:
+        fields["stageId"] = stage_id
+
+    result = call("crm.item.add", {"entityTypeId": OWNER_DATA_TYPE_ID, "fields": fields})
+    item = (result or {}).get("item") or {}
+    item_id = item.get("id")
+    if not item_id:
+        raise BitrixError("Bitrix created no Owner Data record and gave no reason")
+    return {
+        "type": f"DYNAMIC_{OWNER_DATA_TYPE_ID}",
+        "id": int(item_id),
+        "kind": "owner data",
+    }

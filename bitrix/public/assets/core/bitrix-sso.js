@@ -28,9 +28,32 @@ export class SsoError extends Error {
 
 let sdkPromise = null;
 
+function asSsoError(error) {
+  if (error instanceof SsoError) return error;
+  return new SsoError(
+    error?.code || "sdk_timeout",
+    error?.message || "The Bitrix JS SDK did not load.",
+    error?.detail ?? error
+  );
+}
+
 /** Loads //api.bitrix24.com/api/v1/ and resolves once BX24.init() has fired. */
 export function loadBX24() {
   if (sdkPromise) return sdkPromise;
+
+  // Placement pages start BX24.init from bx24-early.js so Bitrix can drop the
+  // "Loading WhatsApp" overlay before inbox.js has even downloaded. Calling
+  // init a second time is how that overlay comes back and stays: some portal
+  // builds never fire the later callback.
+  if (window.__a7Bx24Ready) {
+    sdkPromise = Promise.resolve(window.__a7Bx24Ready).then((bx) => {
+      if (!bx) throw new SsoError("sdk_missing", "The BX24 object is still missing after the SDK loaded.");
+      return bx;
+    }, (error) => {
+      throw asSsoError(error);
+    });
+    return sdkPromise;
+  }
 
   sdkPromise = new Promise((resolve, reject) => {
     if (window.top === window.self) {
@@ -111,9 +134,25 @@ export async function getBitrixAuth({ allowRefresh = true } = {}) {
   };
 }
 
+function withTimeout(promise, ms, code, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new SsoError(code, message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 /** Forces the portal to mint a fresh access token (they expire in ~1 hour). */
 export function refreshBitrixAuth() {
-  return new Promise((resolve, reject) => {
+  const pending = new Promise((resolve, reject) => {
     if (!window.BX24 || typeof window.BX24.refreshAuth !== "function") {
       reject(new SsoError("no_refresh", "BX24.refreshAuth is not available."));
       return;
@@ -123,11 +162,17 @@ export function refreshBitrixAuth() {
       else reject(new SsoError("refresh_failed", "The Bitrix token could not be refreshed."));
     });
   });
+  return withTimeout(
+    pending,
+    8000,
+    "refresh_timeout",
+    "Bitrix did not refresh the placement token. Close the slider and open WhatsApp from the left menu again."
+  );
 }
 
 /** Promisified BX24.callMethod. */
 export function callBitrix(method, params = {}) {
-  return new Promise((resolve, reject) => {
+  const pending = new Promise((resolve, reject) => {
     window.BX24.callMethod(method, params, (result) => {
       const error = result.error();
       if (!error) {
@@ -140,6 +185,7 @@ export function callBitrix(method, params = {}) {
       reject(new SsoError(raw.error || "rest_error", raw.error_description || String(error), { method, params }));
     });
   });
+  return withTimeout(pending, 15000, "rest_timeout", `Bitrix ${method} did not answer.`);
 }
 
 /**

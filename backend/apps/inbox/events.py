@@ -69,6 +69,10 @@ def publish(conversation, event, data):
     }
     try:
         async_to_sync(layer.group_send)(group_for_number(conversation.number_id), message)
+        # A transferred chat's owner may not be subscribed to the number group.
+        agent_id = getattr(conversation, "assigned_agent_id", None)
+        if agent_id:
+            async_to_sync(layer.group_send)(group_for_agent(agent_id), message)
     except Exception:  # noqa: BLE001 - a dead socket must not fail the write path
         logger.exception("Failed to publish %s for conversation %s", event, conversation.pk)
 
@@ -86,6 +90,10 @@ def publish_message(message):
             "conversation": serialize_conversation(conversation),
         },
     )
+    if not message.mirrored_from_id:
+        from .transfer import mirror_to_peer
+
+        mirror_to_peer(message)
 
 
 def publish_status(message):

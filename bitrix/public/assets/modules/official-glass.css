@@ -1,0 +1,726 @@
+/* Official screens — same liquid-glass language as the inbox home.
+   Loaded last so light-first kits and the extras #0e1a2b modal lose.
+
+   Bitrix LEFT_MENU is an iframe. `vh` / `vw` measure the outer portal, not
+   this frame — that is how the composer and wide wizards used to hang off
+   the visible box. Heights and widths here are % of the pinned frame. */
+
+/* ------------------------------------------------------------------ iframe */
+
+/* Title row is ~52px. A % of that clipped the hamburger to nothing.
+   The sheet must stay a compact overlay — a see-through 420px panel
+   painted the chats underneath and looked like the menu had dumped
+   into the list. */
+.sidebar__chrome {
+  z-index: 24 !important;
+}
+
+.sidebar__menu {
+  position: absolute !important;
+  top: calc(100% + 4px) !important;
+  right: 10px !important;
+  left: auto !important;
+  z-index: 80 !important;
+  width: min(280px, calc(100% - 16px)) !important;
+  min-width: 220px !important;
+  max-width: min(280px, calc(100% - 16px)) !important;
+  max-height: 360px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+.sidebar__menu[hidden] {
+  display: none !important;
+}
+
+.modal {
+  padding: 10px !important;
+  overflow: hidden !important;
+}
+
+.modal__box {
+  max-height: calc(100% - 20px) !important;
+  max-width: min(100%, 460px) !important;
+}
+
+.modal__box--wide,
+.modal__box.tmc-modal,
+.modal__box.iai-modal,
+.modal__box.rfb-modal {
+  width: min(100%, 760px) !important;
+  max-width: min(100%, 760px) !important;
+}
+
+.modal__box--campaign {
+  width: min(100%, 900px) !important;
+  max-width: min(100%, 900px) !important;
+}
+
+.modal__box--wide,
+.modal__box--campaign,
+.modal__box.tmc-modal,
+.modal__box.iai-modal,
+.modal__box.rfb-modal {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.modal__box--wide > :not(.modal__head),
+.modal__box--campaign > :not(.modal__head),
+.modal__box.tmc-modal > :not(.modal__head),
+.modal__box.iai-modal > :not(.modal__head),
+.modal__box.rfb-modal > :not(.modal__head) {
+  min-height: 0;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+
+.camp-shell,
+.rep-modal,
+.modal__body.iai,
+.modal__body.rfb,
+.tmc-modal .modal__body,
+.akit-agents__list,
+.iai-health {
+  max-height: none !important;
+  min-height: 0 !important;
+}
+
+.camp-shell {
+  overflow: auto;
+}
+
+.cp {
+  width: min(380px, 100%) !important;
+}
+
+/* ------------------------------------------------------------------ glass-dark = home */
+
+[data-wa-theme="glass-dark"] .modal {
+  background: rgba(4, 10, 22, 0.42) !important;
+}
+
+[data-wa-theme="glass-dark"] .modal__box,
+[data-wa-theme="glass-dark"] .modal__box--wide,
+[data-wa-theme="glass-dark"] .modal__box.tmc-modal,
+[data-wa-theme="glass-dark"] .modal__box.iai-modal,
+[data-wa-theme="glass-dark"] .modal__box.rfb-modal,
+[data-wa-theme="glass-dark"] .modal__box--campaign,
+[data-wa-theme="glass-dark"] .slash-popup {
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: blur(34px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 20px !important;
+  color: #eef3f9 !important;
+  box-shadow: 0 30px 80px rgba(3, 8, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+}
+
+[data-wa-theme="glass-dark"] .modal__head,
+[data-wa-theme="glass-dark"] .iai-modal .modal__head,
+[data-wa-theme="glass-dark"] .rfb-modal .modal__head {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .modal__title,
+[data-wa-theme="glass-dark"] .iai-modal .modal__title {
+  color: #eef3f9 !important;
+  font-weight: 650;
+}
+
+[data-wa-theme="glass-dark"] .modal__x {
+  color: rgba(238, 243, 249, 0.7) !important;
+}
+
+[data-wa-theme="glass-dark"] .field,
+[data-wa-theme="glass-dark"] input.field,
+[data-wa-theme="glass-dark"] select.field,
+[data-wa-theme="glass-dark"] textarea.field,
+[data-wa-theme="glass-dark"] .akit-agents__search,
+[data-wa-theme="glass-dark"] .tmc-search,
+[data-wa-theme="glass-dark"] .tmc-picker,
+[data-wa-theme="glass-dark"] .tplc .field,
+[data-wa-theme="glass-dark"] .tplc input.field,
+[data-wa-theme="glass-dark"] .tplc select.field,
+[data-wa-theme="glass-dark"] .tplc textarea.field {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  border-radius: 12px;
+}
+
+[data-wa-theme="glass-dark"] .field::placeholder,
+[data-wa-theme="glass-dark"] input.field::placeholder,
+[data-wa-theme="glass-dark"] textarea.field::placeholder {
+  color: rgba(159, 176, 198, 0.85) !important;
+}
+
+[data-wa-theme="glass-dark"] .field:focus,
+[data-wa-theme="glass-dark"] input.field:focus,
+[data-wa-theme="glass-dark"] select.field:focus,
+[data-wa-theme="glass-dark"] textarea.field:focus {
+  outline: none;
+  border-color: rgba(200, 163, 74, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(200, 163, 74, 0.18);
+}
+
+[data-wa-theme="glass-dark"] .alert {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #eef3f9;
+}
+
+/* hamburger — opaque so the chat list cannot show through */
+[data-wa-theme="glass-dark"] .sidebar__menu {
+  background: rgba(16, 24, 38, 0.96) !important;
+  backdrop-filter: blur(22px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(150%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: 0 18px 44px rgba(3, 8, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .menu__item:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-wa-theme="glass-dark"] .menu__section {
+  color: rgba(200, 163, 74, 0.85) !important;
+}
+
+/* ------------------------------------------------------------------ By agent */
+
+[data-wa-theme="glass-dark"] .an,
+[data-wa-theme="glass-light"] .an {
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 0 8px;
+  background: transparent !important;
+  color: inherit !important;
+  font-family: inherit !important;
+  font-size: 13px;
+}
+
+[data-wa-theme="glass-dark"] .an-title,
+[data-wa-theme="glass-dark"] .an-empty,
+[data-wa-theme="glass-dark"] .an-alert,
+[data-wa-theme="glass-dark"] .an-agent__name,
+[data-wa-theme="glass-dark"] .an-sub,
+[data-wa-theme="glass-dark"] .an-agent__count {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .an-search,
+[data-wa-theme="glass-dark"] .an-note {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  border-radius: 10px;
+  font: inherit !important;
+}
+
+[data-wa-theme="glass-dark"] .an-search:focus,
+[data-wa-theme="glass-dark"] .an-note:focus {
+  outline: none;
+  border-color: rgba(200, 163, 74, 0.7) !important;
+}
+
+[data-wa-theme="glass-dark"] .an-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #eef3f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+[data-wa-theme="glass-dark"] .an-table th,
+[data-wa-theme="glass-dark"] .an-table td {
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 9px 10px;
+  color: #eef3f9 !important;
+  background: transparent !important;
+}
+
+[data-wa-theme="glass-dark"] .an-table th {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(230, 201, 121, 0.95) !important;
+  font-weight: 650;
+}
+
+[data-wa-theme="glass-dark"] .an-table tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+[data-wa-theme="glass-dark"] .na-agent-pane,
+[data-wa-theme="glass-dark"] .na-numbers-pane,
+[data-wa-theme="glass-dark"] .an-body,
+.na-agent-pane .an-results {
+  overflow: auto;
+  min-height: 0;
+  max-height: none !important;
+  max-width: 100%;
+}
+
+[data-wa-theme="glass-dark"] .na-tab.is-on {
+  color: #241b06 !important;
+  border-color: rgba(255, 235, 180, 0.5) !important;
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+}
+
+/* ------------------------------------------------------------------ admin-kit */
+
+[data-wa-theme="glass-dark"] .akit-card,
+[data-wa-theme="glass-dark"] .akit-row,
+[data-wa-theme="glass-dark"] .akit-asset-card,
+[data-wa-theme="glass-dark"] .akit-agent,
+[data-wa-theme="glass-dark"] .akit-access {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .akit-card__title,
+[data-wa-theme="glass-dark"] .akit-body,
+[data-wa-theme="glass-dark"] .akit-check,
+[data-wa-theme="glass-dark"] .akit-agents__title,
+[data-wa-theme="glass-dark"] .akit-agent__name,
+[data-wa-theme="glass-dark"] .akit-access__label,
+[data-wa-theme="glass-dark"] .akit-asset-card__title {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .akit-shortcut {
+  color: #e6c979 !important;
+}
+
+[data-wa-theme="glass-dark"] .akit-section-title,
+[data-wa-theme="glass-dark"] .akit-agents__lead,
+[data-wa-theme="glass-dark"] .akit-agent__sub,
+[data-wa-theme="glass-dark"] .akit-access__hint,
+[data-wa-theme="glass-dark"] .akit-asset-card__meta {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .slash-popup__item {
+  color: #eef3f9 !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ------------------------------------------------------------------ reports */
+
+[data-wa-theme="glass-dark"] .rep-modal,
+[data-wa-theme="glass-dark"] .rep-card,
+[data-wa-theme="glass-dark"] .rep-chart-box,
+[data-wa-theme="glass-dark"] .rep-prob-card,
+[data-wa-theme="glass-dark"] .rep-rank,
+[data-wa-theme="glass-dark"] .rep-table-wrap {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-tab:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-tab.active {
+  color: #241b06 !important;
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+  border-color: rgba(255, 235, 180, 0.45) !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-range {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-range-btn.active {
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+  color: #241b06 !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-card__val,
+[data-wa-theme="glass-dark"] .rep-chart-title,
+[data-wa-theme="glass-dark"] .rep-prob-title,
+[data-wa-theme="glass-dark"] .rep-table,
+[data-wa-theme="glass-dark"] .rep-rank__title {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-card__lbl,
+[data-wa-theme="glass-dark"] .rep-card__sub,
+[data-wa-theme="glass-dark"] .rep-chart-legend,
+[data-wa-theme="glass-dark"] .rep-prob-meaning {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-table th {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(230, 201, 121, 0.95) !important;
+}
+
+[data-wa-theme="glass-dark"] .rep-content {
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ------------------------------------------------------------------ campaign */
+
+[data-wa-theme="glass-dark"] .camp-tabs,
+[data-wa-theme="glass-dark"] .camp-left,
+[data-wa-theme="glass-dark"] .camp-actions,
+[data-wa-theme="glass-dark"] .camp-hist.camp-pane.is-active {
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-card,
+[data-wa-theme="glass-dark"] .camp-step,
+[data-wa-theme="glass-dark"] .camp-format,
+[data-wa-theme="glass-dark"] .camp-hist__item,
+[data-wa-theme="glass-dark"] .camp-chat-list__item,
+[data-wa-theme="glass-dark"] .camp-stat,
+[data-wa-theme="glass-dark"] .camp-progress,
+[data-wa-theme="glass-dark"] .camp-recent__item,
+[data-wa-theme="glass-dark"] .camp-issue,
+[data-wa-theme="glass-dark"] .camp-resend {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-tab.is-active {
+  color: #241b06 !important;
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-card__title,
+[data-wa-theme="glass-dark"] .camp-field__label,
+[data-wa-theme="glass-dark"] .camp-hist__heading,
+[data-wa-theme="glass-dark"] .camp-hist__item strong,
+[data-wa-theme="glass-dark"] .camp-stat__n,
+[data-wa-theme="glass-dark"] .camp-right__title {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-intro__text,
+[data-wa-theme="glass-dark"] .camp-card__sub,
+[data-wa-theme="glass-dark"] .camp-field__hint,
+[data-wa-theme="glass-dark"] .camp-right__hint,
+[data-wa-theme="glass-dark"] .camp-empty {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-right {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+[data-wa-theme="glass-dark"] .camp-chip--key {
+  background: rgba(200, 163, 74, 0.9) !important;
+  color: #241b06 !important;
+}
+
+/* ------------------------------------------------------------------ templates */
+
+[data-wa-theme="glass-dark"] .tmc-card,
+[data-wa-theme="glass-dark"] .tplc-ai__card,
+[data-wa-theme="glass-dark"] .tplc-item,
+[data-wa-theme="glass-dark"] .tplc-list,
+[data-wa-theme="glass-dark"] .tplc-empty,
+[data-wa-theme="glass-dark"] .tplc-note,
+[data-wa-theme="glass-dark"] .tplc-vars,
+[data-wa-theme="glass-dark"] .tplc-deploy-list {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .tmc-lead,
+[data-wa-theme="glass-dark"] .tmc-card__meta,
+[data-wa-theme="glass-dark"] .tmc-hint,
+[data-wa-theme="glass-dark"] .tplc-note {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .tmc-card--ok::before,
+[data-wa-theme="glass-dark"] .tmc-card--warn::before,
+[data-wa-theme="glass-dark"] .tmc-card--bad::before {
+  background: rgba(200, 163, 74, 0.85);
+}
+
+[data-wa-theme="glass-dark"] .tplc-phone__screen {
+  background: rgba(8, 16, 28, 0.45) !important;
+}
+
+/* ------------------------------------------------------------------ AI + feedback */
+
+[data-wa-theme="glass-dark"] .iai-lead,
+[data-wa-theme="glass-dark"] .iai-sub,
+[data-wa-theme="glass-dark"] .iai-note,
+[data-wa-theme="glass-dark"] .rfb-lead {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .iai-switch,
+[data-wa-theme="glass-dark"] .iai-scope,
+[data-wa-theme="glass-dark"] .rfb-tab,
+[data-wa-theme="glass-dark"] .rfb-pane {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .rfb-tab--on {
+  border-color: rgba(200, 163, 74, 0.7) !important;
+  background: rgba(200, 163, 74, 0.2) !important;
+  color: #eef3f9 !important;
+}
+
+/* ------------------------------------------------------------------ contact drawer */
+
+[data-wa-theme="glass-dark"] .cp {
+  background: rgba(255, 255, 255, 0.07) !important;
+  backdrop-filter: blur(34px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  box-shadow: 0 30px 80px rgba(3, 8, 20, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-head {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-head__title,
+[data-wa-theme="glass-dark"] .cp-x {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-body {
+  background: transparent !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-hero,
+[data-wa-theme="glass-dark"] .cp-quick,
+[data-wa-theme="glass-dark"] .cp-block {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-input,
+[data-wa-theme="glass-dark"] .cp-stat,
+[data-wa-theme="glass-dark"] .cp-file,
+[data-wa-theme="glass-dark"] .cp-other,
+[data-wa-theme="glass-dark"] .cp-quick__btn,
+[data-wa-theme="glass-dark"] .cp-btn,
+[data-wa-theme="glass-dark"] .cp-num,
+[data-wa-theme="glass-dark"] .cp-tile {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-quick__btn,
+[data-wa-theme="glass-dark"] .cp-block__title,
+[data-wa-theme="glass-dark"] .cp-status--ok {
+  color: #e6c979 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-quick__btn.is-on {
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+  border-color: rgba(255, 235, 180, 0.45) !important;
+  color: #241b06 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-input:focus {
+  border-color: rgba(200, 163, 74, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(200, 163, 74, 0.18) !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-tile--image,
+[data-wa-theme="glass-dark"] .cp-tile--sticker,
+[data-wa-theme="glass-dark"] .cp-tile--video {
+  background: rgba(200, 163, 74, 0.16) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .cp-event::before {
+  background: #c8a34a !important;
+}
+
+/* ------------------------------------------------------------------ profile + access */
+
+[data-wa-theme="glass-dark"] .wa-x-profile-stat-card,
+[data-wa-theme="glass-dark"] .wa-x-feature-tag,
+[data-wa-theme="glass-dark"] .wa-x-profile-num-chip,
+[data-wa-theme="glass-dark"] .access__card,
+[data-wa-theme="glass-dark"] .req {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .wa-x-stat-val,
+[data-wa-theme="glass-dark"] .access__title {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .wa-x-stat-lbl,
+[data-wa-theme="glass-dark"] .access__lead {
+  color: #9fb0c6 !important;
+}
+
+[data-wa-theme="glass-dark"] .access__icon {
+  background: linear-gradient(180deg, rgba(230, 201, 121, 0.95), rgba(196, 161, 73, 0.9)) !important;
+  color: #241b06 !important;
+}
+
+/* ------------------------------------------------------------------ extras dropdowns — not navy slabs */
+
+[data-wa-theme="glass-dark"] .wa-x-theme-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-search-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-reminders-dropdown,
+[data-wa-theme="glass-dark"] .wa-x-preset-menu {
+  background: rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(28px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+}
+
+/* ------------------------------------------------------------------ glass-light pages */
+
+[data-wa-theme="glass-light"] .modal__box,
+[data-wa-theme="glass-light"] .modal__box.tmc-modal,
+[data-wa-theme="glass-light"] .modal__box.iai-modal,
+[data-wa-theme="glass-light"] .modal__box.rfb-modal,
+[data-wa-theme="glass-light"] .modal__box--campaign {
+  background: rgba(255, 255, 255, 0.62) !important;
+  backdrop-filter: blur(34px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  color: #16202e !important;
+}
+
+[data-wa-theme="glass-light"] .an {
+  background: transparent !important;
+  color: #16202e !important;
+  font-family: inherit !important;
+}
+
+[data-wa-theme="glass-light"] .an-table,
+[data-wa-theme="glass-light"] .an-search,
+[data-wa-theme="glass-light"] .an-note {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid rgba(24, 48, 82, 0.12) !important;
+  color: #16202e !important;
+}
+
+[data-wa-theme="glass-light"] .cp {
+  background: rgba(255, 255, 255, 0.72) !important;
+  color: #16202e !important;
+}
+
+[data-wa-theme="glass-light"] .cp-head {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(24, 48, 82, 0.1) !important;
+  color: #16202e !important;
+}
+
+[data-wa-theme="glass-light"] .cp-head__title,
+[data-wa-theme="glass-light"] .cp-x {
+  color: #16202e !important;
+}
+
+[data-wa-theme="glass-light"] .sidebar__menu {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(24, 48, 82, 0.12) !important;
+  color: #16202e !important;
+  box-shadow: 0 18px 44px rgba(16, 24, 40, 0.18) !important;
+}
+
+/* ------------------------------------------------------------------ 3-dot chat actions
+   extras.css paints every .btn--ghost as a 999px pill. Those rules used to
+   stretch Export / Transfer / CRM across the thread when the menu opened
+   inside overflow:hidden. Menu is now a compact sheet; keep the pills out. */
+
+.thread__header .thread__tools {
+  max-width: min(48%, 240px) !important;
+  flex: none !important;
+}
+
+.iai-more__btn.btn {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  border-radius: 10px !important;
+}
+
+.iai-more__menu,
+.iai-more__menu.iai-more__menu--open {
+  position: fixed !important;
+  z-index: 120 !important;
+  min-width: 200px !important;
+  max-width: min(240px, calc(100% - 16px)) !important;
+  max-height: 360px !important;
+  overflow: auto !important;
+}
+
+[data-wa-theme="glass-dark"] .iai-more__menu {
+  background: rgba(16, 24, 38, 0.94) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  color: #eef3f9 !important;
+  box-shadow: 0 18px 40px rgba(3, 8, 20, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+}
+
+.iai-more__item.btn,
+[data-wa-theme="glass-dark"] .iai-more__item.btn,
+[data-wa-theme="glass-light"] .iai-more__item.btn {
+  width: 100% !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  justify-content: flex-start !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+[data-wa-theme="glass-dark"] .iai-more__item.btn {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .iai-more__item.btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Native <select> menus on Windows/Chrome stay white. Glass-dark fields set
+   light ink; that colour inherited onto <option> and the open list went blank
+   (New contact → From). Closed select still uses select { color }. */
+[data-wa-theme="glass-dark"] option,
+[data-wa-theme="glass-light"] option,
+[data-wa-theme="glass-dark"] select option,
+[data-wa-theme="glass-light"] select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+[data-wa-theme="glass-dark"] .np__option,
+[data-wa-theme="glass-dark"] .np__empty,
+[data-wa-theme="glass-dark"] .np__option-text {
+  color: #eef3f9 !important;
+}
+
+[data-wa-theme="glass-dark"] .np__option-waba {
+  color: rgba(200, 163, 74, 0.95) !important;
+}

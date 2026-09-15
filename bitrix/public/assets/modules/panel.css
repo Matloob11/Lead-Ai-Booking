@@ -30,7 +30,7 @@
    those elements kept their pale background and lost their dark text. A
    surface and its text have to move together, so each component that paints a
    background states its own colour. */
-body[data-wa-theme="glass-dark"] {
+[data-wa-theme="glass-dark"] {
   --menu-bg: rgba(20, 34, 56, 0.96);
   --menu-hover: rgba(255, 255, 255, 0.12);
   --menu-ink: #eef3f9;
@@ -39,7 +39,7 @@ body[data-wa-theme="glass-dark"] {
   --scroll-thumb-hover: rgb(255 255 255 / 45%);
 }
 
-body[data-wa-theme="glass-light"] {
+[data-wa-theme="glass-light"] {
   --menu-bg: rgba(255, 255, 255, 0.97);
 }
 

@@ -90,6 +90,8 @@ export interface BaileysLifecycleHost {
   getOnQRCode(): EngineEventCallbacks['onQRCode'];
   /** The currently-registered onReady callback, if any (assigned at initialize()). */
   getOnReady(): EngineEventCallbacks['onReady'];
+  /** Route provider data through the generation acceptance gate before mutating adapter state. */
+  routeDataEvent(payload: unknown, apply: () => void | Promise<void>): void;
   /** The currently-registered onDisconnected callback, if any (assigned at initialize()). */
   getOnDisconnected(): EngineEventCallbacks['onDisconnected'];
   /** The currently-registered onError callback, if any (assigned at initialize()). */
@@ -116,6 +118,8 @@ export class BaileysLifecycle {
   connectedAt = 0;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
+  /** True only after this adapter generation itself exposed a fresh pairing QR. */
+  private linkedByQrThisGeneration = false;
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
   private intentionalClose = false;
@@ -272,58 +276,82 @@ export class BaileysLifecycle {
 
     sock.ev.on('creds.update', () => void saveCreds());
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
-    sock.ev.on('messages.upsert', event => this.host.handleMessagesUpsert(event));
-    sock.ev.on('messages.update', updates => this.host.handleMessagesUpdate(updates));
-    sock.ev.on('contacts.upsert', contacts => {
-      this.host.logContactEvent('contacts.upsert', contacts);
-      this.host.upsertContacts(contacts);
-    });
-    sock.ev.on('contacts.update', updates => {
-      this.host.logContactEvent('contacts.update', updates);
-      this.host.upsertContacts(updates);
-    });
-    sock.ev.on('chats.upsert', chats => {
-      this.host.logger.debug('Baileys chats event', {
-        action: 'baileys_chats',
-        event: 'upsert',
-        count: chats?.length ?? 0,
-      });
-      this.host.upsertChats(chats);
-    });
-    sock.ev.on('chats.update', updates => {
-      this.host.logger.debug('Baileys chats event', {
-        action: 'baileys_chats',
-        event: 'update',
-        count: updates?.length ?? 0,
-      });
-      this.host.upsertChats(updates);
-    });
-    sock.ev.on('group-participants.update', event => this.host.handleGroupParticipantsUpdate(event));
-    sock.ev.on('groups.update', updates => this.host.handleGroupsUpdate(updates));
-    sock.ev.on('messaging-history.set', history => {
-      this.host.upsertContacts(history.contacts);
-      this.host.upsertChats(history.chats);
-      this.host.addLidMappings(history.lidPnMappings ?? []);
-      void this.host.captureHistoryMessages(history.messages ?? []);
-      this.host.logger.debug('History sync received', {
-        action: 'baileys_history_set',
-        sessionId: this.host.config.sessionId,
-        syncType: history.syncType,
-        isLatest: history.isLatest,
-        progress: history.progress,
-        chats: history.chats?.length ?? 0,
-        messages: history.messages?.length ?? 0,
-        contacts: history.contacts?.length ?? 0,
-        namedContacts: history.contacts?.filter(c => c.name || c.notify).length ?? 0,
-        lidContacts: history.contacts?.filter(c => c.lid).length ?? 0,
-        lidPnMappings: history.lidPnMappings?.length ?? 0,
-      });
-    });
+    sock.ev.on('messages.upsert', event =>
+      this.host.routeDataEvent(['messages.upsert', event], () => this.host.handleMessagesUpsert(event)),
+    );
+    sock.ev.on('messages.update', updates =>
+      this.host.routeDataEvent(['messages.update', updates], () => this.host.handleMessagesUpdate(updates)),
+    );
+    sock.ev.on('contacts.upsert', contacts =>
+      this.host.routeDataEvent(['contacts.upsert', contacts], () => {
+        this.host.logContactEvent('contacts.upsert', contacts);
+        this.host.upsertContacts(contacts);
+      }),
+    );
+    sock.ev.on('contacts.update', updates =>
+      this.host.routeDataEvent(['contacts.update', updates], () => {
+        this.host.logContactEvent('contacts.update', updates);
+        this.host.upsertContacts(updates);
+      }),
+    );
+    sock.ev.on('chats.upsert', chats =>
+      this.host.routeDataEvent(['chats.upsert', chats], () => {
+        this.host.logger.debug('Baileys chats event', {
+          action: 'baileys_chats',
+          event: 'upsert',
+          count: chats?.length ?? 0,
+        });
+        this.host.upsertChats(chats);
+      }),
+    );
+    sock.ev.on('chats.update', updates =>
+      this.host.routeDataEvent(['chats.update', updates], () => {
+        this.host.logger.debug('Baileys chats event', {
+          action: 'baileys_chats',
+          event: 'update',
+          count: updates?.length ?? 0,
+        });
+        this.host.upsertChats(updates);
+      }),
+    );
+    sock.ev.on('group-participants.update', event =>
+      this.host.routeDataEvent(['group-participants.update', event], () =>
+        this.host.handleGroupParticipantsUpdate(event),
+      ),
+    );
+    sock.ev.on('groups.update', updates =>
+      this.host.routeDataEvent(['groups.update', updates], () => this.host.handleGroupsUpdate(updates)),
+    );
+    sock.ev.on('messaging-history.set', history =>
+      this.host.routeDataEvent(['messaging-history.set', history], async () => {
+        this.host.upsertContacts(history.contacts);
+        this.host.upsertChats(history.chats);
+        this.host.addLidMappings(history.lidPnMappings ?? []);
+        await this.host.captureHistoryMessages(history.messages ?? []);
+        this.host.logger.debug('History sync received', {
+          action: 'baileys_history_set',
+          sessionId: this.host.config.sessionId,
+          syncType: history.syncType,
+          isLatest: history.isLatest,
+          progress: history.progress,
+          chats: history.chats?.length ?? 0,
+          messages: history.messages?.length ?? 0,
+          contacts: history.contacts?.length ?? 0,
+          namedContacts: history.contacts?.filter(c => c.name || c.notify).length ?? 0,
+          lidContacts: history.contacts?.filter(c => c.lid).length ?? 0,
+          lidPnMappings: history.lidPnMappings?.length ?? 0,
+        });
+      }),
+    );
     // WhatsApp pushes this when a lid<->phone mapping is learned (renamed from the pre-v7
     // 'chats.phoneNumberShare' event, whose { lid, jid } payload this shape directly replaces).
-    sock.ev.on('lid-mapping.update', ({ lid, pn }) => this.host.addLidMappings([{ lid, pn }]));
-    sock.ev.on('call', calls => this.host.handleCallEvents(calls));
-    sock.ev.on('presence.update', update => this.host.handlePresenceUpdate(update));
+    sock.ev.on('lid-mapping.update', ({ lid, pn }) =>
+      this.host.routeDataEvent(['lid-mapping.update', { lid, pn }], () => this.host.addLidMappings([{ lid, pn }])),
+    );
+    sock.ev.on('call', calls => this.host.routeDataEvent(['call', calls], () => this.host.handleCallEvents(calls)));
+    sock.ev.on('presence.update', update =>
+      this.host.routeDataEvent(['presence.update', update], () => this.host.handlePresenceUpdate(update)),
+    );
   }
 
   private handleConnectionUpdate(update: {
@@ -338,7 +366,9 @@ export class BaileysLifecycle {
     // probeAccountRestriction() pulls the current state — Baileys routes its own query result back
     // through this same event, so one handler covers both channels.
     if (reachoutTimeLock) {
-      this.reportReachoutTimelock(reachoutTimeLock);
+      this.host.routeDataEvent(['account-restriction', reachoutTimeLock], () =>
+        this.reportReachoutTimelock(reachoutTimeLock),
+      );
     }
 
     if (qr) {
@@ -362,12 +392,16 @@ export class BaileysLifecycle {
       // land a couple seconds "before" connectedAt and be misjudged as history.
       this.connectedAt = Math.floor(Date.now() / 1000) - 10;
       this.setStatus(EngineStatus.READY);
-      this.host.getOnReady()?.(this.phoneNumber ?? '', this.pushName ?? '');
-      // WhatsApp only PUSHES a timelock when it changes, so a gateway that starts (or reconnects)
-      // while the account is already restricted would never hear about it. Ask once per connection.
-      void this.probeAccountRestriction();
-      // Backfill names the initial sync skipped (see BaileysHistory.hydrateNames).
-      void this.host.hydrateNames();
+      void Promise.resolve(this.host.getOnReady()?.(this.phoneNumber ?? '', this.pushName ?? '')).catch(error =>
+        this.host.logger.error('Baileys identity admission callback failed', String(error)),
+      );
+      this.host.routeDataEvent(['post-ready-engine-reads'], async () => {
+        // WhatsApp only PUSHES a timelock when it changes, so a gateway that starts (or reconnects)
+        // while the account is already restricted would never hear about it. Ask once per connection.
+        await this.probeAccountRestriction();
+        // Backfill names the initial sync skipped (see BaileysHistory.hydrateNames).
+        await this.host.hydrateNames();
+      });
     }
 
     if (connection === 'close') {
@@ -531,6 +565,7 @@ export class BaileysLifecycle {
   private async handleQrCode(qr: string): Promise<void> {
     try {
       this.qrCode = await qrcode.toDataURL(qr);
+      this.linkedByQrThisGeneration = true;
       this.setStatus(EngineStatus.QR_READY);
       this.host.getOnQRCode()?.(this.qrCode);
     } catch (error) {
@@ -701,6 +736,12 @@ export class BaileysLifecycle {
       });
       throw err;
     }
+  }
+
+  purgeLocalCredentials(): Promise<void> {
+    if (!this.linkedByQrThisGeneration) return Promise.resolve();
+    this.linkedByQrThisGeneration = false;
+    return this.clearAuthState();
   }
 
   destroy(): Promise<void> {

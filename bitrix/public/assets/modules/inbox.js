@@ -7,7 +7,9 @@
  *
  * Server rules the UI must mirror (see the API contract):
  *  - an agent sees every chat on their numbers, assigned or not; `assigned_agent`
- *    is ownership for transfers, never a list filter;
+ *    is ownership for transfers, never a list filter. Transfer shows that one
+ *    chat to the receiving agent so they can continue it — it does not grant
+ *    the rest of the Official number;
  *  - when `is_session_open` is false the composer is locked and only approved
  *    templates can reopen the 24h window;
  *  - transfer is admin-only.
@@ -18,6 +20,12 @@ import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js"
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "../core/bitrix-sso.js";
 import { imagesInThread, openLightbox } from "../core/lightbox.js";
+import { mediaMessageNode } from "../core/message-media.js";
+import { buttonReplyTag, templateButtonsRow, templateFooterNode } from "../core/message-bubble-extras.js";
+import { specialMessageNode } from "../core/message-special.js";
+import { numberNameWithDial } from "../core/number-label.js";
+import { createNumberPicker } from "../core/number-picker.js";
+import { createQuickFilters, renderTagMenu } from "../core/list-quick-filters.js";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openLinkedPhonesAdmin } from "./linked-phones-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
@@ -29,6 +37,7 @@ import { openStarredMessagesModal } from "./starred-messages.js";
 import { openAgentsAdminModal } from "./agents-admin.js";
 import { openForwardModal } from "./forward-picker.js";
 import { openReportsModal } from "./reports.js";
+import { openCampaignModal } from "./campaigns.js";
 import { notifyNewMessage, playChime, requestNotificationPermission, isSoundEnabled, setSoundEnabled, isDesktopEnabled, setDesktopEnabled } from "../core/notifications.js";
 import { InboxSocket } from "../core/realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, toast, untilText, initials } from "../core/dom.js";
@@ -36,6 +45,7 @@ import { bindEmojiPicker } from "../core/emoji.js";
 import { icon, iconForKind } from "../core/icons.js";
 
 const PAGE_SIZE = 40;
+const LIST_PAGE_SIZE = 30;
 
 const STATUS_TICK = {
   queued: { name: "clock", label: "queued" },
@@ -51,9 +61,9 @@ const STATUS_TICK = {
  *   does: an agent clicks the WhatsApp icon beside a lead's number and expects
  *   that conversation, not the list they left three hours ago.
  *
- *   `{ conversationId }`  open this chat
- *   `{ phone }`           no chat yet — start one with this number, which on a
- *                         cold contact means a template and nothing else
+ *   `{ conversationId }`  open this Omni chat
+ *   `{ phone }`           no Omni chat yet — start one with this number (template)
+ *   `{ linkedPhone }`     open Linked devices on this number (chat or new contact)
  */
 export function mountInbox(root, { me, openRequest = null }) {
   const state = {
@@ -71,6 +81,14 @@ export function mountInbox(root, { me, openRequest = null }) {
     replyTo: null,
     loadingThread: false,
     connection: "connecting",
+    listOffset: 0,
+    listExhausted: false,
+    /** Label name to keep in the conversation list, or null for all. */
+    tagFilter: null,
+    /** all | unread | pinned | transferred */
+    listFilter: "all",
+    messagesExhausted: false,
+    loadingOlderMessages: false,
   };
 
   // Composer listeners (attach button, drop zone, paste) are rebound whenever
@@ -81,14 +99,13 @@ export function mountInbox(root, { me, openRequest = null }) {
   /* ------------------------------------------------------------ structure */
 
   const ui = {
-    numberSelect: el("select.filter__select", { onchange: onNumberFilterChange }),
     search: el("input.filter__search", {
       type: "search",
       placeholder: "Search by name or number",
       oninput: debounce((event) => {
         state.search = event.target.value.trim();
         loadConversations();
-      }),
+      }, 200),
     }),
     list: el("ul.convs"),
     listStatus: el("div.convs__status"),
@@ -105,6 +122,7 @@ export function mountInbox(root, { me, openRequest = null }) {
     search: el("div.slot", { id: "wa-search-slot" }),
     topbar: el("div.slot", { id: "wa-topbar-slot" }),
     composer: el("div.slot", { id: "wa-composer-slot" }),
+    theme: el("div.slot", { id: "wa-theme-slot" }),
   };
 
   /**
@@ -118,23 +136,42 @@ export function mountInbox(root, { me, openRequest = null }) {
   // gets, so it is filled in as soon as the list is known.
   const requestsBadge = el("span.badge.menu__badge", { hidden: true });
 
+  const menuTagsSlot = el("div.menu__tags-slot", { id: "wa-tag-filter-menu" });
+
   const menuPanel = el("div.sidebar__menu", { hidden: true }, [
     slots.search,
+    el("div.menu__section", {}, ["You"]),
     el("button.btn.menu__item", { onclick: openProfile, type: "button" }, [
       icon("user", { size: 16 }),
       "My Profile",
     ]),
-    el("button.btn.menu__item", { onclick: () => openTemplateManager(), type: "button" }, [
+    el("button.btn.menu__item", { onclick: openNewContact, type: "button" }, [
+      icon("plus", { size: 16 }),
+      "New contact",
+    ]),
+    el("button.btn.menu__item", {
+      onclick: async () => {
+        const soundOn = isSoundEnabled();
+        setSoundEnabled(!soundOn);
+        if (!soundOn) playChime();
+        await requestNotificationPermission();
+        toast(`Sound ${!soundOn ? "on" : "off"} for new messages`);
+      },
+      type: "button",
+    }, [
+      icon("bell", { size: 16 }),
+      "Sound & Notifications",
+    ]),
+    el("div.menu__section", {}, ["Inbox tools"]),
+    el("div.menu__section", {}, ["Tags"]),
+    menuTagsSlot,
+    el("button.btn.menu__item", { onclick: () => openTemplateManager({ isAdmin: me.is_wa_admin }), type: "button" }, [
       icon("file", { size: 16 }),
       "Templates Center",
     ]),
     el("button.btn.menu__item", { onclick: () => openSharedLibraryModal(), type: "button" }, [
       icon("folder", { size: 16 }),
       "Shared Library",
-    ]),
-    el("button.btn.menu__item", { onclick: () => openReportsModal(), type: "button" }, [
-      icon("zap", { size: 16 }),
-      "Reports",
     ]),
     el("button.btn.menu__item", {
       onclick: () => openQuickRepliesModal({ isWaAdmin: me.is_wa_admin }),
@@ -154,51 +191,40 @@ export function mountInbox(root, { me, openRequest = null }) {
       icon("star", { size: 16 }),
       "Starred Messages",
     ]),
-    me.is_wa_admin
-      ? el("button.btn.menu__item", { onclick: () => openAgentsAdminModal({ me }), type: "button" }, [
-          icon("userCheck", { size: 16 }),
-          "Agents & Panel Admins",
+    el("button.btn.menu__item", { onclick: () => openReportsModal(), type: "button" }, [
+      icon("zap", { size: 16 }),
+      "Reports",
+    ]),
+    el("button.btn.menu__item", { onclick: () => openCampaignModal(), type: "button" }, [
+      icon("send", { size: 16 }),
+      "Campaign",
+    ]),
+    me.can_linked_devices !== false ? el("div.menu__section", {}, ["Linked phones"]) : null,
+    me.can_linked_devices !== false
+      ? el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
+          icon("smartphone", { size: 16 }),
+          "Linked phones",
         ])
       : null,
-    el("button.btn.menu__item", {
-      onclick: async () => {
-        const soundOn = isSoundEnabled();
-        setSoundEnabled(!soundOn);
-        if (!soundOn) playChime();
-        await requestNotificationPermission();
-        toast(`Sound ${!soundOn ? "on" : "off"} for new messages`);
-      },
-      type: "button",
-    }, [
-      icon("bell", { size: 16 }),
-      "Sound & Notifications",
-    ]),
+    me.is_wa_admin && me.can_linked_devices !== false
+      ? el("button.btn.menu__item", { onclick: openLinkedPhones, type: "button" }, [
+          icon("users", { size: 16 }),
+          "Linked phone agents",
+        ])
+      : null,
+    me.is_wa_admin ? el("div.menu__section", {}, ["Admin"]) : null,
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openNumbers, type: "button" }, [
           icon("hash", { size: 16 }),
           "Numbers",
         ])
       : null,
-    // The same job for the QR-linked phones. A separate screen because they are
-    // separate things — those numbers are ours, these are sessions living in the
-    // gateway, and a phone can leave this list because somebody unlinked a
-    // handset rather than because anything changed here.
     me.is_wa_admin
-      ? el("button.btn.menu__item", { onclick: openLinkedPhones, type: "button" }, [
-          icon("users", { size: 16 }),
-          "Linked phone agents",
+      ? el("button.btn.menu__item", { onclick: () => openAgentsAdminModal({ me }), type: "button" }, [
+          icon("userCheck", { size: 16 }),
+          "Agents & access",
         ])
       : null,
-    // Everyone, not admins only. An agent answers the QR-linked phones too, and
-    // what they can actually see there is decided on the far side rather than by
-    // hiding the door: their OpenWA key is scoped to the numbers assigned to
-    // them, server-side. An agent with nothing assigned gets an empty chat list,
-    // which is the correct answer to "you have not been given a number yet" —
-    // not an error, and not somebody else's conversations.
-    el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
-      icon("smartphone", { size: 16 }),
-      "Linked devices",
-    ]),
     me.is_wa_admin
       ? el("button.btn.menu__item", { onclick: openRequests, type: "button" }, [
           icon("users", { size: 16 }),
@@ -206,37 +232,72 @@ export function mountInbox(root, { me, openRequest = null }) {
           requestsBadge,
         ])
       : null,
-    el("button.btn.menu__item", { onclick: openNewContact, type: "button" }, [
-      icon("plus", { size: 16 }),
-      "New contact",
-    ]),
+    el("div.menu__section", {}, ["Design"]),
+    slots.theme,
   ]);
 
   const menuBtn = el("button.btn.btn--icon.sidebar__menu-btn", { type: "button", title: "Menu" }, [
     icon("menu", { size: 19 }),
   ]);
 
+  const newContactFab = el(
+    "button.sidebar__fab",
+    {
+      type: "button",
+      title: "New contact",
+      "aria-label": "New contact",
+      onclick: () => openNewContact(),
+    },
+    [icon("plus", { size: 18 }), el("span.sidebar__fab-label", {}, ["New"])]
+  );
+
+  const quickFilters = createQuickFilters({
+    getActive: () => state.listFilter,
+    onChange: (id) => {
+      state.listFilter = id;
+      quickFilters.render();
+      renderConversations();
+    },
+  });
+
+  const numberPicker = createNumberPicker({
+    getNumbers: () => state.numbers,
+    getValue: () => state.numberFilter || "",
+    setValue: (id) => {
+      state.numberFilter = id;
+    },
+    onChange: () => loadConversations({ keepActive: false }),
+    labelFor: (number) => (number ? numberOptionLabel(number) : "All numbers"),
+    matchFilter: numberMatchesFilter,
+  });
+
   const layout = el("div.app", {}, [
     el("aside.sidebar", {}, [
-      // The menu button is a direct child of the bar on purpose: companion
-      // modules locate their insertion point with
-      // `sidebarTop.querySelector(".btn")` and then insertBefore it, which
-      // throws if that button is nested inside a wrapper.
-      el("div.sidebar__top", {}, [
-        el("div.sidebar__title", {}, ["WhatsApp"]),
-        menuBtn,
-        menuPanel,
+      // Chrome stays out of the scroll pane so filters never paint under chats.
+      el("div.sidebar__chrome", {}, [
+        // The menu button is a direct child of the bar on purpose: companion
+        // modules locate their insertion point with
+        // `sidebarTop.querySelector(".btn")` and then insertBefore it, which
+        // throws if that button is nested inside a wrapper.
+        el("div.sidebar__top", {}, [
+          el("div.sidebar__title", {}, ["Official API"]),
+          menuBtn,
+          menuPanel,
+        ]),
+        el("div.filter", {}, [numberPicker.root, ui.search, quickFilters.root]),
       ]),
-      el("div.filter", {}, [ui.numberSelect, ui.search]),
       // List and status share one scroll box so the empty-state message sits
       // right under the (possibly empty) list instead of at the sidebar's foot.
       el("div.convs__wrap", {}, [ui.list, ui.listStatus]),
+      // Float over the list — no footer bar; chats stay visible behind.
+      newContactFab,
     ]),
     el("section.thread", {}, [ui.connection, ui.threadHeader, ui.messages, ui.composer]),
   ]);
 
   bindSidebarMenu();
   renderEmptyThread();
+  quickFilters.render();
 
   /**
    * Opens and closes the sidebar menu, and adopts anything a companion module
@@ -291,37 +352,67 @@ export function mountInbox(root, { me, openRequest = null }) {
     state.numbers = asList(me.numbers, "numbers");
     if (!state.numbers.length) state.numbers = asList(await catalog.numbers(), "numbers");
 
-    // With no number there is nothing to show and no chat to open, so the
-    // panel becomes a way to ask for one instead of an empty list.
-    if (!state.numbers.length) {
+    await loadConversations();
+
+    // No Official number, and no chat transferred to them either — ask for a number.
+    if (!state.numbers.length && !state.conversations.length) {
       root.className = "";
       renderNoNumbersScreen(root, {
         me,
         onAssigned: () => window.location.reload(),
-        // This screen stands in for the whole panel, so without handing the QR
-        // channel through here an agent who has only a linked phone — and no
-        // Business Platform number — could not reach it at all.
         onLinkedDevices: openLinkedDevices,
       });
       return;
     }
 
     renderNumberFilter();
-    await loadConversations();
-
+    quickFilters.render();
     root.className = "";
     clear(root).append(layout);
     connectSocket();
     publishApi();
     if (me.is_wa_admin) refreshRequestCount();
 
-    // The frame's height is Bitrix's to decide, and the panel simply fills it.
-    // Asking for a taller frame (there is no API for "how much room do I have")
-    // meant guessing, and a guess that overshot pushed the portal page into a
-    // scrollbar that hid its own header — worse than a shorter panel.
+    // Pin the panel to this iframe's visible box so the composer cannot be
+    // pushed under Bitrix chrome on short sliders / laptop viewports.
+    pinFrameHeight(root);
 
     // Last, because it needs the list and the layout to exist first.
     if (openRequest) await honourOpenRequest(openRequest);
+  }
+
+  /**
+   * Keep html/body/#root exactly as tall as the frame's visual viewport.
+   * Bitrix LEFT_MENU / openApplication iframes vary by screen; without this,
+   * percentage heights sometimes resolve against a taller box and the bottom
+   * composer is clipped by overflow:hidden on .app.
+   */
+  function pinFrameHeight(mount) {
+    const apply = () => {
+      const h = Math.floor(
+        window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0
+      );
+      if (h < 200) return;
+      const px = `${h}px`;
+      document.documentElement.style.height = px;
+      document.documentElement.style.maxHeight = px;
+      document.body.style.height = px;
+      document.body.style.maxHeight = px;
+      if (mount) {
+        mount.style.height = px;
+        mount.style.maxHeight = px;
+      }
+    };
+
+    apply();
+    window.addEventListener("resize", apply);
+    window.visualViewport?.addEventListener("resize", apply);
+    window.visualViewport?.addEventListener("scroll", apply);
+
+    // A one-shot after Bitrix finishes opening the slider — first paint is
+    // often shorter than the final frame.
+    window.setTimeout(apply, 120);
+    window.setTimeout(apply, 600);
   }
 
   /**
@@ -332,7 +423,13 @@ export function mountInbox(root, { me, openRequest = null }) {
    * they get is the ordinary inbox rather than an error page — they came here
    * to talk to somebody and the panel is still the way to do that.
    */
-  async function honourOpenRequest({ conversationId, phone }) {
+  async function honourOpenRequest({ conversationId, phone, linkedPhone }) {
+    if (linkedPhone) {
+      const digits = String(linkedPhone).replace(/\D/g, "");
+      if (digits) openLinkedDevices(digits);
+      return;
+    }
+
     if (conversationId) {
       try {
         await openConversation(Number(conversationId));
@@ -351,26 +448,64 @@ export function mountInbox(root, { me, openRequest = null }) {
     if (digits) openNewContact({ to: digits });
   }
 
-  async function loadConversations({ keepActive = true } = {}) {
-    ui.listStatus.textContent = "Loading…";
+  async function loadConversations({ keepActive = true, append = false } = {}) {
+    if (!append) {
+      state.listOffset = 0;
+      state.listExhausted = false;
+      ui.listStatus.textContent = "Loading…";
+    } else {
+      clear(ui.listStatus).append("Loading more…");
+    }
     try {
+      const offset = append ? state.listOffset || 0 : 0;
       const payload = await inbox.conversations({
         number: state.numberFilter || undefined,
         q: state.search || undefined,
-        limit: PAGE_SIZE,
+        limit: LIST_PAGE_SIZE,
+        offset,
       });
-      state.conversations = asList(payload, "conversations");
+      const page = asList(payload, "conversations");
+      state.conversations = append
+        ? mergeConversations(state.conversations, page)
+        : page;
+      state.listOffset = (append ? offset : 0) + page.length;
+      state.listExhausted = page.length < LIST_PAGE_SIZE;
       renderConversations();
-      ui.listStatus.textContent = state.conversations.length ? "" : "No conversations.";
+      renderListStatus();
 
       if (keepActive && state.activeId) {
         const still = state.conversations.some((c) => c.id === state.activeId);
         if (!still) renderEmptyThread();
       }
     } catch (error) {
-      ui.listStatus.textContent = `Could not load the list: ${error.message}`;
+      clear(ui.listStatus).append(`Could not load the list: ${error.message}`);
       console.error("[a7-wa] conversations failed:", error);
     }
+  }
+
+  function mergeConversations(existing, incoming) {
+    const byId = new Map(existing.map((c) => [String(c.id), c]));
+    for (const row of incoming) byId.set(String(row.id), row);
+    return [...byId.values()];
+  }
+
+  function renderListStatus() {
+    clear(ui.listStatus);
+    if (!state.conversations.length) {
+      ui.listStatus.append("No conversations.");
+      return;
+    }
+    if (state.listExhausted) return;
+    ui.listStatus.append(
+      el(
+        "button.btn.btn--ghost.btn--sm.convs__more",
+        {
+          type: "button",
+          onclick: () => loadConversations({ keepActive: true, append: true }),
+        },
+        ["Load more"]
+      )
+    );
   }
 
   function openProfile() {
@@ -527,9 +662,22 @@ export function mountInbox(root, { me, openRequest = null }) {
     openContactPanel(conversation.id, {
       onSaved: (contact) => {
         const known = findConversation(conversation.id);
-        if (known?.contact) known.contact.name = contact.name;
+        if (!known) {
+          renderConversations();
+          return;
+        }
+        if (known.contact && contact?.name != null) known.contact.name = contact.name;
+        if (known.contact && contact?.display_name != null) {
+          known.contact.name = contact.display_name || known.contact.name;
+        }
+        // Pin / archive flags come back on contact.conversation from the panel.
+        const flags = contact?.conversation;
+        if (flags) {
+          if ("is_pinned" in flags) known.is_pinned = !!flags.is_pinned;
+          if ("is_archived" in flags) known.is_archived = !!flags.is_archived;
+        }
         renderConversations();
-        renderThreadHeader(known || conversation);
+        renderThreadHeader(known);
       },
       onOpenConversation: (id) => openConversation(id),
     });
@@ -544,7 +692,9 @@ export function mountInbox(root, { me, openRequest = null }) {
     if (state.activeId !== id) state.replyTo = null;
     state.activeId = id;
     state.loadingThread = true;
-    renderConversations();
+    state.messagesExhausted = false;
+    state.loadingOlderMessages = false;
+    renderConversations({ scrollActive: true });
     clear(ui.messages).append(el("div.thread__hint", {}, ["Loading…"]));
 
     try {
@@ -554,6 +704,7 @@ export function mountInbox(root, { me, openRequest = null }) {
       // The endpoint already hands back the newest slice in oldest-first order,
       // which is exactly the reading order — do not re-sort it.
       state.messages = asList(payload, "messages");
+      state.messagesExhausted = state.messages.length < PAGE_SIZE;
 
       // A search hit can point at a message far above the newest page.
       if (highlightMessageId) await loadUntilMessage(id, highlightMessageId);
@@ -566,7 +717,7 @@ export function mountInbox(root, { me, openRequest = null }) {
       state.unreadAtOpen = conversation?.unread_count || 0;
 
       renderThreadHeader(conversation);
-      renderMessages();
+      renderMessages({ scroll: "bottom" });
       renderComposer(conversation);
 
       if (highlightMessageId) highlightMessage(highlightMessageId);
@@ -594,8 +745,9 @@ export function mountInbox(root, { me, openRequest = null }) {
     try {
       const payload = await inbox.messages(id, { limit: PAGE_SIZE });
       state.messages = asList(payload, "messages");
+      state.messagesExhausted = state.messages.length < PAGE_SIZE;
       if (payload?.conversation) upsertConversation(payload.conversation);
-      renderMessages();
+      renderMessages({ scroll: "bottom" });
     } catch (error) {
       console.error("[a7-wa] could not refresh the thread:", error);
     }
@@ -648,8 +800,35 @@ export function mountInbox(root, { me, openRequest = null }) {
       const older = asList(await inbox.messages(conversationId, { before: oldest, limit: PAGE_SIZE }), "messages");
       if (!older.length) return false;
       state.messages = [...older, ...state.messages];
+      state.messagesExhausted = older.length < PAGE_SIZE;
+      renderMessages({ scroll: "preserve" });
     }
     return false;
+  }
+
+  /** Pull the next page of history when the agent scrolls to the top. */
+  async function loadOlderMessages() {
+    if (!state.activeId || state.loadingOlderMessages || state.messagesExhausted) return;
+    const oldest = state.messages[0]?.id;
+    if (!oldest) return;
+    state.loadingOlderMessages = true;
+    try {
+      const older = asList(
+        await inbox.messages(state.activeId, { before: oldest, limit: PAGE_SIZE }),
+        "messages"
+      );
+      if (!older.length) {
+        state.messagesExhausted = true;
+        return;
+      }
+      state.messages = [...older, ...state.messages];
+      if (older.length < PAGE_SIZE) state.messagesExhausted = true;
+      renderMessages({ scroll: "preserve" });
+    } catch (error) {
+      console.error("[a7-wa] could not load older messages:", error);
+    } finally {
+      state.loadingOlderMessages = false;
+    }
   }
 
   /** Scrolls a message into view and flashes it, the way a search result should. */
@@ -677,43 +856,60 @@ export function mountInbox(root, { me, openRequest = null }) {
     const phone = formatPhoneDigits(rawPhone) || rawPhone || "Number";
 
     const agents = Array.isArray(number?.agents) ? number.agents : [];
-    const names = agents.map((a) => a.display_name).filter(Boolean);
+    const names = agents.map((a) => {
+      const name = a.display_name;
+      if (!name) return "";
+      const community = String(a.community || "").trim();
+      return community ? `${name} · ${community}` : name;
+    }).filter(Boolean);
 
     const customLabel = (number?.label || (number?.title !== number?.phone_number ? number?.title : "") || "").trim();
     const isDistinctLabel = customLabel && customLabel !== rawPhone && customLabel !== phone;
+    const community = String(number?.community || "").trim();
+    const withCommunity = (text) =>
+      community && !String(text).includes(community) ? `${text} · ${community}` : text;
 
     if (names.length) {
       const assignedText = names.join(", ");
       if (isDistinctLabel && !names.includes(customLabel)) {
-        return `${phone} (${customLabel}) → ${assignedText}`;
+        return withCommunity(`${phone} (${customLabel}) → ${assignedText}`);
       }
-      return `${phone} → ${assignedText}`;
+      return withCommunity(`${phone} → ${assignedText}`);
     }
 
     if (isDistinctLabel) {
-      return `${phone} → ${customLabel}`;
+      return withCommunity(`${phone} → ${customLabel}`);
     }
 
-    return `${phone} → Not assigned`;
+    return withCommunity(community ? `${phone} → ${community}` : `${phone} → Not assigned`);
+  }
+
+  function numberMatchesFilter(number, query) {
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return true;
+    const phone = String(number?.phone_number || "");
+    const label = numberOptionLabel(number).toLowerCase();
+    const digits = q.replace(/\D/g, "");
+    if (label.includes(q)) return true;
+    if (phone.toLowerCase().includes(q)) return true;
+    if (digits && phone.replace(/\D/g, "").includes(digits)) return true;
+    const title = String(number?.title || number?.label || "").toLowerCase();
+    if (title.includes(q)) return true;
+    const account = String(number?.account_username || "").toLowerCase();
+    if (account && account.includes(q)) return true;
+    const waba = String(number?.waba_business_id || "");
+    if (waba && (waba.toLowerCase().includes(q) || (digits && waba.includes(digits)))) return true;
+    const agents = Array.isArray(number?.agents) ? number.agents : [];
+    for (const agent of agents) {
+      const name = String(agent?.display_name || "").toLowerCase();
+      if (name && name.includes(q)) return true;
+    }
+    return false;
   }
 
   function renderNumberFilter() {
-    clear(ui.numberSelect);
-    // With a single number the filter is noise — the agent has no choice to make.
-    if (state.numbers.length < 2) {
-      ui.numberSelect.hidden = true;
-      return;
-    }
-    ui.numberSelect.hidden = false;
-    ui.numberSelect.append(el("option", { value: "" }, ["All numbers"]));
-    for (const number of state.numbers) {
-      ui.numberSelect.append(el("option", { value: number.id }, [numberOptionLabel(number)]));
-    }
-  }
-
-  function onNumberFilterChange(event) {
-    state.numberFilter = event.target.value;
-    loadConversations({ keepActive: false });
+    numberPicker.setVisible(state.numbers.length >= 2);
+    numberPicker.refresh();
   }
 
   /**
@@ -721,22 +917,72 @@ export function mountInbox(root, { me, openRequest = null }) {
    * (admin label → gateway name → digits). Everything the agent sees goes
    * through it, so a rename shows up in one place.
    */
-  const numberTitle = (number) => number?.title || number?.phone_number || "—";
+  const numberTitle = (number) => numberNameWithDial(number);
 
-  function renderConversations() {
+  function collectTagNames() {
+    const names = new Map();
+    for (const c of state.conversations) {
+      for (const l of c.labels || []) {
+        if (l?.name) names.set(l.name, l.colour || "#25D366");
+      }
+    }
+    return names;
+  }
+
+  function renderTagFilterMenu() {
+    renderTagMenu({
+      container: menuTagsSlot,
+      getTags: collectTagNames,
+      getActive: () => state.tagFilter,
+      onChange: (name) => {
+        state.tagFilter = name;
+        renderTagFilterMenu();
+        renderConversations();
+      },
+    });
+  }
+
+  function applyListFilter(conversations) {
+    let rows = conversations.slice();
+    if (state.listFilter === "unread") {
+      rows = rows.filter((c) => Number(c.unread_count || 0) > 0);
+    } else if (state.listFilter === "pinned") {
+      rows = rows.filter((c) => c.is_pinned);
+    } else if (state.listFilter === "transferred") {
+      rows = rows.filter((c) => isTransferredIn(c));
+    }
+    if (state.tagFilter) {
+      rows = rows.filter((c) => (c.labels || []).some((l) => l.name === state.tagFilter));
+    }
+    return rows;
+  }
+
+  function renderConversations({ scrollActive = false } = {}) {
     clear(ui.list);
-    const conversationsToDraw = state.tagFilter
-      ? state.conversations.filter((c) => (c.labels || []).some((l) => l.name === state.tagFilter))
-      : state.conversations;
+    renderTagFilterMenu();
+    const conversationsToDraw = applyListFilter(state.conversations).sort((a, b) => {
+      const pa = a.is_pinned ? 1 : 0;
+      const pb = b.is_pinned ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      const ta = Date.parse(a.last_message_at || "") || 0;
+      const tb = Date.parse(b.last_message_at || "") || 0;
+      return tb - ta;
+    });
 
     for (const conversation of conversationsToDraw) {
       const open = conversation.is_session_open;
-      const labelsNode = conversation.labels?.length
-        ? el("div.conv__labels", { style: "display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;" }, [
-            ...conversation.labels.map((l) =>
-              el("span.conv__label-chip", { style: `background: ${l.colour}; color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600;` }, [l.name])
-            ),
-          ])
+      // "Transferred" already shows on the meta line — keep chips for real tags only.
+      const chipLabels = (conversation.labels || []).filter(
+        (l) => String(l.name || "").trim().toLowerCase() !== "transferred"
+      );
+      const labelsNode = chipLabels.length
+        ? el(
+            "div.conv__labels",
+            {},
+            chipLabels.map((l) =>
+              el("span.conv__label-chip", { style: `background:${l.colour};color:#fff` }, [l.name])
+            )
+          )
         : null;
 
       ui.list.append(
@@ -746,6 +992,7 @@ export function mountInbox(root, { me, openRequest = null }) {
             class: [
               conversation.id === state.activeId ? "conv--active" : "",
               isClosingSoon(conversation) ? "conv--closing" : "",
+              isTransferredIn(conversation) ? "conv--transferred" : "",
             ]
               .filter(Boolean)
               .join(" "),
@@ -761,7 +1008,7 @@ export function mountInbox(root, { me, openRequest = null }) {
               el("div.conv__line", {}, [
                 el("span.conv__preview", {}, [
                   kindIcon(conversation.last_message_kind),
-                  conversation.last_message_preview || "",
+                  el("span.conv__preview-text", {}, [conversation.last_message_preview || ""]),
                 ]),
                 conversation.unread_count
                   ? el("span.badge", {}, [String(conversation.unread_count)])
@@ -777,16 +1024,38 @@ export function mountInbox(root, { me, openRequest = null }) {
                       ? `Window closing — ${untilText(conversation.session_expires_at) || "1 hour"} left`
                       : "Window open",
                 }),
-                el("span.conv__number", {}, [numberTitle(numberById(conversation.number_id))]),
+                el(
+                  "span.conv__number",
+                  {},
+                  [
+                    isTransferredIn(conversation) ? "Transferred · " : "",
+                    numberTitle(numberById(conversation.number_id) || conversation.number),
+                  ]
+                ),
               ]),
             ]),
           ]
         )
       );
     }
+
+    if (scrollActive && state.activeId) {
+      requestAnimationFrame(() => {
+        ui.list.querySelector(".conv--active")?.scrollIntoView({ block: "nearest" });
+      });
+    }
   }
 
   const numberById = (id) => state.numbers.find((n) => String(n.id) === String(id));
+
+  function isTransferredIn(conversation) {
+    if (conversation?.is_transferred) return true;
+    if ((conversation?.labels || []).some((l) => String(l.name) === "Transferred")) return true;
+    const mine =
+      String(conversation?.assigned_agent?.id || conversation?.assigned_agent) === String(state.me?.id);
+    if (!mine) return false;
+    return !state.numbers.some((n) => String(n.id) === String(conversation.number_id));
+  }
 
   /** Marks a media preview in the list; plain text and templates get no icon. */
   const kindIcon = (kind) => iconForKind(kind, { size: 13, className: "conv__kind" });
@@ -897,7 +1166,7 @@ export function mountInbox(root, { me, openRequest = null }) {
     asLead.addEventListener("click", () => run("lead", asLead));
     asOwner.addEventListener("click", () => run("owner_data", asOwner));
 
-    clear(button).append(icon("user", { size: 15 }), " Create lead");
+    clear(button).append(icon("user", { size: 15 }), " Create in CRM");
     restore();
   }
 
@@ -996,7 +1265,7 @@ export function mountInbox(root, { me, openRequest = null }) {
           el("div.thread__sub", {}, [
             conversation.contact?.wa_id || "",
             " · ",
-            numberTitle(numberById(conversation.number_id)),
+            numberTitle(numberById(conversation.number_id) || conversation.number),
           ]),
         ]),
       ]),
@@ -1005,7 +1274,16 @@ export function mountInbox(root, { me, openRequest = null }) {
           open ? (left ? `Window open · ${left}` : "Window open") : "Window closed",
         ]),
         conversation.assigned_agent
-          ? el("span.pill", {}, [`@${conversation.assigned_agent.display_name || conversation.assigned_agent}`])
+          ? el("span.pill", {}, [
+              `@${conversation.assigned_agent.display_name || conversation.assigned_agent}${
+                conversation.assigned_agent.community ? ` · ${conversation.assigned_agent.community}` : ""
+              }`,
+            ])
+          : null,
+        conversation.is_transferred
+          ? el("span.pill", { title: "Panel copy on both Official numbers. New WhatsApp messages use each agent's own number." }, [
+              "Transferred",
+            ])
           : null,
         openLeadButton(conversation),
         el("button.btn.btn--ghost.btn--sm", {
@@ -1044,7 +1322,16 @@ export function mountInbox(root, { me, openRequest = null }) {
               icon("users", { size: 15 }),
               "Transfer",
             ])
-          : null,
+          : el(
+              "button.btn.btn--ghost.btn--sm",
+              {
+                type: "button",
+                title: "Only panel admins can transfer chats",
+                onclick: () =>
+                  toast("Ask a panel admin to transfer this chat — agents cannot reassign ownership.", "err"),
+              },
+              [icon("users", { size: 15 }), "Ask admin"]
+            ),
       ])
     );
   }
@@ -1115,11 +1402,25 @@ export function mountInbox(root, { me, openRequest = null }) {
     return "pill--open";
   }
 
-  function renderMessages() {
+  function renderMessages({ scroll = "bottom" } = {}) {
+    const prevScrollTop = ui.messages.scrollTop;
+    const prevHeight = ui.messages.scrollHeight;
     clear(ui.messages);
 
     const unreadFrom = firstUnreadIndex();
     let lastDay = null;
+
+    if (state.loadingOlderMessages) {
+      ui.messages.append(el("div.thread__hint", {}, ["Loading older messages…"]));
+    } else if (!state.messagesExhausted && state.messages.length >= PAGE_SIZE) {
+      ui.messages.append(
+        el(
+          "button.btn.btn--ghost.btn--sm.thread__older",
+          { type: "button", onclick: () => void loadOlderMessages() },
+          ["Load older messages"]
+        )
+      );
+    }
 
     state.messages.forEach((message, index) => {
       const day = dayKey(message.created_at);
@@ -1133,8 +1434,13 @@ export function mountInbox(root, { me, openRequest = null }) {
       ui.messages.append(messageBubble(message));
     });
 
-    followTail = true;
-    scrollToBottom();
+    if (scroll === "preserve") {
+      followTail = false;
+      ui.messages.scrollTop = ui.messages.scrollHeight - prevHeight + prevScrollTop;
+    } else {
+      followTail = true;
+      scrollToBottom();
+    }
   }
 
   /**
@@ -1182,32 +1488,6 @@ export function mountInbox(root, { me, openRequest = null }) {
         " Open in Google Maps",
       ]),
     ]);
-  }
-
-  function retryButton(message) {
-    if (message.status !== "failed" || message.direction !== "out") return null;
-
-    return el(
-      "button.msg__retry",
-      {
-        type: "button",
-        style: "margin-top: 6px;",
-        onclick: async (event) => {
-          const button = event.currentTarget;
-          button.disabled = true;
-          button.textContent = "Retrying…";
-          try {
-            await inbox.retry(message.id);
-            if (state.activeId) await loadMessages(state.activeId);
-          } catch (err) {
-            button.disabled = false;
-            button.replaceChildren(icon("refresh", { size: 13 }), " Retry");
-            toast(`Retry failed: ${err.message}`, "err");
-          }
-        },
-      },
-      [icon("refresh", { size: 13 }), " Retry"]
-    );
   }
 
   /**
@@ -1266,14 +1546,55 @@ export function mountInbox(root, { me, openRequest = null }) {
     ui.composer.querySelector(".composer__input")?.focus();
   }
 
+  /** Human-readable send failure for the bubble (Meta codes + our guards). */
+  function formatSendFailure(message) {
+    const code = String(message.error_code || "").trim();
+    const detail = String(message.error_detail || "").trim();
+    if (code === "RECIPIENT_MISMATCH") return detail || "Recipient number mismatch";
+    if (code === "131026") {
+      return (
+        "131026 · Message undeliverable — this phone may not be on WhatsApp, " +
+        "or the country code is wrong. Confirm the number and resend the template."
+      );
+    }
+    return [code, detail].filter(Boolean).join(" · ");
+  }
+
   function messageBubble(message) {
+    if (message.kind === "system") {
+      return el("div.msg.msg--system", { "data-id": message.id ?? "" }, [message.body || ""]);
+    }
+
     const outbound = message.direction === "out";
     const tick = outbound ? STATUS_TICK[message.status] : null;
-    const failure = [message.error_code, message.error_detail].filter(Boolean).join(" · ");
+    const failure = formatSendFailure(message);
     const author = outbound && message.sent_by && message.sent_by.id !== state.me.id ? message.sent_by.display_name : null;
 
     const media = mediaNode(message);
     const location = locationNode(message);
+    const special = specialMessageNode(message);
+    const kind = String(message.kind || "").toLowerCase();
+    const bodyText = String(message.body || "").trim();
+    const isButtonReply = kind === "button" || kind === "interactive";
+    const templateLine =
+      !bodyText && message.template_name
+        ? el("div.msg__template-line", {}, [
+            el("span.msg__template-badge", {}, ["Template"]),
+            message.template_name,
+          ])
+        : null;
+    const mainText = bodyText && !special
+      ? el("div.msg__text", {}, [
+          isButtonReply ? buttonReplyTag(kind) : null,
+          message.body,
+        ])
+      : null;
+    const templateFooter = kind === "template" ? templateFooterNode(message) : null;
+    const templateBtns = kind === "template" ? templateButtonsRow(message) : null;
+    const emptyHint =
+      !media && !location && !special && !mainText && !templateLine && !templateFooter
+        ? el("div.msg__empty-hint", {}, [messageFallbackLabel(message)])
+        : null;
 
     const forwardedTag = message.is_forwarded
       ? el("div.msg__forwarded-tag", {
@@ -1282,7 +1603,11 @@ export function mountInbox(root, { me, openRequest = null }) {
           icon("forward", { size: 12 }),
           "Forwarded",
         ])
-      : null;
+      : message.is_panel_copy
+        ? el("div.msg__forwarded-tag", {
+            style: "font-size: 11px; font-style: italic; opacity: 0.75; margin-bottom: 4px;",
+          }, ["Panel copy"])
+        : null;
 
     const starBadge = message.is_starred
       ? el("span.msg__star-badge", {
@@ -1345,25 +1670,31 @@ export function mountInbox(root, { me, openRequest = null }) {
     ]);
 
     return el("div.msg", { class: outbound ? "msg--out" : "msg--in", "data-id": message.id ?? "" }, [
-      el("div.msg__bubble", {}, [
-        forwardedTag,
-        quotedNode(message.reply_to),
-        location,
-        media,
-        message.body ? el("div.msg__text", {}, [message.body]) : null,
-        !media && !location && !message.body ? el("div.msg__unsupported", {}, [unsupportedLabel(message.kind)]) : null,
-        failure ? el("div.msg__error", {}, [failure]) : null,
-        retryButton(message),
-        el("div.msg__foot", {}, [
-          author ? el("span.msg__author", {}, [author]) : null,
-          el("span", {}, [stamp(message.created_at)]),
-          starBadge,
-          tick
-            ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [
-                icon(tick.name, { size: 15 }),
-              ])
-            : null,
+      el("div.msg__stack", {}, [
+        el("div.msg__bubble", {}, [
+          forwardedTag,
+          quotedNode(message.reply_to),
+          location,
+          special,
+          media,
+          templateLine,
+          mainText,
+          templateFooter,
+          emptyHint,
+          failure ? el("div.msg__error", {}, [failure]) : null,
+          retryButton(message),
+          el("div.msg__foot", {}, [
+            author ? el("span.msg__author", {}, [author]) : null,
+            el("span", {}, [stamp(message.created_at)]),
+            starBadge,
+            tick
+              ? el("span.tick", { class: tick.className || "", title: failure || tick.label }, [
+                  icon(tick.name, { size: 15 }),
+                ])
+              : null,
+          ]),
         ]),
+        templateBtns,
       ]),
       actionToolbar,
       reactionsNode(message),
@@ -1395,38 +1726,44 @@ export function mountInbox(root, { me, openRequest = null }) {
   }
 
   /**
-   * Attachments are downloaded from Meta by a background task, so a message can
-   * arrive before its file does. The server pushes a message.status event once
-   * the download settles, which re-renders this bubble — so the waiting state
-   * needs no polling and no retry affordance.
-   *
-   * The panel is same-origin with the API and the media view is cookie
-   * authenticated, so `src` works directly: no fetch, no blob, no header.
-   */
-  /**
-   * "Send again" under a failed outbound message.
-   *
-   * Only text can be replayed from what the panel holds: a failed attachment's
-   * media_id is not in the message payload, so that one has to be re-attached.
+   * Retry a failed outbound via the server (templates/media/text). Text-only
+   * "Send again" remains as a fallback when the gateway retry is refused.
    */
   function retryButton(message) {
     if (message.status !== "failed" || message.direction !== "out") return null;
-    if (message.kind !== "text" || !message.body) return null;
 
     return el(
       "button.msg__retry",
       {
         type: "button",
+        style: "margin-top: 6px;",
         onclick: async (event) => {
           const button = event.currentTarget;
           button.disabled = true;
-          button.textContent = "Sending…";
-          const conversation = findConversation(state.activeId);
-          if (conversation) await sendText(conversation, message.body);
-          button.remove();
+          button.textContent = "Retrying…";
+          try {
+            await inbox.retry(message.id);
+            if (state.activeId) await loadMessages(state.activeId);
+          } catch (err) {
+            if (message.kind === "text" && message.body) {
+              button.textContent = "Sending…";
+              try {
+                const conversation = findConversation(state.activeId);
+                if (conversation) await sendText(conversation, message.body);
+                button.remove();
+                return;
+              } catch (sendErr) {
+                toast(`Retry failed: ${sendErr.message || err.message}`, "err");
+              }
+            } else {
+              toast(`Retry failed: ${err.message}`, "err");
+            }
+            button.disabled = false;
+            button.replaceChildren(icon("refresh", { size: 13 }), " Retry");
+          }
         },
       },
-      [icon("refresh", { size: 13 }), "Send again"]
+      [icon("refresh", { size: 13 }), " Retry"]
     );
   }
 
@@ -1438,59 +1775,11 @@ export function mountInbox(root, { me, openRequest = null }) {
   }
 
   function mediaNode(message) {
-    const kind = String(message.kind || "").toLowerCase();
-    if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
-
-    if (message.media_failed) {
-      return el("div.msg__media-failed", {}, [icon("alert", { size: 15 }), "This attachment is unavailable"]);
-    }
-
-    if (!message.media_url) {
-      // Outbound attachments are uploaded straight to the gateway and never
-      // stored our side, so there is nothing to show back — saying it is still
-      // downloading would be plainly wrong. Inbound is the real waiting case.
-      if (message.direction === "out") {
-        return el("div.msg__sent-media", {}, [
-          iconForKind(kind, { size: 15 }) || icon("paperclip", { size: 15 }),
-          `${SENT_MEDIA_LABEL[kind] || "File"} sent`,
-        ]);
-      }
-      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Downloading attachment…"]);
-    }
-
-    if (!message.media_ready) {
-      return el("div.msg__pending", {}, [el("span.spinner.spinner--sm"), "Downloading attachment…"]);
-    }
-
-    if (kind === "image" || kind === "sticker") {
-      return el("img.msg__image", {
-        src: message.media_url,
-        alt: message.media_name || "image",
-        loading: "lazy",
-        title: "View full size",
-        onclick: () => openImage(message),
-      });
-    }
-    // Voice notes arrive as audio/ogg; a plain player is what they need.
-    if (kind === "audio") return el("audio.msg__audio", { src: message.media_url, controls: true });
-
-    if (kind === "video") {
-      // No poster comes from the API, so preload the metadata — the browser
-      // then paints the first frame instead of a black rectangle.
-      return el("video.msg__video", { src: message.media_url, controls: true, preload: "metadata" });
-    }
-
-    return el("a.msg__doc", { href: message.media_url, target: "_blank", rel: "noopener", download: message.media_name || "" }, [
-      el("div.msg__doc-icon", {}, [icon("file", { size: 22 })]),
-      el("div.msg__doc-meta", {}, [
-        el("div.msg__doc-name", { title: message.media_name || "" }, [message.media_name || "Document"]),
-        el("div.msg__doc-sub", {}, [docSubtitle(message)]),
-      ]),
-      el("div.msg__doc-dl", { title: "Download" }, [icon("download", { size: 17 })]),
-    ]);
+    return mediaMessageNode(message, {
+      onImageClick: openImage,
+      formatBytes,
+    });
   }
-
-  const SENT_MEDIA_LABEL = { image: "Photo", sticker: "Sticker", video: "Video", audio: "Audio", document: "Document" };
 
   const UNSUPPORTED_LABEL = {
     location: "Location sent",
@@ -1507,6 +1796,8 @@ export function mountInbox(root, { me, openRequest = null }) {
     // sent to us, and nothing can be re-imported later. Spelled out because
     // "[unknown]" reads to an agent as a fault in this panel, and the next thing
     // they do is report a bug instead of asking the customer to resend.
+    album: "Photo album",
+    pinned_message: "Pinned message",
     unknown: "WhatsApp could not deliver this message. Ask the customer to send it again as text, a photo or a file.",
     unsupported: "WhatsApp could not deliver this message. Ask the customer to send it again as text, a photo or a file.",
   };
@@ -1514,10 +1805,19 @@ export function mountInbox(root, { me, openRequest = null }) {
   const unsupportedLabel = (kind) =>
     UNSUPPORTED_LABEL[String(kind || "").toLowerCase()] || `[${kind || "unknown"}]`;
 
-  function docSubtitle(message) {
-    const ext = String(message.media_name || "").split(".").pop()?.toUpperCase();
-    const size = formatBytes(message.media_size);
-    return [ext && ext.length <= 5 ? ext : null, size].filter(Boolean).join(" · ") || "Download";
+  function messageFallbackLabel(message) {
+    const kind = String(message.kind || "").toLowerCase();
+    if (message.media_failed) {
+      if (kind === "audio") return "Voice message — file not saved on server";
+      if (kind === "image" || kind === "sticker") return "Photo — file not saved on server";
+      if (kind === "video") return "Video — file not saved on server";
+      return "Attachment — file not saved on server";
+    }
+    if (message.status === "failed" || message.status === "exhausted") {
+      return formatSendFailure(message) || "Message failed to send";
+    }
+    if (kind === "template") return message.template_name ? `Template: ${message.template_name}` : "Template message";
+    return unsupportedLabel(kind);
   }
 
   /* ------------------------------------------------------------- composer */
@@ -1534,17 +1834,24 @@ export function mountInbox(root, { me, openRequest = null }) {
     }
 
     if (!conversation.is_session_open) {
+      // Do not mount #wa-composer-slot here — reply-buttons / reminders would
+      // stay clickable while free-form is closed and look like a broken send.
       ui.composer.append(
         el("div.locked", {}, [
-          el("div.locked__text", {}, [
-            // Not "sending a template reopens it". A template does not reopen
-            // the window — only a message *from* the customer does. Telling an
-            // agent otherwise is what sends them to write a free-form reply
-            // straight after a template and collect Meta's error 131049.
-            "The 24-hour window is closed, so only a template can be sent. " +
-              "The window reopens when the customer writes back.",
+          el("div.locked__main", {}, [
+            el("div.locked__text", {}, [
+              // Not "sending a template reopens it". A template does not reopen
+              // the window — only a message *from* the customer does. Telling an
+              // agent otherwise is what sends them to write a free-form reply
+              // straight after a template and collect Meta's error 131049.
+              "The 24-hour window is closed, so only a template can be sent. " +
+                "A template does not reopen free-form chat — after you send it, wait for the customer to reply, then type normally. " +
+                "Replying in free text before they answer usually fails with Meta error 131049.",
+            ]),
+            el("p.locked__note", {}, [
+              "This Official API channel also cannot show outbound blue ticks, typing indicators, or send reactions — Meta gateway limits, not a panel bug.",
+            ]),
           ]),
-          slots.composer,
           el("button.btn.btn--primary", { type: "button", onclick: () => openTemplates(conversation) }, [
             "Choose a template",
           ]),
@@ -1711,6 +2018,7 @@ export function mountInbox(root, { me, openRequest = null }) {
           state.messages.push(message);
           appendMessageNode(messageBubble(message), { wasAtBottom: true });
         }
+        bumpConversationActivity(conversation, message || { kind: "document", created_at: new Date().toISOString() });
       },
     });
   }
@@ -1732,6 +2040,28 @@ export function mountInbox(root, { me, openRequest = null }) {
     // The agent just hit send, so following their own message is always right.
     appendMessageNode(messageBubble(draft), { wasAtBottom: true });
     return draft;
+  }
+
+  /**
+   * WhatsApp list rule: only a new message (send or receive) moves a chat.
+   * Opening / marking read must not change last_message_at.
+   */
+  function bumpConversationActivity(conversation, messageLike) {
+    if (!conversation) return;
+    const at = messageLike?.created_at || new Date().toISOString();
+    const prevAt = Date.parse(conversation.last_message_at || "") || 0;
+    const nextAt = Date.parse(at) || Date.now();
+    if (nextAt < prevAt) {
+      upsertConversation(conversation);
+      return;
+    }
+    conversation.last_message_at = at;
+    if (messageLike?.kind) conversation.last_message_kind = messageLike.kind;
+    const preview =
+      (messageLike?.body && String(messageLike.body).trim()) ||
+      (messageLike?.kind && messageLike.kind !== "text" ? `[${messageLike.kind}]` : "");
+    if (preview) conversation.last_message_preview = String(preview).slice(0, 255);
+    upsertConversation(conversation);
   }
 
   function replaceMessage(draftId, real) {
@@ -1764,6 +2094,7 @@ export function mountInbox(root, { me, openRequest = null }) {
     }
 
     const draft = appendOptimistic({ kind: "text", body, reply_to: replyTo });
+    bumpConversationActivity(conversation, draft);
     try {
       const real = await inbox.send(conversation.id, {
         kind: "text",
@@ -1771,6 +2102,7 @@ export function mountInbox(root, { me, openRequest = null }) {
         reply_to_id: replyTo?.id,
       });
       replaceMessage(draft.id, real || { status: "sent" });
+      if (real?.created_at) bumpConversationActivity(conversation, real);
     } catch (error) {
       replaceMessage(draft.id, { status: "failed", body: `${body}\n\n⚠ ${error.message}` });
     }
@@ -1780,7 +2112,17 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   async function templatesFor(numberId) {
     if (state.templates.has(numberId)) return state.templates.get(numberId);
-    const list = asList(await catalog.templates(numberId), "templates");
+    const ownsNumber = state.numbers.some((n) => String(n.id) === String(numberId));
+    const transferred = state.conversations.find(
+      (c) =>
+        String(c.number_id) === String(numberId) &&
+        String(c.assigned_agent?.id || c.assigned_agent) === String(state.me.id)
+    );
+    const list = ownsNumber
+      ? asList(await catalog.templates(numberId), "templates")
+      : transferred
+        ? asList(await inbox.conversationTemplates(transferred.id), "templates")
+        : asList(await catalog.templates(numberId), "templates");
     state.templates.set(numberId, list);
     return list;
   }
@@ -1832,10 +2174,27 @@ export function mountInbox(root, { me, openRequest = null }) {
    * different channel with different rules, and it has a chat list, threads
    * and a composer of its own.
    */
-  function openLinkedDevices() {
+  /**
+   * @param {string} [phoneDigits]  when set (CRM "Open with WhatsApp"), land on
+   *   that chat in OpenWA, or the new-contact form if there is no chat yet.
+   */
+  function openLinkedDevices(phoneDigits) {
+    if (me.can_linked_devices === false) {
+      toast("Linked phones access is not enabled for your account", "err");
+      return;
+    }
+    const digits = String(phoneDigits || "").replace(/\D/g, "");
+    const base = LINKED_DEVICES_URL.replace(/\/+$/, "");
+    const src = digits.length >= 8
+      ? `${base}/chats?phone=${encodeURIComponent(digits)}&embedded=1`
+      : `${base}/?embedded=1`;
+
     const frame = el("iframe.linked__frame", {
-      src: LINKED_DEVICES_URL,
-      title: "Linked devices",
+      src,
+      title: "Linked phones",
+      // Voice notes: getUserMedia is refused in a nested iframe unless this
+      // frame (and Bitrix's outer iframe) delegate the microphone.
+      allow: "microphone; autoplay",
       // Every flag here was added because something inside was silently doing
       // nothing without it. A sandboxed frame does not refuse loudly.
       //
@@ -1879,6 +2238,12 @@ export function mountInbox(root, { me, openRequest = null }) {
         { type: "openwa_auth", key: credentials.apiKey },
         openwaOrigin
       );
+      if (digits.length >= 8) {
+        frame.contentWindow?.postMessage(
+          { type: "openwa_open_phone", phone: digits },
+          openwaOrigin
+        );
+      }
     };
 
     const onFrameMessage = (event) => {
@@ -1912,11 +2277,18 @@ export function mountInbox(root, { me, openRequest = null }) {
       close();
     };
 
+    // Same liquid-glass shell as the Omni / API WhatsApp screen (pic-1), so the
+    // QR-linked inbox does not look like a different product sitting next to it.
     const screen = el("section.linked", {}, [
+      el("div.linked__glass-bg", { "aria-hidden": "true" }, [
+        el("div.linked__blob.linked__b1"),
+        el("div.linked__blob.linked__b2"),
+        el("div.linked__blob.linked__b3"),
+        el("div.linked__blob.linked__b4"),
+      ]),
       el("header.linked__bar", {}, [
         icon("smartphone", { size: 17 }),
-        el("span.linked__title", {}, ["Linked devices"]),
-        el("span.linked__note", {}, ["QR-linked phones, separate from the Business Platform numbers"]),
+        el("span.linked__title", {}, ["Linked phones"]),
         el("button.btn.btn--icon.linked__close", { type: "button", title: "Back to the inbox", onclick: close }, [
           icon("close", { size: 18 }),
         ]),
@@ -2039,7 +2411,9 @@ export function mountInbox(root, { me, openRequest = null }) {
           const isCurrent = String(agent.id) === String(currentAgentId);
           agentSelect.append(
             el("option", { value: agent.id }, [
-              `${agent.display_name || agent.username} ${isCurrent ? "(Current)" : ""}`,
+              `${agent.display_name || agent.username}${
+                agent.community ? ` · ${agent.community}` : ""
+              } ${isCurrent ? "(Current)" : ""}`,
             ])
           );
         }
@@ -2061,9 +2435,16 @@ export function mountInbox(root, { me, openRequest = null }) {
       send.disabled = true;
       send.textContent = "Transferring…";
       try {
-        await inbox.assign(conversation.id, { agent_id: selectedId, reason: reason.value.trim() || undefined });
+        const updated = await inbox.assign(conversation.id, {
+          agent_id: selectedId,
+          reason: reason.value.trim() || undefined,
+        });
         dialog.close();
-        await loadConversations();
+        await focusTransferredChat(updated || conversation);
+        const picked = activeAgents.find((a) => String(a.id) === String(selectedId));
+        toast(
+          `Copied onto ${picked?.display_name || picked?.username || "the agent"}'s Official number. They send the next WhatsApp message from that number (template if the window is closed).`
+        );
       } catch (err) {
         send.disabled = false;
         send.textContent = "Transfer";
@@ -2097,7 +2478,11 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   /* ------------------------------------------------------------ realtime */
 
+  let liveSocket = null;
+  let socketUnloadBound = false;
+
   function connectSocket() {
+    liveSocket?.close();
     const socket = new InboxSocket({
       onEvent: handleEvent,
 
@@ -2130,8 +2515,12 @@ export function mountInbox(root, { me, openRequest = null }) {
       },
     });
 
+    liveSocket = socket;
     socket.connect();
-    window.addEventListener("beforeunload", () => socket.close());
+    if (!socketUnloadBound) {
+      socketUnloadBound = true;
+      window.addEventListener("beforeunload", () => liveSocket?.close());
+    }
   }
 
   // Events carry whole objects, not ids, so the panel renders them directly
@@ -2141,7 +2530,13 @@ export function mountInbox(root, { me, openRequest = null }) {
     if (event === "message.new") return onMessageNew(data);
     if (event === "message.status") return onMessageStatus(data.message);
     if (event === "conversation.updated" || event === "conversation.assigned") {
-      return onConversationChanged(data.conversation);
+      const mine = String(data.conversation?.assigned_agent?.id || "") === String(state.me?.id);
+      if (event === "conversation.assigned" && mine) {
+        toast("A chat was transferred to you.");
+        focusTransferredChat(data.conversation);
+        return;
+      }
+      return onConversationChanged(data.conversation, { force: mine });
     }
     // The closing warning carries the conversation, and the panel derives the
     // warning state from it — so re-sends of the same warning are harmless.
@@ -2155,21 +2550,60 @@ export function mountInbox(root, { me, openRequest = null }) {
     console.debug("[a7-wa] unhandled ws event:", event, data);
   }
 
-  /** Inserts or replaces a conversation, keeping the list newest-activity-first. */
-  function upsertConversation(conversation) {
+  /**
+   * Transfer landed this thread on the agent looking at the panel. Drop the
+   * number / search / tag filters so it is not hidden, then open it — list
+   * row and thread together.
+   */
+  async function focusTransferredChat(conversation) {
     if (!conversation) return;
-    // A filtered-out number must not silently reappear in the list.
-    if (state.numberFilter && String(conversation.number_id) !== String(state.numberFilter)) return;
+    state.search = "";
+    ui.search.value = "";
+    state.tagFilter = null;
+    state.numberFilter = "";
+    numberPicker.refresh({ resetSearch: true });
+    quickFilters.render();
+    await loadConversations({ keepActive: true });
+    upsertConversation(conversation, { force: true });
+    await openConversation(conversation.id);
+  }
+
+  /** Inserts or replaces a conversation, keeping the list newest-activity-first. */
+  function upsertConversation(conversation, { force = false } = {}) {
+    if (!conversation) return;
+    // A filtered-out number must not silently reappear in the list — unless
+    // this chat was just transferred to the agent sitting here.
+    if (
+      !force &&
+      !isTransferredIn(conversation) &&
+      state.numberFilter &&
+      String(conversation.number_id) !== String(state.numberFilter)
+    ) {
+      return;
+    }
 
     const index = state.conversations.findIndex((c) => c.id === conversation.id);
-    if (index === -1) state.conversations.unshift(conversation);
-    else state.conversations[index] = conversation;
+    if (index === -1) {
+      state.conversations.unshift(conversation);
+    } else {
+      const prev = state.conversations[index];
+      const prevAt = Date.parse(prev.last_message_at || "") || 0;
+      const nextAt = Date.parse(conversation.last_message_at || "") || 0;
+      // Opening a chat (or a stale WS payload) must not bury a thread we just
+      // bumped for a send — keep the fresher activity fields.
+      if (nextAt < prevAt) {
+        conversation = {
+          ...conversation,
+          last_message_at: prev.last_message_at,
+          last_message_preview: prev.last_message_preview,
+          last_message_kind: prev.last_message_kind,
+        };
+      }
+      state.conversations[index] = conversation;
+    }
 
-    state.conversations.sort(
-      (a, b) => new Date(b.last_message_at || 0) - new Date(a.last_message_at || 0)
-    );
     renderConversations();
-    ui.listStatus.textContent = state.conversations.length ? "" : "No conversations.";
+    renderListStatus();
   }
 
   /**
@@ -2216,7 +2650,8 @@ export function mountInbox(root, { me, openRequest = null }) {
       if (message.direction === "in") markRead(conversation);
     }
 
-    upsertConversation(conversation);
+    // New message activity — same rule as WhatsApp: this chat jumps to the top.
+    bumpConversationActivity(conversation, message);
     if (active) {
       renderThreadHeader(conversation);
       renderComposer(conversation);
@@ -2228,8 +2663,8 @@ export function mountInbox(root, { me, openRequest = null }) {
     replaceMessageById(message);
   }
 
-  function onConversationChanged(conversation) {
-    upsertConversation(conversation);
+  function onConversationChanged(conversation, { force = false } = {}) {
+    upsertConversation(conversation, { force });
     if (conversation?.id === state.activeId) {
       // Assignment or an expiring window changes what the composer may do.
       renderThreadHeader(conversation);

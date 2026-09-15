@@ -1,6 +1,23 @@
-import { chatKind, isChannelJid, parseWaId, toNeutralJid, userPart } from './wa-id';
+import { chatKind, isChannelJid, normalizePhoneIdentity, parseWaId, toNeutralJid, userPart } from './wa-id';
 
 describe('wa-id', () => {
+  describe('normalizePhoneIdentity', () => {
+    it.each([
+      ['+92 316-6753715', '923166753715'],
+      ['923166753715@c.us', '923166753715'],
+      ['923166753715:4@s.whatsapp.net', '923166753715'],
+    ])('normalizes %s to %s', (value, expected) => {
+      expect(normalizePhoneIdentity(value)).toBe(expected);
+    });
+
+    it.each(['', '   ', '123@lid', 'status@broadcast', 'abc@c.us', '12345', null, undefined])(
+      'fails closed for %p',
+      value => {
+        expect(normalizePhoneIdentity(value)).toBeNull();
+      },
+    );
+  });
+
   describe('userPart', () => {
     it('strips the domain and the device suffix', () => {
       expect(userPart('628111@c.us')).toBe('628111');

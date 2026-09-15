@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import { nextReconnectState } from '../utils/reconnectState';
 import { applyIncomingToChatList } from '../utils/chatList';
-import { filterChats, filterChannels, groupStatusesByContact } from '../utils/chatFilters';
-import { ArrowLeft, Loader2, Megaphone, CircleDashed, AlertCircle, MessageSquare } from 'lucide-react';
+import { filterChats, filterChannels, groupStatusesByContact, chatMatchesPhone, digitsOnly } from '../utils/chatFilters';
+import { ArrowLeft, Loader2, Megaphone, CircleDashed, AlertCircle, MessageSquare, ExternalLink } from 'lucide-react';
 import { useProfilePicture } from '../hooks/useProfilePicture';
 import { useProfilePictures } from '../hooks/useProfilePictures';
 import { useResolvedPhone } from '../hooks/useResolvedPhone';
@@ -12,7 +13,10 @@ import { formatPhoneForDisplay } from '../utils/formatPhone';
 import {
   sessionApi,
   messageApi,
+  conversationHealthApi,
+  chatProfileApi,
   asMessageType,
+  ALL_CHATS_SESSION_ID,
   // A7: the sidebar search box now looks inside messages too, not just chat names.
   searchApi,
   type Session,
@@ -34,6 +38,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useToast } from '../hooks/useToast';
 import { PageHeader } from '../components/PageHeader';
+import { ConversationHealthPanel } from '../components/ConversationHealthPanel';
+import { useAppMenu } from '../hooks/useAppMenu';
 // A7: shared with what used to be the corner search box — it turns a typed query
 // into the API's params, and returns null for one too short to be worth sending.
 import { buildSearchParams } from '../utils/search-highlight';
@@ -42,6 +48,7 @@ import { useChannelMessages } from '../hooks/useChannelMessages';
 import { useContactStatuses } from '../hooks/useContactStatuses';
 import { useChatScrollPosition } from '../hooks/useChatScrollPosition';
 import { useCurrentEngineQuery } from '../hooks/queries';
+import { useRole } from '../hooks/useRole';
 import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 import MessageBody from '../components/chats/MessageBody';
 import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLightbox';
@@ -54,6 +61,7 @@ import StatusComposeModal from '../components/chats/StatusComposeModal';
 // A7: the agent's two sidebar actions — reaching a new number, and their own figures.
 import NewContactModal from '../components/chats/NewContactModal';
 import AgentProfileModal from '../components/chats/AgentProfileModal';
+import ContactProfilePanel from '../components/chats/ContactProfilePanel';
 import './Chats.css';
 
 // Quiet window for coalescing mark-as-read RPCs (see markReadCoalescer below).
@@ -114,7 +122,9 @@ const statusFontStyle = (font?: number): { fontFamily?: string; fontWeight?: num
 export function Chats() {
   const { t } = useTranslation();
   useDocumentTitle(t('nav.chats'));
+  const location = useLocation();
   const { error: showErrorToast, warning: showWarningToast } = useToast();
+  const { isAdmin } = useRole();
 
   // Sessions list & active session
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -185,17 +195,43 @@ export function Chats() {
   // A7: the two sidebar actions. Both are dialogs rather than routes — an agent
   // opening either is stepping aside from a conversation, not leaving it.
   const [newContactOpen, setNewContactOpen] = useState<boolean>(false);
+  const [newContactPhone, setNewContactPhone] = useState<string>('');
   const [profileOpen, setProfileOpen] = useState<boolean>(false);
+  const [healthOpen, setHealthOpen] = useState<boolean>(false);
+  /** Customer contact card (right drawer) — distinct from the agent's own Profile modal. */
+  const [contactPanelOpen, setContactPanelOpen] = useState(false);
+  const { registerChatsActions } = useAppMenu();
+
+  // App dropdown (pic-1) calls these — Conversation Health (admin) / New contact / Profile.
+  useEffect(() => {
+    registerChatsActions({
+      onNewContact: () => setNewContactOpen(true),
+      onOpenProfile: () => setProfileOpen(true),
+      onOpenHealth: () => {
+        if (isAdmin) setHealthOpen(true);
+      },
+    });
+    return () => registerChatsActions(null);
+  }, [registerChatsActions, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin && healthOpen) setHealthOpen(false);
+  }, [isAdmin, healthOpen]);
   // The whole row, not just its id: one dialog reads the linked number's country
   // to make sense of a local number, the other names the phone it is reporting on.
-  const selectedSession = sessions.find(s => s.id === selectedSessionId) ?? null;
+  const allChatsMode = selectedSessionId === ALL_CHATS_SESSION_ID;
+  const selectedSession = allChatsMode
+    ? null
+    : (sessions.find(s => s.id === selectedSessionId) ?? null);
+  // All-chats rows carry their own sessionId; single-session mode uses the picker.
+  const threadSessionId = activeChat?.sessionId || (allChatsMode ? '' : selectedSessionId);
 
   const {
     data: messages = [],
     isLoading: loadingMessages,
     isError: messagesError,
-  } = useChatMessages(selectedSessionId, activeChat?.id ?? null);
-  const { appendMessage, updateMessage, loadChatMedia } = useChatMessagesActions();
+  } = useChatMessages(threadSessionId, activeChat?.id ?? null);
+  const { appendMessage, updateMessage, loadMessageMedia } = useChatMessagesActions();
   const queryClient = useQueryClient();
 
   // Lightbox state for media viewer
@@ -251,11 +287,11 @@ export function Chats() {
   // (per-row queries burst the per-IP throttle into 429s). Sorted-key cached 1h; rows fall back
   // to the generic icon for ids that resolve null.
   const chatIds = useMemo(() => chats.map(c => c.id), [chats]);
-  const listPics = useProfilePictures(selectedSessionId || undefined, chatIds);
+  const listPics = useProfilePictures(allChatsMode ? undefined : selectedSessionId || undefined, chatIds);
 
   // Profile-picture fetch for the active room (cached 1h by useProfilePicture; TanStack Query
   // dedupes, so other components querying the same key share this slice).
-  const activePp = useProfilePicture(selectedSessionId || undefined, activeChat?.id);
+  const activePp = useProfilePicture(threadSessionId || undefined, activeChat?.id);
 
   // Header phone line. Local formatting handles @c.us ids offline; for anything else personal
   // (notably @lid privacy ids, which are NOT phones and must never be formatted as one) resolve
@@ -263,11 +299,133 @@ export function Chats() {
   const activePhoneDisplay = activeChat ? formatPhoneForDisplay(activeChat.id) : null;
   const needsPhoneResolution = Boolean(activeChat && activeChat.kind === 'individual' && !activePhoneDisplay);
   const resolvedPhoneQ = useResolvedPhone(
-    needsPhoneResolution ? selectedSessionId || undefined : undefined,
+    needsPhoneResolution ? threadSessionId || undefined : undefined,
     needsPhoneResolution ? activeChat?.id : undefined,
   );
   const activePhoneText =
     activePhoneDisplay ?? (resolvedPhoneQ.data ? formatPhoneForDisplay(resolvedPhoneQ.data) : null);
+
+  const chatLeadQ = useQuery({
+    queryKey: ['chat-lead', threadSessionId, activeChat?.id],
+    queryFn: () => conversationHealthApi.getChatLead(threadSessionId!, activeChat!.id),
+    enabled: Boolean(threadSessionId && activeChat?.id && !activeChat.isGroup),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const chatLead =
+    chatLeadQ.data && 'bitrixLeadId' in chatLeadQ.data && chatLeadQ.data.bitrixLeadId
+      ? chatLeadQ.data
+      : null;
+
+  // Deep-link from Conversation Health list: open a specific session + chat.
+  useEffect(() => {
+    const state = location.state as { openSessionId?: string; openChatId?: string } | null;
+    if (!state?.openSessionId || !state?.openChatId) return;
+    setSelectedSessionId(state.openSessionId);
+    const chatId = state.openChatId;
+    void sessionApi
+      .getChats(state.openSessionId)
+      .then(list => {
+        const found = list.find(c => c.id === chatId);
+        if (found) setActiveChat({ ...found, sessionId: state.openSessionId });
+      })
+      .catch(() => undefined);
+  }, [location.state]);
+
+  // Deep-link from Bitrix CRM tab: /chats?phone=971… (also sessionStorage + postMessage).
+  const pendingPhoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    const fromQuery = digitsOnly(new URLSearchParams(location.search).get('phone') || '');
+    const fromStore = digitsOnly(sessionStorage.getItem('openwa_open_phone') || '');
+    const phone = fromQuery.length >= 8 ? fromQuery : fromStore.length >= 8 ? fromStore : '';
+    if (phone) pendingPhoneRef.current = phone;
+  }, [location.search]);
+
+  useEffect(() => {
+    const trusted = new Set([
+      window.location.origin,
+      'https://wa.srv1802669.hstgr.cloud',
+      ...(import.meta.env.DEV ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : []),
+    ]);
+    const onMessage = (event: MessageEvent) => {
+      if (!trusted.has(event.origin)) return;
+      if (!event.data || typeof event.data !== 'object') return;
+      if (event.data.type !== 'openwa_open_phone') return;
+      const phone = digitsOnly(String(event.data.phone || ''));
+      if (phone.length < 8) return;
+      pendingPhoneRef.current = phone;
+      sessionStorage.setItem('openwa_open_phone', phone);
+      setSearchQuery(phone);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  useEffect(() => {
+    const phone = pendingPhoneRef.current;
+    if (!phone || phone.length < 8) return;
+    if (loadingChats || loadingSessions) return;
+    if (!selectedSessionId && !isAdmin) return;
+
+    const clearPending = () => {
+      sessionStorage.removeItem('openwa_open_phone');
+      pendingPhoneRef.current = null;
+    };
+
+    const openFound = (found: Chat, sessionId: string) => {
+      setSelectedSessionId(sessionId === ALL_CHATS_SESSION_ID ? ALL_CHATS_SESSION_ID : sessionId);
+      setActiveChat({ ...found, sessionId: found.sessionId || sessionId });
+      setSearchQuery(phone);
+      setActiveTab('chats');
+      clearPending();
+    };
+
+    const openNewContact = () => {
+      const sid =
+        selectedSessionId && selectedSessionId !== ALL_CHATS_SESSION_ID
+          ? selectedSessionId
+          : sessions[0]?.id || '';
+      if (!sid) {
+        setSearchQuery(phone);
+        clearPending();
+        return;
+      }
+      setSelectedSessionId(sid);
+      setActiveTab('chats');
+      setNewContactPhone(phone);
+      setNewContactOpen(true);
+      clearPending();
+    };
+
+    const local = chats.find(c => chatMatchesPhone(c, phone));
+    if (local) {
+      openFound(local, local.sessionId || selectedSessionId);
+      return;
+    }
+
+    // Still loading this session's list — wait for the next paint.
+    if (loadingChats) return;
+
+    // Admin: scan All chats once if the current session list missed it.
+    if (isAdmin) {
+      let cancelled = false;
+      void sessionApi
+        .getAllChats()
+        .then(list => {
+          if (cancelled) return;
+          const found = list.find(c => chatMatchesPhone(c, phone));
+          if (found) openFound(found, found.sessionId || ALL_CHATS_SESSION_ID);
+          else openNewContact();
+        })
+        .catch(() => openNewContact());
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Agent: no matching chat on their session → new contact form.
+    openNewContact();
+  }, [chats, selectedSessionId, loadingChats, loadingSessions, isAdmin, sessions]);
 
   // 1. Fetch available connected sessions.
   //
@@ -281,8 +439,10 @@ export function Chats() {
         const list = await sessionApi.list();
         const isSynced = (s: Session) =>
           s.syncProgress === undefined || s.syncProgress === null || s.syncProgress >= 100;
-        const readySessions = list.filter(s => s.status === 'ready' && isSynced(s));
-        setImportingSessions(list.filter(s => s.status === 'ready' && !isSynced(s)));
+        // Soft-removed sessions stay out of the picker — All chats (admin) still lists them.
+        const activeList = list.filter(s => !s.removedAt);
+        const readySessions = activeList.filter(s => s.status === 'ready' && isSynced(s));
+        setImportingSessions(activeList.filter(s => s.status === 'ready' && !isSynced(s)));
 
         // A7: a number that is not connected still has its conversations in our
         // own tables, and the server now answers the chat list from those when no
@@ -293,24 +453,25 @@ export function Chats() {
         // Live ones first so the common case is still the top of the list, and
         // offline ones after, labelled. Read-only over there: no unread counts, no
         // presence, and sending stays unavailable because that needs the handset.
-        const offlineSessions = list
+        const offlineSessions = activeList
           .filter(s => s.status !== 'ready')
           .map(s => ({ ...s, name: `${s.name} (offline)` }));
         setSessions([...readySessions, ...offlineSessions]);
         // Functional: a poll must not pull the selection back to the first session while an agent
         // is reading a different one. Only an empty selection is filled in.
-        if (readySessions.length > 0) {
-          setSelectedSessionId(current =>
-            current && readySessions.some(s => s.id === current) ? current : readySessions[0].id,
-          );
-        }
+        // Keep admin All chats selection stable across quiet polls.
+        setSelectedSessionId(current => {
+          if (current === ALL_CHATS_SESSION_ID) return current;
+          if (current && [...readySessions, ...offlineSessions].some(s => s.id === current)) return current;
+          return readySessions[0]?.id || offlineSessions[0]?.id || (isAdmin ? ALL_CHATS_SESSION_ID : '');
+        });
       } catch (err) {
         if (!quiet) showErrorToast(t('chats.errors.loadSessions'), err instanceof Error ? err.message : undefined);
       } finally {
         if (!quiet) setLoadingSessions(false);
       }
     },
-    [t, showErrorToast],
+    [t, showErrorToast, isAdmin],
   );
 
   useEffect(() => {
@@ -334,8 +495,28 @@ export function Chats() {
       if (!sessionId) return;
       try {
         setLoadingChats(true);
-        const data = await sessionApi.getChats(sessionId);
-        const sorted = [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const data =
+          sessionId === ALL_CHATS_SESSION_ID ? await sessionApi.getAllChats() : await sessionApi.getChats(sessionId);
+        let sorted = [...data].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        // Overlay team-local display names + pins (contact panel) onto the engine list.
+        if (sessionId !== ALL_CHATS_SESSION_ID) {
+          try {
+            const { names, pinned } = await chatProfileApi.listNames(sessionId);
+            const pinnedSet = new Set(pinned || []);
+            sorted = sorted.map(chat => ({
+              ...chat,
+              name: names[chat.id] || chat.name,
+              teamPinned: pinnedSet.has(chat.id),
+            }));
+            sorted.sort((a, b) => {
+              const pin = Number(Boolean(b.teamPinned)) - Number(Boolean(a.teamPinned));
+              if (pin !== 0) return pin;
+              return (b.timestamp || 0) - (a.timestamp || 0);
+            });
+          } catch {
+            // Profile names are optional polish — a failed overlay must not blank the list.
+          }
+        }
         setChats(sorted);
       } catch (err) {
         showErrorToast(t('chats.errors.loadChats'), err instanceof Error ? err.message : undefined);
@@ -345,6 +526,20 @@ export function Chats() {
       }
     },
     [t, showErrorToast],
+  );
+
+  const handleSelectChat = useCallback(
+    (chat: Chat) => {
+      if (chat.canOpenThread === false) {
+        showWarningToast('Removed session', 'History stays in the list; open the thread after reconnecting.');
+        setActiveChat(null);
+        setContactPanelOpen(false);
+        return;
+      }
+      setActiveChat(chat);
+      setContactPanelOpen(false);
+    },
+    [showWarningToast],
   );
 
   useEffect(() => {
@@ -369,11 +564,13 @@ export function Chats() {
   const markReadCoalescer = useMemo(
     () =>
       createTrailingCoalescer<string>(chatId => {
-        void sessionApi.markChatRead(selectedSessionId, chatId).catch(err => {
+        const sid = threadSessionId;
+        if (!sid || sid === ALL_CHATS_SESSION_ID) return;
+        void sessionApi.markChatRead(sid, chatId).catch(err => {
           showWarningToast(t('chats.errors.markRead'), err instanceof Error ? err.message : undefined);
         });
       }, MARK_READ_DEBOUNCE_MS),
-    [selectedSessionId, t, showWarningToast],
+    [threadSessionId, t, showWarningToast],
   );
 
   // Flush pending trailing calls on unmount / session switch: the mark-as-read POST is
@@ -623,11 +820,11 @@ export function Chats() {
   // (mark-as-read + clear sidebar unread badge) live in a small effect below.
 
   const handleReactMessage = async (msg: ChatMessageView, emoji: string) => {
-    if (!selectedSessionId || !activeChat) return;
+    if (!threadSessionId || !activeChat) return;
 
     const msgId = msg.waMessageId || msg.id;
     const currentReactions = msg.metadata?.reactions || {};
-    const sessionPhone = sessions.find(s => s.id === selectedSessionId)?.phone || 'me';
+    const sessionPhone = sessions.find(s => s.id === threadSessionId)?.phone || 'me';
 
     let alreadyReacted = false;
     for (const [sender, emo] of Object.entries(currentReactions)) {
@@ -640,14 +837,14 @@ export function Chats() {
     const emojiToSend = alreadyReacted ? '' : emoji;
 
     try {
-      await messageApi.react(selectedSessionId, {
+      await messageApi.react(threadSessionId, {
         chatId: activeChat.id,
         messageId: msgId,
         emoji: emojiToSend,
       });
 
       // Deep-merge metadata.reactions so existing media / quotedMessage on metadata survive.
-      const key = messagesQueryKey(selectedSessionId, activeChat.id);
+      const key = messagesQueryKey(threadSessionId, activeChat.id);
       queryClient.setQueryData<ChatMessageView[]>(key, (old = []) =>
         old.map(m => {
           if (m.id === msg.id || m.waMessageId === msg.id) {
@@ -669,19 +866,24 @@ export function Chats() {
   };
 
   const handleDeleteMessage = async (msg: ChatMessageView) => {
-    if (!selectedSessionId || !activeChat) return;
+    if (!threadSessionId || !activeChat) return;
     const msgId = msg.waMessageId || msg.id;
 
-    if (!window.confirm(t('chats.deleteConfirm'))) return;
+    // Soft-delete always keeps the body for admin; agents see a deleted placeholder.
+    if (!window.confirm(t(isAdmin ? 'chats.deleteConfirm' : 'chats.deleteConfirmAgent'))) return;
 
     try {
-      await messageApi.delete(selectedSessionId, {
+      await messageApi.delete(threadSessionId, {
         chatId: activeChat.id,
         messageId: msgId,
-        forEveryone: true,
+        forEveryone: isAdmin,
       });
 
-      updateMessage(selectedSessionId, activeChat.id, msg.id, { body: '', type: 'revoked' });
+      // Admin keeps content + Deleted tag; agents get the redacted placeholder locally too.
+      updateMessage(threadSessionId, activeChat.id, msg.id, {
+        ...(isAdmin ? {} : { body: '', type: 'revoked' as const }),
+        metadata: { ...msg.metadata, agentDeleted: true },
+      });
     } catch (err) {
       showErrorToast(t('chats.errors.delete'), err instanceof Error ? err.message : undefined);
     }
@@ -822,10 +1024,14 @@ export function Chats() {
       setMessageHitsLoading(false);
       return;
     }
-    const params = buildSearchParams(query, selectedSessionId ? { sessionId: selectedSessionId } : undefined, {
-      limit: 20,
-      offset: 0,
-    });
+    const params = buildSearchParams(
+      query,
+      allChatsMode || !selectedSessionId ? undefined : { sessionId: selectedSessionId },
+      {
+        limit: 20,
+        offset: 0,
+      },
+    );
     if (!params) {
       setMessageHits([]);
       return;
@@ -852,7 +1058,7 @@ export function Chats() {
       live = false;
       clearTimeout(timer);
     };
-  }, [searchQuery, selectedSessionId]);
+  }, [searchQuery, selectedSessionId, allChatsMode]);
   // The channels zero-state ("not subscribed to any channels") stays keyed on the UNFILTERED list
   // below, so a non-matching search renders an empty list rather than claiming there are none.
   const filteredChannels = filterChannels(channelsQuery.data ?? [], searchQuery);
@@ -900,6 +1106,9 @@ export function Chats() {
         actions={null}
       />
 
+      {/* Conversation Health lives in the sidebar tools menu (hamburger beside
+          "WhatsApp session"), not as a permanent strip above the layout. */}
+
       {/* Real-time connection permanently dropped — let the user re-establish it instead of
           silently showing stale chats. */}
       {connectionFailed && (
@@ -931,7 +1140,7 @@ export function Chats() {
           </p>
           <p>Chats appear as soon as this finishes. Showing a half-imported list would look like the rest was lost.</p>
         </div>
-      ) : sessions.length === 0 ? (
+      ) : sessions.length === 0 && !isAdmin ? (
         <div className="chats-error-state">
           <AlertCircle size={48} className="text-warn" />
           <h3>{t('chats.noSessionsTitle')}</h3>
@@ -946,8 +1155,10 @@ export function Chats() {
           {/* LEFT SIDEBAR: session & chat rooms */}
           <ChatSidebar
             sessions={sessions}
-            selectedSessionId={selectedSessionId}
+            selectedSessionId={allChatsMode ? ALL_CHATS_SESSION_ID : selectedSessionId}
             onSelectSession={setSelectedSessionId}
+            showAllChats={isAdmin}
+            allChatsSelected={allChatsMode}
             activeTab={activeTab}
             onSwitchTab={switchTab}
             searchQuery={searchQuery}
@@ -963,8 +1174,9 @@ export function Chats() {
               loading: loadingChats,
               chats: filteredChats,
               activeChatId: activeChat?.id,
+              activeSessionId: activeChat?.sessionId || threadSessionId,
               pictures: listPics.data,
-              onSelectChat: setActiveChat,
+              onSelectChat: handleSelectChat,
             }}
             channelsTab={{
               engineLoading: currentEngine.isLoading,
@@ -992,35 +1204,54 @@ export function Chats() {
                   <button className="room-back" onClick={() => setActiveChat(null)} aria-label={t('common.back')}>
                     <ArrowLeft size={20} />
                   </button>
-                  <div className="room-avatar">
-                    {activePp.data ? (
-                      <img
-                        src={activePp.data}
-                        alt=""
-                        // Signed CDN URLs rotate every few hours; refetch the slice on a stale load.
-                        onError={() => activePp.refetch()}
-                      />
-                    ) : (
-                      <KindIcon kind={activeChat.kind} />
-                    )}
-                  </div>
-                  <div className="room-contact-info">
-                    <h3>{activeChat.name || activeChat.id.split('@')[0]}</h3>
-                    {/* Personal chats show the prettified phone number — local formatting for
-                        @c.us ids, engine-resolved for @lid privacy ids (which are NOT phones and
-                        must never be formatted as one). Groups fall back to a semantic label;
-                        the raw JID follows below for the technical case. */}
-                    <span className="room-contact-phone">
-                      {activePhoneText ??
-                        (activeChat.isGroup ? t('chats.groupSubtitle') : t('chats.privateContactSubtitle'))}
-                    </span>
-                    {/* Raw JID preserved for the technical case (the gateway speaks JIDs everywhere:
-                        webhooks, message rows, lid resolution). Monospace + muted so it doesn't compete
-                        with the human-facing name/number. */}
-                    <span className="room-contact-jid" title={activeChat.id}>
-                      {activeChat.id}
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    className="room-contact-btn"
+                    onClick={() => setContactPanelOpen(open => !open)}
+                    aria-pressed={contactPanelOpen}
+                    aria-label="Open contact profile"
+                    title="Open contact profile"
+                  >
+                    <div className="room-avatar">
+                      {activePp.data ? (
+                        <img
+                          src={activePp.data}
+                          alt=""
+                          // Signed CDN URLs rotate every few hours; refetch the slice on a stale load.
+                          onError={() => activePp.refetch()}
+                        />
+                      ) : (
+                        <KindIcon kind={activeChat.kind} />
+                      )}
+                    </div>
+                    <div className="room-contact-info">
+                      <h3>{activeChat.name || activeChat.id.split('@')[0]}</h3>
+                      {/* Personal chats show the prettified phone number — local formatting for
+                          @c.us ids, engine-resolved for @lid privacy ids (which are NOT phones and
+                          must never be formatted as one). Groups fall back to a semantic label;
+                          the raw JID follows below for the technical case. */}
+                      <span className="room-contact-phone">
+                        {activePhoneText ??
+                          (activeChat.isGroup ? t('chats.groupSubtitle') : t('chats.privateContactSubtitle'))}
+                      </span>
+                      {/* Raw JID stays on the contact side panel — not in the room header. */}
+                    </div>
+                  </button>
+                  {chatLead && (
+                    <button
+                      type="button"
+                      className="room-open-lead"
+                      title={
+                        chatLead.colour
+                          ? `Conversation Health: ${chatLead.colour.toUpperCase()}`
+                          : 'Open linked CRM record'
+                      }
+                      onClick={() => window.open(chatLead.leadUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      <ExternalLink size={14} />
+                      {t('conversationHealth.openLeadButton')}
+                    </button>
+                  )}
                 </header>
 
                 {/* Messages body (list, media, reactions, scroll-to-bottom) — components/chats/ChatThread. */}
@@ -1038,15 +1269,16 @@ export function Chats() {
                   onReply={setReplyingTo}
                   onReact={handleReactMessage}
                   onDelete={handleDeleteMessage}
+                  isAdmin={isAdmin}
                   // A7: history is read media-free, so an imported photo or clip has no bytes until
-                  // somebody asks. The thread owns the button; this fetches the chat's media.
-                  onLoadMedia={() => loadChatMedia(selectedSessionId, activeChat.id)}
+                  // somebody asks. The thread owns the button; this fetches that one message's file.
+                  onLoadMedia={messageId => loadMessageMedia(threadSessionId, activeChat.id, messageId)}
                 />
 
                 {/* Composer: attachment preview, emoji panel, reply banner, input bar —
                     components/chats/ChatComposer. */}
                 <ChatComposer
-                  selectedSessionId={selectedSessionId}
+                  selectedSessionId={threadSessionId}
                   activeChat={activeChat}
                   replyingTo={replyingTo}
                   setReplyingTo={setReplyingTo}
@@ -1059,6 +1291,57 @@ export function Chats() {
                   previewUrl={previewUrl}
                   setPreviewUrl={setPreviewUrl}
                 />
+
+                {/* Contact drawer lives inside the room so it paints over the thread only —
+                    not as a fixed viewport sheet that inherits translucent glass tokens. */}
+                {contactPanelOpen && activeChat && threadSessionId ? (
+                  <ContactProfilePanel
+                    session={selectedSession}
+                    sessionId={threadSessionId}
+                    chat={activeChat}
+                    pictureUrl={activePp.data}
+                    phoneText={activePhoneText}
+                    onClose={() => setContactPanelOpen(false)}
+                    onDisplayNameSaved={(chatId, displayName) => {
+                      const nextName = displayName?.trim() || null;
+                      setChats(prev =>
+                        prev.map(c => {
+                          if (c.id !== chatId) return c;
+                          if (nextName) return { ...c, name: nextName };
+                          return c;
+                        }),
+                      );
+                      setActiveChat(prev => {
+                        if (!prev || prev.id !== chatId) return prev;
+                        if (nextName) return { ...prev, name: nextName };
+                        return prev;
+                      });
+                      if (!nextName) void loadChats(threadSessionId);
+                    }}
+                    onPinnedChange={(chatId, pinned) => {
+                      setChats(prev => {
+                        const next = prev.map(c => (c.id === chatId ? { ...c, teamPinned: pinned } : c));
+                        next.sort((a, b) => {
+                          const pin = Number(Boolean(b.teamPinned)) - Number(Boolean(a.teamPinned));
+                          if (pin !== 0) return pin;
+                          return (b.timestamp || 0) - (a.timestamp || 0);
+                        });
+                        return next;
+                      });
+                      setActiveChat(prev => (prev && prev.id === chatId ? { ...prev, teamPinned: pinned } : prev));
+                    }}
+                    onArchived={chatId => {
+                      setChats(prev => prev.filter(c => c.id !== chatId));
+                      setActiveChat(prev => (prev && prev.id === chatId ? null : prev));
+                      setContactPanelOpen(false);
+                    }}
+                    onOpenMedia={messageId => {
+                      const idx = imageMedia.findIndex(x => x.id === messageId);
+                      if (idx >= 0) setLightboxIndex(idx);
+                      else void loadMessageMedia(threadSessionId, activeChat.id, messageId);
+                    }}
+                  />
+                ) : null}
               </div>
             ) : activeChannel ? (
               // Read-only channel pane: no send footer, reactions, delete, reply, or markChatRead —
@@ -1175,31 +1458,68 @@ export function Chats() {
         />
       )}
 
-      {/* A7. Both need the session object rather than its id — one to read the
-          linked number's country when a local number is typed, the other to
-          name the phone whose figures it is showing. */}
-      {newContactOpen && selectedSession && (
+      {/* Prefer the picker session; in All chats fall back to the active chat's
+          session, then the first connected session so menu actions never no-op. */}
+      {newContactOpen && (selectedSession || sessions[0]) && (
         <NewContactModal
-          session={selectedSession}
-          onClose={() => setNewContactOpen(false)}
+          session={selectedSession || (activeChat?.sessionId
+            ? sessions.find(s => s.id === activeChat.sessionId) || sessions[0]
+            : sessions[0])!}
+          initialPhone={newContactPhone}
+          onClose={() => {
+            setNewContactOpen(false);
+            setNewContactPhone('');
+          }}
           onStarted={chat => {
             setNewContactOpen(false);
-            // Opened straight away, and the list refetched behind it: the chat
-            // is real on the engine the moment the message goes, but the list
-            // is polled and would not carry it for a few seconds yet.
+            setNewContactPhone('');
             setActiveChat(chat);
-            void loadChats(selectedSessionId);
+            if (chat.sessionId) setSelectedSessionId(chat.sessionId);
+            void loadChats(chat.sessionId || selectedSessionId);
           }}
         />
       )}
 
-      {profileOpen && selectedSession && (
+      {profileOpen && (selectedSession || sessions[0]) && (
         <AgentProfileModal
-          session={selectedSession}
+          session={selectedSession || (activeChat?.sessionId
+            ? sessions.find(s => s.id === activeChat.sessionId) || sessions[0]
+            : sessions[0])!}
           openChats={chats.length}
           onClose={() => setProfileOpen(false)}
         />
       )}
+
+      {healthOpen ? (
+        <div
+          className="a7-health-modal-backdrop"
+          role="presentation"
+          onClick={() => setHealthOpen(false)}
+        >
+          <div
+            className="a7-health-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Conversation Health"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="a7-health-modal-head">
+              <h3>Conversation Health</h3>
+              <button
+                type="button"
+                className="a7-health-modal-close"
+                aria-label="Close"
+                onClick={() => setHealthOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="a7-health-modal-body">
+              <ConversationHealthPanel compact />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

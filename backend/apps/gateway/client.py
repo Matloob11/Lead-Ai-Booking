@@ -11,6 +11,9 @@ Verified against the live account on 2026-08-02:
   and return 204 when that WABA has none. The account-wide
   ``/api/v1/meta/templates`` endpoint ignores every filter and omits the WABA
   id, so it cannot answer "which templates may this number use".
+* ``POST …/message_templates`` reaches Meta for create. ``DELETE`` on the same
+  path returns HTTP 405 — not forwarded. Removal goes through Meta Graph
+  directly when ``META_GRAPH_ACCESS_TOKEN`` is configured.
 """
 
 import logging
@@ -22,6 +25,46 @@ from django.conf import settings
 from .models import ApiCall
 
 logger = logging.getLogger(__name__)
+
+
+def describe_alots_failure(fallback, payload=None):
+    """The sentence alots or Meta actually returned, not just ``HTTP 500``.
+
+    Their 500 body is often ``{isValid, response:[{status, message}]}`` — the
+    useful line is ``Network Banned…``, not the status code. Meta's shape is
+    ``{error:{error_user_msg, message}}``.
+    """
+    sentence = _payload_sentence(payload)
+    if not sentence:
+        return fallback
+    if "network banned" in sentence.lower():
+        return (
+            f"{sentence} This From-number cannot send until the provider unbans it. "
+            "Pick another number and try again."
+        )
+    return sentence
+
+
+def _payload_sentence(payload):
+    if not isinstance(payload, dict):
+        return ""
+    err = payload.get("error")
+    if isinstance(err, dict):
+        text = (
+            err.get("error_user_msg")
+            or err.get("error_user_title")
+            or err.get("message")
+        )
+        if text:
+            return str(text)
+    if payload.get("detail"):
+        return str(payload["detail"])
+    rows = payload.get("response")
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return str(rows[0].get("status") or rows[0].get("message") or "")
+    if isinstance(rows, dict):
+        return str(rows.get("status") or rows.get("message") or "")
+    return ""
 
 
 class AlotsError(Exception):
@@ -48,14 +91,21 @@ class AlotsClient:
             "Accept": "application/json",
         }
 
-    def _request(self, method, path, *, json=None, files=None, log_body=True):
+    def _request(self, method, path, *, json=None, files=None, params=None, log_body=True, headers=None, redact_response=False, timeout=None):
         url = f"{self.base_url}{path}"
         started = time.monotonic()
-        record = ApiCall(method=method, path=path, request_body=json if log_body else None)
+        record = ApiCall(
+            method=method,
+            path=path,
+            request_body=json if log_body else (params if params else None),
+        )
+        use_headers = headers or self._headers
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.request(method, url, headers=self._headers, json=json, files=files)
+            with httpx.Client(timeout=timeout or self.timeout, follow_redirects=False) as client:
+                response = client.request(
+                    method, url, headers=use_headers, json=json, files=files, params=params
+                )
         except httpx.HTTPError as exc:
             record.error = str(exc)
             record.duration_ms = int((time.monotonic() - started) * 1000)
@@ -76,14 +126,18 @@ class AlotsClient:
             body = None
             record.error = response.text[:2000]
 
-        record.response_body = body if isinstance(body, (dict, list)) else None
+        if redact_response and isinstance(body, dict):
+            record.response_body = {"n": len(body.get("chatList") or [])}
+        else:
+            record.response_body = body if isinstance(body, (dict, list)) else None
         record.save()
 
         if response.status_code >= 400:
+            raw = f"{method} {path} -> HTTP {response.status_code}"
             raise AlotsError(
-                f"{method} {path} -> HTTP {response.status_code}",
+                describe_alots_failure(raw, body if not redact_response else None),
                 status_code=response.status_code,
-                payload=body,
+                payload=body if not redact_response else None,
             )
         return body
 
@@ -106,6 +160,96 @@ class AlotsClient:
             f"/{self.version}/{waba_business_id}/message_templates",
             json=payload,
         )
+
+    def delete_template(self, waba_business_id, name, *, meta_template_id=""):
+        """Remove a template from Meta by name.
+
+        Meta deletes every language of that name, which is what we want when
+        an agent is about to recreate it — a leftover language still occupies
+        the name and the next create comes back as a duplicate.
+
+        The alots gateway answers POST on this path but not DELETE (405). When
+        that happens we call Meta Graph directly — see ``META_GRAPH_ACCESS_TOKEN``.
+        """
+        params = {"name": name}
+        if meta_template_id:
+            params["hsm_id"] = str(meta_template_id)
+        try:
+            return self._request(
+                "DELETE",
+                f"/{self.version}/{waba_business_id}/message_templates",
+                params=params,
+            )
+        except AlotsError as exc:
+            if exc.status_code != 405:
+                raise
+            return self._delete_template_via_graph(
+                waba_business_id,
+                name,
+                meta_template_id=meta_template_id,
+            )
+
+    def _delete_template_via_graph(self, waba_business_id, name, *, meta_template_id=""):
+        token = (getattr(settings, "META_GRAPH_ACCESS_TOKEN", "") or "").strip()
+        if not token:
+            raise AlotsError(
+                "The gateway does not support DELETE on message_templates (HTTP 405). "
+                "Add META_GRAPH_ACCESS_TOKEN to deploy/.env — the Meta System User "
+                "token with whatsapp_business_management (the same permanent token "
+                "stored in the alots WABA settings works).",
+                status_code=405,
+            )
+
+        base = getattr(settings, "META_GRAPH_BASE_URL", "https://graph.facebook.com").rstrip("/")
+        path = f"/{self.version}/{waba_business_id}/message_templates"
+        params = {"name": name}
+        if meta_template_id:
+            params["hsm_id"] = str(meta_template_id)
+        url = f"{base}{path}"
+        started = time.monotonic()
+        record = ApiCall(method="DELETE", path=f"[graph]{path}", request_body=params)
+
+        try:
+            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
+                response = client.request(
+                    "DELETE",
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                    },
+                    params=params,
+                )
+        except httpx.HTTPError as exc:
+            record.error = str(exc)
+            record.duration_ms = int((time.monotonic() - started) * 1000)
+            record.save()
+            raise AlotsError(f"DELETE {path} failed: {exc}") from exc
+
+        record.duration_ms = int((time.monotonic() - started) * 1000)
+        record.status_code = response.status_code
+
+        if response.status_code == 204 or not response.content:
+            record.save()
+            return None
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+            record.error = response.text[:2000]
+
+        record.response_body = body if isinstance(body, (dict, list)) else None
+        record.save()
+
+        if response.status_code >= 400:
+            raw = f"DELETE {path} -> HTTP {response.status_code}"
+            raise AlotsError(
+                describe_alots_failure(raw, body),
+                status_code=response.status_code,
+                payload=body,
+            )
+        return body
 
     # Messages -------------------------------------------------------------
     def send_raw(self, phone_number_id, payload):
@@ -230,6 +374,7 @@ class AlotsClient:
             f"/{self.version}/{phone_number_id}/media",
             files={"file": (filename, file_obj, mime_type)},
             log_body=False,
+            timeout=max(self.timeout, 180),
         )
         return (body or {}).get("id") or (body or {}).get("media_id")
 
@@ -237,3 +382,5 @@ class AlotsClient:
     def wallet_balance(self):
         body = self._request("GET", "/api/v1/user/balance")
         return (body or {}).get("walletBalance")
+
+

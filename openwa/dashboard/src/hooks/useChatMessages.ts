@@ -73,44 +73,41 @@ export function useChatMessagesActions() {
     },
 
     /**
-     * A7: fetch this chat's history AGAIN, this time with the media, and merge the bytes in.
+     * A7: fetch the bytes for ONE message the first history read deliberately left out, and merge
+     * them in. Resolves true when that message came back carrying its payload.
      *
-     * The first read is deliberately media-free (see the hook above) — a 50 MiB video would sit in
-     * heap as base64, held twice as a `data:` URI, and every chat an agent opened would add to it. The
-     * cost of that choice is that anything imported from the phone's history shows the omitted
+     * The first read is media-free on purpose (see the hook above) — a 50 MiB video would sit in
+     * heap as base64, held twice as a `data:` URI, and every chat an agent opened would add to it.
+     * The cost of that choice is that anything imported from the phone's history shows the omitted
      * placeholder for ever: 187 of 190 media rows on the live account had no bytes, so a video the
      * agent needed read as `📎 Media` with a filename under it and nothing to play.
      *
-     * So the bytes are fetched when somebody actually asks for them, per chat, which is the only
-     * moment we know they are wanted. The gateway's own aggregate budget
-     * (CHAT_HISTORY_MEDIA_BUDGET_BYTES) and per-message cap bound the response, so a chat full of
-     * films cannot be turned into one enormous reply — anything past the budget comes back still
-     * marked omitted, and the bubble keeps saying so honestly.
+     * This asked for the whole chat's media at first, which is the wrong unit — and measuring it
+     * showed why. WhatsApp stops serving old media, and it does not say so: each dead file is waited
+     * on for the gateway's full MEDIA_DOWNLOAD_TIMEOUT_MS before it can be called gone. A chat
+     * holding ten of them charged the agent ten timeouts — about five minutes of spinner — to answer
+     * a question about the one bubble they pressed. Asking per message costs one timeout, and the
+     * other bubbles keep their own state instead of being condemned by a neighbour's result.
      *
-     * Merged rather than replaced: `mergeChatMessages` lets the DB copy win, which is what carries
-     * live media and the delivery ticks, so pulling history in again cannot undo either.
+     * The slice still comes back whole (media-free apart from the one), because merging it is how
+     * the thread stays consistent; the gateway's per-message cap still bounds the payload.
+     *
+     * Merged rather than replaced: `mergeChatMessages` lets the DB copy win for status and identity
+     * while media already in hand survives a payload-less marker — so bytes fetched for an earlier
+     * bubble are not wiped by the next bubble's fetch.
      */
-    async loadChatMedia(sessionId: string, chatId: string): Promise<number> {
+    async loadMessageMedia(sessionId: string, chatId: string, messageId: string): Promise<boolean> {
       const key = messagesQueryKey(sessionId, chatId);
-      // The ids that were WAITING, captured before the fetch. Counting bytes across the whole slice
-      // afterwards is not the same question and gets the answer wrong: a chat with one live photo
-      // already in it would report success while every omitted bubble the agent pressed stayed
-      // omitted — which is exactly what happened the first time this was tried.
-      const waiting = new Set(
-        (qc.getQueryData<ChatMessageView[]>(key) ?? [])
-          .filter(m => m.metadata?.media?.omitted)
-          .map(m => m.id),
-      );
 
-      const withMedia = await sessionApi.getChatHistory(sessionId, chatId, 100, true);
+      const withMedia = await sessionApi.getChatHistory(sessionId, chatId, 100, true, messageId);
       const history = withMedia.map(mapEngineHistoryMessage);
       qc.setQueryData<ChatMessageView[]>(key, old => (old === undefined ? undefined : mergeChatMessages(old, history)));
 
-      // How many of those actually arrived with bytes. Zero is a real and common answer rather than a
-      // failure: WhatsApp stops serving old media, and on the live account every download for a
-      // month-old file hit MEDIA_DOWNLOAD_TIMEOUT_MS and came back still marked omitted. The caller
-      // needs to tell that apart, or the bubble invites the agent to press it again for ever.
-      return history.filter(m => waiting.has(m.id) && m.metadata?.media?.data).length;
+      // Whether THIS message arrived with bytes. False is a real and common answer rather than a
+      // failure: on the live account every download for a month-old file hit the timeout and came
+      // back still marked omitted. The caller has to tell that apart from the request going wrong,
+      // or the bubble invites the agent to press it again for ever.
+      return history.some(m => m.id === messageId && Boolean(m.metadata?.media?.data));
     },
   };
 }

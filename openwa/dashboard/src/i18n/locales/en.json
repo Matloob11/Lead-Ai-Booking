@@ -78,8 +78,8 @@
       "pollMultiple": "Multiple answers allowed"
     },
     "subtitle": "Send and reply to WhatsApp messages in real time",
-    "noSessionsTitle": "No connected sessions",
-    "noSessionsDesc": "Please connect a WhatsApp session from the <1>Sessions</1> menu first to use the chat feature.",
+    "noSessionsTitle": "No WhatsApp numbers assigned",
+    "noSessionsDesc": "No linked phone is assigned to your account yet. Ask an admin to open <1>Linked phone agents</1> in the Bitrix WhatsApp menu and assign you a number.",
     "sessionLabel": "WhatsApp session",
     "noPhone": "No phone",
     "searchPlaceholder": "Search chats...",
@@ -106,13 +106,22 @@
     "messagePlaceholder": "Type a message...",
     "noPermission": "You do not have permission to send messages",
     "send": "Send",
+    "voiceTitle": "Record a voice note",
+    "voiceRecording": "Recording",
+    "voiceCancel": "Cancel",
+    "voiceSend": "Send",
+    "voiceMicDenied": "The microphone was refused. Allow it for this page and try again.",
+    "voiceMicUnavailable": "This browser will not give the panel a microphone.",
+    "voiceTooShort": "That note was too short.",
     "placeholderTitle": "Start messaging",
     "placeholderDesc": "Choose a conversation to read and reply.",
     "scrollToBottom": "Scroll to latest",
     "groupSubtitle": "Group",
     "privateContactSubtitle": "Private contact",
     "deleteConfirm": "Delete this message for everyone?",
+    "deleteConfirmAgent": "Remove this message from agent chats? Admin can still see it.",
     "messageDeleted": "🚫 This message was deleted",
+    "agentDeletedTag": "Deleted",
     "messageMasked": "🔒 Masked by WhatsApp for linked devices — check your primary phone",
     "kind": {
       "group": "Group",
@@ -181,6 +190,33 @@
     "footer": "Made with ❤️ by Yudhi Armyndharis and the OpenWA Community",
     "version": "v{{version}} · {{date}}"
   },
+  "conversationHealth": {
+    "title": "Conversation Health",
+    "subtitle": "AI colour counts for WhatsApp Leads (click a colour for the list)",
+    "listTitle": "{{colour}} chats",
+    "pickColour": "Choose a colour to open matching chats.",
+    "loading": "Loading…",
+    "countLabel": "{{count}} chats",
+    "openChat": "Open chat",
+    "openLead": "Open lead",
+    "empty": "No chats with this colour yet.",
+    "loadError": "Could not load Conversation Health.",
+    "openLeadButton": "Open lead",
+    "allowAsGreen": "Allow as green",
+    "allowTitle": "Allow RED as green",
+    "allowBody": "Move \"{{name}}\" from RED to GREEN. This is for chats you have already approved. Enter the admin password to confirm.",
+    "adminPassword": "Admin password",
+    "confirmAllow": "Confirm allow",
+    "allowFailed": "Could not allow this chat. Check the password and try again.",
+    "legendTitle": "Colour meanings",
+    "redAllowHint": "Some RED chats are false alarms. If you already approved a chat, use Allow as green (admin password required).",
+    "reclassifyFalseRed": "Re-check false RED",
+    "reclassifyHint": "Re-run AI on unlocked RED chats. Clean chats flip to green automatically.",
+    "reclassifyQueued": "Queued {{count}} RED chat(s) for re-check. Counts refresh as jobs finish.",
+    "reclassifyEmpty": "No unlocked RED chats to re-check.",
+    "reclassifyDisabled": "Conversation Health jobs are disabled on this server.",
+    "reclassifyFailed": "Could not start the re-check. Try again."
+  },
   "dashboard": {
     "title": "Dashboard",
     "subtitle": "Overview of your WhatsApp sessions and activity",
@@ -210,7 +246,8 @@
       "period": {
         "24h": "24h",
         "7d": "7d",
-        "30d": "30d"
+        "30d": "30d",
+        "1y": "1 year"
       },
       "overTime": "Messages over time",
       "byType": "Messages by type",
@@ -219,7 +256,18 @@
       "received": "Received",
       "messages": "Messages",
       "empty": "No message activity in this period.",
-      "error": "Couldn't load message analytics. Check the server logs."
+      "error": "Couldn't load message analytics. Check the server logs.",
+      "responseTitle": "Agent response time",
+      "responseNote": "First reply after a customer message, per linked phone. Session names are usually the agent on that desk. Same period as Message Analytics above. Needs at least 3 timed replies for a band.",
+      "worstTitle": "Top 10 slowest",
+      "bestTitle": "Top 10 fastest",
+      "rankEmpty": "Not enough timed replies yet to rank phones.",
+      "allPhones": "All linked phones",
+      "colPhone": "Phone / session",
+      "colPerf": "Performance",
+      "colAvg": "Avg reply",
+      "colMedian": "Median reply",
+      "colReplies": "Timed replies"
     }
   },
   "sessionStatus": {
@@ -237,7 +285,7 @@
   "sessions": {
     "title": "Sessions",
     "subtitle": "Manage your WhatsApp sessions and QR code connections",
-    "newSession": "New Session",
+    "newSession": "Create Session",
     "searchPlaceholder": "Search sessions...",
     "filter": {
       "all": "All Status",
@@ -511,7 +559,7 @@
     },
     "roleDescriptions": {
       "admin": "Full access to all resources",
-      "operator": "Session & message management",
+      "operator": "Chats only — send and reply on assigned linked phones",
       "viewer": "Read-only access"
     },
     "columns": {

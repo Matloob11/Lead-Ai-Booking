@@ -32,8 +32,11 @@ def _serialize(agent):
         "email": agent.email or "",
         "bitrix_user_id": agent.bitrix_user_id or "",
         "display_name": agent.display_name or agent.get_full_name() or agent.username,
+        "community": agent.community or "",
         "avatar_url": agent.avatar_url,
         "is_wa_admin": agent.has_admin_rights,
+        "can_official_api": bool(agent.can_official_api),
+        "can_linked_devices": bool(agent.can_linked_devices),
         "role": "Administrator" if agent.has_admin_rights else "Agent",
         "numbers": [serialize_number(n) for n in agent.visible_numbers],
         "capabilities": {
@@ -126,7 +129,21 @@ def bitrix_login(request):
     if not agent.display_name_is_custom:
         agent.display_name = full_name or agent.display_name
     agent.bitrix_portal = domain
-    agent.avatar_url = profile.get("PERSONAL_PHOTO") or agent.avatar_url
+    # Bitrix PERSONAL_PHOTO is often a long CDN URL with query tokens. Django's
+    # URLField defaults to 200 chars; writing past that raised DataError and
+    # turned every login into HTTP 500 (seen for bitrix_2368 / esha ghazi).
+    # Keep a usable avatar when it fits; otherwise leave the previous value.
+    photo = str(profile.get("PERSONAL_PHOTO") or "").strip()
+    avatar_max = Agent._meta.get_field("avatar_url").max_length or 200
+    if photo and len(photo) <= avatar_max:
+        agent.avatar_url = photo
+    elif photo:
+        logger.info(
+            "Skipping Bitrix avatar for user %s: URL length %s > %s",
+            bitrix_id,
+            len(photo),
+            avatar_max,
+        )
     agent.is_bitrix_admin = _is_portal_admin(domain, auth_id)
     agent.last_seen_at = timezone.now()
     agent.save(
@@ -309,9 +326,14 @@ def admin_gate(request):
 def openwa_gate(request):
     """Answers nginx's auth_request before it proxies the OpenWA dashboard/API.
 
-    Every authenticated agent (admin or operator) gets 200 OK.
+    Authenticated agents with Linked-phones access get 200 OK.
     Returns X-WA-Agent-Id, X-WA-Agent-Name, and X-WA-Is-Admin headers for proxying.
     """
+    if not request.user.can_linked_devices:
+        return Response(
+            {"detail": "Linked phones access is not enabled for this account"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     answer = Response({"ok": True})
     answer["X-WA-Agent-Id"] = str(request.user.pk)
     answer["X-WA-Agent-Name"] = request.user.display_name or request.user.get_full_name() or request.user.get_username()
@@ -333,6 +355,11 @@ def openwa_credentials(request):
     from .models import OpenWaAssignment
 
     agent = request.user
+    if not agent.can_linked_devices:
+        return Response(
+            {"detail": "Linked phones access is not enabled for this account"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     # No literal fallback. This is the unscoped admin credential for the WhatsApp
     # gateway; a default written into the source is the same key on every machine
     # that has ever held a copy of this repository, and it goes on working after

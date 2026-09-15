@@ -31,7 +31,7 @@ export function openSharedLibraryModal({ onSelectAsset, isPicker = false } = {})
     " Upload Asset",
   ]);
 
-  const listContainer = el("div.na-rows", { style: "display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;" });
+  const listContainer = el("div.akit-asset-grid");
 
   const toolbar = el("div.na-toolbar", { style: "align-items: center;" }, [
     search,
@@ -93,19 +93,19 @@ export function openSharedLibraryModal({ onSelectAsset, isPicker = false } = {})
       const isVid = asset.kind === "video";
       const iconName = isImg ? "image" : isVid ? "video" : "fileText";
 
-      const card = el("div.na-row", { style: "display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);" }, [
-        el("div", { style: "display: flex; gap: 10px; align-items: flex-start;" }, [
+      const card = el("div.akit-asset-card", {}, [
+        el("div.akit-asset-card__top", {}, [
           isImg && asset.url
-            ? el("img", { src: asset.url, style: "width: 48px; height: 48px; object-fit: cover; border-radius: 6px;" })
-            : el("div", { style: "width: 44px; height: 44px; border-radius: 8px; background: rgba(37,211,102,0.15); color: #25D366; display: flex; align-items: center; justify-content: center; flex-shrink: 0;" }, [
+            ? el("img.akit-asset-card__thumb", { src: asset.url, alt: "" })
+            : el("div.akit-asset-card__icon", {}, [
                 icon(iconName, { size: 22 }),
               ]),
-          el("div", { style: "flex: 1; min-width: 0;" }, [
-            el("div.na-title", { style: "font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" }, [asset.title]),
-            el("div.na-phone", { style: "font-size: 11px; opacity: 0.7;" }, [`${asset.file_name} · ${formatBytes(asset.size_bytes)}`]),
+          el("div.akit-row__main", {}, [
+            el("div.akit-asset-card__title", {}, [asset.title]),
+            el("div.akit-asset-card__meta", {}, [`${asset.file_name} · ${formatBytes(asset.size_bytes)}`]),
           ]),
         ]),
-        el("div", { style: "display: flex; gap: 6px; justify-content: flex-end; margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);" }, [
+        el("div.akit-asset-card__foot", {}, [
           asset.url
             ? el("a.btn.btn--ghost.btn--sm", { href: asset.url, target: "_blank", rel: "noopener", title: "Preview / Download" }, [
                 icon("eye", { size: 14 }),

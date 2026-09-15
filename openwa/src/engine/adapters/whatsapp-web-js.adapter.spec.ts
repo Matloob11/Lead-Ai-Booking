@@ -566,6 +566,33 @@ describe('WhatsAppWebJsAdapter.getChatHistory enrichment (parity with the live p
       expect(out).toEqual([]);
       expect(m1.downloadMedia).not.toHaveBeenCalled();
     });
+
+    // What makes `mediaFor` worth a parameter is the waiting, not the bytes: WhatsApp stops serving
+    // old media and says so only by timing out, so a chat holding ten dead files charged ten
+    // MEDIA_DOWNLOAD_TIMEOUT_MS waits to answer for the one bubble an agent pressed.
+    it('downloads only the named message when mediaFor is given, and still returns the rest', async () => {
+      const m1 = mediaMsg('M16', 'QUJD');
+      const m2 = mediaMsg('M17', 'QUJDRA');
+
+      const out = await readyAdapter(clientFor(m1, m2)).getChatHistory('621@c.us', 50, true, undefined, undefined, 'M17');
+
+      expect(m1.downloadMedia).not.toHaveBeenCalled();
+      expect(m2.downloadMedia).toHaveBeenCalled();
+      // The whole slice still comes back — the caller merges it — with only the asked-for payload.
+      expect(out).toHaveLength(2);
+      expect(out[0].media).toBeUndefined();
+      expect(out[1].media).toEqual({ mimetype: 'image/jpeg', data: 'QUJDRA' });
+    });
+
+    it('downloads nothing when mediaFor names a message outside the slice', async () => {
+      const m1 = mediaMsg('M18', 'QUJD');
+
+      const out = await readyAdapter(clientFor(m1)).getChatHistory('621@c.us', 50, true, undefined, undefined, 'absent');
+
+      expect(m1.downloadMedia).not.toHaveBeenCalled();
+      expect(out).toHaveLength(1);
+      expect(out[0].media).toBeUndefined();
+    });
   });
 });
 

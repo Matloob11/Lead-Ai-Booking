@@ -26,11 +26,35 @@
 #   ops/wa.sh sync src /opt/a7-wa/wa-qr   copy a directory to the server
 #   ops/wa.sh build openwa                rebuild the OpenWA trial stack
 #   ops/wa.sh panel [stale…]              publish bitrix/public to /opt/a7-wa/panel
+#   ops/wa.sh agent-reports-deploy        publish agent-reports stack + nginx location
+#   ops/wa.sh agent-reports-check         compose + public /agent-reports/ health
+#   ops/wa.sh agent-reports-fix-nginx    move/refresh /agent-reports/ into :443 server
+#   ops/wa.sh agent-reports-sync-owner-phones [--dry-run] [--limit N] [--all]
 #   ops/wa.sh build qr app                rebuild an image
 #   ops/wa.sh restart qr app              restart services
 #   ops/wa.sh up qr app                   recreate a service (after a build)
+#   ops/wa.sh openwa-state                image, compose, health, and disk state
+#   ops/wa.sh openwa-cold-backup          stop API and archive fixed data volume
+#   ops/wa.sh openwa-inspect-asma-backup  inspect fixed pre-delete backup read-only
+#   ops/wa.sh openwa-restore-asma         cold-backup then guarded Asma-only restore
+#   ops/wa.sh openwa-verify-asma-restore  prove stored chats + agent-10 scope
+#   ops/wa.sh openwa-browser-verify-asma  open restored chat in live headless dashboard
+#   ops/wa.sh openwa-stop-restored-asma    stop restored Asma engine; keep row/history
+#   ops/wa.sh openwa-arm-restored-asma     prevent boot auto-start before profile-reset deploy
+#   ops/wa.sh openwa-reset-restored-asma   invoke guarded profile reset after deploy
+#   ops/wa.sh openwa-delete-javeria-one-chat  one-off: drop one javeria-bibi thread
+#   ops/wa.sh openwa-force-recreate       force-recreate OpenWA API after build
 #   ops/wa.sh unlock                      clear stale Chromium profile locks
+#   ops/wa.sh migrate                     apply pending Django migrations (app stack)
 #   ops/wa.sh django-check                the two checks CLAUDE.md requires
+#   ops/wa.sh deploy-villa-nova2            one-off: villa_nova2 to missing WABAs
+#   ops/wa.sh sync-all-templates            pull Alots templates for every Official WABA
+#   ops/wa.sh keep-sheet-official-numbers   hide Official numbers not on the Dubai sheet
+#   ops/wa.sh assign-18-971-44              one 44 + one 971 for the named 18 agents
+#   ops/wa.sh probe-openai-configured       yes/no only: Official OPENAI_API_KEY set
+#   ops/wa.sh probe-openai-credits          yes/no only: Official OpenAI key has credits
+#   ops/wa.sh probe-utility-rewrite         two draft POSTs; cards must follow the text
+#   ops/wa.sh raise-upload-limit            Official + OpenWA nginx body size → 1024m
 
 set -euo pipefail
 
@@ -54,10 +78,19 @@ SITE="https://wa.srv1802669.hstgr.cloud"
 # ops/known_hosts were captured from the server and matched against the ones
 # already trusted in the operator's own ~/.ssh/known_hosts, recorded long before.
 KNOWN_HOSTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/known_hosts"
+# ssh.exe wants a Windows path; WSL /mnt/c/... cannot be written and stalls host-key updates.
+KNOWN_HOSTS_SSH="$KNOWN_HOSTS"
+if command -v wslpath >/dev/null 2>&1; then
+  case "$KNOWN_HOSTS" in
+    /mnt/*) KNOWN_HOSTS_SSH=$(wslpath -w "$KNOWN_HOSTS") ;;
+  esac
+fi
 SSH_OPTS=(
   -o BatchMode=yes
+  -o ConnectTimeout=20
+  -o ServerAliveInterval=10
   -o StrictHostKeyChecking=accept-new
-  -o UserKnownHostsFile="$KNOWN_HOSTS"
+  -o UserKnownHostsFile="$KNOWN_HOSTS_SSH"
 )
 
 # The only places anything is allowed to happen.
@@ -253,6 +286,177 @@ case "$cmd" in
     remote "cd $dir && docker compose up -d '$2' 2>&1 | tail -3"
     ;;
 
+  openwa-state)
+    [[ $# -eq 0 ]] || die "openwa-state takes no arguments"
+    remote "set -eu; cd $OPENWA_DIR; \
+      cid=\$(docker compose ps -q openwa-api); test -n \"\$cid\"; \
+      image=\$(docker inspect -f '{{.Image}}' \"\$cid\"); \
+      docker inspect -f 'container-image={{.Image}} state={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"\$cid\"; \
+      docker image inspect -f 'image-id={{.Id}} image-digests={{json .RepoDigests}} created={{.Created}}' \"\$image\"; \
+      readiness=\$(docker exec \"\$cid\" node -e 'const http=require(\"http\");const request=http.get(\"http://localhost:2785/api/health/ready\",response=>{console.log(response.statusCode);response.resume()});request.on(\"error\",()=>process.exit(1))'); \
+      echo readiness-http=\$readiness; \
+      sync=\$(docker exec \"\$cid\" sh -c 'if [ \"\${DATABASE_SYNCHRONIZE:-}\" = true ] || grep -qx \"DATABASE_SYNCHRONIZE=true\" /app/data/.env.generated 2>/dev/null; then echo true; else echo false; fi'); \
+      echo database-synchronize=\$sync; \
+      docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
+      df -h /opt/openwa-trial /var/lib/docker/volumes/openwa_openwa-data/_data | tail -n +2"
+    ;;
+
+  openwa-cold-backup)
+    [[ $# -eq 0 ]] || die "openwa-cold-backup takes no arguments"
+    remote "set -eu; cd $OPENWA_DIR; \
+      docker compose stop openwa-api; \
+      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
+      test -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite; \
+      mkdir -p /opt/openwa-trial/backups; \
+      stamp=\$(date -u +%Y%m%dT%H%M%SZ); \
+      archive=/opt/openwa-trial/backups/openwa-data-\$stamp.tar.gz; \
+      tar -C /var/lib/docker/volumes/openwa_openwa-data/_data -czf \"\$archive\" .; \
+      echo backup=\$(basename \"\$archive\"); \
+      md5sum \"\$archive\"; \
+      sqlite_count=\$(tar -tzf \"\$archive\" | grep -Ec '(^|/)openwa.sqlite$' || true); \
+      test \"\$sqlite_count\" -eq 1; echo sqlite=present"
+    ;;
+
+  openwa-inspect-asma-backup)
+    [[ $# -eq 0 ]] || die "openwa-inspect-asma-backup takes no arguments"
+    remote "set -eu; cd $OPENWA_DIR; \
+      archive=/opt/openwa-trial/backups/openwa-data-20260808T074558Z.tar.gz; \
+      tool=$OPENWA_DIR/restore-asma.js; \
+      test -f \"\$archive\"; test -f \"\$tool\"; \
+      tmp=\$(mktemp -d /opt/openwa-trial/asma-inspect.XXXXXX); \
+      trap 'rm -rf \"\$tmp\"' EXIT; \
+      tar -xzf \"\$archive\" -C \"\$tmp\"; test -f \"\$tmp/openwa.sqlite\"; \
+      image=\$(docker compose images -q openwa-api | head -1); test -n \"\$image\"; \
+      docker run --rm --network none --read-only \
+        -v \"\$tmp/openwa.sqlite:/restore/openwa.sqlite:ro\" \
+        -v \"\$tool:/app/restore-asma.js:ro\" \
+        -w /app --entrypoint node \"\$image\" \
+        /app/restore-asma.js inspect /restore/openwa.sqlite"
+    ;;
+
+  openwa-restore-asma)
+    [[ $# -eq 0 ]] || die "openwa-restore-asma takes no arguments"
+    remote "set -eu; cd $OPENWA_DIR; \
+      archive=/opt/openwa-trial/backups/openwa-data-20260808T074558Z.tar.gz; \
+      tool=$OPENWA_DIR/restore-asma.js; \
+      volume=/var/lib/docker/volumes/openwa_openwa-data/_data; \
+      test -f \"\$archive\"; test -f \"\$tool\"; test -f \"\$volume/openwa.sqlite\"; \
+      image=\$(docker compose images -q openwa-api | head -1); test -n \"\$image\"; \
+      tmp=\$(mktemp -d /opt/openwa-trial/asma-restore.XXXXXX); \
+      started=0; \
+      cleanup() { rm -rf \"\$tmp\"; if [ \"\$started\" -eq 0 ]; then docker compose start openwa-api >/dev/null; fi; }; \
+      trap cleanup EXIT; \
+      tar -xzf \"\$archive\" -C \"\$tmp\"; test -f \"\$tmp/openwa.sqlite\"; \
+      docker compose stop openwa-api; \
+      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
+      mkdir -p /opt/openwa-trial/backups; \
+      stamp=\$(date -u +%Y%m%dT%H%M%SZ); \
+      cold=/opt/openwa-trial/backups/openwa-data-\$stamp.tar.gz; \
+      tar -C \"\$volume\" -czf \"\$cold\" .; \
+      echo backup=\$(basename \"\$cold\"); md5sum \"\$cold\"; \
+      sqlite_count=\$(tar -tzf \"\$cold\" | grep -Ec '(^|/)openwa.sqlite\$' || true); \
+      test \"\$sqlite_count\" -eq 1; echo sqlite=present; \
+      docker run --rm --network none --read-only \
+        -v \"\$volume:/live:rw\" \
+        -v \"\$tmp/openwa.sqlite:/restore/openwa.sqlite:ro\" \
+        -v \"\$tool:/app/restore-asma.js:ro\" \
+        -w /app --entrypoint node \"\$image\" \
+        /app/restore-asma.js restore /live/openwa.sqlite /restore/openwa.sqlite; \
+      docker compose start openwa-api >/dev/null; started=1; \
+      for n in 1 2 3 4 5 6; do \
+        cid=\$(docker compose ps -q openwa-api); \
+        health=\$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"\$cid\"); \
+        [ \"\$health\" = healthy ] && break; sleep 5; \
+      done; \
+      echo api-health=\$health; test \"\$health\" = healthy"
+    ;;
+
+  openwa-verify-asma-restore)
+    [[ $# -eq 0 ]] || die "openwa-verify-asma-restore takes no arguments"
+    verify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/verify-asma-restore.py"
+    [[ -f "$verify_script" ]] || die "missing ops/openwa/verify-asma-restore.py"
+    encoded=$(base64 -w0 < "$verify_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  openwa-browser-verify-asma)
+    [[ $# -eq 0 ]] || die "openwa-browser-verify-asma takes no arguments"
+    verify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/verify-asma-dashboard.js"
+    [[ -f "$verify_script" ]] || die "missing ops/openwa/verify-asma-dashboard.js"
+    encoded=$(base64 -w0 < "$verify_script")
+    printf '%s' "$encoded" | remote "cd $OPENWA_DIR && base64 -d | docker compose exec -T openwa-api node -"
+    ;;
+
+  openwa-stop-restored-asma)
+    [[ $# -eq 0 ]] || die "openwa-stop-restored-asma takes no arguments"
+    remote "cd $OPENWA_DIR && docker compose exec -T openwa-api node -e '
+      const id = \"e209881a-0aa3-4463-849f-ff0ed37144b5\";
+      const key = process.env.API_MASTER_KEY || process.env.API_KEY;
+      if (!key) throw new Error(\"master API key is unavailable\");
+      fetch(\"http://127.0.0.1:2785/api/sessions/\" + id + \"/stop\", {
+        method: \"POST\", headers: { \"X-API-Key\": key }
+      }).then(async response => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(\"stop returned HTTP \" + response.status);
+        if (body.id !== id || body.name !== \"asma\" || body.status !== \"disconnected\") {
+          throw new Error(\"stop response identity/status assertion failed\");
+        }
+        console.log(\"restored-asma-stop=PASS\");
+        console.log(\"restored-status=disconnected\");
+      }).catch(error => { console.error(error.message); process.exit(1); });
+    '"
+    ;;
+
+  openwa-arm-restored-asma)
+    [[ $# -eq 0 ]] || die "openwa-arm-restored-asma takes no arguments"
+    remote "set -eu; cd $OPENWA_DIR; \
+      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
+      volume=/var/lib/docker/volumes/openwa_openwa-data/_data; \
+      tool=$OPENWA_DIR/arm-asma-manual-start.js; \
+      test -f \"\$volume/openwa.sqlite\"; test -f \"\$tool\"; \
+      image=openwa-openwa-api; docker image inspect \"\$image\" >/dev/null; \
+      docker run --rm --network none --read-only \
+        -v \"\$volume:/live:rw\" -v \"\$tool:/app/arm-asma-manual-start.js:ro\" \
+        -w /app --entrypoint node \"\$image\" \
+        /app/arm-asma-manual-start.js /live/openwa.sqlite"
+    ;;
+
+  openwa-delete-javeria-one-chat)
+    [[ $# -eq 0 ]] || die "openwa-delete-javeria-one-chat takes no arguments"
+    delete_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/delete-javeria-one-chat.js"
+    [[ -f "$delete_script" ]] || die "missing ops/openwa/delete-javeria-one-chat.js"
+    encoded=$(base64 -w0 < "$delete_script")
+    printf '%s' "$encoded" | remote "cd $OPENWA_DIR && base64 -d | docker compose exec -T openwa-api node -"
+    ;;
+
+  openwa-reset-restored-asma)
+    [[ $# -eq 0 ]] || die "openwa-reset-restored-asma takes no arguments"
+    remote "cd $OPENWA_DIR && docker compose exec -T openwa-api node -e '
+      const id = \"e209881a-0aa3-4463-849f-ff0ed37144b5\";
+      const key = process.env.API_MASTER_KEY || process.env.API_KEY;
+      if (!key) throw new Error(\"master API key is unavailable\");
+      fetch(\"http://127.0.0.1:2785/api/sessions/\" + id + \"/reset-profile\", {
+        method: \"POST\", headers: { \"X-API-Key\": key }
+      }).then(async response => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(\"reset returned HTTP \" + response.status);
+        if (body.id !== id || body.name !== \"asma\" || body.status !== \"disconnected\" || body.engineLoaded !== false) {
+          throw new Error(\"reset response identity/status assertion failed\");
+        }
+        console.log(\"restored-asma-profile-reset=PASS\");
+        console.log(\"restored-status=disconnected\");
+        console.log(\"restored-engine-loaded=false\");
+      }).catch(error => { console.error(error.message); process.exit(1); });
+    '"
+    ;;
+
+  openwa-force-recreate)
+    [[ $# -eq 0 ]] || die "openwa-force-recreate takes no arguments"
+    # Keep the redis profile up: Conversation Health + BullMQ need openwa-redis on the network.
+    remote "cd $OPENWA_DIR && docker compose --profile redis up -d redis && docker compose --profile redis up -d --force-recreate openwa-api 2>&1 | tail -8"
+    ;;
+
   unlock)
     # Chromium leaves a SingletonLock behind when its container is killed rather
     # than stopped, and the next start refuses the profile: "already in use by
@@ -272,12 +476,298 @@ case "$cmd" in
     remote "cd $dir && docker compose restart $*"
     ;;
 
+  migrate)
+    # Apply pending Django migrations on the live app stack. Fixed command —
+    # no passthrough args — so this cannot become arbitrary manage.py execution.
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py migrate --noinput"
+    ;;
+
   django-check)
     # The two CLAUDE.md insists on after any migration work. Fixed, not a
     # passthrough — `manage.py <anything>` would be arbitrary execution again.
     remote "cd $APP_DIR && docker compose exec -T web python manage.py makemigrations --check --dry-run; \
             echo '---'; \
             cd $APP_DIR && docker compose exec -T web python manage.py showmigrations"
+    ;;
+
+  deploy-villa-nova2)
+    [[ $# -eq 0 ]] || die "deploy-villa-nova2 takes no arguments"
+    deploy_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/deploy-villa-nova2.py"
+    [[ -f "$deploy_script" ]] || die "missing ops/catalog/deploy-villa-nova2.py"
+    encoded=$(base64 -w0 < "$deploy_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  retry-villa-nova2-failed)
+    [[ $# -eq 0 ]] || die "retry-villa-nova2-failed takes no arguments"
+    retry_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/retry-villa-nova2-failed.py"
+    [[ -f "$retry_script" ]] || die "missing ops/catalog/retry-villa-nova2-failed.py"
+    encoded=$(base64 -w0 < "$retry_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  diag-villa-nova2-error)
+    [[ $# -eq 0 ]] || die "diag-villa-nova2-error takes no arguments"
+    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-villa-nova2-error.py"
+    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-villa-nova2-error.py"
+    encoded=$(base64 -w0 < "$diag_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  add-dubai10wbx-numbers)
+    [[ $# -eq 0 ]] || die "add-dubai10wbx-numbers takes no arguments"
+    add_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/add-dubai10wbx-numbers.py"
+    [[ -f "$add_script" ]] || die "missing ops/catalog/add-dubai10wbx-numbers.py"
+    encoded=$(base64 -w0 < "$add_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  keep-sheet-official-numbers)
+    [[ $# -eq 0 ]] || die "keep-sheet-official-numbers takes no arguments"
+    keep_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/keep-sheet-official-numbers.py"
+    [[ -f "$keep_script" ]] || die "missing ops/catalog/keep-sheet-official-numbers.py"
+    encoded=$(base64 -w0 < "$keep_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  assign-18-971-44)
+    [[ $# -eq 0 ]] || die "assign-18-971-44 takes no arguments"
+    assign_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/assign-18-971-44.py"
+    [[ -f "$assign_script" ]] || die "missing ops/catalog/assign-18-971-44.py"
+    encoded=$(base64 -w0 < "$assign_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  replay-ignored-flat-outbound)
+    # One-shot: re-queue Alots flat body webhooks ignored for missing phone_number_id.
+    [[ $# -eq 0 ]] || die "replay-ignored-flat-outbound takes no arguments"
+    replay_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gateway/replay-ignored-flat-outbound.py"
+    [[ -f "$replay_script" ]] || die "missing ops/gateway/replay-ignored-flat-outbound.py"
+    encoded=$(base64 -w0 < "$replay_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  diag-media-337)
+    [[ $# -eq 0 ]] || die "diag-media-337 takes no arguments"
+    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-media-337.py"
+    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-media-337.py"
+    encoded=$(base64 -w0 < "$diag_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  diag-media-337b)
+    [[ $# -eq 0 ]] || die "diag-media-337b takes no arguments"
+    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-media-337b.py"
+    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-media-337b.py"
+    encoded=$(base64 -w0 < "$diag_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  diag-audio-urls)
+    [[ $# -eq 0 ]] || die "diag-audio-urls takes no arguments"
+    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-audio-urls.py"
+    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-audio-urls.py"
+    encoded=$(base64 -w0 < "$diag_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  retry-failed-audio)
+    [[ $# -eq 0 ]] || die "retry-failed-audio takes no arguments"
+    retry_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/retry-failed-audio.py"
+    [[ -f "$retry_script" ]] || die "missing ops/catalog/retry-failed-audio.py"
+    encoded=$(base64 -w0 < "$retry_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  sync-all-templates)
+    [[ $# -eq 0 ]] || die "sync-all-templates takes no arguments"
+    sync_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/sync-all-templates.py"
+    [[ -f "$sync_script" ]] || die "missing ops/catalog/sync-all-templates.py"
+    encoded=$(base64 -w0 < "$sync_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  retry-template-sync-failed)
+    [[ $# -eq 0 ]] || die "retry-template-sync-failed takes no arguments"
+    retry_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/retry-template-sync-failed.py"
+    [[ -f "$retry_script" ]] || die "missing ops/catalog/retry-template-sync-failed.py"
+    encoded=$(base64 -w0 < "$retry_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-empty-template-wabas)
+    [[ $# -eq 0 ]] || die "probe-empty-template-wabas takes no arguments"
+    probe_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-empty-template-wabas.py"
+    [[ -f "$probe_script" ]] || die "missing ops/catalog/probe-empty-template-wabas.py"
+    encoded=$(base64 -w0 < "$probe_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  explain-template-count-gap)
+    [[ $# -eq 0 ]] || die "explain-template-count-gap takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/explain-template-count-gap.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/explain-template-count-gap.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  diag-131026)
+    [[ $# -eq 0 ]] || die "diag-131026 takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-131026.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/diag-131026.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-plus-recipient)
+    [[ $# -eq 0 ]] || die "probe-plus-recipient takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-plus-recipient.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-plus-recipient.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-openai-configured)
+    # Yes/no only. Never prints the key.
+    [[ $# -eq 0 ]] || die "probe-openai-configured takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-openai-configured.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-openai-configured.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-openai-credits)
+    # Tiny chat call. Prints credits=yes|no only. Never prints the key.
+    [[ $# -eq 0 ]] || die "probe-openai-credits takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-openai-credits.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-openai-credits.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-utility-rewrite)
+    [[ $# -eq 0 ]] || die "probe-utility-rewrite takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-utility-rewrite.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-utility-rewrite.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  agent-reports-deploy)
+    # Fixed deploy of the Sales/TS Agent Daily Reports app. Paths and compose
+    # file are hard-coded under /opt/a7-wa/agent-reports — no caller-chosen
+    # remote destination. Nginx gets one new location (^~ /agent-reports/) if
+    # missing; the rest of a7-wa.conf is untouched.
+    [[ $# -eq 0 ]] || die "agent-reports-deploy takes no arguments"
+    src="$(cd "$(dirname "${BASH_SOURCE[0]}")/../agent-reports" && pwd)"
+    [[ -d "$src" ]] || die "agent-reports/ is missing"
+    [[ -f "$src/deploy/docker-compose.yml" ]] || die "agent-reports/deploy/docker-compose.yml missing"
+    [[ -f "$src/.env" ]] || die "agent-reports/.env missing — copy from .env.example and fill secrets"
+
+    remote "mkdir -p /opt/a7-wa/agent-reports"
+    tar --exclude='.venv' --exclude='__pycache__' --exclude='storage' \
+        --exclude='*.db' --exclude='.pytest_cache' \
+        -cf - -C "$(dirname "$src")" "$(basename "$src")" \
+      | remote "tar -xf - -C /opt/a7-wa --overwrite"
+    scp.exe -i "$KEY" "${SSH_OPTS[@]}" "$src/.env" "$HOST:/opt/a7-wa/agent-reports/.env"
+    remote "cd /opt/a7-wa/agent-reports/deploy && docker compose build 2>&1 | tail -20"
+    remote "cd /opt/a7-wa/agent-reports/deploy && docker compose up -d 2>&1 | tail -20"
+    remote "cd /opt/a7-wa/agent-reports/deploy && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'"
+
+    # Nginx: always re-run fix_nginx.py so /agent-reports/ lands in the :443
+    # server (an earlier awk install mistakenly targeted the :80 redirect block).
+    remote "python3 /opt/a7-wa/agent-reports/deploy/fix_nginx.py && nginx -t && systemctl reload nginx"
+    remote "curl -sk -H 'Host: wa.srv1802669.hstgr.cloud' -o /dev/null -w 'health %{http_code}\n' https://127.0.0.1/agent-reports/health; curl -sk -o /dev/null -w 'local8091 %{http_code}\n' http://127.0.0.1:8091/health"
+    echo "deployed agent-reports → https://wa.srv1802669.hstgr.cloud/agent-reports/"
+    echo "Bitrix left menu iframe URL: https://wa.srv1802669.hstgr.cloud/agent-reports/"
+    ;;
+
+  agent-reports-check)
+    [[ $# -eq 0 ]] || die "agent-reports-check takes no arguments"
+    remote "cd /opt/a7-wa/agent-reports/deploy && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'"
+    remote "grep -n agent-reports /etc/nginx/conf.d/a7-wa.conf | head -20"
+    remote "curl -sk -o /dev/null -w 'local8091 %{http_code}\n' http://127.0.0.1:8091/health"
+    remote "curl -sk -H 'Host: wa.srv1802669.hstgr.cloud' -o /tmp/ar-n.json -w 'nginx-host %{http_code}\n' https://127.0.0.1/agent-reports/health; head -c 300 /tmp/ar-n.json; echo"
+    remote "curl -sk -o /tmp/ar-p.json -w 'public %{http_code}\n' https://wa.srv1802669.hstgr.cloud/agent-reports/health; head -c 300 /tmp/ar-p.json; echo"
+    ;;
+
+  agent-reports-fix-nginx)
+    [[ $# -eq 0 ]] || die "agent-reports-fix-nginx takes no arguments"
+    src="$(cd "$(dirname "${BASH_SOURCE[0]}")/../agent-reports/deploy" && pwd)"
+    scp.exe -i "$KEY" "${SSH_OPTS[@]}" "$src/fix_nginx.py" "$HOST:/opt/a7-wa/agent-reports/deploy/fix_nginx.py"
+    scp.exe -i "$KEY" "${SSH_OPTS[@]}" "$src/nginx-snippet.conf" "$HOST:/opt/a7-wa/agent-reports/deploy/nginx-snippet.conf"
+    remote "python3 /opt/a7-wa/agent-reports/deploy/fix_nginx.py && nginx -t && systemctl reload nginx"
+    remote "curl -sk -H 'Host: wa.srv1802669.hstgr.cloud' -o /tmp/ar-n.json -w 'nginx-host %{http_code}\n' https://127.0.0.1/agent-reports/health; head -c 400 /tmp/ar-n.json; echo"
+    ;;
+
+  agent-reports-sync-owner-phones)
+    # Bulk-link Owner Data phone UFs → Contacts (call button). Optional flags only.
+    dry_run=0
+    limit=""
+    do_all=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dry-run) dry_run=1 ;;
+        --limit)
+          [[ $# -ge 2 ]] || die "--limit needs a number"
+          [[ "$2" =~ ^[0-9]+$ ]] || die "--limit must be an integer"
+          limit="$2"
+          shift
+          ;;
+        --all) do_all=1 ;;
+        *) die "agent-reports-sync-owner-phones: unknown arg '$1' (want --dry-run|--limit N|--all)" ;;
+      esac
+      shift
+    done
+    args=()
+    [[ "$dry_run" -eq 1 ]] && args+=(--dry-run)
+    [[ -n "$limit" ]] && args+=(--limit "$limit")
+    [[ "$do_all" -eq 1 ]] && args+=(--all)
+    if [[ ${#args[@]} -eq 0 ]]; then
+      remote "cd /opt/a7-wa/agent-reports/deploy && docker compose exec -T web \
+        python scripts/bulk_link_owner_phones.py"
+    else
+      # shellcheck disable=SC2029
+      remote "cd /opt/a7-wa/agent-reports/deploy && docker compose exec -T web \
+        python scripts/bulk_link_owner_phones.py $(printf '%q ' "${args[@]}")"
+    fi
+    ;;
+
+  raise-upload-limit)
+    # Official inbox + OpenWA dashboard. Only this one number, only the
+    # body-size line, so a 90 MB video is not 413'd at nginx.
+    [[ $# -eq 0 ]] || die "raise-upload-limit takes no arguments"
+    remote 'set -eu
+      for f in /etc/nginx/conf.d/a7-wa.conf /etc/nginx/conf.d/a7-openwa.conf \
+               /etc/nginx/sites-enabled/a7-wa.conf /etc/nginx/sites-enabled/a7-openwa.conf; do
+        [ -f "$f" ] || continue
+        sed -i "s/client_max_body_size [0-9]\+[mMkK];/client_max_body_size 1024m;/" "$f"
+        echo "updated $f"
+        grep -n client_max_body_size "$f" || true
+      done
+      nginx -t
+      systemctl reload nginx
+    '
     ;;
 
   ""|-h|--help|help) usage ;;

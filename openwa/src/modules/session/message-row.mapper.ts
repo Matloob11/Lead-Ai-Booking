@@ -28,7 +28,10 @@ export const OMITTED_MEDIA = { mimetype: '', omitted: true } as const;
  *   and an empty object would be noise).
  */
 export function buildMessageMetadata(
-  message: Pick<IncomingMessage, 'media' | 'quotedMessage' | 'call' | 'poll' | 'type' | 'rawType'>,
+  message: Pick<
+    IncomingMessage,
+    'media' | 'quotedMessage' | 'call' | 'poll' | 'type' | 'rawType' | 'senderPhone'
+  >,
   synthesizeOmittedMedia = false,
 ): Record<string, unknown> | undefined {
   const metadata: Record<string, unknown> = {};
@@ -53,6 +56,10 @@ export function buildMessageMetadata(
   // would have been to reproduce the traffic.
   if (message.rawType) {
     metadata.rawType = message.rawType;
+  }
+  // Digits from RESOLVE_LID_TO_PHONE — chat list titles fall back to this when WhatsApp only gave @lid.
+  if (typeof message.senderPhone === 'string' && message.senderPhone.trim()) {
+    metadata.senderPhone = message.senderPhone.trim();
   }
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }

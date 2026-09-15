@@ -13,8 +13,16 @@
  */
 
 import { inbox, catalog } from "../api/api.js";
+import {
+  clearTemplateCaches,
+  readNumbersCache,
+  readTemplatesCache,
+  writeNumbersCache,
+  writeTemplatesCache,
+} from "./template-cache.js";
 import { clear, debounce, el, formatBytes, modal } from "../core/dom.js";
 import { icon } from "../core/icons.js";
+import { numberNameWithDial } from "../core/number-label.js";
 
 const MAX_VISIBLE_BUTTONS = 3;
 
@@ -169,7 +177,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     // The warning's wording depends on which of our numbers is selected, so a
     // change here has to re-evaluate it.
     { onchange: () => { state.numberId = numberSelect.value; loadTemplates(); checkExisting(); } },
-    numbers.map((n) => el("option", { value: n.id }, [n.title || n.phone_number]))
+    numbers.map((n) => el("option", { value: n.id }, [numberNameWithDial(n)]))
   );
   const phone = el("input.field", {
     type: "tel",
@@ -653,9 +661,23 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
   return dialog;
 }
 
-export function openTemplateManager({ onUseTemplate } = {}) {
-  const body = el("div.modal__body.na", {}, [el("div.na-note", {}, ["Loading templates from Meta…"])]);
-  const dialog = modal("Templates Management Center", body, { wide: true });
+function ensureTemplateCenterCss() {
+  const href = "/app/assets/modules/template-center.css";
+  if (document.querySelector(`link[href="${href}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+export function openTemplateManager({ onUseTemplate, isAdmin = false } = {}) {
+  ensureTemplateCenterCss();
+
+  const body = el("div.modal__body.tmc", {}, [
+    el("div.tmc-loading", {}, ["Loading templates…"]),
+  ]);
+  const dialog = modal("Message templates", body, { wide: true });
+  dialog.box.classList.add("tmc-modal");
 
   let templates = [];
   let numbers = [];
@@ -663,19 +685,21 @@ export function openTemplateManager({ onUseTemplate } = {}) {
   let filterWaba = "";
   let searchTerm = "";
 
-  const search = el("input.na-search", {
+  const search = el("input.tmc-search", {
     type: "search",
     placeholder: "Find template by name or text…",
+    "aria-label": "Find template by name or text",
   });
 
   // Templates belong to a business account and several numbers share one, so
   // an agent covering four numbers otherwise reads one undifferentiated list
   // and cannot tell which template can be sent from which phone.
-  const numberSelect = el("select.na-picker", { style: "width: 190px;" }, [
+  const numberSelect = el("select.tmc-picker", { "aria-label": "Filter by number" }, [
     el("option", { value: "" }, ["All my numbers"]),
   ]);
 
-  const notice = el("div.alert", { hidden: true });
+  const notice = el("p.tmc-notice", { hidden: true });
+  const unreachableNote = el("p.tmc-notice.tmc-notice--warn", { hidden: true });
 
   /** Whichever of the caller's numbers sit on a template's business account. */
   const numbersFor = (wabaId) =>
@@ -687,8 +711,8 @@ export function openTemplateManager({ onUseTemplate } = {}) {
     return shared.map((n) => n.phone_number || n.title || n.label).join(", ");
   };
 
-  const statusSelect = el("select.na-picker", { style: "width: 140px;" }, [
-    el("option", { value: "" }, ["All Statuses"]),
+  const statusSelect = el("select.tmc-picker", { "aria-label": "Filter by status" }, [
+    el("option", { value: "" }, ["All statuses"]),
     el("option", { value: "APPROVED" }, ["Approved"]),
     el("option", { value: "PENDING" }, ["Pending"]),
     el("option", { value: "REJECTED" }, ["Rejected"]),
@@ -701,13 +725,16 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 
   const createBtn = el("button.btn.btn--primary.btn--sm", { type: "button" }, [
     icon("plus", { size: 14 }),
-    " Create New Template",
+    " Create new template",
   ]);
 
-  const summary = el("div.na-summary");
-  const listContainer = el("div.na-rows");
+  const stats = el("div.tmc-stats");
+  const listContainer = el("div.tmc-list");
+  const lead = el("p.tmc-lead", {}, [
+    "Create submits straight to Meta. Sync is only to refresh review status (Pending → Approved).",
+  ]);
 
-  const toolbar = el("div.na-toolbar", { style: "align-items: center;" }, [
+  const toolbar = el("div.tmc-toolbar", {}, [
     search,
     numberSelect,
     statusSelect,
@@ -732,28 +759,31 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 
   syncBtn.addEventListener("click", async () => {
     syncBtn.disabled = true;
-    syncBtn.textContent = "Syncing…";
+    clear(syncBtn).append("Syncing…");
     notice.hidden = true;
     try {
       const result = await catalog.syncTemplates();
-      await fetchTemplates();
+      clearTemplateCaches();
+      await fetchTemplates({ force: true });
       // Said out loud, because the common outcome of a successful sync is that
       // nothing on screen changes, which reads exactly like a sync that failed.
-      // The route answers with a plain count, not an object.
       const count = Number(result?.templates);
-      clear(notice).append(
-        Number.isFinite(count)
-          ? `Refreshed from Meta — ${count} template${count === 1 ? "" : "s"} on record.`
-          : "Refreshed from Meta."
-      );
-      notice.className = "alert wa-x-alert--ok";
+      const skipped = Number(result?.wabas_failed) || 0;
+      let line = Number.isFinite(count)
+        ? `Refreshed from Meta — ${count} template${count === 1 ? "" : "s"} on this Official key.`
+        : "Refreshed from Meta.";
+      if (skipped) {
+        line += ` ${skipped} extra business account${skipped === 1 ? "" : "s"} sit on a different WhatsApp provider and were skipped. Templates already here stay available.`;
+      }
+      clear(notice).append(line);
+      notice.className = skipped ? "tmc-notice tmc-notice--warn" : "tmc-notice tmc-notice--ok";
       notice.hidden = false;
     } catch (err) {
       // In the panel rather than in a browser alert: this screen lives inside
       // two nested iframes, and "An embedded page at … says" is not a sentence
       // that tells anybody what went wrong.
       clear(notice).append(`Could not refresh from Meta: ${err.message}`);
-      notice.className = "alert";
+      notice.className = "tmc-notice tmc-notice--bad";
       notice.hidden = false;
     } finally {
       syncBtn.disabled = false;
@@ -764,32 +794,72 @@ export function openTemplateManager({ onUseTemplate } = {}) {
   createBtn.addEventListener("click", () => {
     openCreateTemplateModal({
       numbers,
-      onCreated: async () => {
-        await fetchTemplates();
-        clear(notice).append(
-          "Submitted to Meta. It shows as PENDING until the review finishes, usually a minute or two — press Sync from Meta to check."
-        );
-        notice.className = "alert wa-x-alert--ok";
+      isAdmin,
+      onCreated: async (summary) => {
+        let line =
+          "Submitted to Meta. It is already in this list as Pending — no Sync needed. Review usually finishes in a minute or two; press Sync from Meta only to refresh the status.";
+        if (summary && typeof summary.created === "number") {
+          line = `Submitted to Meta on ${summary.created} business account${summary.created === 1 ? "" : "s"}`;
+          if (summary.skipped) line += ` · ${summary.skipped} already had it`;
+          if (summary.failed) line += ` · ${summary.failed} failed`;
+          line += ". Pending until Meta approves — Sync refreshes status.";
+        }
+        clear(notice).append(line);
+        notice.className = "tmc-notice tmc-notice--ok";
         notice.hidden = false;
+        // Do not block the UI on a full list reload — refresh quietly.
+        clearTemplateCaches();
+        fetchTemplates({ force: true, silent: true }).catch(() => {});
       },
     });
   });
 
-  async function fetchTemplates() {
-    clear(body).append(el("div.na-note", {}, ["Loading templates from Meta…"]));
+  async function pullLiveLists() {
+    const [rows, numberRows] = await Promise.all([
+      catalog.allTemplates(),
+      catalog.numbers().catch(() => []),
+    ]);
+    templates = Array.isArray(rows) ? rows : [];
+    numbers = Array.isArray(numberRows) ? numberRows : [];
+    writeTemplatesCache(templates);
+    writeNumbersCache(numbers);
+  }
+
+  async function fetchTemplates({ force = false, silent = false } = {}) {
+    const cachedT = readTemplatesCache();
+    const cachedN = readNumbersCache();
+    const haveCache = Boolean(cachedT?.rows?.length);
+
+    if (haveCache && !force) {
+      templates = cachedT.rows;
+      numbers = Array.isArray(cachedN?.rows) ? cachedN.rows : numbers;
+      renderMain();
+      // Background refresh — keep showing the cached list if the network is slow.
+      pullLiveLists()
+        .then(() => {
+          if (dialog.box?.isConnected) renderMain();
+        })
+        .catch(() => {});
+      return;
+    }
+
+    if (!silent) {
+      clear(body).append(el("div.tmc-loading", {}, ["Loading templates…"]));
+    }
     try {
-      // The numbers alongside the templates: without them a template can be
-      // listed but not attributed, and this screen's whole complaint was not
-      // knowing which number a template belonged to.
-      const [rows, numberRows] = await Promise.all([
-        catalog.allTemplates(),
-        catalog.numbers().catch(() => []),
-      ]);
-      templates = Array.isArray(rows) ? rows : [];
-      numbers = Array.isArray(numberRows) ? numberRows : [];
+      await pullLiveLists();
       renderMain();
     } catch (err) {
-      clear(body).append(el("div.alert", {}, [`Failed to load templates: ${err.message}`]));
+      if (haveCache) {
+        templates = cachedT.rows;
+        numbers = Array.isArray(cachedN?.rows) ? cachedN.rows : [];
+        renderMain();
+        clear(notice).append(`Showing saved list — live refresh failed: ${err.message}`);
+        notice.className = "tmc-notice tmc-notice--warn";
+        notice.hidden = false;
+        return;
+      }
+      clear(body).append(el("div.tmc-notice.tmc-notice--bad", {}, [`Failed to load templates: ${err.message}`]));
     }
   }
 
@@ -812,8 +882,21 @@ export function openTemplateManager({ onUseTemplate } = {}) {
     filterWaba = numberSelect.value;
   }
 
+  function paintUnreachable() {
+    const bad = numbers.some((n) => n.template_sync_error);
+    if (!bad) {
+      unreachableNote.hidden = true;
+      return;
+    }
+    clear(unreachableNote).append(
+      "Templates for this Business ID cannot be listed with the A7 gateway key."
+    );
+    unreachableNote.hidden = false;
+  }
+
   function renderMain() {
-    clear(body).append(toolbar, notice, summary, listContainer);
+    paintUnreachable();
+    clear(body).append(lead, toolbar, unreachableNote, notice, stats, listContainer);
     renderNumberFilter();
     render();
   }
@@ -834,17 +917,29 @@ export function openTemplateManager({ onUseTemplate } = {}) {
       return matchStatus && matchNumber && matchText;
     });
 
-    clear(summary).append(
-      `${templates.length} total templates · `,
-      el("span.tpl-stat-approved", { style: "color: #10b981; font-weight: 600;" }, [`${approvedCount} Approved`]),
-      " · ",
-      el("span.tpl-stat-pending", { style: "color: #f59e0b; font-weight: 600;" }, [`${pendingCount} Pending`]),
-      rejectedCount ? ` · ${rejectedCount} Rejected` : "",
-      searchTerm || filterStatus || filterWaba ? ` · showing ${filtered.length}` : ""
+    const totalLabel = searchTerm || filterStatus || filterWaba ? "Showing" : "Total";
+    const totalValue = searchTerm || filterStatus || filterWaba ? filtered.length : templates.length;
+    clear(stats).append(
+      el("div.tmc-stat", {}, [
+        el("strong", {}, [String(totalValue)]),
+        el("span", {}, [totalLabel]),
+      ]),
+      el("div.tmc-stat.tmc-stat--ok", {}, [
+        el("strong", {}, [String(approvedCount)]),
+        el("span", {}, ["Approved"]),
+      ]),
+      el("div.tmc-stat.tmc-stat--warn", {}, [
+        el("strong", {}, [String(pendingCount)]),
+        el("span", {}, ["Pending"]),
+      ]),
+      el("div.tmc-stat.tmc-stat--bad", {}, [
+        el("strong", {}, [String(rejectedCount)]),
+        el("span", {}, ["Rejected"]),
+      ])
     );
 
     if (!filtered.length) {
-      listContainer.append(el("div.tplc-empty", {}, ["No templates match your filters."]));
+      listContainer.append(el("div.tmc-empty", {}, ["No templates match your filters."]));
       return;
     }
 
@@ -852,33 +947,48 @@ export function openTemplateManager({ onUseTemplate } = {}) {
       const isApproved = t.status === "APPROVED";
       const isPending = t.status === "PENDING";
       const isRejected = t.status === "REJECTED";
-
       const statusTone = isApproved ? "ok" : isPending ? "warn" : isRejected ? "bad" : "";
-      const statusLabel = isApproved ? "APPROVED" : isPending ? "PENDING (Under Meta Review)" : isRejected ? "REJECTED" : t.status;
+      const statusLabel = isApproved
+        ? "Approved"
+        : isPending
+          ? "Pending review"
+          : isRejected
+            ? "Rejected"
+            : t.status;
 
-      const card = el("div.na-row.tpl-card", {}, [
-        el("div.na-head", {}, [
-          el("div.na-who", {}, [
-            el("div.na-title", {}, [t.name]),
-            el("div.na-phone", {}, [
-              `Language: ${t.language} · Category: ${t.category}`,
-              // Which phone this can actually be sent from. A template is
-              // approved for one business account and is unusable from a number
-              // on any other, which was invisible until now.
-              numberLabel(t.waba_business_id)
-                ? ` · On ${numberLabel(t.waba_business_id)}`
-                : "",
-            ]),
+      const phones = numberLabel(t.waba_business_id);
+      const metaBits = [t.language || "—", t.category || "—", phones ? `On ${phones}` : ""].filter(Boolean);
+
+      const card = el(`article.tmc-card${statusTone ? `.tmc-card--${statusTone}` : ""}`, {}, [
+        el("header.tmc-card__head", {}, [
+          el("div", {}, [
+            el("h3.tmc-card__name", {}, [t.name]),
+            el("p.tmc-card__meta", {}, [metaBits.join(" · ")]),
           ]),
-          el("div.na-flags", {}, [
-            el("span.na-badge", { class: `na-badge--${statusTone}` }, [statusLabel]),
-          ]),
+          el("span.tmc-badge", { class: statusTone ? `tmc-badge--${statusTone}` : "" }, [statusLabel]),
         ]),
-        el("div.na-body", { style: "grid-template-columns: 1fr;" }, [
-          el("div.tplc-item__text", { style: "white-space: pre-wrap; font-size: 13px;" }, [t.body_text || "—"]),
-          t.footer_text ? el("div.tplc-bubble__footer", { style: "font-size: 11px; opacity: 0.7;" }, [t.footer_text]) : null,
-        ]),
-        el("div.na-foot", {}, [
+        el("p.tmc-card__body", {}, [t.body_text || "—"]),
+        t.footer_text ? el("p.tmc-card__footer-text", {}, [t.footer_text]) : null,
+        el("div.tmc-card__foot", {}, [
+          isAdmin
+            ? el("button.btn.btn--ghost.btn--sm", {
+                type: "button",
+                title: "Copy this template to Official numbers that do not have it yet",
+                onclick: () => deployMissing(t),
+              }, [icon("plus", { size: 14 }), " Copy to missing numbers"])
+            : null,
+          el("button.btn.btn--ghost.btn--sm", {
+            type: "button",
+            title: "Hide this template from the panel",
+            onclick: () => askRemove(t),
+          }, [icon("trash", { size: 14 }), " Hide from panel"]),
+          isAdmin
+            ? el("button.btn.btn--ghost.btn--sm", {
+                type: "button",
+                title: "Delete this template name on Meta so it can be recreated",
+                onclick: () => askPurgeMeta(t),
+              }, [icon("trash", { size: 14 }), " Delete from Meta"])
+            : null,
           isApproved
             ? el("button.btn.btn--primary.btn--sm", {
                 type: "button",
@@ -886,13 +996,112 @@ export function openTemplateManager({ onUseTemplate } = {}) {
                   dialog.close();
                   onUseTemplate?.(t);
                 },
-              }, ["Use in Chat"])
-            : el("span.na-status", {}, [isPending ? "Meta is reviewing this template (1-2 mins)" : "Template not available for sending"]),
+              }, ["Use in chat"])
+            : el("span.tmc-hint", {}, [
+                isPending
+                  ? "Meta is reviewing this template (1–2 minutes)"
+                  : "Not available to send",
+              ]),
         ]),
       ]);
 
       listContainer.append(card);
     }
+  }
+
+  function deployMissing(t) {
+    if (!window.confirm(`Copy "${t.name}" to every Official number that does not have it yet?`)) return;
+    clear(notice).append("Submitting to Meta on missing numbers…");
+    notice.className = "tmc-notice";
+    notice.hidden = false;
+    catalog
+      .deployTemplate(t.id, { all_numbers: true })
+      .then(async (summary) => {
+        await fetchTemplates();
+        clear(notice).append(
+          `Copied to ${summary.created || 0} business account${summary.created === 1 ? "" : "s"}` +
+            (summary.skipped ? ` · ${summary.skipped} skipped` : "") +
+            (summary.failed ? ` · ${summary.failed} failed` : "") +
+            "."
+        );
+        notice.className = "tmc-notice tmc-notice--ok";
+        notice.hidden = false;
+      })
+      .catch((err) => {
+        clear(notice).append(err.message || "Could not copy this template.");
+        notice.className = "tmc-notice tmc-notice--bad";
+        notice.hidden = false;
+      });
+  }
+
+  function askRemove(t) {
+    const errorEl = el("p.tmc-notice.tmc-notice--bad", { hidden: true });
+    const confirmBtn = el("button.btn.btn--primary.btn--sm", { type: "button" }, [
+      icon("trash", { size: 14 }),
+      " Hide from panel",
+    ]);
+    const cancelBtn = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["Cancel"]);
+    const confirm = modal("Hide template", el("div.modal__body", {}, [
+      el("p", {}, [
+        `Hide ${t.name} from this panel? It stays at Meta, but agents will not see it here. Sync will not bring it back.`,
+      ]),
+      errorEl,
+      el("div.tmc-card__foot", {}, [cancelBtn, confirmBtn]),
+    ]));
+    cancelBtn.addEventListener("click", () => confirm.close());
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Removing…";
+      errorEl.hidden = true;
+      try {
+        await catalog.deleteTemplate(t.id);
+        confirm.close();
+        await fetchTemplates();
+        clear(notice).append(`Hidden ${t.name} from the panel.`);
+        notice.className = "tmc-notice tmc-notice--ok";
+        notice.hidden = false;
+      } catch (err) {
+        confirmBtn.disabled = false;
+        confirmBtn.replaceChildren(icon("trash", { size: 14 }), " Hide from panel");
+        errorEl.textContent = err.message || "Could not hide this template.";
+        errorEl.hidden = false;
+      }
+    });
+  }
+
+  function askPurgeMeta(t) {
+    const errorEl = el("p.tmc-notice.tmc-notice--bad", { hidden: true });
+    const confirmBtn = el("button.btn.btn--primary.btn--sm", { type: "button" }, [
+      icon("trash", { size: 14 }),
+      " Delete from Meta",
+    ]);
+    const cancelBtn = el("button.btn.btn--ghost.btn--sm", { type: "button" }, ["Cancel"]);
+    const confirm = modal("Delete from Meta", el("div.modal__body", {}, [
+      el("p", {}, [
+        `Delete ${t.name} from Meta? The name becomes free to recreate. It is also hidden from this panel so Sync cannot bring it back.`,
+      ]),
+      errorEl,
+      el("div.tmc-card__foot", {}, [cancelBtn, confirmBtn]),
+    ]));
+    cancelBtn.addEventListener("click", () => confirm.close());
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Deleting…";
+      errorEl.hidden = true;
+      try {
+        await catalog.purgeTemplateMeta(t.id);
+        confirm.close();
+        await fetchTemplates();
+        clear(notice).append(`Deleted ${t.name} from Meta and hid it from the panel.`);
+        notice.className = "tmc-notice tmc-notice--ok";
+        notice.hidden = false;
+      } catch (err) {
+        confirmBtn.disabled = false;
+        confirmBtn.replaceChildren(icon("trash", { size: 14 }), " Delete from Meta");
+        errorEl.textContent = err.message || "Could not delete this template on Meta.";
+        errorEl.hidden = false;
+      }
+    });
   }
 
   fetchTemplates();
@@ -910,13 +1119,67 @@ export function openTemplateManager({ onUseTemplate } = {}) {
 const numbersOnWaba = (numbers, wabaId) =>
   numbers.filter((n) => n.waba_business_id && n.waba_business_id === wabaId);
 
-export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
+/** Phone first — titles are often agent names and confuse the picker. */
+function formatWaNumber(number) {
+  const raw = String(number?.phone_number || "").replace(/\s+/g, "");
+  const phone = raw
+    ? raw.startsWith("+")
+      ? raw
+      : `+${raw.replace(/^\+/, "")}`
+    : "";
+  const name = String(number?.label || number?.title || "").trim();
+  const nameIsPhone = name && phone && name.replace(/\s+/g, "").replace(/^\+/, "") === phone.replace(/^\+/, "");
+  return {
+    phone: phone || (nameIsPhone ? name : "") || `#${number?.id || "?"}`,
+    name: name && !nameIsPhone && name !== phone ? name : "",
+  };
+}
+
+export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = false } = {}) {
+  ensureTemplateCenterCss();
+
   // Which business account this is being written into. Meta reviews it under
   // that account's name, so it is not a detail to leave implicit — and an agent
   // covering four numbers has no other way to know which one they are spending.
   const numberSelect = el("select.field");
-  const wabaNote = el("div.tplc-waba-note", {}, ["Loading your numbers…"]);
+  const wabaNote = el("div.tplc-waba-note", {}, ["Loading numbers…"]);
+  const deployAllInput = el("input", { type: "checkbox", checked: true, id: "tplc-deploy-all" });
+  const deployList = el("div.tplc-deploy-list");
   let allNumbers = Array.isArray(numbers) ? numbers : [];
+
+  function syncDeployAllFromRows() {
+    const boxes = [...deployList.querySelectorAll('input[type="checkbox"]')];
+    deployAllInput.checked = boxes.length > 0 && boxes.every((box) => box.checked);
+  }
+
+  function paintDeployTargets() {
+    clear(deployList);
+    for (const number of allNumbers) {
+      const { phone, name } = formatWaNumber(number);
+      const box = el("input", {
+        type: "checkbox",
+        checked: true,
+        "data-number-id": String(number.id),
+      });
+      box.addEventListener("change", syncDeployAllFromRows);
+      deployList.append(
+        el("label.tplc-deploy-row", {}, [
+          box,
+          el("span.tplc-deploy-row__text", {}, [
+            el("span.tplc-deploy-row__phone", {}, [phone]),
+            name ? el("span.tplc-deploy-row__name", {}, [name]) : null,
+          ]),
+        ])
+      );
+    }
+    syncDeployAllFromRows();
+  }
+
+  deployAllInput.addEventListener("change", () => {
+    for (const box of deployList.querySelectorAll('input[type="checkbox"]')) {
+      box.checked = deployAllInput.checked;
+    }
+  });
 
   function paintNumbers() {
     clear(numberSelect);
@@ -927,24 +1190,25 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
     for (const number of allNumbers) {
       if (!number.waba_business_id || seen.has(number.waba_business_id)) continue;
       seen.add(number.waba_business_id);
+      const shared = numbersOnWaba(allNumbers, number.waba_business_id);
+      const phones = shared.map((n) => formatWaNumber(n).phone).join(", ");
       numberSelect.append(
-        el("option", { value: number.waba_business_id }, [
-          number.title || number.label || number.phone_number || number.waba_business_id,
-        ])
+        el("option", { value: number.waba_business_id }, [phones || number.waba_business_id])
       );
     }
     if (!seen.size) {
       numberSelect.append(el("option", { value: "" }, ["No number available"]));
     }
     paintWabaNote();
+    if (isAdmin) paintDeployTargets();
   }
 
   function paintWabaNote() {
     const shared = numbersOnWaba(allNumbers, numberSelect.value);
     clear(wabaNote).append(
       shared.length
-        ? `Sendable from ${shared.map((n) => n.phone_number || n.title).join(", ")}`
-        : "This template will be created on your business account."
+        ? shared.map((n) => formatWaNumber(n).phone).join(", ")
+        : "Pick a business account."
     );
   }
 
@@ -957,30 +1221,43 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
         allNumbers = Array.isArray(rows) ? rows : [];
         paintNumbers();
       })
-      .catch(() => clear(wabaNote).append("Could not load your numbers."));
+      .catch(() => clear(wabaNote).append("Could not load numbers."));
   } else {
     paintNumbers();
   }
 
+  const targetField = isAdmin
+    ? el("div.tplc-field", {}, [
+        el("div.tplc-field__head", {}, [
+          el("span", {}, ["Numbers"]),
+          el("label.tplc-deploy-all", {}, [deployAllInput, " Select all"]),
+        ]),
+        deployList,
+      ])
+    : el("label.tplc-field", {}, [el("span", {}, ["Number"]), numberSelect, wabaNote]);
+
   const nameInput = el("input.field", {
     type: "text",
-    placeholder: "e.g. property_viewing_offer",
+    placeholder: "property_viewing_offer",
   });
 
   const categorySelect = el("select.field", {}, [
-    el("option", { value: "MARKETING" }, ["MARKETING (Promotions, Offers, Re-engagement)"]),
-    el("option", { value: "UTILITY" }, ["UTILITY (Order updates, Appointments, Account alerts)"]),
+    el("option", { value: "MARKETING" }, ["Marketing"]),
+    el("option", { value: "UTILITY" }, ["Utility"]),
   ]);
 
   const langSelect = el("select.field", {}, [
-    el("option", { value: "en" }, ["English (en)"]),
-    el("option", { value: "ar" }, ["Arabic (ar)"]),
-    el("option", { value: "ur" }, ["Urdu (ur)"]),
+    el("option", { value: "en" }, ["English"]),
+    el("option", { value: "ar" }, ["Arabic"]),
+    el("option", { value: "ur" }, ["Urdu"]),
   ]);
 
-  const headerInput = el("input.field", { type: "text", placeholder: "Header text (optional)" });
-  const bodyTextarea = el("textarea.field", { rows: 4, placeholder: "Hello {{1}}, thank you for contacting A7 Group. Your appointment is set for {{2}}." });
-  const footerInput = el("input.field", { type: "text", placeholder: "Footer text e.g. A7 Real Estate (optional)" });
+  const headerInput = el("input.field", { type: "text", placeholder: "Header (optional)" });
+  const bodyTextarea = el("textarea.field", {
+    rows: 4,
+    placeholder: "Hello {{1}}, your appointment is on {{2}}.",
+  });
+  const footerInput = el("input.field", { type: "text", placeholder: "Footer (optional)" });
 
   /**
    * A sample value for every {{n}}, which Meta requires and this screen never
@@ -1008,14 +1285,12 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
     }
     if (!holes.length) return;
 
-    clear(container).append(
-      el("div.tplc-vars__title", {}, [`Sample values — Meta needs one per placeholder in the ${label}`])
-    );
+    clear(container).append(el("div.tplc-vars__title", {}, [`Sample for ${label}`]));
     for (const hole of holes) {
       const input = el("input.field.tplc-vars__input", {
         type: "text",
         value: store[hole] || "",
-        placeholder: `What {{${hole}}} looks like, e.g. Ahmed`,
+        placeholder: `{{${hole}}} example`,
       });
       input.addEventListener("input", () => {
         store[hole] = input.value;
@@ -1127,11 +1402,11 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
     updatePreview();
   });
 
-  const nameHint = el("span", { style: "font-size: 11px; opacity: 0.7;" }, ["Format: lowercase and underscores only"]);
+  const nameHint = el("span.tplc-field__hint", {}, ["lowercase_with_underscores"]);
 
   nameInput.addEventListener("input", () => {
     nameInput.value = nameInput.value.toLowerCase().replace(/[^\w]+/g, "_");
-    nameHint.textContent = `Meta identifier: ${nameInput.value || "template_name"}`;
+    nameHint.textContent = nameInput.value || "lowercase_with_underscores";
     updatePreview();
   });
 
@@ -1192,6 +1467,131 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
     }
   }
 
+  const aiNote = el("p.tplc-ai__note", { hidden: true });
+  const aiList = el("div.tplc-ai__list");
+  const aiSource = el("p.tplc-ai__note", { hidden: true });
+  const aiPanel = el("div.tplc-ai", { hidden: true }, [aiNote, aiList, aiSource]);
+  const aiBtn = el("button.btn.btn--ghost.btn--sm", { type: "button" }, [
+    icon("zap", { size: 14 }),
+    " Rewrite as Utility",
+  ]);
+
+  let aiPickedName = "";
+
+  function fillExampleStore(store, incoming) {
+    for (const key of Object.keys(store)) delete store[key];
+    for (const [key, value] of Object.entries(incoming || {})) {
+      store[String(key)] = String(value || "");
+    }
+  }
+
+  function applyUtilitySuggestion(row) {
+    aiPickedName = row.name;
+    nameInput.value = row.name;
+    nameHint.textContent = row.name || "lowercase_with_underscores";
+    categorySelect.value = "UTILITY";
+    headerInput.value = row.header || "";
+    bodyTextarea.value = row.body || "";
+    footerInput.value = row.footer || "";
+    fillExampleStore(headerExamples, row.header_examples);
+    fillExampleStore(bodyExamples, row.body_examples);
+    buttons.splice(0, buttons.length, ...(Array.isArray(row.buttons) ? row.buttons.map((b) => ({
+      type: "QUICK_REPLY",
+      text: b.text || "",
+      url: "",
+      phone_number: "",
+      example: "",
+    })) : []));
+    paintButtons();
+    updatePreview();
+    for (const card of aiList.querySelectorAll(".tplc-ai__card")) {
+      card.classList.toggle("is-picked", card.dataset.name === row.name);
+    }
+  }
+
+  function paintUtilitySuggestions(payload) {
+    clear(aiList);
+    const rows = Array.isArray(payload?.suggestions) ? payload.suggestions.slice(0, 3) : [];
+    const marketing = Boolean(payload?.original_would_be_marketing);
+    const fromAi = payload?.source === "openai" && payload?.ai_configured === true;
+    clear(aiNote).append(
+      payload?.analysis
+        || (marketing
+          ? "This draft would be approved as Marketing. Pick a Utility wording below."
+          : "Pick one Utility wording. Meta scores the text, not the category dropdown.")
+    );
+    aiNote.className = marketing ? "tplc-ai__note" : "tplc-ai__note tplc-ai__note--ok";
+    aiNote.hidden = false;
+
+    clear(aiSource);
+    if (fromAi) {
+      aiSource.hidden = true;
+    } else {
+      const err = String(payload?.ai_error || "").trim();
+      aiSource.append(
+        err || "Rewrite service is not configured",
+        " These wordings are from your draft."
+      );
+      aiSource.className = "tplc-ai__note";
+      aiSource.hidden = false;
+    }
+
+    if (!rows.length) {
+      aiList.append(el("p.tplc-ai__note.tplc-ai__note--bad", {}, ["No Utility rewrites came back. Try again."]));
+      return;
+    }
+
+    for (const row of rows) {
+      const useBtn = el("button.btn.btn--primary.btn--sm", { type: "button" }, ["Use this"]);
+      useBtn.addEventListener("click", () => applyUtilitySuggestion(row));
+      aiList.append(
+        el("article.tplc-ai__card", { "data-name": row.name, class: row.name === aiPickedName ? "is-picked" : "" }, [
+          el("div.tplc-ai__card-head", {}, [
+            el("h3.tplc-ai__name", {}, [row.name || "utility_template"]),
+            useBtn,
+          ]),
+          el("p.tplc-ai__body", {}, [row.body || ""]),
+        ])
+      );
+    }
+  }
+
+  aiBtn.addEventListener("click", async () => {
+    const bodyText = bodyTextarea.value.trim();
+    if (!bodyText) {
+      errorEl.textContent = "Write the template body first, then rewrite it as Utility.";
+      errorEl.hidden = false;
+      return;
+    }
+    errorEl.hidden = true;
+    aiPanel.hidden = false;
+    aiBtn.disabled = true;
+    aiBtn.replaceChildren("Analysing…");
+    clear(aiList).append(el("p.tplc-ai__note", {}, ["Checking whether Meta would treat this as Marketing…"]));
+    aiNote.hidden = true;
+    aiSource.hidden = true;
+    try {
+      const payload = await catalog.suggestUtilityTemplates({
+        name: nameInput.value.trim(),
+        category: categorySelect.value,
+        language: langSelect.value,
+        header_text: headerInput.value.trim(),
+        body_text: bodyText,
+        footer_text: footerInput.value.trim(),
+      });
+      paintUtilitySuggestions(payload);
+    } catch (err) {
+      clear(aiNote).append(err.message || "Could not rewrite this as Utility.");
+      aiNote.className = "tplc-ai__note tplc-ai__note--bad";
+      aiNote.hidden = false;
+      aiSource.hidden = true;
+      clear(aiList);
+    } finally {
+      aiBtn.disabled = false;
+      aiBtn.replaceChildren(icon("zap", { size: 14 }), " Rewrite as Utility");
+    }
+  });
+
   const errorEl = el("div.alert", { hidden: true });
   const submitBtn = el("button.btn.btn--primary", { type: "button" }, [
     icon("send", { size: 14 }),
@@ -1199,18 +1599,22 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
   ]);
 
   const leftForm = el("div.tplc-form", { style: "gap: 10px;" }, [
-    el("label.tplc-field", {}, [el("span", {}, ["Creating on"]), numberSelect, wabaNote]),
-    el("label.tplc-field", {}, [el("span", {}, ["Template Name"]), nameInput, nameHint]),
-    el("label.tplc-field", {}, [el("span", {}, ["Category"]), categorySelect]),
+    targetField,
+    el("label.tplc-field", {}, [el("span", {}, ["Name"]), nameInput, nameHint]),
+    el("label.tplc-field", {}, [
+      el("div.tplc-field__head", {}, [el("span", {}, ["Category"]), aiBtn]),
+      categorySelect,
+    ]),
     el("label.tplc-field", {}, [el("span", {}, ["Language"]), langSelect]),
-    el("label.tplc-field", {}, [el("span", {}, ["Header Text (Optional)"]), headerInput]),
+    el("label.tplc-field", {}, [el("span", {}, ["Header"]), headerInput]),
     headerVars,
     el("label.tplc-field", {}, [
-      el("div.tplc-field__head", {}, [el("span", {}, ["Body Text"]), addVariable]),
+      el("div.tplc-field__head", {}, [el("span", {}, ["Body"]), addVariable]),
       bodyTextarea,
     ]),
     bodyVars,
-    el("label.tplc-field", {}, [el("span", {}, ["Footer Text (Optional)"]), footerInput]),
+    aiPanel,
+    el("label.tplc-field", {}, [el("span", {}, ["Footer"]), footerInput]),
     el("div.tplc-field", {}, [
       el("div.tplc-field__head", {}, [
         el("span", {}, [`Buttons (max ${MAX_VISIBLE_BUTTONS})`]),
@@ -1223,7 +1627,7 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
   ]);
 
   const body = el("div.modal__body.tplc", {}, [leftForm, el("div.tplc-right", {}, [phoneFrame])]);
-  const dialog = modal("Create New WhatsApp Template", body, { wide: true });
+  const dialog = modal("Create WhatsApp Template", body, { wide: true });
 
   paintButtons();
   updatePreview();
@@ -1239,6 +1643,19 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
     for (const [hole, value] of Object.entries({ ...headerExamples, ...bodyExamples })) {
       if (!String(value || "").trim()) return `Give {{${hole}}} a sample value — Meta reviews the finished sentence.`;
     }
+    const body = bodyTextarea.value.trim();
+    const holes = placeholdersIn(body);
+    if (holes.length) {
+      const expected = holes.map((_, i) => String(i + 1));
+      if (holes.join(",") !== expected.join(",")) {
+        return "Placeholders must be {{1}}, {{2}}, … in order with no gaps.";
+      }
+      if (body.startsWith("{{") || /\{\{\d+\}\}$/.test(body)) {
+        return "Body cannot start or end with a variable — Meta rejects that. Add words before {{1}} and after the last one.";
+      }
+    }
+    if (headerInput.value.trim().length > 60) return "Header text must be 60 characters or fewer.";
+    if (footerInput.value.trim().length > 60) return "Footer text must be 60 characters or fewer.";
     for (const button of buttons) {
       if (!button.text.trim()) return "Every button needs a label, or remove it.";
       if (button.type === "URL" && !button.url.trim()) return `Button "${button.text}" needs a link.`;
@@ -1246,8 +1663,32 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
         return `Button "${button.text}" needs a phone number.`;
       }
     }
-    if (!numberSelect.value) return "No WhatsApp Business account is available on your numbers.";
+    if (!isAdmin && !numberSelect.value) return "No WhatsApp number available.";
+    if (isAdmin) {
+      const picked = deployList.querySelectorAll('input[type="checkbox"]:checked');
+      if (!picked.length) return "Select at least one number.";
+    }
     return "";
+  }
+
+  function templatePayload() {
+    return {
+      name: nameInput.value.trim(),
+      category: categorySelect.value,
+      language: langSelect.value,
+      header_text: headerInput.value.trim(),
+      header_examples: headerExamples,
+      body_text: bodyTextarea.value.trim(),
+      body_examples: bodyExamples,
+      footer_text: footerInput.value.trim(),
+      buttons: buttons.map((b) => ({
+        type: b.type,
+        text: b.text.trim(),
+        url: b.type === "URL" ? b.url.trim() : "",
+        phone_number: b.type === "PHONE_NUMBER" ? b.phone_number.trim() : "",
+        example: b.example.trim(),
+      })),
+    };
   }
 
   submitBtn.addEventListener("click", async () => {
@@ -1258,32 +1699,41 @@ export function openCreateTemplateModal({ onCreated, numbers = null } = {}) {
       return;
     }
 
+    const numberIds = isAdmin
+      ? [...deployList.querySelectorAll('input[type="checkbox"]:checked')].map(
+          (node) => node.dataset.numberId
+        )
+      : [];
+    const accountCount = isAdmin ? Math.max(1, numberIds.length) : 1;
+
     submitBtn.disabled = true;
-    submitBtn.textContent = "Submitting to Meta…";
+    submitBtn.textContent =
+      accountCount > 1
+        ? `Submitting to Meta on ${accountCount} numbers…`
+        : "Submitting to Meta…";
     errorEl.hidden = true;
 
     try {
-      await catalog.createTemplate({
-        waba_business_id: numberSelect.value,
-        name: nameInput.value.trim(),
-        category: categorySelect.value,
-        language: langSelect.value,
-        header_text: headerInput.value.trim(),
-        header_examples: headerExamples,
-        body_text: bodyTextarea.value.trim(),
-        body_examples: bodyExamples,
-        footer_text: footerInput.value.trim(),
-        buttons: buttons.map((b) => ({
-          type: b.type,
-          text: b.text.trim(),
-          url: b.type === "URL" ? b.url.trim() : "",
-          phone_number: b.type === "PHONE_NUMBER" ? b.phone_number.trim() : "",
-          example: b.example.trim(),
-        })),
-      });
+      const payload = templatePayload();
+      let summary = null;
+      if (isAdmin) {
+        // Always send the checked ids — never all_numbers:true alone. That flag
+        // expands to every Official number on the portal and can sit on Meta
+        // for minutes while the button still says Submitting.
+        summary = await catalog.createTemplateBulk({
+          ...payload,
+          all_numbers: false,
+          number_ids: numberIds,
+        });
+      } else {
+        await catalog.createTemplate({
+          ...payload,
+          waba_business_id: numberSelect.value,
+        });
+      }
 
       dialog.close();
-      onCreated?.();
+      onCreated?.(summary);
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.replaceChildren(icon("send", { size: 14 }), " Submit Template to Meta");

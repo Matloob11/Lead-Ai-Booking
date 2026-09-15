@@ -107,44 +107,107 @@ def _messages(request):
     return queryset, days, since, until
 
 
-def _response_gaps(queryset):
-    """Seconds between a customer writing and somebody answering.
+# First-reply median bands for agent performance (real-estate WhatsApp pace).
+# Fewer than MIN_SAMPLES replies → "insufficient" rather than a misleading label.
+PERF_MIN_SAMPLES = 3
+PERF_BANDS = (
+    ("excellent", "Excellent", 5 * 60),       # under 5 minutes
+    ("good", "Good", 15 * 60),                # under 15 minutes
+    ("fair", "Fair", 60 * 60),                # under 1 hour
+    ("bad", "Bad", 4 * 60 * 60),              # under 4 hours
+    ("critical", "Critical", None),           # 4 hours or more
+)
 
-    Walked in one pass over (conversation, direction, time) rather than queried
-    per conversation: the interesting number is the *first* reply after each
+
+def _response_gaps_by_agent(queryset):
+    """First-reply gaps keyed by the agent who closed the wait (`sent_by_id`).
+
+    Walked in one pass: the interesting number is the *first* reply after each
     inbound run, so a customer sending four messages and getting one answer
-    counts once, not four times.
+    counts once. Gaps with no ``sent_by`` land under ``None``.
     """
     rows = queryset.order_by("conversation_id", "created_at").values_list(
-        "conversation_id", "direction", "created_at"
+        "conversation_id", "direction", "created_at", "sent_by_id"
     )
 
-    gaps = []
+    by_agent = defaultdict(list)
     current = None
     waiting_since = None
 
-    for conversation_id, direction, created_at in rows:
+    for conversation_id, direction, created_at, sent_by_id in rows:
         if conversation_id != current:
             current, waiting_since = conversation_id, None
         if direction == Message.Direction.INBOUND:
             if waiting_since is None:
                 waiting_since = created_at
         elif waiting_since is not None:
-            gaps.append((created_at - waiting_since).total_seconds())
+            gap = (created_at - waiting_since).total_seconds()
+            by_agent[sent_by_id].append(gap)
             waiting_since = None
+    return by_agent
+
+
+def _response_gaps(queryset):
+    """All first-reply gaps in the queryset (every agent, plus unattributed)."""
+    gaps = []
+    for agent_gaps in _response_gaps_by_agent(queryset).values():
+        gaps.extend(agent_gaps)
     return gaps
 
 
 def _spread(gaps):
     if not gaps:
-        return {"count": 0, "median_seconds": None, "p90_seconds": None, "slowest_seconds": None}
+        return {
+            "count": 0,
+            "avg_seconds": None,
+            "median_seconds": None,
+            "p90_seconds": None,
+            "slowest_seconds": None,
+        }
     ordered = sorted(gaps)
     return {
         "count": len(ordered),
+        "avg_seconds": round(statistics.fmean(ordered)),
         "median_seconds": round(statistics.median(ordered)),
         "p90_seconds": round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.9))]),
         "slowest_seconds": round(ordered[-1]),
     }
+
+
+def _performance_band(spread):
+    """Label an agent from median first-reply time (stable vs one slow outlier)."""
+    count = int(spread.get("count") or 0)
+    median = spread.get("median_seconds")
+    if count < PERF_MIN_SAMPLES or median is None:
+        return {
+            "key": "insufficient",
+            "label": "Not enough data",
+            "median_seconds": median,
+        }
+    for key, label, ceiling in PERF_BANDS:
+        if ceiling is None or median < ceiling:
+            return {"key": key, "label": label, "median_seconds": median}
+    return {"key": "critical", "label": "Critical", "median_seconds": median}
+
+
+def _performance_legend():
+    rows = [
+        {
+            "key": "excellent",
+            "label": "Excellent",
+            "detail": "Median first reply under 5 minutes",
+        },
+        {"key": "good", "label": "Good", "detail": "Under 15 minutes"},
+        {"key": "fair", "label": "Fair", "detail": "Under 1 hour"},
+        {"key": "bad", "label": "Bad", "detail": "Under 4 hours"},
+        {"key": "critical", "label": "Critical", "detail": "4 hours or more"},
+        {
+            "key": "insufficient",
+            "label": "Not enough data",
+            "detail": f"Fewer than {PERF_MIN_SAMPLES} timed replies in this period",
+        },
+    ]
+    return rows
 
 
 @api_view(["GET"])
@@ -198,12 +261,12 @@ def summary(request):
 
 @api_view(["GET"])
 def agents(request):
-    """Who did how much, and how quickly."""
+    """Who did how much, how quickly, and how that ranks (full list + worst 10)."""
     messages, days, since, until = _messages(request)
 
-    rows = (
+    rows = list(
         messages.filter(sent_by__isnull=False)
-        .values("sent_by_id", "sent_by__display_name", "sent_by__username")
+        .values("sent_by_id", "sent_by__display_name", "sent_by__username", "sent_by__community")
         .annotate(
             sent=Count("pk"),
             delivered=Count("pk", filter=Q(delivered_at__isnull=False)),
@@ -215,32 +278,63 @@ def agents(request):
         .order_by("-sent")
     )
 
-    # Response time is a property of the conversation, not of one message, so it
-    # is measured per agent over the chats they answered in.
-    by_agent = {}
-    for row in rows:
-        answered = messages.filter(
-            conversation__in=messages.filter(sent_by_id=row["sent_by_id"]).values(
-                "conversation_id"
-            )
-        )
-        by_agent[row["sent_by_id"]] = _spread(_response_gaps(answered))
+    # Attribute each first-reply gap to the agent who actually answered — not
+    # every agent who ever touched the chat (that used to share the same times).
+    gaps_by_agent = _response_gaps_by_agent(messages)
 
-    return Response(
-        [
+    agents_out = []
+    for row in rows:
+        agent_id = row["sent_by_id"]
+        spread = _spread(gaps_by_agent.get(agent_id, []))
+        band = _performance_band(spread)
+        agents_out.append(
             {
-                "agent_id": row["sent_by_id"],
+                "agent_id": agent_id,
                 "display_name": row["sent_by__display_name"] or row["sent_by__username"],
+                "community": row["sent_by__community"] or "",
                 "sent": row["sent"],
                 "delivered": row["delivered"],
                 "read": row["read"],
                 "failed": row["failed"],
                 "templates": row["templates"],
                 "chats": row["chats"],
-                "first_response": by_agent[row["sent_by_id"]],
+                "first_response": spread,
+                "performance": band,
             }
-            for row in rows
-        ]
+        )
+
+    ranked = [
+        a
+        for a in agents_out
+        if a["performance"]["key"] not in ("insufficient",)
+        and a["first_response"].get("median_seconds") is not None
+    ]
+    worst = sorted(
+        ranked,
+        key=lambda a: (
+            a["first_response"]["median_seconds"],
+            -(a["first_response"]["count"] or 0),
+        ),
+        reverse=True,
+    )[:10]
+    best = sorted(
+        ranked,
+        key=lambda a: (
+            a["first_response"]["median_seconds"],
+            -(a["first_response"]["count"] or 0),
+        ),
+    )[:10]
+
+    return Response(
+        {
+            "from": since.isoformat(),
+            "to": until.isoformat(),
+            "days": days,
+            "bands": _performance_legend(),
+            "agents": agents_out,
+            "worst": worst,
+            "best": best,
+        }
     )
 
 
@@ -260,10 +354,12 @@ def numbers(request):
         )
     }
 
-    from apps.catalog.models import WaTemplate
+    from apps.catalog.models import WaTemplate, WaTemplateHide
 
     approved = dict(
-        WaTemplate.objects.filter(status=WaTemplate.Status.APPROVED)
+        WaTemplateHide.visible(
+            WaTemplate.objects.filter(status=WaTemplate.Status.APPROVED)
+        )
         .values_list("waba_business_id")
         .annotate(n=Count("pk"))
     )
@@ -288,7 +384,10 @@ def numbers(request):
                 # wrote first, which is worth seeing next to how busy it is.
                 "approved_templates": approved.get(number.waba_business_id, 0),
                 "agents": [
-                    a.agent.display_name or a.agent.get_username()
+                    {
+                        "display_name": a.agent.display_name or a.agent.get_username(),
+                        "community": a.agent.community or "",
+                    }
                     for a in number.assignments.filter(is_active=True).select_related("agent")
                 ],
             }

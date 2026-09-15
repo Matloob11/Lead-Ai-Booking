@@ -1,19 +1,12 @@
 /**
- * The WhatsApp tab on a lead, deal, contact or company.
+ * The WhatsApp tab on a lead, deal, contact, company, or Owner Data item.
  *
- * It answers one question and then gets out of the way: for each phone number
- * on this record, is there already a WhatsApp chat, and take me to it.
+ * For each phone on the record it offers two ways in — both via
+ * BX24.openApplication into the side panel (same as Omni always did):
+ *   Open with Omni     — WABA inbox on that chat / new template
+ *   Open with WhatsApp — Linked devices (OpenWA) on that chat / new contact
  *
- * Deliberately not a chat. This tab once carried a thread, message bubbles and
- * a composer, which meant an agent could half-work a conversation inside a
- * CRM record — with no template picker, no attachments, no reply-to, and no
- * sight of anything else the customer had said. Everything that actually
- * answers a customer lives in the panel, so the icon opens the panel, on the
- * right chat, and the agent works there.
- *
- * The panel opens *inside Bitrix*, through BX24.openApplication. A new browser
- * tab would leave the portal — and the panel reads where to land from the
- * placement options, which a plain URL cannot carry.
+ * This tab only picks the door. It does not embed a dashboard here.
  *
  * Nothing here goes through innerHTML: a contact's name, a lead's title and a
  * phone number are all typed by people outside this company.
@@ -26,6 +19,15 @@ import {
   callBitrix,
   loadBX24,
 } from "../assets/core/bitrix-sso.js";
+
+/** Owner Data SPA — same id as backend crmlink / conversation-health. */
+const OWNER_DATA_TYPE_ID = 1042;
+const OWNER_DATA_PHONE_FIELDS = [
+  "ufCrm5_1768317611513",
+  "ufCrm5_1769416533028",
+  "ufCrm5_1768317656051",
+  "ufCrm5_1768314841508",
+];
 
 /** Nodes, never markup. */
 function el(spec, props = {}, children = []) {
@@ -77,16 +79,25 @@ function extractPhones(phoneField) {
   return out;
 }
 
+/** Collect digit phones from Owner Data UF number/string fields. */
+function extractOwnerPhones(item) {
+  const out = [];
+  const push = (raw) => {
+    const value = String(raw ?? "").trim();
+    if (!value || value === "0") return;
+    const digits = digitsOf(value);
+    if (digits.length < 8) return;
+    if (!out.includes(digits) && !out.includes(value)) out.push(digits);
+  };
+  for (const field of OWNER_DATA_PHONE_FIELDS) push(item?.[field]);
+  return out;
+}
+
 const digitsOf = (text) => String(text || "").replace(/\D/g, "");
 
 /**
  * Whoever the customer is, by whichever name the server knows them under — and
  * "" when the only name it has is the number itself.
- *
- * serialize_contact falls back to the wa_id when a contact has no WhatsApp
- * profile name, which is most of them. Printed as-is that makes every row read
- * "971555484423 · 971555484423 · on Farhat Shahid": the number, said twice,
- * with the useful half pushed off the end.
  */
 function contactName(conversation, phone) {
   const c = conversation?.contact || {};
@@ -114,15 +125,8 @@ function ago(iso) {
 }
 
 /**
- * Which of several chats the icon should open.
- *
- * One number can have more than one chat, because a conversation is per (our
- * number, customer) — the same person messaged from three of our numbers is
- * three threads on purpose. Lead 70045 has exactly that.
- *
- * The agent's own chat wins. Anything else would hand them somebody else's
- * thread with the same person, which is the one outcome that wastes two
- * agents' time instead of one.
+ * Which of several chats the Omni icon should open.
+ * The agent's own chat wins.
  */
 function pickConversation(conversations, meId) {
   const mine = conversations.filter((c) => Number(c.assigned_agent?.id) === Number(meId));
@@ -140,6 +144,7 @@ class CrmTab {
     this.me = null;
     this.bx = null;
     this.entityType = "";
+    this.entityTypeId = null;
     this.entityId = null;
     this.entityName = "";
     this.rows = []; // {phone, conversations}
@@ -151,28 +156,34 @@ class CrmTab {
       this.me = await ensureSession();
 
       if (typeof this.bx.isAdmin === "function" && this.bx.isAdmin()) {
-        // Self-healing, the same way index.html does it: an app registered by
-        // hand never gets Bitrix's install call, so the tab would stay unbound.
         this.registerPlacements();
       }
 
       const info = typeof this.bx.placement?.info === "function" ? this.bx.placement.info() : {};
       const options = info?.options || {};
       this.entityId = options.ID || options.ENTITY_ID || null;
-      this.entityType = String(info?.placement || "").includes("LEAD")
-        ? "LEAD"
-        : String(info?.placement || "").includes("DEAL")
-          ? "DEAL"
-          : String(info?.placement || "").includes("CONTACT")
-            ? "CONTACT"
-            : String(info?.placement || "").includes("COMPANY")
-              ? "COMPANY"
-              : "";
+      const placement = String(info?.placement || "");
+      const dyn = placement.match(/CRM_DYNAMIC_(\d+)_DETAIL_TAB/i);
+
+      if (dyn) {
+        this.entityTypeId = Number(dyn[1]);
+        this.entityType = `DYNAMIC_${this.entityTypeId}`;
+      } else if (placement.includes("LEAD")) {
+        this.entityType = "LEAD";
+      } else if (placement.includes("DEAL")) {
+        this.entityType = "DEAL";
+      } else if (placement.includes("CONTACT")) {
+        this.entityType = "CONTACT";
+      } else if (placement.includes("COMPANY")) {
+        this.entityType = "COMPANY";
+      } else {
+        this.entityType = "";
+      }
 
       if (!this.entityId || !this.entityType) {
         return this.showNote(
           "This tab has to be opened from a CRM record",
-          "Bitrix did not say which record this is. Open it from a lead, deal, contact or company."
+          "Bitrix did not say which record this is. Open it from a lead, deal, contact, company or Owner Data."
         );
       }
 
@@ -188,8 +199,6 @@ class CrmTab {
 
       this.rows = [];
       for (const phone of phones) {
-        // One at a time. Four numbers is four requests either way, and doing
-        // them together only makes the failures harder to attribute.
         this.rows.push({ phone, conversations: await this.lookup(phone) });
       }
 
@@ -199,28 +208,34 @@ class CrmTab {
       this.showNote(
         "The WhatsApp tab could not load",
         error?.message || "Unknown error",
-        // `crm` is what reads the record's numbers; without it every lookup
-        // comes back empty and the tab looks broken rather than unauthorised.
         "If this keeps happening, check that the app's scope includes `crm`."
       );
     }
   }
 
   async registerPlacements() {
+    const handler = new URL(".", window.location.href).href;
     for (const placement of [
       "CRM_LEAD_DETAIL_TAB",
       "CRM_DEAL_DETAIL_TAB",
       "CRM_CONTACT_DETAIL_TAB",
       "CRM_COMPANY_DETAIL_TAB",
+      `CRM_DYNAMIC_${OWNER_DATA_TYPE_ID}_DETAIL_TAB`,
     ]) {
-      // Handler left to default: it resolves to this page's own directory,
-      // which is exactly where these four belong.
-      await ensurePlacement({ placement, title: "WhatsApp" }).catch(() => {});
+      await ensurePlacement({ placement, title: "WhatsApp", handler }).catch(() => {});
     }
   }
 
   async fetchPhones() {
     const id = this.entityId;
+
+    if (this.entityType.startsWith("DYNAMIC_")) {
+      const typeId = this.entityTypeId || Number(this.entityType.replace("DYNAMIC_", ""));
+      const res = await callBitrix("crm.item.get", { entityTypeId: typeId, id });
+      const item = res?.item || res || {};
+      this.entityName = item.title || item.TITLE || `Owner Data #${id}`;
+      return extractOwnerPhones(item);
+    }
 
     if (this.entityType === "LEAD") {
       const lead = await callBitrix("crm.lead.get", { id });
@@ -238,9 +253,6 @@ class CrmTab {
       return extractPhones(company.PHONE);
     }
 
-    // A deal has no number of its own; it borrows the one from whoever it is
-    // attached to. Both are read, because a deal can carry a company and a
-    // contact and the person answering is on the contact.
     const deal = await callBitrix("crm.deal.get", { id });
     this.entityName = deal.TITLE || `Deal #${id}`;
 
@@ -259,9 +271,6 @@ class CrmTab {
   async lookup(phone) {
     try {
       const data = await apiFetch(`/api/inbox/lookup/?phone=${encodeURIComponent(phone)}`);
-      // Shown exactly as the server scoped it. This tab does no filtering of
-      // its own: /api/inbox/lookup/ already answers per agent, and a second
-      // opinion here could only ever be the wrong one.
       return Array.isArray(data?.conversations) ? data.conversations : [];
     } catch (error) {
       console.warn(`[a7-wa] lookup failed for ${phone}:`, error);
@@ -270,13 +279,10 @@ class CrmTab {
   }
 
   /**
-   * Opens the panel inside Bitrix, on the chat this row is about.
-   *
-   * openApplication, never a URL. The panel reads where to land from the
-   * placement options — a link could not carry them, and would take the agent
-   * out of the portal on the way.
+   * Opens the WhatsApp side panel (same BX24.openApplication path Omni uses).
+   * Options: conversation_id / phone (Omni) or linked_phone (Linked devices).
    */
-  open(target) {
+  openPanel(target) {
     if (typeof this.bx.openApplication !== "function") {
       return this.showNote(
         "This portal cannot open the panel from here",
@@ -286,8 +292,75 @@ class CrmTab {
     this.bx.openApplication(target);
   }
 
+  /** Let the agent pick which Omni thread when one phone has several chats. */
+  chooseOmniChat(phone, conversations) {
+    if (!conversations.length) {
+      this.openPanel({ phone: digitsOf(phone) });
+      return;
+    }
+    if (conversations.length === 1) {
+      this.openPanel({ conversation_id: conversations[0].id });
+      return;
+    }
+
+    const backdrop = el("div.wa-pick", {
+      role: "dialog",
+      "aria-label": "Choose Omni chat",
+    });
+    const close = () => backdrop.remove();
+    const list = el("div.wa-pick__list");
+    for (const c of conversations) {
+      const label = [
+        contactName(c, phone) || phone,
+        c.number_label ? `on ${c.number_label}` : "",
+        c.assigned_agent?.display_name || c.assigned_agent?.username
+          ? `@${c.assigned_agent.display_name || c.assigned_agent.username}`
+          : "",
+        ago(c.last_message_at),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      list.append(
+        el(
+          "button.wa-pick__item",
+          {
+            type: "button",
+            onclick: () => {
+              close();
+              this.openPanel({ conversation_id: c.id });
+            },
+          },
+          [label]
+        )
+      );
+    }
+    backdrop.append(
+      el("div.wa-pick__card", {}, [
+        el("div.wa-pick__title", {}, [`${conversations.length} Official API chats for ${phone}`]),
+        el("p.wa-pick__help", {}, [
+          "Same customer on more than one company WhatsApp number. Pick the Official API thread to open.",
+        ]),
+        list,
+        el("button.wa-pick__cancel", { type: "button", onclick: close }, ["Cancel"]),
+      ])
+    );
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) close();
+    });
+    this.root.append(backdrop);
+    this.fit();
+  }
+
   render() {
     const list = el("div.wa-list");
+    list.append(
+      el("p.wa-legend", {}, [
+        el("strong", {}, ["Official API"]),
+        " = Meta Business (templates, 24h window). ",
+        el("strong", {}, ["Linked phone"]),
+        " = QR-linked handset chats (OpenWA).",
+      ])
+    );
 
     for (const { phone, conversations } of this.rows) {
       const chosen = conversations.length ? pickConversation(conversations, this.me?.id) : null;
@@ -295,25 +368,34 @@ class CrmTab {
       const status = chosen
         ? [
             contactName(chosen, phone),
-            // The label, never number_id. That id printed as "Channel #16" is
-            // a database row number shown to an agent as though it named
-            // something.
             chosen.number_label ? `on ${chosen.number_label}` : "",
             ago(chosen.last_message_at),
           ]
             .filter(Boolean)
             .join(" · ") || "Chat open"
-        : "No chat yet";
+        : "No Official API chat yet";
 
-      const button = el("button.wa-row__go", {
-        type: "button",
-        title: chosen ? "Open this chat in WhatsApp" : "Start a WhatsApp chat with this number",
-        // The chat when there is one, the bare number when there is not — the
-        // panel opens the template composer for the second, because a customer
-        // who has never written cannot be sent anything else.
-        onclick: () =>
-          this.open(chosen ? { conversation_id: chosen.id } : { phone: digitsOf(phone) }),
-      }, [whatsappIcon(18)]);
+      const omniBtn = el(
+        "button.wa-row__btn.wa-row__btn--omni",
+        {
+          type: "button",
+          title: chosen
+            ? "Open Official API (Meta Business) chat"
+            : "Start Official API chat — template if the 24h window is closed",
+          onclick: () => this.chooseOmniChat(phone, conversations),
+        },
+        [whatsappIcon(16), el("span", {}, ["Official API"])]
+      );
+
+      const linkedBtn = el(
+        "button.wa-row__btn.wa-row__btn--linked",
+        {
+          type: "button",
+          title: "Open Linked phone (QR / OpenWA) for this number",
+          onclick: () => this.openPanel({ linked_phone: digitsOf(phone) }),
+        },
+        [whatsappIcon(16), el("span", {}, ["Linked phone"])]
+      );
 
       list.append(
         el("div.wa-row", {}, [
@@ -321,14 +403,18 @@ class CrmTab {
             el("div.wa-row__phone", {}, [phone]),
             el("div.wa-row__status", { class: chosen ? "" : "wa-row__status--none" }, [status]),
           ]),
-          // Said only when it changes what the icon does: several chats exist
-          // and this opens one of them.
           conversations.length > 1
-            ? el("span.wa-row__count", { title: "This number has more than one chat" }, [
-                `${conversations.length} chats`,
-              ])
+            ? el(
+                "button.wa-row__count",
+                {
+                  type: "button",
+                  title: "Choose which Official API chat to open",
+                  onclick: () => this.chooseOmniChat(phone, conversations),
+                },
+                [`${conversations.length} chats — pick`]
+              )
             : null,
-          button,
+          el("div.wa-row__actions", {}, [omniBtn, linkedBtn]),
         ])
       );
     }
@@ -347,16 +433,9 @@ class CrmTab {
     this.fit();
   }
 
-  /**
-   * Asks Bitrix for the height this actually needs.
-   *
-   * The tab used to reserve room for a thread and a composer, so a lead with
-   * two numbers left most of the panel empty. Measured rather than guessed —
-   * the number of rows is not known until they are drawn.
-   */
   fit() {
     if (typeof this.bx?.resizeWindow !== "function") return;
-    const height = Math.min(560, Math.max(140, this.root.scrollHeight + 24));
+    const height = Math.min(560, Math.max(160, this.root.scrollHeight + 24));
     this.bx.resizeWindow(window.innerWidth || 800, height);
   }
 }

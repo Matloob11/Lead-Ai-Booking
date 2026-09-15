@@ -36,6 +36,18 @@ const ALLOWLIST = new Map<string, string>([
   // Self-validation only: the route returns {valid, role} for the calling key and reads/writes no
   // resource, so a session-restricted key validating itself is harmless (it cannot broaden scope).
   ['auth-validate.controller.ts :: validate', 'self-validation of the calling key; no resource access'],
+  [
+    'conversation-health.controller.ts :: summary',
+    'admin-only; scope-filters chat_leads via apiKey.allowedSessions in the service',
+  ],
+  [
+    'conversation-health.controller.ts :: list',
+    'admin-only; scope-filters chat_leads via apiKey.allowedSessions in the service',
+  ],
+  [
+    'conversation-health.controller.ts :: allowGreen',
+    'admin-only; password + session scope checked in service before colour override',
+  ],
 ]);
 
 /**

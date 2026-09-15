@@ -39,8 +39,34 @@ const TYPE_LABEL: Record<string, string> = {
   masked: 'Message not available',
 };
 
+/**
+ * True when the list title is only the @lid identity (no push-name / contact name).
+ * Long digit strings that match the LID user part are placeholders, not phones.
+ */
+export function isLidPlaceholderName(chatId: string, name: string | undefined | null): boolean {
+  if (!chatId.endsWith('@lid')) return false;
+  const lidUser = chatId.split('@')[0] ?? '';
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return true;
+  if (trimmed === lidUser) return true;
+  return /^\d+$/.test(trimmed) && trimmed === lidUser;
+}
+
+/** Prefer a human name, then a resolved phone from metadata, then the JID user part. */
+export function displayNameForStoredChat(chatId: string, message: Pick<Message, 'chatName' | 'metadata'>): string {
+  const chatName = message.chatName?.trim() || '';
+  if (chatName && !isLidPlaceholderName(chatId, chatName)) return chatName;
+  const phone = message.metadata?.['senderPhone'];
+  if (typeof phone === 'string' && phone.trim()) return phone.trim();
+  return chatName || chatId.split('@')[0] || chatId;
+}
+
 /** One line describing a message, for a list row. Empty when there is nothing honest to say. */
-export function previewOf(message: Pick<Message, 'type' | 'body'>): string {
+export function previewOf(message: Pick<Message, 'type' | 'body' | 'metadata'>): string {
+  // Agent soft-delete keeps the real body for admin — the list must still say "deleted".
+  if (message.metadata && message.metadata['agentDeleted'] === true) {
+    return TYPE_LABEL.revoked;
+  }
   const body = message.body?.trim();
   if (body) return body;
   return TYPE_LABEL[message.type] ?? '';
@@ -87,10 +113,13 @@ export function overlayStoredMessages(chats: ChatSummary[], newest: Map<string, 
     // with no caption), and answering only the first would leave the row still reading empty.
     const takeTimestamp = storedAt > (chat.timestamp ?? 0);
     const takePreview = preview !== '' && (takeTimestamp || !chat.lastMessage);
-    if (!takeTimestamp && !takePreview) return chat;
+    const resolvedName = displayNameForStoredChat(chat.id, stored);
+    const takeName = isLidPlaceholderName(chat.id, chat.name) && resolvedName !== chat.name;
+    if (!takeTimestamp && !takePreview && !takeName) return chat;
 
     return {
       ...chat,
+      name: takeName ? resolvedName : chat.name,
       timestamp: takeTimestamp ? storedAt : chat.timestamp,
       lastMessage: takePreview ? preview : chat.lastMessage,
     };
@@ -146,9 +175,8 @@ export function chatsFromStoredMessages(newest: Map<string, Message>): ChatSumma
     const isGroup = chatId.endsWith('@g.us');
     chats.push({
       id: chatId,
-      // The name WhatsApp gave when the message was stored, or the number itself.
-      // Never a blank row: a chat with no label is still a chat somebody had.
-      name: message.chatName || chatId.split('@')[0],
+      // Human name, else resolved phone from metadata, else the JID user part — never blank.
+      name: displayNameForStoredChat(chatId, message),
       isGroup,
       kind: isGroup ? 'group' : 'individual',
       unreadCount: 0,

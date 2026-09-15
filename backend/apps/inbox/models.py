@@ -117,6 +117,16 @@ class Conversation(models.Model):
     is_archived = models.BooleanField(default=False)
     labels = models.ManyToManyField(Label, blank=True, related_name="conversations")
 
+    # The other Official thread this one was copied onto after a transfer.
+    # WhatsApp still has two chats; the panel keeps their histories in step.
+    linked_conversation = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -200,6 +210,8 @@ class Message(models.Model):
         INTERACTIVE = "interactive", "Interactive"
         BUTTON = "button", "Button reply"
         REACTION = "reaction", "Reaction"
+        ALBUM = "album", "Album"
+        PINNED = "pinned_message", "Pinned message"
         SYSTEM = "system", "System"
         UNKNOWN = "unknown", "Unknown"
 
@@ -235,6 +247,17 @@ class Message(models.Model):
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies"
     )
 
+    # Set when this row is a panel-only copy of a message on the linked
+    # conversation. It must never be sent through the gateway, and it has no
+    # WhatsApp id of its own.
+    mirrored_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="panel_copies",
+    )
+
     # Emoji the customer put on this message, keyed by their wa_id. Reactions
     # arrive as their own webhook event naming a target, and belong on the
     # bubble they decorate rather than as a message of their own. Sending one
@@ -261,6 +284,13 @@ class Message(models.Model):
     class Meta:
         ordering = ["created_at", "id"]
         indexes = [models.Index(fields=["conversation", "created_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "mirrored_from"],
+                condition=models.Q(mirrored_from__isnull=False),
+                name="unique_panel_copy_per_peer",
+            )
+        ]
 
     def __str__(self):
         return f"{self.direction} {self.kind} #{self.pk}"

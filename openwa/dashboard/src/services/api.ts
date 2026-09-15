@@ -65,6 +65,8 @@ export interface Session {
    * dashboard can be served by a gateway that predates the field.
    */
   restriction?: AccountRestriction | null;
+  /** ISO timestamp when soft-removed; null/absent means still an active session record. */
+  removedAt?: string | null;
 }
 
 /** One participant's presence within a chat. */
@@ -191,6 +193,9 @@ export interface MessageResponse {
 // Mirrors the backend engine ChatKind (dashboard cannot import wa-id.ts).
 export type ChatKind = 'individual' | 'group' | 'channel' | 'status' | 'broadcast' | 'unknown';
 
+/** Sentinel session id for the admin All chats merged list (not a real UUID). */
+export const ALL_CHATS_SESSION_ID = '__all__';
+
 // Chat summary returned by GET /sessions/:id/chats (mirrors the backend ChatSummary).
 export interface Chat {
   id: string;
@@ -200,6 +205,15 @@ export interface Chat {
   unreadCount: number;
   timestamp: number;
   lastMessage?: string;
+  /** Present on admin All-chats rows. */
+  sessionId?: string;
+  sessionName?: string;
+  sessionStatus?: Session['status'];
+  sessionPhone?: string | null;
+  removed?: boolean;
+  canOpenThread?: boolean;
+  /** Team-local pin from chat_profiles (Linked phones contact panel). */
+  teamPinned?: boolean;
 }
 
 // Engine-neutral message types (mirrors the backend's IWhatsAppEngine MessageType). The backend
@@ -265,6 +279,9 @@ export interface ChatMessage {
      * as "nobody voted" rather than "not known".
      */
     poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
+    /** Agent soft-delete: body stays for admin; agents get a revoked placeholder from the API. */
+    agentDeleted?: boolean;
+    agentDeletedAt?: string;
   };
 }
 
@@ -337,6 +354,8 @@ export interface SendMediaPayload {
   mimetype?: string;
   filename?: string;
   caption?: string;
+  /** Audio only: send as a WhatsApp voice note (mic bubble), not a file. */
+  ptt?: boolean;
 }
 
 // Payloads below mirror the backend DTOs in src/modules/message/dto (raw bodies, no envelope).
@@ -724,7 +743,10 @@ export const sessionApi = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
-  delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
+  getDeleteImpact: (id: string) => request<{ messageCount: number }>(`/sessions/${id}/delete-impact`),
+  delete: (id: string, confirmMessageCount: number) =>
+    request<void>(`/sessions/${id}?confirmMessageCount=${confirmMessageCount}`, { method: 'DELETE' }),
+  resetProfile: (id: string) => request<Session>(`/sessions/${id}/reset-profile`, { method: 'POST' }),
   start: (id: string) => request<Session>(`/sessions/${id}/start`, { method: 'POST' }),
   stop: (id: string) => request<Session>(`/sessions/${id}/stop`, { method: 'POST' }),
   logout: (id: string) => request<Session>(`/sessions/${id}/logout`, { method: 'POST' }),
@@ -739,6 +761,7 @@ export const sessionApi = {
   getGroups: (id: string) =>
     request<{ id: string; name: string; linkedParentJID?: string | null }[]>(`/sessions/${id}/groups`),
   getChats: (id: string) => request<Chat[]>(`/sessions/${id}/chats`),
+  getAllChats: () => request<Chat[]>('/sessions/chats/all'),
   markChatRead: (id: string, chatId: string) =>
     request<{ success: boolean }>(`/sessions/${id}/chats/read`, {
       method: 'POST',
@@ -749,6 +772,11 @@ export const sessionApi = {
       method: 'POST',
       body: JSON.stringify({ chatId }),
     }),
+  archiveChat: (id: string, chatId: string, archive: boolean) =>
+    request<{ success: boolean }>(`/sessions/${id}/chats/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ chatId, archive }),
+    }),
   getChatMessages: (id: string, chatId: string, limit = 100) =>
     request<{ messages: ChatMessage[]; total: number }>(
       `/sessions/${id}/messages?chatId=${encodeURIComponent(chatId)}&limit=${limit}`,
@@ -757,11 +785,14 @@ export const sessionApi = {
   // captured, e.g. a freshly paired session whose persisted store is still empty.
   // includeMedia downloads the media payload (base64) for history messages so stickers/images/
   // video/voice render instead of collapsing to an empty timestamp-only bubble.
-  getChatHistory: (id: string, chatId: string, limit = 100, includeMedia = false) =>
+  // `mediaFor` limits the media download to one message id. Old media is not refused quickly — it is
+  // waited on until the gateway's download timeout — so fetching a whole chat's media to answer for
+  // one bubble charges the agent every other file's timeout as well.
+  getChatHistory: (id: string, chatId: string, limit = 100, includeMedia = false, mediaFor?: string) =>
     request<EngineHistoryMessage[]>(
       `/sessions/${id}/messages/${encodeURIComponent(chatId)}/history?limit=${limit}${
         includeMedia ? '&includeMedia=true' : ''
-      }`,
+      }${includeMedia && mediaFor ? `&mediaFor=${encodeURIComponent(mediaFor)}` : ''}`,
     ),
   getSubscribedChannels: (id: string) => request<Channel[]>(`/sessions/${id}/channels`),
   getChannelMessages: (id: string, channelId: string, limit = 50) =>
@@ -879,6 +910,14 @@ export const contactApi = {
         .map(encodeURIComponent)
         .join(',')}`,
     ),
+  block: (sessionId: string, contactId: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/contacts/${encodeURIComponent(contactId)}/block`, {
+      method: 'POST',
+    }),
+  unblock: (sessionId: string, contactId: string) =>
+    request<{ success: boolean }>(`/sessions/${sessionId}/contacts/${encodeURIComponent(contactId)}/block`, {
+      method: 'DELETE',
+    }),
 };
 
 // =============================================================================
@@ -963,6 +1002,12 @@ export const messageApi = {
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-${mediaType}`, {
       method: 'POST',
       body: JSON.stringify({ chatId, ...payload }),
+    }),
+  /** ffmpeg → Ogg/Opus. Pass the result to send-audio with `ptt: true`. */
+  convertVoice: (sessionId: string, base64: string) =>
+    request<{ base64: string; mimetype: string; bytes: number }>(`/sessions/${sessionId}/media/convert/voice`, {
+      method: 'POST',
+      body: JSON.stringify({ base64 }),
     }),
   sendLocation: (sessionId: string, data: SendLocationPayload) =>
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-location`, {
@@ -1317,7 +1362,7 @@ export const pluginInstancesApi = {
 // Statistics API (mirrors src/modules/stats)
 // =============================================================================
 
-export type StatsPeriod = '24h' | '7d' | '30d';
+export type StatsPeriod = '24h' | '7d' | '30d' | '1y';
 
 export interface OverviewStats {
   sessions: { active: number; total: number; byStatus: Record<string, number> };
@@ -1330,14 +1375,144 @@ export interface MessageTimeSeriesPoint {
   received: number;
 }
 
+export interface ResponseSpread {
+  count: number;
+  avgSeconds: number | null;
+  medianSeconds: number | null;
+  p90Seconds: number | null;
+  slowestSeconds: number | null;
+}
+
+export interface ResponsePerformanceRow {
+  sessionId: string;
+  name: string;
+  phone: string | null;
+  sent: number;
+  received: number;
+  firstResponse: ResponseSpread;
+  performance: { key: string; label: string };
+}
+
+export interface ResponsePerformance {
+  bands: Array<{ key: string; label: string; detail: string }>;
+  phones: ResponsePerformanceRow[];
+  worst: ResponsePerformanceRow[];
+  best: ResponsePerformanceRow[];
+}
+
 export interface MessageStats {
   timeSeries: MessageTimeSeriesPoint[];
   byType: Record<string, number>;
   bySession: Array<{ sessionId: string; name: string; sent: number; received: number }>;
   topChats: Array<{ chatId: string; chatName?: string | null; messageCount: number }>;
+  responsePerformance?: ResponsePerformance;
 }
 
 export const statsApi = {
   getOverview: () => request<OverviewStats>('/stats/overview'),
   getMessages: (period: StatsPeriod) => request<MessageStats>(`/stats/messages?period=${period}`),
+};
+
+// =============================================================================
+// Conversation Health (Bitrix colour monitor)
+// =============================================================================
+
+export type ConversationColour = 'red' | 'pink' | 'yellow' | 'white' | 'green';
+
+// =============================================================================
+// Chat contact profile (team-local name + notes side panel)
+// =============================================================================
+
+export interface ChatProfileMediaItem {
+  id: string;
+  type: string;
+  createdAt: string;
+  hasMedia: boolean;
+}
+
+export interface ChatProfileView {
+  sessionId: string;
+  chatId: string;
+  displayName: string | null;
+  notes: string;
+  pinned: boolean;
+  waName: string | null;
+  phone: string | null;
+  session: { id: string; name: string; phone: string | null; status: string };
+  lead: {
+    bitrixLeadId: string;
+    leadUrl: string;
+    colour: ConversationColour | null;
+  } | null;
+  stats: { total: number; inbound: number; outbound: number; failed: number };
+  media: ChatProfileMediaItem[];
+}
+
+export const chatProfileApi = {
+  listNames: (sessionId: string) =>
+    request<{ names: Record<string, string>; pinned: string[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/chat-profiles`,
+    ),
+  get: (sessionId: string, chatId: string) =>
+    request<ChatProfileView>(
+      `/sessions/${encodeURIComponent(sessionId)}/chats/${encodeURIComponent(chatId)}/profile`,
+    ),
+  patch: (
+    sessionId: string,
+    chatId: string,
+    body: { displayName?: string | null; notes?: string | null; pinned?: boolean },
+  ) =>
+    request<ChatProfileView>(
+      `/sessions/${encodeURIComponent(sessionId)}/chats/${encodeURIComponent(chatId)}/profile`,
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+};
+
+export interface HealthSummary {
+  red: number;
+  pink: number;
+  yellow: number;
+  white: number;
+  green: number;
+  unclassified: number;
+  total: number;
+}
+
+export interface HealthListRow {
+  sessionId: string;
+  sessionName: string;
+  chatId: string;
+  phone: string | null;
+  name: string | null;
+  colour: ConversationColour | null;
+  bitrixLeadId: string;
+  leadUrl: string;
+}
+
+export interface ChatLeadLink {
+  bitrixLeadId: string;
+  leadUrl: string;
+  colour: ConversationColour | null;
+  found?: boolean;
+}
+
+export const conversationHealthApi = {
+  summary: () => request<HealthSummary>('/conversation-health/summary'),
+  list: (colour: ConversationColour) =>
+    request<HealthListRow[]>(`/conversation-health/list?colour=${encodeURIComponent(colour)}`),
+  allowGreen: (sessionId: string, chatId: string, password: string) =>
+    request<HealthListRow>('/conversation-health/allow-green', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, chatId, password }),
+    }),
+  getChatLead: (sessionId: string, chatId: string) =>
+    request<ChatLeadLink | { found: false }>(
+      `/sessions/${encodeURIComponent(sessionId)}/chats/${encodeURIComponent(chatId)}/lead`,
+    ),
+  backfill: () => request<{ enqueued: number; enabled: boolean }>('/conversation-health/backfill', { method: 'POST' }),
+  reclassifyFalseRed: () =>
+    request<{ enqueued: number; enabled: boolean; candidates: number }>(
+      '/conversation-health/reclassify-false-red',
+      { method: 'POST' },
+    ),
 };

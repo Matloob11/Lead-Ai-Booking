@@ -47,20 +47,46 @@ export const catalog = {
     return apiFetch(`/api/catalog/templates/all/${qs ? `?${qs}` : ""}`);
   },
   createTemplate: (data) => apiFetch("/api/catalog/templates/create/", { method: "POST", body: data }),
+  createTemplateBulk: (data) =>
+    apiFetch("/api/catalog/templates/create-bulk/", { method: "POST", body: data }),
+  deployTemplate: (id, data = {}) =>
+    apiFetch(`/api/catalog/templates/${id}/deploy/`, { method: "POST", body: data }),
+  deleteTemplate: (id) => apiFetch(`/api/catalog/templates/${id}/`, { method: "DELETE" }),
+  purgeTemplateMeta: (id) =>
+    apiFetch(`/api/catalog/templates/${id}/purge-meta/`, { method: "POST" }),
+  suggestUtilityTemplates: (data) =>
+    apiFetch("/api/catalog/templates/utility-suggestions/", { method: "POST", body: data }),
   syncTemplates: () => apiFetch("/api/catalog/sync/", { method: "POST", body: { what: "templates" } }),
 
   /** Admin only. */
   agents: () => apiFetch("/api/catalog/agents/"),
   setAgentAdmin: (agentId, isWaAdmin) =>
     apiFetch(`/api/catalog/agents/${agentId}/admin/`, { method: "POST", body: { is_wa_admin: isWaAdmin } }),
+  /** Admin only — Official API / Linked phones / Panel Admin flags. */
+  setAgentAccess: (agentId, body) =>
+    apiFetch(`/api/catalog/agents/${agentId}/admin/`, { method: "POST", body }),
 
   /** Renames a number. An empty label clears it and `title` falls back. */
-  renameNumber: (numberId, label) =>
-    apiFetch(`/api/catalog/numbers/${numberId}/`, { method: "PATCH", body: { label } }),
+  renameNumber: (numberId, body) =>
+    apiFetch(`/api/catalog/numbers/${numberId}/`, {
+      method: "PATCH",
+      body: typeof body === "string" ? { label: body } : body,
+    }),
 
   /** Replaces the whole roster for a number — send the state you want. */
   setNumberAgents: (numberId, agents) =>
     apiFetch(`/api/catalog/numbers/${numberId}/agents/`, { method: "PUT", body: { agents } }),
+
+  /** Probe alots for Phone Number ID / Business ID before saving a manual row. */
+  testNumber: (data) =>
+    apiFetch("/api/catalog/numbers/test/", { method: "POST", body: data }),
+
+  /** Create a manually typed Official API number (admin). */
+  createNumber: (data) =>
+    apiFetch("/api/catalog/numbers/", { method: "POST", body: data }),
+
+  /** Admin: pull channel list from alots into the local catalogue. */
+  syncNumbers: () => apiFetch("/api/catalog/sync/", { method: "POST", body: { what: "numbers" } }),
 };
 
 export const crm = {
@@ -73,6 +99,39 @@ export const crm = {
   whereis(phone) {
     return apiFetch(`/api/crm/whereis/?phone=${encodeURIComponent(phone)}`);
   },
+
+  /**
+   * Makes the record this number has not got yet and copies the conversation
+   * into its timeline. `where` is "lead" or "owner_data".
+   *
+   * Refuses with 409 if the number turns out to be in the CRM after all — two
+   * leads for one customer is the problem this portal already has, and one
+   * created from here would be our own doing.
+   */
+  createRecord(conversationId, where) {
+    return apiFetch("/api/crm/create/", {
+      method: "POST",
+      body: { conversation: conversationId, where },
+    });
+  },
+};
+
+/**
+ * The QR-linked phones, and who covers them.
+ *
+ * Separate from `catalog` because these are not our numbers: they live in the
+ * OpenWA gateway, are identified by a UUID it issues, and can disappear from
+ * under us if somebody unlinks a handset there. Admin only, both ends.
+ */
+export const linkedPhones = {
+  list: () => apiFetch("/api/auth/openwa-sessions/"),
+
+  /** Replaces the roster for one phone — send the state you want, not a change. */
+  setAgents: (sessionId, agents, label) =>
+    apiFetch(`/api/auth/openwa-sessions/${encodeURIComponent(sessionId)}/agents/`, {
+      method: "PUT",
+      body: { agents, label },
+    }),
 };
 
 export const inbox = {
@@ -94,6 +153,9 @@ export const inbox = {
 
   sendTemplate: (conversationId, body) =>
     apiFetch(`/api/inbox/conversations/${conversationId}/send-template/`, { method: "POST", body }),
+
+  conversationTemplates: (conversationId) =>
+    apiFetch(`/api/inbox/conversations/${conversationId}/templates/`),
 
   sendLocation: (conversationId, data) =>
     apiFetch(`/api/inbox/conversations/${conversationId}/send-location/`, { method: "POST", body: data }),
@@ -203,8 +265,104 @@ export const inbox = {
   },
 
   labels: () => apiFetch("/api/inbox/labels/"),
+  createLabel: (data) => apiFetch("/api/inbox/labels/", { method: "POST", body: data }),
+  deleteLabel: (id) => apiFetch(`/api/inbox/labels/${id}/`, { method: "DELETE" }),
   setFlags: (conversationId, flags) =>
     apiFetch(`/api/inbox/conversations/${conversationId}/flags/`, { method: "POST", body: flags }),
+};
+
+/**
+ * Agent AI cover: per-chat context plus a global desk that can take new / all /
+ * selected chats while the agent is away.
+ */
+export const inboxAi = {
+  desk: () => apiFetch("/api/inboxai/desk/"),
+  saveDesk: (data) => apiFetch("/api/inboxai/desk/", { method: "PUT", body: data }),
+  cover: (conversationId) => apiFetch(`/api/inboxai/conversations/${conversationId}/cover/`),
+  saveCover: (conversationId, data) =>
+    apiFetch(`/api/inboxai/conversations/${conversationId}/cover/`, { method: "PUT", body: data }),
+  candidates: (q = "") => {
+    const query = new URLSearchParams();
+    if (q) query.set("q", q);
+    const qs = query.toString();
+    return apiFetch(`/api/inboxai/candidates/${qs ? `?${qs}` : ""}`);
+  },
+  healthSummary: () => apiFetch("/api/inboxai/health/summary/"),
+  healthList: (colour) =>
+    apiFetch(`/api/inboxai/health/list/?colour=${encodeURIComponent(colour)}`),
+  healthAllowGreen: (conversationId, password) =>
+    apiFetch("/api/inboxai/health/allow-green/", {
+      method: "POST",
+      body: { conversation_id: conversationId, password },
+    }),
+  healthReclassifyFalseRed: () =>
+    apiFetch("/api/inboxai/health/reclassify-false-red/", { method: "POST", body: {} }),
+  healthAnalyse: () => apiFetch("/api/inboxai/health/analyse/", { method: "POST", body: {} }),
+};
+
+/**
+ * Agent report & feedback for the Official API panel. Attachments are image
+ * or video; only admins mark a report solved.
+ */
+export const feedback = {
+  list: (status) => {
+    const query = new URLSearchParams();
+    if (status) query.set("status", status);
+    const qs = query.toString();
+    return apiFetch(`/api/feedback/${qs ? `?${qs}` : ""}`);
+  },
+  create: ({ body, files }) => {
+    const form = new FormData();
+    form.append("body", body || "");
+    for (const file of files || []) form.append("files", file);
+    return apiFetch("/api/feedback/", { method: "POST", body: form });
+  },
+  solve: (id, note) =>
+    apiFetch(`/api/feedback/${id}/solve/`, { method: "POST", body: { note: note || "" } }),
+};
+
+/**
+ * Bulk approved-template campaigns. Recipients from paste and/or CSV; every
+ * number is matched or created in Owner Data (SPA 1042).
+ */
+export const campaigns = {
+  list: () => apiFetch("/api/campaigns/"),
+  get: (id) => apiFetch(`/api/campaigns/${id}/`),
+  preview({ recipients_text = "", csv = null, template_id = null } = {}) {
+    const form = new FormData();
+    form.append("recipients_text", recipients_text || "");
+    if (template_id) form.append("template_id", String(template_id));
+    if (csv) form.append("csv", csv);
+    return apiFetch("/api/campaigns/preview/", { method: "POST", body: form });
+  },
+  create({
+    number_id,
+    template_id,
+    name = "",
+    recipients_text = "",
+    csv = null,
+    variables = {},
+    header_variables = {},
+    button_variables = {},
+    header_media_id = "",
+  } = {}) {
+    const form = new FormData();
+    form.append("number_id", String(number_id));
+    form.append("template_id", String(template_id));
+    form.append("name", name || "");
+    form.append("recipients_text", recipients_text || "");
+    form.append("variables", JSON.stringify(variables || {}));
+    form.append("header_variables", JSON.stringify(header_variables || {}));
+    form.append("button_variables", JSON.stringify(button_variables || {}));
+    if (header_media_id) form.append("header_media_id", header_media_id);
+    if (csv) form.append("csv", csv);
+    return apiFetch("/api/campaigns/", { method: "POST", body: form });
+  },
+  resendSkipped: (id, numberId) =>
+    apiFetch(`/api/campaigns/${id}/resend-skipped/`, {
+      method: "POST",
+      body: numberId ? { number_id: numberId } : {},
+    }),
 };
 
 /**

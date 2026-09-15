@@ -23,6 +23,10 @@ import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.service';
 import { StorageService, isMissingObjectError } from '../../common/storage/storage.service';
+import { ApiKeyRole } from '../auth/entities/api-key.entity';
+
+/** Metadata flag set when an agent soft-deletes a bubble. Body/type stay intact for admin. */
+export const AGENT_DELETED_META_KEY = 'agentDeleted';
 
 export interface GetMessagesOptions {
   chatId?: string;
@@ -30,6 +34,27 @@ export interface GetMessagesOptions {
   from?: string;
   limit?: number;
   offset?: number;
+  /**
+   * When not admin, agent-soft-deleted rows are returned as revoked placeholders (no body/media).
+   * Admin keeps the real content and sees `metadata.agentDeleted`.
+   */
+  viewerRole?: ApiKeyRole;
+}
+
+export function isAgentDeletedMetadata(metadata: Record<string, unknown> | null | undefined): boolean {
+  return metadata?.[AGENT_DELETED_META_KEY] === true;
+}
+
+/** Agent-facing view of a soft-deleted row: same id/timeline, no content. */
+export function redactAgentDeletedMessage(message: Message): Message {
+  return {
+    ...message,
+    body: '',
+    type: 'revoked',
+    mediaPath: undefined,
+    mediaMimetype: undefined,
+    metadata: { [AGENT_DELETED_META_KEY]: true },
+  };
 }
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
@@ -393,7 +418,12 @@ export class MessageService {
     }
 
     const [messages, total] = await query.getManyAndCount();
-    return { messages, total };
+    const forAgent = options.viewerRole !== undefined && options.viewerRole !== ApiKeyRole.ADMIN;
+    if (!forAgent) return { messages, total };
+    return {
+      messages: messages.map(m => (isAgentDeletedMetadata(m.metadata) ? redactAgentDeletedMessage(m) : m)),
+      total,
+    };
   }
 
   /**
@@ -808,6 +838,11 @@ export class MessageService {
    *
    * An optional `signal` (HTTP client disconnect) is threaded to the engine, which checks it between
    * media downloads. Callers without cancellation keep the exact three-argument engine call shape.
+   *
+   * `mediaFor` narrows the media download to a single message id. What makes that worth a parameter
+   * is the timeout, not the bytes: WhatsApp stops serving old media, and each such file is waited on
+   * for MEDIA_DOWNLOAD_TIMEOUT_MS before it can be reported gone — so asking a chat with ten of them
+   * about one bubble costs the agent ten timeouts of spinner to learn one answer.
    */
   async getChatHistory(
     sessionId: string,
@@ -816,13 +851,16 @@ export class MessageService {
     includeMedia = false,
     deep = false,
     signal?: AbortSignal,
+    mediaFor?: string,
   ) {
     const engine = this.getEngine(sessionId);
     const ceiling = deep ? MessageService.MAX_DEEP_CHAT_HISTORY_LIMIT : MessageService.MAX_CHAT_HISTORY_LIMIT;
     const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), ceiling) : 50;
     const media = deep ? false : includeMedia;
-    return signal
-      ? engine.getChatHistory(chatId, safeLimit, media, undefined, signal)
+    // The three-argument shape is kept for callers that pass neither, so existing engine mocks and
+    // adapters see the exact call they saw before.
+    return signal || mediaFor
+      ? engine.getChatHistory(chatId, safeLimit, media, undefined, signal, mediaFor)
       : engine.getChatHistory(chatId, safeLimit, media);
   }
 
@@ -872,16 +910,38 @@ export class MessageService {
   async deleteMessage(
     sessionId: string,
     dto: { chatId: string; messageId: string; forEveryone?: boolean },
+    actor?: { role?: ApiKeyRole },
   ): Promise<void> {
-    const engine = this.getEngine(sessionId);
-    await engine.deleteMessage(dto.chatId, dto.messageId, dto.forEveryone ?? true);
+    // Never wipe the stored body. Soft-delete marks the row so admins still see content + a
+    // Deleted label; agents get a redacted placeholder on read. Admin additionally asks WhatsApp
+    // to revoke for everyone when an engine is live — that is a handset-side effect only.
+    const row = await this.messageRepository.findOne({
+      where: [
+        { sessionId, waMessageId: dto.messageId },
+        { sessionId, id: dto.messageId },
+      ],
+    });
+    if (!row) {
+      throw new NotFoundException(`Message '${dto.messageId}' was not found in stored history`);
+    }
+    const metadata: Record<string, unknown> = {
+      ...(row.metadata ?? {}),
+      [AGENT_DELETED_META_KEY]: true,
+      agentDeletedAt: new Date().toISOString(),
+    };
+    await this.messageRepository.update({ id: row.id }, { metadata } as QueryDeepPartialEntity<Message>);
 
-    // Flag the stored message as revoked. No localized display string is persisted here;
-    // the dashboard renders the localized "message deleted" text.
+    const isAdmin = actor?.role === undefined || actor.role === ApiKeyRole.ADMIN;
+    if (!isAdmin) return;
+
     try {
-      await this.messageRepository.update({ sessionId, waMessageId: dto.messageId }, { body: '', type: 'revoked' });
+      const engine = this.getEngine(sessionId);
+      await engine.deleteMessage(dto.chatId, dto.messageId, dto.forEveryone ?? true);
     } catch (err) {
-      this.logger.warn(`Failed to flag deleted message ${dto.messageId} as revoked`, { error: String(err) });
+      // Soft-delete already stuck; a missing engine / WhatsApp refusal must not undo the archive.
+      this.logger.warn(`WhatsApp revoke skipped after soft-delete for ${dto.messageId}`, {
+        error: String(err),
+      });
     }
   }
 

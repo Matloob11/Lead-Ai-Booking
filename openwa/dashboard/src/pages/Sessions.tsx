@@ -68,7 +68,7 @@ export function Sessions() {
   const { t } = useTranslation();
   useDocumentTitle(t('sessions.title'));
   const toast = useToast();
-  const { canWrite } = useRole();
+  const { canWrite, isAdmin } = useRole();
   const queryClient = useQueryClient();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +79,12 @@ export function Sessions() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteImpact, setDeleteImpact] = useState<number | null>(null);
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
+  const [deleteImpactError, setDeleteImpactError] = useState<string | null>(null);
+  const deleteImpactRequest = useRef(0);
+  const [resetConfirmId, setResetConfirmId] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
   const [killConfirmId, setKillConfirmId] = useState<string | null>(null);
   const [unlinkConfirmId, setUnlinkConfirmId] = useState<string | null>(null);
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
@@ -90,6 +96,7 @@ export function Sessions() {
       // arriving on a live page reads as a full reload.
       if (!initialLoadDone.current) setLoading(true);
       const data = await sessionApi.list();
+      setError(null);
       setSessions(data);
       // Keep the shared React Query cache (read by the Dashboard via useSessionsQuery /
       // useSessionStatsQuery) in sync after this page's mutations reload local state — otherwise the
@@ -234,25 +241,79 @@ export function Sessions() {
     return () => clearInterval(timer);
   }, [importing, fetchSessions]);
 
-  const handleDelete = async (id: string) => {
+  const closeDeleteConfirmation = () => {
+    deleteImpactRequest.current += 1;
+    setDeleteConfirmId(null);
+    setDeleteImpact(null);
+    setDeleteImpactError(null);
+    setDeleteImpactLoading(false);
+  };
+
+  const openDeleteConfirmation = async (id: string) => {
+    const requestId = deleteImpactRequest.current + 1;
+    deleteImpactRequest.current = requestId;
+    setDeleteConfirmId(id);
+    setDeleteImpact(null);
+    setDeleteImpactError(null);
+    setDeleteImpactLoading(true);
+    try {
+      const impact = await sessionApi.getDeleteImpact(id);
+      if (deleteImpactRequest.current !== requestId) return;
+      setDeleteImpact(impact.messageCount);
+    } catch (err) {
+      if (deleteImpactRequest.current !== requestId) return;
+      setDeleteImpactError(err instanceof Error ? err.message : 'Could not count stored messages.');
+    } finally {
+      if (deleteImpactRequest.current === requestId) setDeleteImpactLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string, confirmedMessageCount: number) => {
     const session = sessions.find(s => s.id === id);
     try {
-      await sessionApi.delete(id);
-      // Functional removal (no stale `sessions` capture), then invalidate the prefix.
-      setSessions(current => current.filter(s => s.id !== id));
+      await sessionApi.delete(id, confirmedMessageCount);
+      // Soft-remove keeps the row; refresh so removedAt / status show correctly.
       await invalidateSessionQueries(queryClient, queryKeys.sessions);
+      const refreshed = await sessionApi.list();
+      setSessions(refreshed);
       toast.success(
-        t('sessions.delete.successTitle'),
+        'Session removed',
         session
-          ? t('sessions.delete.successDescNamed', { name: session.name })
-          : t('sessions.delete.successDescGeneric'),
+          ? `${session.name} is removed from active use. Stored chats were kept.`
+          : 'Session removed. Stored chats were kept.',
       );
+      closeDeleteConfirmation();
     } catch (err) {
       const msg = err instanceof Error ? err.message : t('sessions.delete.errorDefault');
       console.error('Failed to delete:', err);
+      if ((err as { code?: string } | null)?.code === 'SESSION_DELETE_COUNT_CHANGED') {
+        toast.warning(
+          'Message count changed',
+          'Delete stopped. Review the latest stored message count before confirming again.',
+        );
+        await openDeleteConfirmation(id);
+        return;
+      }
+      setDeleteImpactError(msg);
       toast.error(t('sessions.delete.errorTitle'), msg);
+    }
+  };
+
+  const handleResetProfile = async (id: string) => {
+    if (resettingId) return;
+    setResettingId(id);
+    try {
+      const updated = await sessionApi.resetProfile(id);
+      await applySessionResponse(updated);
+      toast.success('Profile reset', 'Session identity and stored messages were preserved. Use Start when ready.');
+      setResetConfirmId(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Profile reset failed.';
+      console.error('Failed to reset profile:', err);
+      toast.error('Profile reset failed', msg);
+      await fetchSessions();
     } finally {
-      setDeleteConfirmId(null);
+      setResettingId(null);
     }
   };
 
@@ -285,6 +346,10 @@ export function Sessions() {
         await fetchSessions();
         return;
       }
+      toast.error(
+        t('sessions.toasts.failedTitle'),
+        err instanceof Error && err.message ? err.message : t('sessions.toasts.failedDesc'),
+      );
       const fresh = await fetchSessions();
       const current = fresh.find(s => s.id === id);
       if (current?.status !== 'ready') handleShowQR(id);
@@ -380,7 +445,7 @@ export function Sessions() {
         subtitle={t('sessions.subtitle')}
         actions={
           canWrite && (
-            <button className="btn-primary" onClick={() => setShowCreateModal(true)}>
+            <button className="btn-primary sessions-create-btn sessions-create-btn--header" onClick={() => setShowCreateModal(true)}>
               <Plus size={18} />
               {t('sessions.newSession')}
             </button>
@@ -412,6 +477,18 @@ export function Sessions() {
             ]}
           />
         </div>
+
+        {/* Embedded Linked-phones hides `.page-header`, so Create lives here too. */}
+        {canWrite && (
+          <button
+            type="button"
+            className="btn-primary sessions-create-btn sessions-create-btn--toolbar"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus size={18} />
+            {t('sessions.newSession')}
+          </button>
+        )}
       </div>
 
       {error && (
@@ -660,17 +737,21 @@ export function Sessions() {
       {deleteConfirmId && (
         <Modal
           open
-          onClose={() => setDeleteConfirmId(null)}
+          onClose={closeDeleteConfirmation}
           title={t('sessions.delete.title')}
           className="confirm-modal"
           closeLabel={t('common.close')}
           footer={
             <>
-              <button className="btn-secondary" onClick={() => setDeleteConfirmId(null)}>
+              <button className="btn-secondary" onClick={closeDeleteConfirmation}>
                 {t('common.cancel')}
               </button>
-              <button className="btn-danger" onClick={() => handleDelete(deleteConfirmId)}>
-                {t('common.delete')}
+              <button
+                className="btn-danger"
+                disabled={deleteImpactLoading || deleteImpact === null}
+                onClick={() => deleteImpact !== null && handleDelete(deleteConfirmId, deleteImpact)}
+              >
+                Remove session
               </button>
             </>
           }
@@ -682,7 +763,49 @@ export function Sessions() {
               components={{ strong: <strong /> }}
             />
           </p>
-          <p className="text-muted">{t('sessions.delete.warning')}</p>
+          {deleteImpactLoading ? <p className="text-muted">Counting stored messages…</p> : null}
+          {deleteImpact !== null ? (
+            <p>
+              <strong>
+                {deleteImpact} stored {deleteImpact === 1 ? 'message' : 'messages'}
+              </strong>{' '}
+              will be kept. The session is marked removed and can reappear in All chats; reconnecting
+              the same number reattaches this history.
+            </p>
+          ) : null}
+          {deleteImpactError ? <p className="error-message">{deleteImpactError}</p> : null}
+          <p className="text-muted">Local WhatsApp login data is cleared. Stored chats are not deleted.</p>
+        </Modal>
+      )}
+
+      {resetConfirmId && (
+        <Modal
+          open
+          onClose={() => (resettingId ? undefined : setResetConfirmId(null))}
+          title="Reset WhatsApp profile"
+          className="confirm-modal"
+          closeLabel={t('common.close')}
+          footer={
+            <>
+              <button className="btn-secondary" disabled={Boolean(resettingId)} onClick={() => setResetConfirmId(null)}>
+                {t('common.cancel')}
+              </button>
+              <button
+                className="btn-danger"
+                disabled={Boolean(resettingId)}
+                onClick={() => handleResetProfile(resetConfirmId)}
+              >
+                {resettingId ? <Loader2 className="animate-spin" size={16} /> : null}
+                Reset profile
+              </button>
+            </>
+          }
+        >
+          <p>
+            This stops the engine and clears its local WhatsApp authentication profile. Session identity and stored
+            messages stay intact.
+          </p>
+          <p className="text-muted">No QR will be generated automatically. Use Start when you are ready to link it.</p>
         </Modal>
       )}
 
@@ -754,6 +877,12 @@ export function Sessions() {
             <QrCode size={48} />
             <h3>{t('sessions.empty.title')}</h3>
             <p>{t('sessions.empty.description')}</p>
+            {canWrite && (
+              <button type="button" className="btn-primary" onClick={() => setShowCreateModal(true)}>
+                <Plus size={18} />
+                {t('sessions.newSession')}
+              </button>
+            )}
           </div>
         ) : (
           filteredSessions.map(session => (
@@ -867,8 +996,14 @@ export function Sessions() {
                     {t('sessions.actions.unlink')}
                   </button>
                 )}
+                {isAdmin && (
+                  <button className="btn-action danger" onClick={() => setResetConfirmId(session.id)}>
+                    <RefreshCw size={16} />
+                    Reset profile
+                  </button>
+                )}
                 {canWrite && (
-                  <button className="btn-action danger" onClick={() => setDeleteConfirmId(session.id)}>
+                  <button className="btn-action danger" onClick={() => void openDeleteConfirmation(session.id)}>
                     <Trash2 size={16} />
                     {t('sessions.actions.delete')}
                   </button>

@@ -31,8 +31,8 @@ import {
   VotePollDto,
   UnpinMessageDto,
 } from './dto/message-actions.dto';
-import { RequireRole } from '../auth/decorators/auth.decorators';
-import { ApiKeyRole } from '../auth/entities/api-key.entity';
+import { RequireRole, CurrentApiKey } from '../auth/decorators/auth.decorators';
+import { ApiKey, ApiKeyRole } from '../auth/entities/api-key.entity';
 
 @ApiTags('messages')
 @Controller('sessions/:sessionId/messages')
@@ -64,10 +64,12 @@ export class MessageController {
     @Query('from') from?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @CurrentApiKey() apiKey?: ApiKey,
   ) {
     return this.messageService.getMessages(sessionId, {
       chatId,
       from,
+      viewerRole: apiKey?.role,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
     });
@@ -330,6 +332,16 @@ export class MessageController {
       '(whatsapp-web.js only; loads earlier messages on demand). Forces metadata-only (includeMedia ' +
       'is ignored). Large/slow requests may increase WhatsApp rate-limiting risk; default false.',
   })
+  @ApiQuery({
+    name: 'mediaFor',
+    required: false,
+    type: String,
+    description:
+      'With includeMedia, downloads media for this one message id only; other messages are still ' +
+      'returned but media-free. Old media is not refused quickly — it is waited on until the ' +
+      'download timeout — so fetching a whole chat to answer for one file costs every other ' +
+      'file’s timeout too.',
+  })
   @ApiResponse({ status: 200, description: 'Chat history (most recent messages)' })
   async getChatHistory(
     @Param('sessionId') sessionId: string,
@@ -337,6 +349,7 @@ export class MessageController {
     @Query('limit') limit?: string,
     @Query('includeMedia') includeMedia?: string,
     @Query('deep') deep?: string,
+    @Query('mediaFor') mediaFor?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
     // Parse the limit defensively: a non-numeric query value (?limit=abc) yields NaN,
@@ -354,6 +367,7 @@ export class MessageController {
       includeMedia === 'true' || includeMedia === '1',
       deep === 'true' || deep === '1',
       abort.signal,
+      mediaFor || undefined,
     );
   }
 
@@ -425,8 +439,9 @@ export class MessageController {
   async deleteMessage(
     @Param('sessionId') sessionId: string,
     @Body() dto: DeleteMessageDto,
+    @CurrentApiKey() apiKey?: ApiKey,
   ): Promise<{ success: boolean }> {
-    await this.messageService.deleteMessage(sessionId, dto);
+    await this.messageService.deleteMessage(sessionId, dto, { role: apiKey?.role });
     return { success: true };
   }
 

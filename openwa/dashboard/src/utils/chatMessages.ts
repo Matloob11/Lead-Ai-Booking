@@ -46,10 +46,19 @@ export function mergeChatMessages(db: ChatMessage[], history: ChatMessage[]): Ch
   for (const m of db) {
     const key = msgKey(m);
     const hist = byId.get(key);
-    // The DB copy wins (authoritative status) — but a legacy row has no stable sender id, so
-    // salvage the engine-history copy's author or two same-named participants collapse into one
-    // attribution run in the chat view.
-    byId.set(key, hist?.author && !m.author ? { ...m, author: hist.author } : m);
+    if (!hist) {
+      byId.set(key, m);
+      continue;
+    }
+    // The DB copy wins for delivery status and identity — but on-demand media reload puts the
+    // bytes on the history side while the DB/cache row still holds only the omitted placeholder.
+    // A wholesale DB win would drop those bytes (Tap to load would succeed and still show 📎).
+    // Salvage author the same way for legacy rows that never stored a stable sender id.
+    byId.set(key, {
+      ...m,
+      author: m.author || hist.author,
+      metadata: mergeMessageMetadata(m.metadata, hist.metadata),
+    });
   }
   const sorted = [...byId.values()].sort((a, b) => msgTime(a) - msgTime(b) || a.createdAt.localeCompare(b.createdAt));
   return capMediaPayloads(sorted);
@@ -113,6 +122,9 @@ export type MessageMedia = {
   sizeBytes?: number;
 };
 
+/** Agent soft-deleted in OpenWA (WhatsApp untouched). Admin keeps body + this flag. */
+export const isAgentDeleted = (m: Pick<ChatMessage, 'metadata'>): boolean => m.metadata?.agentDeleted === true;
+
 export const getMediaSrc = (media?: MessageMedia): string => {
   if (!media || !media.data) return '';
   if (media.data.startsWith('data:') || media.data.startsWith('http://') || media.data.startsWith('https://')) {
@@ -129,6 +141,8 @@ export interface ChatMessageView extends ChatMessage {
     call?: { video: boolean; missed: boolean };
     /** See the same field on ChatMessage in services/api.ts — vote counts are deliberately absent. */
     poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
+    agentDeleted?: boolean;
+    agentDeletedAt?: string;
   };
 }
 
@@ -179,6 +193,13 @@ function mergeMessageMetadata(
   if (reactions) merged.reactions = reactions;
   const call = incoming.call ?? existing.call;
   if (call) merged.call = call;
+  // Soft-delete is a DB fact — a media-less history refresh must not clear it.
+  const agentDeleted = existing.agentDeleted || incoming.agentDeleted;
+  if (agentDeleted) {
+    merged.agentDeleted = true;
+    const agentDeletedAt = existing.agentDeletedAt ?? incoming.agentDeletedAt;
+    if (agentDeletedAt) merged.agentDeletedAt = agentDeletedAt;
+  }
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

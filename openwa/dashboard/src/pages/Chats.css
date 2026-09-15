@@ -23,12 +23,65 @@
    SIDEBAR: Left Column
    ============================================================================= */
 .chats-page .chats-sidebar {
+  position: relative;
   width: 320px;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   background: var(--bg-white);
   flex-shrink: 0;
+}
+
+/* Floating New contact â€” bottom-left of Linked phones chat list. */
+.chats-page .a7-new-contact-fab {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 16px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(11, 122, 69, 0.35);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.chats-page .a7-new-contact-fab:hover {
+  background: #1ebe57;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(11, 122, 69, 0.42);
+}
+
+.chats-page .a7-new-contact-fab:active {
+  transform: translateY(0);
+}
+
+.chats-page .a7-new-contact-fab:focus-visible {
+  outline: 2px solid rgba(37, 211, 102, 0.55);
+  outline-offset: 3px;
+}
+
+[data-theme='dark'] .chats-page .a7-new-contact-fab,
+body.a7-glass-embedded .chats-page .a7-new-contact-fab {
+  color: #052e16;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme='dark'] .chats-page .a7-new-contact-fab:hover,
+body.a7-glass-embedded .chats-page .a7-new-contact-fab:hover {
+  background: #34e27a;
 }
 
 .chats-page .sidebar-header-box {
@@ -43,6 +96,121 @@
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
+}
+
+.chats-page .a7-session-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.chats-page .a7-session-label-row .form-label {
+  margin: 0;
+}
+
+/* Pic-2 style hamburger beside "WhatsApp session". */
+.chats-page .a7-tools-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--border, #d0d7e2);
+  border-radius: 0.55rem;
+  background: var(--bg-white, #fff);
+  color: var(--text-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+[data-theme='dark'] .chats-page .a7-tools-menu-btn {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chats-page .a7-tools-menu-btn:hover,
+.chats-page .a7-tools-menu-btn.open {
+  background: rgba(37, 211, 102, 0.14);
+  border-color: rgba(37, 211, 102, 0.45);
+  color: var(--primary, #25d366);
+}
+
+/* Conversation Health opens from the app menu as a centered dialog. */
+.a7-health-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 8, 23, 0.62);
+}
+
+.a7-health-modal {
+  width: min(720px, 100%);
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1.1rem;
+  background: var(--bg-white, #ffffff);
+  color: var(--text-primary);
+  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.45);
+}
+
+.a7-health-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  background: var(--bg-white, #ffffff);
+}
+
+.a7-health-modal-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.a7-health-modal-close {
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  background: var(--bg-light, #f4f6f8);
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.a7-health-modal-close:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.a7-health-modal-body {
+  padding: 1rem 1.15rem 1.15rem;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+
+.a7-health-modal-body .chp {
+  margin-bottom: 0;
 }
 
 .chats-page .session-selector {
@@ -63,6 +231,67 @@
   border-color: var(--primary);
   background: var(--bg-white);
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+.chats-page .session-select-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.chats-page .session-select-row .session-selector {
+  flex: 1;
+  min-width: 0;
+}
+
+.chats-page .a7-all-chats-btn {
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-light);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chats-page .a7-all-chats-btn:hover,
+.chats-page .a7-all-chats-btn.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.chats-page .chat-item-session {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+}
+
+.chats-page .chat-session-status {
+  text-transform: lowercase;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.chats-page .chat-session-status.status-connected {
+  color: var(--primary);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.chats-page .chat-session-status.status-removed {
+  color: #c45c26;
+  border-color: rgba(196, 92, 38, 0.4);
+}
+
+.chats-page .chat-item-locked {
+  opacity: 0.72;
 }
 
 /* Chats / Channels / Status segmented control */
@@ -129,6 +358,8 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  /* Clearance under the New contact FAB. */
+  padding-bottom: 72px;
 }
 
 /* Custom Scrollbar for chats list */
@@ -222,12 +453,22 @@
 }
 
 .chats-page .chat-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chats-page .chat-item-pin {
+  flex: none;
+  color: #008069;
+  opacity: 0.9;
 }
 
 .chats-page .chat-item-time {
@@ -288,9 +529,12 @@
    ============================================================================= */
 .chats-page .chats-room {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-light);
+  overflow: hidden;
 }
 
 .chats-page .chats-room-placeholder {
@@ -327,10 +571,35 @@
 }
 
 .chats-page .room-container {
+  position: relative; /* anchor for .a7-cp absolute drawer */
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.chats-page .room-open-lead {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  background: var(--bg-white);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chats-page .room-open-lead:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .chats-page .room-header {
@@ -366,6 +635,31 @@
 .chats-page .room-back:hover {
   background: var(--bg-light);
   color: var(--text-primary);
+}
+
+/* Clickable identity cluster â€” opens the contact side panel. */
+.chats-page .room-contact-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chats-page .room-contact-btn:hover {
+  background: var(--bg-light);
+}
+
+.chats-page .room-contact-btn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .chats-page .room-avatar {
@@ -407,7 +701,7 @@
 }
 
 /* Prettified phone (or "Group" / "Private contact" label for non-personal JIDs). Primary subtitle
-   line directly under the name — what an operator reads first. */
+   line directly under the name â€” what an operator reads first. */
 .chats-page .room-contact-phone {
   font-size: 0.8125rem;
   color: var(--text-muted);
@@ -415,7 +709,7 @@
 }
 
 /* Raw JID preserved for technical use (lid resolution, webhook payloads, group ids). Muted mono,
-   below the phone, truncated to keep the header compact — the full value is in the title tooltip. */
+   below the phone, truncated to keep the header compact â€” the full value is in the title tooltip. */
 .chats-page .room-contact-jid {
   font-size: 0.6875rem;
   color: var(--text-muted);
@@ -428,6 +722,7 @@
 
 .chats-page .room-messages {
   flex: 1;
+  min-height: 0;
   padding: 1.5rem;
   overflow-y: auto;
   display: flex;
@@ -587,6 +882,10 @@
    INPUT BAR: Bottom Footer
    ============================================================================= */
 .chats-page .room-input-footer {
+  flex: none;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 8;
   background: var(--bg-white);
   border-top: 1px solid var(--border);
   padding: 1rem 1.5rem;
@@ -642,7 +941,7 @@
 }
 
 .chats-page .btn-send-message:disabled {
-  /* Keep the brand silhouette readable while clearly inactive — a bare gray-on-gray glyph
+  /* Keep the brand silhouette readable while clearly inactive â€” a bare gray-on-gray glyph
      reads as "no button here" rather than "send, disabled". */
   background: var(--primary);
   color: #fff;
@@ -730,6 +1029,57 @@
 .chats-page .btn-input-accessory.active {
   background: rgba(34, 197, 94, 0.1);
   color: var(--primary);
+}
+
+.chats-page .voice-rec {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.chats-page .voice-rec__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: a7-voice-pulse 1s ease-in-out infinite;
+}
+
+@keyframes a7-voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.chats-page .voice-rec__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chats-page .voice-rec__cancel {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+}
+
+.chats-page .voice-rec__cancel:hover:not(:disabled) {
+  background: var(--bg-light);
+  color: var(--text-primary);
 }
 
 .chats-page .attachment-preview-banner {
@@ -843,13 +1193,19 @@
    ============================================================================= */
 @media (max-width: 768px) {
   .chats-page {
-    padding: 1rem;
-    height: auto;
+    padding: 0.5rem;
+    height: 100%;
+    min-height: 0;
   }
 
   .chats-page .chats-layout {
     flex-direction: column;
-    height: calc(100vh - 7rem);
+    height: 100%;
+    min-height: 0;
+  }
+
+  :root[data-embedded] .chats-page {
+    padding: 0;
   }
 
   /* Single-pane on mobile: the list and the open conversation each take the full panel
@@ -907,13 +1263,173 @@
   max-height: 250px;
   border-radius: 8px;
   display: block;
+  margin-bottom: 0;
+  background: #000;
+}
+
+.chats-page .a7-video-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
   margin-bottom: 0.5rem;
+}
+
+.chats-page .a7-video-fs-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: none;
+  border-radius: 0.45rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.chats-page .a7-video-fs-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 
 .chats-page .chat-audio-media {
   max-width: 100%;
   display: block;
   margin-bottom: 0.5rem;
+}
+
+/* Custom voice / audio player (replaces native <audio controls>). */
+.chats-page .a7-voice-player {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: min(180px, 100%);
+  max-width: min(280px, 100%);
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.35rem;
+  border-radius: 1.25rem;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.chats-page .a7-voice-player.outgoing {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.chats-page .a7-voice-player audio {
+  display: none;
+}
+
+.chats-page .a7-voice-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--primary, #25d366);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.chats-page .a7-voice-play:hover {
+  filter: brightness(1.05);
+}
+
+.chats-page .a7-voice-play svg {
+  margin-left: 1px;
+}
+
+.chats-page .a7-voice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chats-page .a7-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 1.5px;
+  height: 1.35rem;
+  pointer-events: none;
+}
+
+.chats-page .a7-voice-wave span {
+  flex: 1;
+  min-width: 2px;
+  max-width: 3px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.45);
+  transition: background 0.12s ease;
+}
+
+.chats-page .a7-voice-wave span.on {
+  background: var(--primary, #25d366);
+}
+
+.chats-page .a7-voice-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.35);
+  outline: none;
+  cursor: pointer;
+}
+
+.chats-page .a7-voice-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary, #25d366);
+  border: none;
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.25);
+}
+
+.chats-page .a7-voice-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary, #25d366);
+  border: none;
+}
+
+.chats-page .a7-voice-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.chats-page .a7-voice-rate {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  cursor: pointer;
+}
+
+.chats-page .a7-voice-rate:hover {
+  border-color: var(--primary, #25d366);
+  color: var(--primary, #25d366);
 }
 
 .chats-page .chat-document-media {
@@ -1174,6 +1690,30 @@
 .chats-page .message-bubble.revoked-type {
   font-style: italic;
   opacity: 0.6;
+}
+
+/* Admin view of an agent soft-delete: content stays, tag marks it. */
+.chats-page .message-bubble.agent-deleted {
+  outline: 1px dashed rgba(239, 68, 68, 0.45);
+}
+
+.chats-page .message-deleted-tag {
+  display: inline-block;
+  align-self: flex-start;
+  margin-bottom: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+[data-theme='dark'] .chats-page .message-deleted-tag {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fca5a5;
 }
 
 [data-theme='dark'] .chats-page .message-actions-menu,
@@ -1439,7 +1979,7 @@
 /* ===========================================================================
    A7: the agent's two sidebar actions, and the dialogs behind them.
    New class names rather than overrides, so none of this needs the
-   :root[data-embedded] prefix the embedded rules depend on — nothing upstream
+   :root[data-embedded] prefix the embedded rules depend on â€” nothing upstream
    claims these selectors, so there is nothing to out-specify.
    =========================================================================== */
 
@@ -1463,7 +2003,7 @@
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
-  /* A long label must shrink rather than push the other button off the row —
+  /* A long label must shrink rather than push the other button off the row â€”
      the sidebar is 320px and narrower still at 800px. */
   min-width: 0;
   white-space: nowrap;
@@ -1502,11 +2042,11 @@
   width: min(520px, 100%);
   /* The frame, not the window. `vh` measures the outer window when this runs
      embedded, so a vh-sized dialog hangs past the bottom of the frame with its
-     buttons out of reach — the same trap a7-embedded.css exists for. */
+     buttons out of reach â€” the same trap a7-embedded.css exists for. */
   max-height: 100%;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  background: var(--bg-primary, #fff);
+  background: var(--bg-white, #fff);
   color: var(--text-primary);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
   overflow: hidden;
@@ -1817,7 +2357,7 @@
 }
 
 /* A phone number is read digit by digit and often compared against another one, so it gets a
- * monospace face and is selectable — an agent's next move is usually to copy it. */
+ * monospace face and is selectable â€” an agent's next move is usually to copy it. */
 .chats-page .message-contact-phone {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.875em;
@@ -1852,8 +2392,8 @@
 
 /* "Tap to load" on a media bubble whose bytes were never fetched
  *
- * History is read media-free on purpose — a chat full of video would otherwise sit in heap as
- * base64 — so an imported photo or clip arrives as a placeholder. This turns that placeholder into
+ * History is read media-free on purpose â€” a chat full of video would otherwise sit in heap as
+ * base64 â€” so an imported photo or clip arrives as a placeholder. This turns that placeholder into
  * the affordance it should always have been: it looks like the omitted marker it replaces, so a
  * thread does not suddenly grow buttons, and only the hint and the cursor say it can be pressed.
  */
@@ -1887,3 +2427,672 @@
 .chats-page .message-media-fetch:focus-visible .message-media-fetch-hint {
   color: var(--primary);
 }
+
+/* --------------------------------------------------------------- contact panel
+   WhatsApp-style right drawer over the thread. Click dimmed thread to close. */
+
+.a7-cp__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 39;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  background: rgba(7, 14, 24, 0.45);
+  animation: a7-cp-fade 140ms ease-out;
+}
+
+@keyframes a7-cp-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.a7-cp {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  color: #111b21;
+  border-left: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.28);
+  animation: a7-cp-in 160ms ease-out;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+@keyframes a7-cp-in {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .a7-cp,
+  .a7-cp__backdrop {
+    animation: none;
+  }
+}
+
+.a7-cp__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  background: #008069;
+  color: #fff;
+}
+
+.a7-cp__head-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #fff;
+}
+
+.a7-cp__x {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.a7-cp__x:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.a7-cp__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #f0f2f5;
+  scroll-padding-bottom: 24px;
+}
+
+.a7-cp__hint,
+.a7-cp__note {
+  color: #667781;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.a7-cp__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+}
+
+.a7-cp__spin {
+  animation: a7-cp-spin 0.8s linear infinite;
+}
+
+@keyframes a7-cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.a7-cp__alert {
+  margin: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdecea;
+  color: #b3261e;
+  font-size: 13px;
+}
+
+.a7-cp__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 16px 18px;
+  background: #ffffff;
+  text-align: center;
+}
+
+.a7-cp__avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #008069;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 650;
+  overflow: hidden;
+}
+
+.a7-cp__avatar--lg {
+  width: 112px;
+  height: 112px;
+  font-size: 36px;
+  box-shadow: 0 8px 24px rgba(0, 128, 105, 0.28);
+}
+
+.a7-cp__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.a7-cp__hero-name {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.a7-cp__hero-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #54656f;
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.a7-cp__hero-phone:hover {
+  background: #f0f2f5;
+  color: #008069;
+}
+
+.a7-cp__wa-name {
+  font-size: 12px;
+  color: #8696a0;
+}
+
+.a7-cp__quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px;
+  padding: 12px 14px 14px;
+  background: #ffffff;
+  border-bottom: 8px solid #f0f2f5;
+}
+
+.a7-cp__quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e9edef;
+  border-radius: 12px;
+  background: #f7f8fa;
+  color: #008069;
+  padding: 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.a7-cp__quick-btn:hover:not(:disabled) {
+  border-color: #008069;
+  background: #e7f8f2;
+}
+
+.a7-cp__quick-btn.is-on {
+  background: #008069;
+  border-color: #008069;
+  color: #fff;
+}
+
+.a7-cp__quick-btn--danger {
+  color: #ea4335;
+}
+
+.a7-cp__quick-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.a7-cp__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  background: #ffffff;
+  border-bottom: 8px solid #f0f2f5;
+}
+
+.a7-cp__block--actions {
+  border-bottom: 0;
+  padding-bottom: 20px;
+}
+
+.a7-cp__block-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #008069;
+}
+
+.a7-cp__count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8696a0;
+}
+
+.a7-cp__status {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.a7-cp__status--ok {
+  color: #008069;
+}
+
+.a7-cp__status--muted {
+  color: #8696a0;
+  font-weight: 500;
+}
+
+.a7-cp__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #54656f;
+}
+
+.a7-cp__field-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  font-weight: 600;
+  color: #54656f;
+}
+
+.a7-cp__field-hint {
+  font-weight: 500;
+  font-size: 11px;
+  color: #8696a0;
+}
+
+.a7-cp__input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.a7-cp__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1.5px solid #d1d7db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111b21;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.35;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.a7-cp__input--with-clear {
+  padding-right: 36px;
+}
+
+.a7-cp__input:focus {
+  outline: none;
+  border-color: #008069;
+  box-shadow: 0 0 0 3px rgba(0, 128, 105, 0.18);
+}
+
+.a7-cp__clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #8696a0;
+  cursor: pointer;
+}
+
+.a7-cp__clear:hover {
+  background: #f0f2f5;
+  color: #111b21;
+}
+
+.a7-cp__field-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #f5c2c0;
+  background: #fdecea;
+  color: #b3261e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.a7-cp__notes {
+  resize: vertical;
+  min-height: 96px;
+  line-height: 1.45;
+}
+
+.a7-cp__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.a7-cp__row-label {
+  color: #8696a0;
+  flex: none;
+}
+
+.a7-cp__row-value {
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #111b21;
+}
+
+.a7-cp__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e7f8f2;
+  color: #008069;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.a7-cp__lead {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: #008069;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.a7-cp__lead:hover {
+  background: #006e5a;
+}
+
+.a7-cp__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.a7-cp__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  border-radius: 12px;
+  background: #f7f8fa;
+  border: 1px solid #e9edef;
+}
+
+.a7-cp__stat b {
+  font-size: 18px;
+  color: #111b21;
+}
+
+.a7-cp__stat span {
+  font-size: 11px;
+  color: #8696a0;
+}
+
+.a7-cp__stat--bad b {
+  color: #ea4335;
+}
+
+.a7-cp__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.a7-cp__tile {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 10px;
+  background: #e9edef;
+  color: #54656f;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.a7-cp__tile--image,
+.a7-cp__tile--sticker {
+  background: linear-gradient(145deg, #d9fdd3, #e7f8f2);
+  color: #008069;
+}
+
+.a7-cp__tile--video {
+  background: linear-gradient(145deg, #dde9ff, #eef3ff);
+  color: #1a73e8;
+}
+
+.a7-cp__tile:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.a7-cp__tile:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.a7-cp__files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.a7-cp__file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid #e9edef;
+  border-radius: 10px;
+  background: #f7f8fa;
+  color: #111b21;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 550;
+  text-transform: capitalize;
+  cursor: pointer;
+  text-align: left;
+}
+
+.a7-cp__file:hover:not(:disabled) {
+  border-color: #008069;
+  color: #008069;
+}
+
+.a7-cp__file:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+/* Embedded CRM: keep WhatsApp teal head; navy body for glass-dark iframe */
+:root[data-embedded] .a7-cp {
+  background: #0b1624;
+  color: rgba(248, 250, 252, 0.96);
+  border-left-color: rgba(255, 255, 255, 0.1);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-embedded] .a7-cp__backdrop {
+  background: rgba(2, 8, 16, 0.55);
+}
+
+:root[data-embedded] .a7-cp__head {
+  background: #0f766e;
+}
+
+:root[data-embedded] .a7-cp__body {
+  background: #08111c;
+}
+
+:root[data-embedded] .a7-cp__hero,
+:root[data-embedded] .a7-cp__quick,
+:root[data-embedded] .a7-cp__block {
+  background: #0f1c2e;
+  border-bottom-color: #08111c;
+}
+
+:root[data-embedded] .a7-cp__hero-name,
+:root[data-embedded] .a7-cp__row-value,
+:root[data-embedded] .a7-cp__stat b,
+:root[data-embedded] .a7-cp__file {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+:root[data-embedded] .a7-cp__hero-phone,
+:root[data-embedded] .a7-cp__field,
+:root[data-embedded] .a7-cp__field-label {
+  color: rgba(203, 213, 225, 0.92);
+}
+
+:root[data-embedded] .a7-cp__note,
+:root[data-embedded] .a7-cp__wa-name,
+:root[data-embedded] .a7-cp__field-hint,
+:root[data-embedded] .a7-cp__row-label,
+:root[data-embedded] .a7-cp__count,
+:root[data-embedded] .a7-cp__stat span {
+  color: rgba(148, 163, 184, 0.9);
+}
+
+:root[data-embedded] .a7-cp__block-title {
+  color: #2dd4bf;
+}
+
+:root[data-embedded] .a7-cp__input,
+:root[data-embedded] .a7-cp__stat,
+:root[data-embedded] .a7-cp__file,
+:root[data-embedded] .a7-cp__quick-btn {
+  background: #162636;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(248, 250, 252, 0.95);
+}
+
+:root[data-embedded] .a7-cp__quick-btn {
+  color: #5eead4;
+}
+
+:root[data-embedded] .a7-cp__quick-btn.is-on {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+:root[data-embedded] .a7-cp__input::placeholder {
+  color: rgba(148, 163, 184, 0.85);
+}
+
+:root[data-embedded] .a7-cp__input:focus {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.2);
+}
+
+:root[data-embedded] .a7-cp__status--ok {
+  color: #4ade80;
+}
+
+:root[data-embedded] .a7-cp__field-error {
+  color: #fca5a5;
+  background: rgba(231, 76, 60, 0.14);
+  border-color: rgba(231, 76, 60, 0.35);
+}
+
+:root[data-embedded] .a7-cp__clear:hover,
+:root[data-embedded] .a7-cp__x:hover,
+:root[data-embedded] .a7-cp__hero-phone:hover {
+  background: #1e3348;
+}
+
+:root[data-embedded] .a7-cp__tile {
+  background: #162636;
+  color: rgba(203, 213, 225, 0.95);
+}
+
+:root[data-embedded] .a7-cp__tile--image,
+:root[data-embedded] .a7-cp__tile--sticker {
+  background: linear-gradient(145deg, #134e4a, #0f766e);
+  color: #ccfbf1;
+}
+
+:root[data-embedded] .a7-cp__tile--video {
+  background: linear-gradient(145deg, #1e3a5f, #1d4ed8);
+  color: #dbeafe;
+}
+
+:root[data-embedded] .a7-cp__pill {
+  background: rgba(15, 118, 110, 0.28);
+  color: #5eead4;
+}
+
+:root[data-embedded] .a7-cp__lead {
+  background: #0f766e;
+}
+
+:root[data-embedded] .a7-cp__lead:hover {
+  background: #0d9488;
+}
+

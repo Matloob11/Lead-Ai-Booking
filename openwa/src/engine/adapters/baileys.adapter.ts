@@ -225,6 +225,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
       hydrateNames: () => this.history.hydrateNames(),
       getOnQRCode: () => this.callbacks.onQRCode,
       getOnReady: () => this.callbacks.onReady,
+      routeDataEvent: (payload, apply) => {
+        if (this.callbacks.onEngineData) {
+          this.callbacks.onEngineData(payload, apply);
+          return;
+        }
+        void Promise.resolve(apply()).catch(error =>
+          this.logger.error('Baileys provider data handler failed', String(error)),
+        );
+      },
       getOnDisconnected: () => this.callbacks.onDisconnected,
       getOnError: () => this.callbacks.onError,
       getOnStateChanged: () => this.callbacks.onStateChanged,
@@ -256,6 +265,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
   // synchronously), so a force-destroy is just a destroy.
   forceDestroy(): Promise<void> {
     return this.lifecycle.forceDestroy();
+  }
+
+  purgeLocalCredentials(): Promise<void> {
+    return this.lifecycle.purgeLocalCredentials();
   }
 
   // ----- Status -----
@@ -556,6 +569,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
     _includeMedia?: boolean,
     _mediaMaxBytes?: number,
     _signal?: AbortSignal,
+    _mediaFor?: string,
   ): Promise<IncomingMessage[]> {
     return this.unsupported('getChatHistory');
   }

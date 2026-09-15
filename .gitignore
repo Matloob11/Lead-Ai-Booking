@@ -16,6 +16,35 @@ venv/
 .env
 .env.*
 !.env.example
+!**/.env.example
+deploy/alots.storage.json
+deploy/alots.ui.cookie
+**/.env.alots_ui
+**/alots.ui.cookie
+**/alots.storage.json
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# Local databases, logs, live dumps (not source)
+*.db
+*.sqlite
+*.log
+*.cookie
+agent-reports/backend/storage/
+agent-reports/bitrix-all-users.html
+agent-reports/bitrix-all-users.json
+files/campaigns/
+files/crm/
+files/briefs/Bitrix-Users.pdf
+files/briefs/Official-971-Numbers.pdf
+files/briefs/Official-WhatsApp-API-Numbers.pdf
+files/briefs/AGENTS DETAILS .pdf
+ops/test-bin/
 
 # Node / frontend
 node_modules/
@@ -23,6 +52,8 @@ node_modules/
 
 # Tooling scratch
 .playwright-mcp/
+.playwright-cli/
+files/temp/
 .serena/
 .vscode/
 .idea/
