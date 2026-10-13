@@ -72,43 +72,43 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 ---
 
-## Decisions needed from Matloob (Q)
+## Decisions (Q)
 
-Each has a recommended answer. Say "ok" or change it.
+**Decided** means Matloob said it; **default** means Matloob accepted the recommended answer ("ap baki start karo", 2026-10-13) and may still change it.
 
-| # | Question | Recommended |
+| # | Question | Answer |
 |---|---|---|
-| Q1 | Office address: PDF "Office #11, V03 Russia Cluster" or live "Shop 20, Building V02/V03"? | — (must answer) |
-| Q2 | Brand in templates and replies: A7 Real Estate (live template) / A7 Group / AR Properties? | — |
-| Q3 | Bot's name: "Sara" (PDF), or no name to avoid the leadbot clash? | no personal name |
-| Q4 | Do the PDF rules replace today's for shop campaigns (prices, licence copy, yourself-or-client first, two slots, broker stops the bot)? | yes, shop campaigns only; other Lead AI campaigns keep today's rules |
-| Q5 | How a campaign is marked "shops"? | a "Script: General / IC Shops" choice next to the Lead AI box (Cursor) |
-| Q6 | Slots: our own booking table (one client per 30-min slot, whole office) or the agents' Bitrix calendar? | own table now, calendar later |
-| Q7 | 100 a day, 11:00–18:00 Mon–Sat: automatic drip? Template B automatically once after 72 h to non-repliers? | yes and yes |
-| Q8 | Opt-out: block the phone on every number and campaign (Sara too)? Import the 279 past Unsubscribe/Stop? | yes and yes |
-| Q9 | "Not now" → "check back in a month?" → yes: Template B after 30 days (consented, despite "no third message") | yes |
-| Q10 | Which Bitrix stage is "lost": JUNK, Reject, or "Not interested" (UC_RYQD1Z)? | — (Cursor gives the ids) |
-| Q11 | Broker or "I want a person": bot silent until an agent presses Resume (no 12 h auto-resume)? | yes |
-| Q12 | Shop agent: who the client meets ("You will meet"), who gets the lead on booking, who is on duty for brokers? | — |
-| Q13 | Agent alert on WhatsApp too, or Bitrix bell + panel only? | bell + panel now |
-| Q14 | Keep the assistant ON for everyone while P1 is fixed, or test numbers only? | test numbers only until P1 is live |
-| Q15 | Languages: English, Arabic, Urdu/Hindi now, Russian later? | yes |
-| Q16 | Bitrix fields: reuse what exists, create only the missing ones? | yes (Cursor, T50) |
+| Q1 | Office address: PDF "Office #11, V03 Russia Cluster" or live "Shop 20, Building V02/V03"? | **open**: Matloob sends it (D2) |
+| Q2 | Brand | **decided: AR Properties** |
+| Q3 | Bot's name | default: no personal name ("Sara" is leadbot) |
+| Q4 | PDF rules (prices, licence copy, yourself-or-client first, two slots, broker stops the bot) | default: **shop campaigns only**; other Lead AI campaigns keep today's rules |
+| Q5 | How a campaign is marked "shops" | default: a "Script" choice next to the Lead AI box (C2 + T20a) |
+| Q6 | Slots | default: our own booking table, one client per 30-min slot for the whole office |
+| Q7 | Sending | default: automatic drip ~100/day, 11:00–18:00 Mon–Sat, spread over the sending numbers; Template B once after 72 h to non-repliers |
+| Q8 | Opt-out | default: block the phone on every number and campaign (Sara too); import the 279 past Unsubscribe/Stop |
+| Q9 | "Not now" | default: "check back in a month?" → yes: Template B after 30 days; no: lost |
+| Q10 | Which Bitrix stage is "lost" | **open**: Cursor lists the stage ids (C3), Matloob picks |
+| Q11 | Broker or "I want a person" | **decided**: the chat gets a **Broker** label in the panel so the team can find and manage it; the bot stays silent until an agent presses Resume |
+| Q12 | Shop agent | **decided**: Khurram and Admin Abdul Malik are one person, Bitrix user **1** (portal admin; sees every chat, no number of his own). **Booking alerts go to Matloob** (Bitrix 2311, agent 3). No reassignment on booking (user 1 is the "hold" user) |
+| Q13 | Agent alerts | **decided**: Bitrix bell + panel, to Matloob (and the chat owner) |
+| Q14 | Assistant ON for everyone while P1 is fixed, or test numbers only? | **open** (still ON for everyone) |
+| Q15 | Languages | default: English, Arabic, Urdu/Hindi now; Russian later |
+| Q16 | Bitrix fields | default: reuse what exists, create only the missing ones (C3) |
 
-## Data needed from Matloob / Malik (D)
+## Data (D)
 
-| # | Data |
-|---|---|
-| D1 | Shop facts final: the type table, and the PDF's open questions (rent per year? Type 3 cheapest 80,000? viewing hours final?), clusters, cheques, licences |
-| D2 | Office: final address, Google Maps link, pin latitude/longitude |
-| D3 | Brand (Q2) and the name for `{{2}}` "this is {{2}} from {{3}}" |
-| D4 | Final text of Template A (reconnect, video header), Template B (follow-up), reminder; **which numbers send the 500** (templates must be approved there) |
-| D5 | Media: per type 1 MP4 under 16 MB (30–60 s) + up to 6 photos; office-front photo; Type 1 walkthrough for Template A's header |
-| D6 | Shop agent(s): name, Bitrix user id; broker on-duty person |
-| D7 | The 500 leads: the Bitrix filter that finds them; is the NAME field the person's name; greeting when there is no name |
-| D8 | 10 staff phone numbers and 10 Bitrix test leads carrying them |
-| D9 | Match table: which size / budget points to which type |
-| D10 | Closed dates (public holidays) |
+| # | Data | State |
+|---|---|---|
+| D1 | Shop facts final: type table; are rents per year; Type 3 cheapest 80,000; viewing hours; clusters, cheques, licences | Matloob sends |
+| D2 | Office: final address, Google Maps link, pin latitude/longitude | Matloob sends |
+| D3 | Brand + the `{{2}}` name in "this is {{2}} from {{3}}" | **AR Properties**; `{{2}}` typed per campaign: "Malik" or "Matloob" (template sample: Malik) |
+| D4 | Sending numbers | **decided**: active 971 numbers, not coexistence, not assigned: 971581058719, -720, -721, -722, -723, -724, -725, -726 (Coastline Properties / Blue Brick). 971507563104 left out: in daily use (1,755 inbound) with no templates. Only -725 has a proven inbound webhook; the other 7 have never received a message, so each gets one test message before use. `ic_shops_followup` is approved on all 8; `a7_leadai_meeting_reminder` on none (T05) |
+| D5 | Media: per type 1 MP4 under 16 MB (30–60 s) + up to 6 photos; office-front photo; Type 1 walkthrough for Template A's header | Matloob sends |
+| D6 | Shop agent | **decided** (Q12) |
+| D7 | The leads | **decided**: International City **shop** leads picked in the Bitrix lead list (filter or ticks; the final pick is real IC shop leads only). The "Mudon" link was a mistake |
+| D8 | Test phones | Matloob gives them when Claude asks at test time |
+| D9 | Match table (size / budget → type) | default: by size range; by budget, under 48k → Type 1, 48k–80k → Type 2, 80k+ → Type 3 |
+| D10 | Closed dates (public holidays) | Matloob sends |
 
 ---
 
@@ -122,8 +122,9 @@ Each has a recommended answer. Say "ok" or change it.
 | T02 | Record the 2026-10-12 switch-on, campaign #395 and this check in TASKS.md | Claude | — | Done (2026-10-13) |
 | T03 | Md Sumon (conv 35283) said Yes, then "I will message you"; no booking, no alert. An agent writes to him by hand before the window closes at 2026-10-13 11:02 UTC (only a template after that), and `invites` is reset | Matloob | — | Open |
 | T04 | Set the assistant to test numbers only, or keep it on | Matloob | Q14 | Open |
-| T05 | Get `a7_leadai_meeting_reminder` approved on every sending WABA (Coastline 1573780013961706 is missing; the submit command skips numbers with no agent) | Claude | D4 | Open |
+| T05 | Get `a7_leadai_meeting_reminder` approved on the 8 sending WABAs (D4); the submit command takes only numbers with an agent, so it also takes the sending numbers | Claude | — | Open |
 | T06 | Paste the Maps link and coordinates in Lead AI → AI settings | Matloob | D2 | Blocked D2 |
+| T07 | One test message from a phone to each of 971581058719, -720, -721, -722, -723, -724, -726, to prove replies reach the panel (only -725 is proven) | Matloob | — | Open |
 
 ### P1 — Fix what the first real chat showed
 
@@ -133,20 +134,21 @@ Each has a recommended answer. Say "ok" or change it.
 | T11 | `reply_en`: store only for non-English replies; move it after `reply` in the schema so it is a translation, not a plan | Claude | — | Open |
 | T12 | Deferrals ("I will message you", typos like "massage", "later") → tentative visit + one fixed line, no new invitation; rules.py set + settle() backstop + eval | Claude | — | Open |
 | T13 | `invites` counts refusals, not invitations; never strip a time offer after the customer said Yes | Claude | — | Open |
-| T14 | `{{1}}` and CUSTOMER NAME = the person's first name, not the lead title ("Bayut WhatsApp \| Md Sumon"); fallback when empty | Cursor (`a7_lead_wa.php:264-269`, `crm_leads.py` `lead_display_name`) + Claude (engine) | D7 | Open |
+| T14 | `{{1}}` and CUSTOMER NAME = the person's first name, not the lead title ("Bayut WhatsApp \| Md Sumon"); fallback when empty. Cursor: C1. Claude: the engine strips a leftover prefix too | Cursor (C1) + Claude | — | Open |
 | T15 | Customer messages never reach the Bitrix timeline: queue `mirror_message` on commit (`crmlink/signals.py:36`; affects the whole inbox) | Claude (shared) | — | Open |
-| T16 | Alerts go to someone who can open the chat (the CRM responsible cannot open admin-owned chats; the first-turn alert misses the responsible) | Claude | Q12 | Open |
+| T16 | Booking, broker and handover alerts reach Matloob (Bitrix 2311) as well as the chat owner; stop belling a CRM responsible who cannot open the chat | Claude | — | Open |
 | T17 | Eval cases from chat 35283: location request, deferral, bare Yes, repeated address; replay the address append in `outgoing()` | Claude | — | Open |
 
 ### P2 — The shops conversation (Bot 2)
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T20 | Playbook per campaign (`general` / `ic_shops`) stored with the Lead AI campaign; popup choice | Claude + Cursor | Q4, Q5 | Blocked Q4 |
+| T20a | `LeadAiCampaign.playbook` (`general` / `ic_shops`, default `general`) + migration; `lane.mark_campaign(campaign, playbook="general")`; a retry inherits the playbook. Ship first, backward compatible | Claude | — | Open |
+| T20b | The popup "Script" choice and its pass-through to `mark_campaign` (C2) | Cursor | T20a | Open |
 | T21 | Shop facts, brand, persona and agent name editable in AI settings, fed into the context; allow-list the PDF amounts in `clean_reply` | Claude | D1, D3 | Blocked D1 |
 | T22 | Shops prompt: old-lead mode, react first, honesty line with brand, real urgency only, the PDF objection answers, unknowns → "our agent will confirm at the viewing" + note, no sentence twice (code guard) | Claude | Q4 | Blocked Q4 |
 | T23 | First reply after Template A is the fixed "Is the shop for yourself, or are you checking for a client?" (code-written) | Claude | Q4 | Blocked Q4 |
-| T24 | Broker: the exact hand-off line, broker marked in Bitrix, bot silent until Resume, on-duty agent alerted with number and ad | Claude + Cursor | Q11, D6 | Blocked Q11 |
+| T24 | Broker: the exact hand-off line; a **Broker** label on the chat, shown in the Lead AI list and thread (filterable); bot silent until Resume; alert to Matloob with the number and the campaign; Bitrix marker once C3 gives the field | Claude (+ Cursor field) | — | Open |
 | T25 | "Not now" → "Should I check back with you in a month?" → 30-day Template B or lost | Claude | Q9, Q10 | Blocked Q9 |
 | T26 | "Stop messages" (button or text) → "Done, you won't receive more messages from us." + global opt-out (T60) | Claude | Q8 | Blocked Q8 |
 | T27 | Already rented → congratulate, ask about a second shop or a referral → lost "already rented" | Claude | Q10 | Blocked Q10 |
@@ -173,14 +175,14 @@ Each has a recommended answer. Say "ok" or change it.
 | T43 | Confirmation in the PDF format + location pin + "bring licence / EID + cheque book" + "See you at {time}" | Claude | D2, D6 | Blocked D2 |
 | T44 | Reschedule offers the two nearest free slots | Claude | T40 | Open |
 | T45 | Reminder per the PDF (I'm on my way / Need to reschedule / Location); Location tap → pin | Claude | D4 | Blocked D4 |
-| T46 | Assign the lead to the shop agent on booking; check what BP 235 and lead-shift do on a responsible change | Cursor + Claude | D6 | Blocked D6 |
+| T46 | ~~Assign the lead to the shop agent on booking~~ — not needed: the shop agent is Bitrix user 1 (admin, "hold" user) and alerts go to Matloob (Q12) | — | — | Dropped (2026-10-13) |
 | T47 | Agent alert on WhatsApp (later) | Claude | Q13 | Open |
 
 ### P5 — Bitrix data
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T50 | Field map: reuse SOURCE_ID, Purpose, business activity, licence status, meeting date; create Shop Type Wanted, Trade License File, Bot Status, WhatsApp Opt-out; "Old Lead" source | Cursor | Q16 | Open |
+| T50 | Bitrix field map and the missing fields (C3) | Cursor | — | Open |
 | T51 | Write those fields whenever they change, not only at booking | Claude | T50 | Open |
 | T52 | Bot Status set in Bitrix (Handed to agent / Broker / Opted out) silences the bot | Claude + Cursor | T50 | Open |
 | T53 | mark_lost: move to the lost stage with the reason in the client's words | Claude | Q10 | Blocked Q10 |
@@ -216,9 +218,27 @@ Each has a recommended answer. Say "ok" or change it.
 
 ---
 
+## Cursor's list (C1–C5)
+
+Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md for deploys (Bitrix files: `ops/bitrix.sh put`; Django: `ops/wa.sh build app` → `up app`, after checking that no campaign is running), and write a TASKS.md entry when done.
+
+| ID | Task | Files | Status |
+|---|---|---|---|
+| C1 | **`{{1}}` = the person's first name** (T14). Today "Name" resolves to the lead TITLE, so customers get "Hi Bayut WhatsApp \| Md Sumon". Use NAME (first word) when it is a real name; otherwise the part of TITLE after the last `\|`. Reject phone numbers, "Missed Call…", "untitled" and empty values, and fall back to "there". `CampaignRecipient.name` must carry the same clean name, because the assistant greets with it. The deal path already strips the prefix (`a7_lead_wa.php:565`). Add cases to `campaigns/tests/test_crm_leads.py` | `ops/bitrix-aws/a7_lead_wa.php` (`a7_lead_wa_display`, :63-68, :264-269), `backend/apps/campaigns/crm_leads.py` (`detail_value`, `lead_display_name` :187-211; `renewals.py` imports it) | Open |
+| C2 | **"Script" choice beside the Lead AI box** (T20b), shown only while the box is ticked: `General` / `International City shops`. Payload field `lead_ai_playbook` = `general` \| `ic_shops`; the PHP forwards it after checking it is one of the two; `campaigns/views.py` (:228, :282) passes it to `send_from_leads` / `send_renewals`, which call `mark_campaign(campaign, playbook=…)`. Deploy the Django part only after Claude's T20a is live | `ops/bitrix-aws/a7_lead_wa.js` (:766-786, :1385), `a7_lead_wa.php` (:1016), `a7_renewals_wa.js/.php`, `backend/apps/campaigns/views.py`, `crm_leads.py` (:348-404), `renewals.py` (:277-369) | Open |
+| C3 | **Bitrix field map** (T50, Q10). Reuse: SOURCE_ID, Purpose `UF_CRM_LEAD_1737031634747` (for Broker), business activity, `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` (add DED / Trakhees / New licence), Meeting Date & Time. Create on leads: **Shop Type Wanted** (Type 1 / Type 2 / Type 3 / Not sure), **Trade License File** (file), **Bot Status** (New / Qualifying / Viewing booked / Handed to agent / Broker / Lost / Opted out), **WhatsApp Opt-out** (Yes/No). Put them on the lead form. Write every UF id and enum id here under "Bitrix field map". Also list the STATUS_ID and stage-required fields of JUNK, Reject and "Not interested" (UC_RYQD1Z), so Matloob can pick the lost stage | Bitrix (`ops/bitrix-aws/`), this board | Open |
+| C4 | **Field-only lead updates** (needed by T51). Check what BP 235 and the lead-shift timer do when a lead already in stage 10, or held by user 1, gets a `crm.lead.update` that changes fields only. If that plans another to-do or moves the lead, say how to avoid it. Write the answer here | Bitrix robots/BP, `a7_lead_shift.php` | Open |
+| C5 | **Secrets out of the source** (low priority). `ops/bitrix-aws/a7_tl_phone_mask.config.php`: change the phone-mask password on the box, then `git rm --cached` the file and commit a `.example`. The 3CX tools (`a7_3cx_click_to_call*.php`, `a7_3cx_ai_recording_analyzer.php`) hard-code an OpenAI key, Bitrix webhook tokens and 3CX secrets: move them into an ignored config file. Both are already in `.gitignore` | `ops/bitrix-aws/` | Open |
+
+### Bitrix field map (Cursor fills in, C3)
+
+| Field | UF id | Enum ids |
+|---|---|---|
+| — | — | — |
+
 ## Requests (one side asking the other)
 
-- Claude → Cursor: T14 needs `a7_lead_wa.php` / `crm_leads.py` (your uncommitted 2026-10-12 work). Please take T14, or say here that Claude may edit them.
+- Claude → Cursor: C1 and C2 touch `crm_leads.py` / `a7_lead_wa.*` (your 2026-10-12 work), so they are on your list. Claude will not edit those files.
 
 ## Known risks
 
