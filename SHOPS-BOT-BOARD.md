@@ -218,7 +218,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 ---
 
-## Cursor's list (C1–C5)
+## Cursor's list (C1–C8)
 
 Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md for deploys (Bitrix files: `ops/bitrix.sh put`; Django: `ops/wa.sh build app` → `up app`, after checking that no campaign is running), and write a TASKS.md entry when done.
 
@@ -229,6 +229,52 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | C3 | **Bitrix field map** (T50, Q10). Reuse: SOURCE_ID, Purpose `UF_CRM_LEAD_1737031634747` (for Broker), business activity, `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` (add DED / Trakhees / New licence), Meeting Date & Time. Create on leads: **Shop Type Wanted** (Type 1 / Type 2 / Type 3 / Not sure), **Trade License File** (file), **Bot Status** (New / Qualifying / Viewing booked / Handed to agent / Broker / Lost / Opted out), **WhatsApp Opt-out** (Yes/No). Put them on the lead form. Write every UF id and enum id here under "Bitrix field map". Also list the STATUS_ID and stage-required fields of JUNK, Reject and "Not interested" (UC_RYQD1Z), so Matloob can pick the lost stage | Bitrix (`ops/bitrix-aws/`), this board | Done (2026-10-13) — fields 2665–2668 live; licence 2455–2457; Broker 2467; section `a7_shops_bot` on the common form and layouts 1, 2 and 6. |
 | C4 | **Field-only lead updates** (needed by T51). Check what BP 235 and the lead-shift timer do when a lead already in stage 10, or held by user 1, gets a `crm.lead.update` that changes fields only. If that plans another to-do or moves the lead, say how to avoid it. Write the answer here | Bitrix robots/BP, `a7_lead_shift.php` | Done (2026-10-13) — stage 10 REST update clears the meeting time and plans another to-do; write fields with bizproc disabled. |
 | C5 | **Secrets out of the source** (low priority). `ops/bitrix-aws/a7_tl_phone_mask.config.php`: change the phone-mask password on the box, then `git rm --cached` the file and commit a `.example`. The 3CX tools (`a7_3cx_click_to_call*.php`, `a7_3cx_ai_recording_analyzer.php`) hard-code an OpenAI key, Bitrix webhook tokens and 3CX secrets: move them into an ignored config file. Both are already in `.gitignore` | `ops/bitrix-aws/` | Done (2026-10-13) — phone-mask password changed on the box; config untracked; 3CX secrets read from `a7_3cx.config.php`. |
+| C6 | **Lead fields tool for the assistant** (T51, T52, T53). See *Lead fields tool contract* below; write the final URL and anything you changed there | NEW `ops/bitrix-aws/a7_leadai_fields.php` → `/home/bitrix/www/bitrix/tools/` | Open |
+| C7 | **Today's booking write vs BP 235** (before go-live). On a confirmed booking, `backend/apps/leadai/assistant/crm.py` sends one REST `crm.lead.update`: `STATUS_ID=10`, Meeting Date & Time, Mode Offline, a few empty-only fields. It then moves or closes the to-do the assistant caused. Per C4, BP 235 at stage 10 clears the meeting time and plans a to-do. Replay exactly that payload on a **test lead** and report: is the meeting time kept, how many to-dos exist after, what the title becomes. If BP 235 breaks it, propose the fix here: either the booking goes through the C6 tool with a separate stage move, or BP 235 skips leads whose Bot Status is "Viewing booked" | Bitrix BP 235, read `crm.py` | Open |
+| C8 | **Honorifics in `{{1}}`** (C1 follow-up). When the chosen first word is a prefix and another word follows, use the next word: "Md Sumon" → "Sumon". The prefixes are Md, Mohd, Muhammad, Mohammad, Mohammed, Muhammed, Mohamed, Dr, Mr, Mrs, Ms, Miss, Engr and Eng, with or without a dot. Same rule in PHP and Django, with tests. The assistant's own greeting gets the same rule on Claude's side | `a7_lead_wa.php`, `crm_leads.py`, `tests/test_crm_leads.py` | Open |
+
+### Lead fields tool contract (C6)
+
+- **Endpoint.** `POST /bitrix/tools/a7_leadai_fields.php`, JSON body.
+  - GET gives 405.
+  - Body at most 8 MB.
+  - The signature is checked before the Bitrix prolog, like `a7_leadai_notify.php`.
+- **Signature.** Same secret as `a7_leadai_notify.php` (the `CRM_LEAD_WA_SECRET` shared with Django), same headers.
+  - `X-Leadai-Ts`: unix seconds, within 300 s.
+  - `X-Leadai-Sign` = hex HMAC-SHA256(secret, `"leadai-fields." . ts . "." . body`).
+  - The `leadai-fields.` prefix means a notify signature can never be replayed here.
+- **Body.**
+  ```json
+  {
+    "lead_id": 73688,
+    "fields": {"UF_CRM_A7_SHOP_TYPE": 2471, "UF_CRM_A7_BOT_STATUS": 2476},
+    "only_if_empty": ["UF_CRM_A7_AI_BUSINESS_ACTIVITY"],
+    "license_file": {"name": "licence.pdf", "content_base64": "..."},
+    "lost": {"status_id": "1", "reason": "the customer's own words"},
+    "comment": "optional timeline comment"
+  }
+  ```
+- **Fields: allow-list only.** Unknown codes or enum ids give 400.
+  - **Codes:** the C3 fields, Business activity, Trade license status, Purpose, Meeting Date & Time.
+  - **Purpose:** only the value 2467 (Broker).
+  - **`only_if_empty`:** codes listed there are written only while the lead's value is empty, so a value an agent typed is never overwritten.
+- **Write.** Through the CRM factory with `disableBizProc()` and `disableAutomation()`.
+  - Never touch `STATUS_ID` or `ASSIGNED_BY_ID`, except the `lost` move.
+  - The `lost` move accepts only `1` or `JUNK` (Q10). Whether it runs with BP/automation on or off is your call; write the reason here.
+  - The reason goes on the lead as a timeline comment, "Lead AI: …".
+- **Licence file.** PDF, JPEG or PNG, checked by magic bytes; at most 5 MB decoded; stored on `UF_CRM_A7_TRADE_LICENSE_FILE`.
+- **Response.** `{"ok": true, "lead_id": 73688, "updated": [...], "skipped": [...], "lost": "1" | null}`.
+  - 400: bad JSON, field or enum.
+  - 401: signature.
+  - 404: no such lead.
+  - 405: method.
+- **Proof before Done.**
+  - `php -l` passes.
+  - Unsigned, wrong and old signatures each give 401.
+  - GET gives 405; an unknown field gives 400.
+  - On a **test lead** (deleted afterwards): writing Shop Type + Bot Status creates no new to-do and leaves title, stage and Meeting Date unchanged.
+  - A `lost` move to `1` puts the comment on the lead.
+  - A PDF lands on the file field.
 
 ### Bitrix field map (Cursor fills in, C3)
 
