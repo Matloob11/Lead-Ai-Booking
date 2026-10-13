@@ -11,6 +11,7 @@ urlpatterns = [
     path("templates/all/", views.all_templates, name="template-all"),
     path("templates/create/", views.create_template, name="template-create"),
     path("templates/create-bulk/", views.create_template_bulk, name="template-create-bulk"),
+    path("templates/header-media/", views.template_header_media, name="template-header-media"),
     path("templates/<int:pk>/deploy/", views.deploy_template, name="template-deploy"),
     path("templates/<int:pk>/purge-meta/", purge.purge_template_meta, name="template-purge-meta"),
     path("templates/<int:pk>/", views.delete_template, name="template-delete"),

@@ -1,0 +1,1365 @@
+/* A7 WhatsApp Inbox — chat panel layout.
+   Loaded after panel.css, which owns the boot screen, brand colours and buttons. */
+
+/* The frame's own height is claimed from the portal in frame.js. Nothing here
+   may exceed it: the page itself never scrolls, only the conversation list and
+   the message thread do, so the header and composer are always in view. */
+html,
+body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Pinned to the frame's box: with nothing in normal flow, the document has no
+   overflow at all, so a stray scrollIntoView cannot push the header or the
+   composer out of view. */
+#root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* The boot/error card is the one thing that may be taller than the frame —
+   a long stack trace must stay readable rather than get clipped. */
+#root.boot {
+  overflow: auto;
+}
+
+.app {
+  display: grid;
+  /* Both tracks are minmax(0, …) so neither can be pushed past the frame by
+     its own content — a long contact name or a wide bubble used to force a
+     horizontal scrollbar under the whole panel. */
+  grid-template-columns: minmax(0, clamp(230px, 30%, 320px)) minmax(0, 1fr);
+  /* minmax(0, 1fr), not 100%: an implicit auto row grows to fit the message
+     list, and the columns' `height: 100%` then resolves against that grown row
+     instead of the frame — which is what pushed the composer off-screen. */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* ------------------------------------------------------------- sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.sidebar__top {
+  position: relative; /* anchors the menu dropdown */
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+}
+
+.sidebar__title {
+  font-weight: 650;
+  color: var(--navy);
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- sidebar menu */
+
+.sidebar__menu {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 14px;
+  z-index: 30;
+  min-width: 230px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Owns its background, so it owns its text colour too — a theme only has to
+     re-tint the surface and the contents follow. */
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+  border: 1px solid var(--menu-line);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(16 24 40 / 20%);
+}
+
+.sidebar__menu[hidden] {
+  display: none;
+}
+
+/* Companion controls are adopted into the menu; they arrive with their own
+   styling, so they only need room and a full-width footprint. */
+.sidebar__menu > * {
+  width: 100%;
+  justify-content: flex-start;
+  margin: 0;
+}
+
+.sidebar__menu .slot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar__menu .slot:empty {
+  display: none;
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu__item:hover {
+  background: var(--menu-hover, #f2f5f8);
+}
+
+/* Beats the generic .btn centring further down the file. */
+.sidebar__menu .menu__item {
+  justify-content: flex-start;
+}
+
+.menu__badge {
+  margin-left: auto;
+}
+
+.menu__badge[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------- no-number / access requests */
+
+.access {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+}
+
+.access__card {
+  width: 100%;
+  max-width: 520px;
+  padding: 26px;
+  border-radius: 14px;
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+  border: 1px solid var(--menu-line);
+  box-shadow: 0 16px 40px rgb(16 24 40 / 18%);
+}
+
+.access__icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--navy);
+  color: #fff;
+  margin-bottom: 14px;
+}
+
+.access__title {
+  font-size: 17px;
+  margin: 0 0 8px;
+}
+
+.access__lead {
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.access__note {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.access__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.access__actions .btn {
+  margin: 0;
+}
+
+.access__status {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  min-height: 16px;
+}
+
+.access__status--ok {
+  color: var(--ok);
+}
+
+.access__status--err {
+  color: var(--err);
+}
+
+.access__recheck {
+  margin-top: 16px;
+}
+
+.reqs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.req {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.req__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.req__who {
+  font-weight: 620;
+}
+
+.req__when {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.req__msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+
+.req__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.req__actions .btn {
+  margin: 0;
+}
+
+.btn--sm {
+  padding: 6px 10px;
+  font-size: 13px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Mount points for the companion modules. Invisible until something is put
+   inside them, so an unloaded module leaves no gap in the layout. */
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slot:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ icons */
+
+/* Icons sit on the text baseline and take the colour of whatever contains
+   them, so one drawing serves a grey tick and a blue one. */
+.icon {
+  display: inline-block;
+  vertical-align: -0.18em;
+  flex: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+
+.btn--icon {
+  padding: 8px;
+  line-height: 0;
+}
+
+.conv__kind {
+  vertical-align: -0.16em;
+  margin-right: 4px;
+  opacity: 0.75;
+}
+
+.msg__pending,
+.msg__sent-media,
+.msg__media-failed,
+.msg__retry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg__retry {
+  width: fit-content;
+}
+
+@media (max-width: 900px) {
+  /* Keep the send button usable when the composer gets tight. */
+  .btn--send .btn__text {
+    display: none;
+  }
+}
+
+/* -------------------------------------------------- numbers admin screen */
+
+.numrows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.numrow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.numrow__title {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.numrow__phone {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.numrow__field {
+  display: block;
+  min-width: 0;
+}
+
+.numrow__field > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.numrow__agents {
+  padding: 4px;
+}
+
+.numrow__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.numrow__actions .btn {
+  margin: 0;
+}
+
+.numrow__status {
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 14px;
+}
+
+.numrow__status--ok {
+  color: var(--ok);
+}
+
+.numrow__status--err {
+  color: var(--err);
+}
+
+@media (max-width: 720px) {
+  .numrow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+.filter {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* currentColor, not a fixed grey: the placeholder then tracks whatever colour
+   the input itself ends up with, so it stays legible on a light field and on a
+   themed dark one without either side knowing about the other. */
+.filter__search::placeholder,
+.composer__input::placeholder,
+.field::placeholder {
+  color: currentcolor;
+  opacity: 0.6;
+}
+
+.filter__select,
+.filter__search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.convs__wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.convs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.convs__status {
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.conv {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+
+.conv:hover {
+  background: #f2f5f8;
+}
+
+.conv--active {
+  background: #eaf0f6;
+}
+
+.conv__avatar {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.conv__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.conv__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conv__name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv__time {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.conv__preview {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.conv__number {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.dot--open {
+  background: var(--ok);
+}
+
+.dot--closed {
+  background: #c2c9d2;
+}
+
+.dot--closing {
+  background: #d99022;
+}
+
+/* The free window is nearly up on this chat. */
+.conv--closing {
+  background: #fdf7ec;
+}
+
+.conv--closing:hover {
+  background: #fbf1de;
+}
+
+.conv--closing.conv--active {
+  background: #f7ecd8;
+}
+
+.closingbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #fdf3e2;
+  color: #8a6d21;
+  font-size: 12px;
+  border-bottom: 1px solid #f0dfbe;
+}
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -6px 0 0 8px;
+}
+
+.msg--out .reactions {
+  justify-content: flex-end;
+  margin: -6px 8px 0 0;
+}
+
+.reaction {
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 6%);
+}
+
+.reaction__n {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* -------------------------------------------------------------- thread */
+
+/* Flex, not grid: the connection bar is `hidden` while the socket is healthy,
+   and a display:none child silently shifts grid rows — which handed the 1fr to
+   the composer and squashed the message list to its content height. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+}
+
+.connbar {
+  padding: 6px 16px;
+  background: #fdf3e2;
+  color: #8a6d21;
+  font-size: 12px;
+  text-align: center;
+}
+
+.thread__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  min-height: 62px;
+  /* The header and composer are the two things that must never move; a long
+     contact name wraps or truncates rather than widening the panel. */
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.thread__name,
+.thread__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread__header:empty {
+  border-bottom: 0;
+}
+
+.connbar,
+.thread__composer {
+  flex: none;
+}
+
+.thread__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.thread__who > div {
+  min-width: 0;
+}
+
+.thread__name {
+  font-weight: 650;
+}
+
+.thread__sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.thread__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.pill--open {
+  background: #e6f5ee;
+  color: var(--ok);
+}
+
+.pill--closed {
+  background: #f1f3f6;
+  color: var(--muted);
+}
+
+.pill--soon {
+  background: #fdf3e2;
+  color: #8a6d21;
+}
+
+.pill--urgent {
+  background: #fdf3f2;
+  color: var(--err);
+}
+
+/* ----------------------------------------------- separators and retries */
+
+.daysep,
+.unreadsep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.daysep::before,
+.daysep::after,
+.unreadsep::before,
+.unreadsep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.daysep span {
+  color: var(--muted);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.unreadsep {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.unreadsep::before,
+.unreadsep::after {
+  background: #bfe3d1;
+}
+
+.msg__retry {
+  display: block;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--navy);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg__retry:hover {
+  border-color: var(--navy);
+}
+
+/* ------------------------------------------------------------ emoji */
+
+.emoji {
+  color: var(--ink);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: 268px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+}
+
+.emoji__title {
+  margin: 6px 2px 4px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.emoji__grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.emoji__item {
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.emoji__item:hover {
+  background: #f2f5f8;
+}
+
+.thread__messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  background: #f6f8fa;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread__hint {
+  margin: auto;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.thread__hint--error {
+  color: var(--err);
+}
+
+/* Column, so a reaction chip can hang under its own bubble. */
+.msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 76%;
+}
+
+.msg--in {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.msg--out {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+/* Flash for a message arrived at from a search result or a reminder. */
+.msg--highlight .msg__bubble {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.msg__bubble {
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 1px rgb(16 24 40 / 4%);
+}
+
+.msg--out .msg__bubble {
+  background: #e7f2ea;
+  border-color: #cfe4d6;
+}
+
+.msg__text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg__unsupported {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.msg__image,
+.msg__video {
+  max-width: min(320px, 100%);
+  max-height: 320px;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.msg__image {
+  cursor: zoom-in;
+}
+
+.msg__audio {
+  display: block;
+  margin-bottom: 6px;
+  max-width: 260px;
+}
+
+.msg__doc {
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(320px, 100%);
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+}
+
+.msg--out .msg__doc {
+  border-color: #cfe4d6;
+}
+
+.msg__doc:hover {
+  border-color: var(--navy);
+}
+
+.msg__doc-icon {
+  flex: none;
+  display: flex;
+  color: var(--navy);
+}
+
+.msg__doc-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.msg__doc-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg__doc-sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.msg__doc-dl {
+  flex: none;
+  display: flex;
+  color: var(--navy);
+}
+
+/* Whole thread is a drop target while a file is being dragged over it. */
+.thread__messages.is-dropping {
+  outline: 2px dashed var(--navy);
+  outline-offset: -8px;
+  background: #eef3f8;
+}
+
+.msg__pending,
+.msg__media-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.msg__media-failed {
+  border-style: solid;
+  border-color: #f0c6c2;
+  background: #fdf3f2;
+  color: var(--err);
+}
+
+/* Our own attachment: sent to the gateway, never stored here to show back. */
+.msg__sent-media {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.spinner--sm {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  margin: 0;
+  vertical-align: baseline;
+}
+
+.msg__error {
+  margin-top: 5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #fdecea;
+  color: #a12a22;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.msg__author {
+  margin-right: auto;
+  padding-right: 10px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.msg__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tick {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.tick .icon {
+  vertical-align: 0;
+}
+
+.tick--read {
+  color: #2f7fd1;
+}
+
+.tick--failed {
+  color: var(--err);
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------ composer */
+
+.thread__composer {
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.composer__attach {
+  position: relative; /* anchors the attach menu popup */
+  flex: none;
+}
+
+.composer__input {
+  flex: 1;
+  resize: none;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.attach-menu {
+  color: var(--ink);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  min-width: 190px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(16 24 40 / 16%);
+}
+
+.attach-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.attach-menu__item:hover {
+  background: #f2f5f8;
+}
+
+.attach__preview {
+  color: var(--ink);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.attach__thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: none;
+  background: #e9eef4;
+}
+
+.attach__icon {
+  flex: none;
+  width: 56px;
+  display: grid;
+  place-items: center;
+  color: var(--navy);
+}
+
+.attach__meta {
+  min-width: 0;
+}
+
+.attach__name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.attach__size {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.attach__caption {
+  resize: vertical;
+}
+
+.attach__progress {
+  margin-top: 12px;
+}
+
+.attach__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.attach__bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--navy);
+  transition: width 0.15s linear;
+}
+
+.btn--icon {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.btn--primary {
+  margin: 0;
+}
+
+.locked {
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f8f9fb;
+}
+
+.locked__text {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.locked .btn {
+  margin: 0;
+  flex: none;
+}
+
+/* -------------------------------------------------------------- modals */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgb(16 24 40 / 45%);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 40;
+}
+
+.modal__box {
+  width: 100%;
+  max-width: 460px;
+  max-height: 86vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgb(16 24 40 / 22%);
+}
+
+.modal__box--wide {
+  max-width: 760px;
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal__x {
+  border: 0;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.modal__body {
+  padding: 16px 18px;
+}
+
+.modal__note {
+  margin-top: 0;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.modal__actions .btn {
+  margin: 0;
+}
+
+.field__row {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.field__row > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field {
+  color: var(--ink);
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.tpl-split {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 16px;
+}
+
+.tpl-list {
+  max-height: 52vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tpl {
+  color: var(--ink);
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tpl:hover {
+  background: #f2f5f8;
+}
+
+.tpl__name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.tpl__lang {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tpl-detail__preview {
+  color: var(--ink);
+  padding: 12px;
+  background: #f6f8fa;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 720px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .tpl-split {
+    grid-template-columns: 1fr;
+  }
+}

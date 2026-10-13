@@ -149,6 +149,8 @@ def serialize_number(number):
         "webhook_configured": getattr(number, "webhook_configured", False),
         "source": getattr(number, "source", "") or "sync",
         "webhook_url": _webhook_url_for_number(),
+        # Set by ``with_send_health``; missing means we did not ask.
+        "send_blocked": bool(getattr(number, "_send_blocked", False)),
     }
 
 
@@ -184,7 +186,64 @@ def serialize_conversation(conversation):
         # Display only. Transfer does not put this number on the agent's roster.
         "number": serialize_number(conversation.number) if conversation.number_id else None,
         "linked_number": serialize_number(peer.number) if peer is not None and peer.number_id else None,
+        "leadbot": _leadbot_badge(conversation),
+        # True while the chat lives in the Lead AI screen (apps/leadai); the
+        # main inbox drops it from its list and opens it there instead.
+        "lead_ai": _lead_ai_flag(conversation),
     }
+
+
+def _lead_ai_flag(conversation):
+    """Read from the select_related cache when the caller loaded it; otherwise
+    asked through apps.leadai, which runs the query in a savepoint so that a
+    failure inside a send or an ingest cannot abort that transaction."""
+    cache = getattr(getattr(conversation, "_state", None), "fields_cache", {})
+    if "lead_ai_chat" in cache:
+        chat = cache["lead_ai_chat"]
+        return bool(chat is not None and chat.active)
+    try:
+        from apps.leadai.lane import is_lead_ai
+
+        return is_lead_ai(conversation)
+    except Exception:  # noqa: BLE001 - a flag must never break a payload
+        return False
+
+
+def _leadbot_badge(conversation):
+    rows = getattr(conversation, "leadbot_rows", None)
+    if rows is None:
+        from apps.leadbot.models import LeadAutomation
+
+        row = (
+            LeadAutomation.objects.filter(conversation_id=conversation.pk)
+            .order_by("-id")
+            .first()
+        )
+    else:
+        row = rows[0] if rows else None
+    return row.panel_badge() if row else None
+
+
+def _lead_ai_extras(message) -> dict:
+    """Two extra keys for messages the Lead AI sent, so its screen can show them.
+
+    - ai_gloss: the English meaning of a reply written in another language,
+      for agents who do not read it;
+    - buttons: the reply-button titles of an outbound button message (the
+      meeting reminder), which otherwise looks like a customer's tap.
+    Every other message gets empty values; nothing else changes.
+    """
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    if message.direction != "out" or not str(payload.get("source") or "").startswith("leadai"):
+        return {"ai_gloss": "", "buttons": []}
+    buttons = []
+    if message.kind == "interactive":
+        action = (payload.get("interactive") or {}).get("action") or {}
+        for item in action.get("buttons") or []:
+            title = str((item.get("reply") or {}).get("title") or item.get("title") or "").strip()
+            if title:
+                buttons.append(title)
+    return {"ai_gloss": str(payload.get("reply_en") or "")[:600], "buttons": buttons}
 
 
 def serialize_message(message, request=None):
@@ -220,6 +279,10 @@ def serialize_message(message, request=None):
         "delivered_at": _iso(message.delivered_at),
         "read_at": _iso(message.read_at),
         "sent_by": serialize_agent(message.sent_by),
+        # Who sent it when no agent did, e.g. "leadai_ai" for the Lead AI
+        # assistant, so the Lead AI screen can label those bubbles.
+        "source": str((message.payload or {}).get("source") or "") if isinstance(message.payload, dict) else "",
+        **_lead_ai_extras(message),
         # {wa_id: emoji}. Drawn on the bubble, not as a message of its own.
         "reactions": message.reactions or {},
         "is_starred": message.is_starred,

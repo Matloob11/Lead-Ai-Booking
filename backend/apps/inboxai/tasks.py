@@ -51,6 +51,25 @@ def reply_to_inbound(message_id: int) -> None:
     if latest is None or latest.pk != inbound.pk:
         return
 
+    # Leadbot owns this thread until qualified. Do not also answer as the AI desk.
+    from apps.leadbot.models import LeadAutomation
+
+    if LeadAutomation.objects.filter(
+        conversation_id=conversation.pk,
+        state__in=(
+            LeadAutomation.State.AWAITING_REPLY,
+            LeadAutomation.State.ACTIVE,
+            LeadAutomation.State.PENDING,
+        ),
+    ).exists():
+        return
+
+    # A Lead AI chat is answered by the agent in the Lead AI screen; no AI reply.
+    from apps.leadai.lane import is_lead_ai
+
+    if is_lead_ai(conversation):
+        return
+
     covering = cover_for(conversation)
     if covering is None:
         return

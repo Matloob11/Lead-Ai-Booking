@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Campaign, CampaignRecipient
+from .models import Campaign, CampaignBatch, CampaignRecipient
+
+
+@admin.register(CampaignBatch)
+class CampaignBatchAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "template_name", "crm_target", "per_number_cap", "total", "leftover", "created_at")
+    search_fields = ("name", "template_name")
+    readonly_fields = ("created_at", "cancelled_at", "column_map", "skipped_numbers", "warnings")
 
 
 class RecipientInline(admin.TabularInline):

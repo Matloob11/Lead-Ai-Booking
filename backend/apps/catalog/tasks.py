@@ -16,8 +16,24 @@ UNREACHABLE_WABA_TEMPLATES = (
 )
 
 
+def _sync_error_text(exc):
+    """What the gateway actually said, so the panel can quote it.
+
+    "Invalid WhatsApp configuration." means the Business ID on file is unknown
+    to alots — which, the one time it was chased down, was a single mistyped
+    digit. The old fixed sentence blamed the key and sent people the wrong way.
+    """
+    text = " ".join(str(exc or "").split())
+    # "GET /v23.0/…/message_templates -> HTTP 500: Invalid WhatsApp
+    # configuration." — the sentence after the colon is the useful part.
+    prefix, sep, rest = text.partition(" -> HTTP ")
+    if sep and ": " in rest:
+        text = rest.split(": ", 1)[1].strip() or text
+    return (text or UNREACHABLE_WABA_TEMPLATES)[:300]
+
+
 def _record_template_sync(waba_id, error=""):
-    WabaNumber.objects.filter(waba_business_id=waba_id).update(template_sync_error=error)
+    WabaNumber.objects.filter(waba_business_id=waba_id).update(template_sync_error=error[:300])
 
 
 @shared_task
@@ -103,12 +119,12 @@ def sync_templates_detail(waba_business_id=None):
         except AlotsError as exc:
             logger.warning("Template list failed for WABA %s: %s", waba_id, exc)
             failures.append({"waba_business_id": waba_id, "detail": str(exc)[:300]})
-            _record_template_sync(waba_id, UNREACHABLE_WABA_TEMPLATES)
+            _record_template_sync(waba_id, _sync_error_text(exc))
             continue
         except Exception as exc:  # noqa: BLE001 - one WABA must not stop the rest
             logger.warning("Template list crashed for WABA %s: %s", waba_id, exc)
             failures.append({"waba_business_id": waba_id, "detail": str(exc)[:300]})
-            _record_template_sync(waba_id, UNREACHABLE_WABA_TEMPLATES)
+            _record_template_sync(waba_id, _sync_error_text(exc))
             continue
 
         _record_template_sync(waba_id, "")

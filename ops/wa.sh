@@ -32,7 +32,7 @@
 #   ops/wa.sh agent-reports-sync-owner-phones [--dry-run] [--limit N] [--all]
 #   ops/wa.sh build qr app                rebuild an image
 #   ops/wa.sh restart qr app              restart services
-#   ops/wa.sh up qr app                   recreate a service (after a build)
+#   ops/wa.sh up app [service]            recreate the app stack, or one service (after a build)
 #   ops/wa.sh openwa-state                image, compose, health, and disk state
 #   ops/wa.sh openwa-cold-backup          stop API and archive fixed data volume
 #   ops/wa.sh openwa-inspect-asma-backup  inspect fixed pre-delete backup read-only
@@ -46,6 +46,11 @@
 #   ops/wa.sh openwa-force-recreate       force-recreate OpenWA API after build
 #   ops/wa.sh unlock                      clear stale Chromium profile locks
 #   ops/wa.sh migrate                     apply pending Django migrations (app stack)
+#   ops/wa.sh migrate-new-image           the same, from the image just built, before `up`
+#   ops/wa.sh leadai-tests                Lead AI tests in the new image, throwaway test DB, nothing leaves
+#   ops/wa.sh probe-leadai-turn           3 real assistant turns on live data + key, rolled back, nothing sent
+#   ops/wa.sh leadai-eval [--only ID] [--repeat N] [--show] [--list]  the prompt vs the real model, scripted chats
+#   ops/wa.sh leadai-eval-draft [same]      the same on the pushed build context (beat), before a build
 #   ops/wa.sh django-check                the two checks CLAUDE.md requires
 #   ops/wa.sh deploy-villa-nova2            one-off: villa_nova2 to missing WABAs
 #   ops/wa.sh sync-all-templates            pull Alots templates for every Official WABA
@@ -53,13 +58,49 @@
 #   ops/wa.sh assign-18-971-44              one 44 + one 971 for the named 18 agents
 #   ops/wa.sh probe-openai-configured       yes/no only: Official OPENAI_API_KEY set
 #   ops/wa.sh probe-openai-credits          yes/no only: Official OpenAI key has credits
+#   ops/wa.sh probe-openai-key              key set? 8-hex fingerprint, model, one-token call result
+#   ops/wa.sh set-leadai-openai-key FILE    Lead AI's own key (LEADAI_OPENAI_API_KEY) from a local file; main key untouched
+#   ops/wa.sh probe-leadai-key              Lead AI key as a new container reads it: fingerprint + one 1-token call
+#   ops/wa.sh probe-leadai-notify           one test Bitrix notification to user 2311 + the tool's refusals
 #   ops/wa.sh probe-utility-rewrite         two draft POSTs; cards must follow the text
+#   ops/wa.sh probe-meta-graph              Meta Graph token set? app id, WABA reach (no secret)
+#   ops/wa.sh probe-send-404                why Official send HTTP 404 on 772479489292535 (read-only)
+#   ops/wa.sh probe-nabiha-500              NABIHA-44 / Matloob test send 500 (read-only)
+#   ops/wa.sh fix-waba-typo-971507563104    one-off: correct that number's Business ID, resync
+#   ops/wa.sh test [apps/x/tests/test_y.py] pytest inside the live web image (needs pytest there)
+#   ops/wa.sh probe-template-header-media  forced-login checks of the header-media route
+#   ops/wa.sh probe-bulk-campaign          forced-login checks of the Excel-campaign routes (no send)
+#   ops/wa.sh probe-crm-entities           live image understands deal/contact campaign rows (no send)
+#   ops/wa.sh probe-media-template-path    can the stack mint a media-template sample handle? yes/no + session state
+#   ops/wa.sh probe-gateway-upload         gateway brokers Meta resumable upload with our API key? (1 tiny PNG, no template)
+#   ops/wa.sh probe-alots-media-template   one throwaway template: does alots take a media id/URL as sample?
+#   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN from FILE's first line, recreate, probe
+#   ops/wa.sh set-alots-ui-cookie FILE     store the alots panel session (Cookie header in FILE), recreate, probe
+#   ops/wa.sh probe-alots-panel-session    is the stored alots panel session alive? one tiny upload
+#   ops/wa.sh probe-alots-hvalue-create    one throwaway template with a panel-minted handle (done 2026-09-22)
 #   ops/wa.sh raise-upload-limit            Official + OpenWA nginx body size → 1024m
+#   ops/wa.sh ensure-crm-lead-secret HEX    set CRM_LEAD_WA_SECRET if empty (64 hex)
+#   ops/wa.sh submit-leadbot-template       submit a7_lead_enquiry_confirm to agent 971 WABAs
+#   ops/wa.sh submit-leadai-reminder-template [--dry-run]  Lead AI meeting reminder to every active assigned WABA
+#   ops/wa.sh leadai-switch on|off|status   the Lead AI assistant's switch
+#   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
+#   ops/wa.sh qr-disable                  stop OpenWA + wa-qr; keep files; no autostart
+#   ops/wa.sh qr-status                   OpenWA + wa-qr: state, restart policy, data on disk
+#   ops/wa.sh load                        host load, RAM, disk, top containers
 
 set -euo pipefail
 
 HOST="root@187.127.123.235"
-KEY="C:/Users/Matloob/.ssh/hostinger_codex"
+# The key is machine-specific: the Matloob profile used hostinger_codex; the Hp
+# profile (2026-10-06) uses ~/.ssh/hostinger. WA_SSH_KEY overrides, otherwise
+# the first path that exists wins, so the same script runs from both machines.
+KEY="${WA_SSH_KEY:-}"
+if [[ -z "$KEY" ]]; then
+  for _k in "C:/Users/Matloob/.ssh/hostinger_codex" "${USERPROFILE//\\//}/.ssh/hostinger"; do
+    [[ -f "$_k" ]] && KEY="$_k" && break
+  done
+fi
+[[ -n "$KEY" ]] || { echo "wa.sh: no SSH key found (set WA_SSH_KEY)" >&2; exit 2; }
 SITE="https://wa.srv1802669.hstgr.cloud"
 
 # The server's host keys, pinned next to this script.
@@ -280,10 +321,23 @@ case "$cmd" in
     ;;
 
   up)
-    dir=$(stack_dir "${1:-}"); check_service "${2:-}"
     # `up -d` and not `restart`, because a rebuilt image only reaches a
     # container that is recreated. `restart` starts the old one again.
-    remote "cd $dir && docker compose up -d '$2' 2>&1 | tail -3"
+    #
+    # With no service it recreates the whole app stack, which is the deploy:
+    # `web`, `worker`, `worker-leadai` and `beat` are separate containers, and
+    # one left out keeps running the old code. worker-leadai, the only
+    # consumer of the Lead AI queue, is the one nobody would notice. The QR
+    # stacks are stopped on purpose (qr-disable), so they still need a service.
+    dir=$(stack_dir "${1:-}")
+    if [[ -n "${2:-}" ]]; then
+      check_service "$2"
+      remote "cd $dir && docker compose up -d '$2' 2>&1 | tail -3"
+    elif [[ "$1" == app ]]; then
+      remote "cd $dir && docker compose up -d 2>&1 | tail -20"
+    else
+      die "up $1 needs a service; only the app stack is recreated whole"
+    fi
     ;;
 
   openwa-state)
@@ -457,6 +511,72 @@ case "$cmd" in
     remote "cd $OPENWA_DIR && docker compose --profile redis up -d redis && docker compose --profile redis up -d --force-recreate openwa-api 2>&1 | tail -8"
     ;;
 
+  qr-disable)
+    # Stop Linked QR (OpenWA) and Official wa-qr. Volumes and bind-mount data
+    # stay on disk. restart=no so a reboot does not bring Chromium back.
+    # Chromium often ignores SIGTERM; compose stop then kill if it hangs.
+    [[ $# -eq 0 ]] || die "qr-disable takes no arguments"
+    remote "set -eu
+      halt() {
+        dir=\$1
+        extra=\$2
+        cd \"\$dir\"
+        cids=\$(docker compose \$extra ps -aq || true)
+        if [ -n \"\$cids\" ]; then docker update --restart=no \$cids >/dev/null || true; fi
+        docker compose \$extra stop || true
+        running=\$(docker compose \$extra ps --status running -q || true)
+        if [ -n \"\$running\" ]; then docker compose \$extra kill || true; fi
+        running=\$(docker compose \$extra ps --status running -q || true)
+        if [ -n \"\$running\" ]; then docker kill \$running || true; fi
+        leftover=\$(docker compose \$extra ps --status running -q || true)
+        test -z \"\$leftover\"
+      }
+      halt $OPENWA_DIR '--profile redis'
+      test -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite
+      echo openwa=stopped data=kept
+      cd $OPENWA_DIR && docker compose --profile redis ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'
+      halt $QR_DIR ''
+      test -d $QR_DIR/data
+      echo wa-qr=stopped data=kept
+      cd $QR_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'
+    "
+    ;;
+
+  qr-status)
+    [[ $# -eq 0 ]] || die "qr-status takes no arguments"
+    remote "set -eu
+      echo '=== openwa ==='
+      cd $OPENWA_DIR
+      docker compose --profile redis ps -a --format '{{.Service}}\t{{.State}}\t{{.Status}}'
+      for c in \$(docker compose --profile redis ps -aq); do
+        docker inspect -f '{{.Name}} {{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}' \"\$c\"
+      done
+      if [ -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite ]; then echo sqlite=kept; else echo sqlite=MISSING; fi
+      echo '=== wa-qr ==='
+      cd $QR_DIR
+      docker compose ps -a --format '{{.Service}}\t{{.State}}\t{{.Status}}'
+      for c in \$(docker compose ps -aq); do
+        docker inspect -f '{{.Name}} {{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}' \"\$c\"
+      done
+      if [ -d $QR_DIR/data ]; then echo wa-qr-data=kept; else echo wa-qr-data=MISSING; fi
+      echo '=== load ==='
+      uptime
+    "
+    ;;
+
+  load)
+    [[ $# -eq 0 ]] || die "load takes no arguments"
+    remote "set -eu
+      echo '=== host ==='
+      nproc
+      uptime
+      free -h
+      df -hP /
+      echo '=== docker ==='
+      docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}'
+    "
+    ;;
+
   unlock)
     # Chromium leaves a SingletonLock behind when its container is killed rather
     # than stopped, and the next start refuses the profile: "already in use by
@@ -488,6 +608,30 @@ case "$cmd" in
     remote "cd $APP_DIR && docker compose exec -T web python manage.py makemigrations --check --dry-run; \
             echo '---'; \
             cd $APP_DIR && docker compose exec -T web python manage.py showmigrations"
+    ;;
+
+  migrate-new-image)
+    # Migrations from the image just BUILT, before `up`. `migrate` above runs in
+    # the running web container, i.e. the old code, which cannot see a migration
+    # that is new in this build, while the new code must not start before its
+    # tables exist. So: a one-off container of the new image — no ports, nothing
+    # else started, removed afterwards.
+    [[ $# -eq 0 ]] || die "migrate-new-image takes no arguments"
+    remote "cd $APP_DIR && docker compose run --rm --no-deps -T web python manage.py migrate --noinput 2>&1 | tail -25"
+    ;;
+
+  leadai-tests)
+    # The Lead AI test suite in a one-off container of the image just built, on
+    # the live Postgres server but inside Django's own throwaway test_<db>
+    # database. Every way out is shut twice, in a7wa/settings_livetest.py and
+    # in the environment here (Celery reads CELERY_BROKER_URL from the
+    # environment first), so a test that forgets a fake fails instead of
+    # reaching Redis, the workers, the gateway, Bitrix or OpenAI.
+    [[ $# -eq 0 ]] || die "leadai-tests takes no arguments"
+    remote "cd $APP_DIR && docker compose run --rm --no-deps -T \
+      -e CELERY_BROKER_URL=memory:// -e CELERY_RESULT_BACKEND=cache+memory:// -e REDIS_URL=redis://127.0.0.1:1/0 \
+      -e OPENAI_API_KEY= -e LEADAI_OPENAI_API_KEY= -e BITRIX_WEBHOOK_URL= -e ALOTS_API_KEY=test-key \
+      web python manage.py test apps.leadai --settings=a7wa.settings_livetest --noinput -v 1 2>&1 | tail -40"
     ;;
 
   deploy-villa-nova2)
@@ -522,6 +666,16 @@ case "$cmd" in
     add_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/add-dubai10wbx-numbers.py"
     [[ -f "$add_script" ]] || die "missing ops/catalog/add-dubai10wbx-numbers.py"
     encoded=$(base64 -w0 < "$add_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  label-oct8-wbx-numbers)
+    # Names the Oct-8 WBBOX numbers already synced into Official (Coastline / Blue Brick).
+    [[ $# -eq 0 ]] || die "label-oct8-wbx-numbers takes no arguments"
+    label_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/label-oct8-wbx-numbers.py"
+    [[ -f "$label_script" ]] || die "missing ops/catalog/label-oct8-wbx-numbers.py"
+    encoded=$(base64 -w0 < "$label_script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
@@ -664,6 +818,94 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
+  probe-openai-key)
+    # The OpenAI key the live web container uses: set or not, an 8-hex SHA-256
+    # fingerprint, the model, and how a one-token call answered. Never the key.
+    [[ $# -eq 0 ]] || die "probe-openai-key takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-openai-key.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-openai-key.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-leadai-notify)
+    # The Lead AI alerts' Bitrix path end to end: ONE test notification to
+    # Bitrix user 2311 (the owner) only, its duplicate refused, and the tool's
+    # refusal of a wrong / missing / old signature and of a GET. No secret shown.
+    [[ $# -eq 0 ]] || die "probe-leadai-notify takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-notify.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-notify.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-leadai-key)
+    # The Lead AI's own key (LEADAI_OPENAI_API_KEY) as a NEW container reads it
+    # from .env: set or not, its 8-hex fingerprint, and how one 1-token call to
+    # the Lead AI model answered. A one-off container, removed after. Never the key.
+    [[ $# -eq 0 ]] || die "probe-leadai-key takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-key.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-key.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose run --rm --no-deps -T web python - 2>&1 | grep -v '^Container\\|Creating\\|Created'"
+    ;;
+
+  probe-bitrix-methods)
+    # Which CRM activity/to-do REST methods the backend's webhook may call.
+    # Read-only REST method "methods"; never prints the webhook or its token.
+    [[ $# -eq 0 ]] || die "probe-bitrix-methods takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-bitrix-methods.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-bitrix-methods.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-bitrix-scope)
+    # The permission scopes of the backend's Bitrix webhook (may it notify?).
+    # Read-only REST method "scope"; never prints the webhook or its token.
+    [[ $# -eq 0 ]] || die "probe-bitrix-scope takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-bitrix-scope.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-bitrix-scope.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  set-leadai-openai-key)
+    # The OpenAI key that ONLY the Lead AI assistant uses, written as
+    # LEADAI_OPENAI_API_KEY from ONE local file. The key travels on stdin
+    # (never argv, never echoed). OPENAI_API_KEY, which everything else uses,
+    # is checked before and after and the write is refused if it would change.
+    # No container is recreated here: afterwards, `ops/wa.sh up app web` and
+    # `ops/wa.sh up app worker-leadai` (env_file is read when a container is
+    # created). `probe-leadai-key` checks the new key from a fresh container.
+    [[ $# -eq 1 ]] || die "set-leadai-openai-key takes one local file that holds the key"
+    [[ -f "$1" ]] || die "no such local file: '$1'"
+    key=$(tr -d '\r\n' < "$1")
+    [[ "$key" =~ ^sk-[A-Za-z0-9_-]{20,}$ && ${#key} -le 400 ]] || die "that file does not hold an OpenAI key"
+    printf '%s' "$key" | remote "set -eu
+      f=$APP_DIR/.env
+      [ -f \"\$f\" ] || { echo 'missing $APP_DIR/.env'; exit 1; }
+      NEWKEY=''
+      IFS= read -r NEWKEY || true
+      case \"\$NEWKEY\" in sk-*) ;; *) echo 'no key arrived on stdin'; exit 1 ;; esac
+      main_before=\$(grep '^OPENAI_API_KEY=' \"\$f\" | sha256sum)
+      tmp=\$(mktemp \"\$f.XXXXXX\")
+      NEWKEY=\"\$NEWKEY\" awk '/^LEADAI_OPENAI_API_KEY=/ { if (!seen) { print \"LEADAI_OPENAI_API_KEY=\" ENVIRON[\"NEWKEY\"]; seen = 1 } next } { print } END { if (!seen) print \"LEADAI_OPENAI_API_KEY=\" ENVIRON[\"NEWKEY\"] }' \"\$f\" > \"\$tmp\"
+      chmod --reference=\"\$f\" \"\$tmp\"
+      chown --reference=\"\$f\" \"\$tmp\"
+      [ \"\$(grep '^OPENAI_API_KEY=' \"\$tmp\" | sha256sum)\" = \"\$main_before\" ] || { rm -f \"\$tmp\"; echo 'refusing: OPENAI_API_KEY would change'; exit 1; }
+      mv \"\$tmp\" \"\$f\"
+      echo \"LEADAI_OPENAI_API_KEY lines: \$(grep -c '^LEADAI_OPENAI_API_KEY=' \"\$f\")\"
+      echo \"lead ai key fingerprint: \$(grep '^LEADAI_OPENAI_API_KEY=' \"\$f\" | head -1 | cut -d= -f2- | tr -d '\\r\\n' | sha256sum | cut -c1-8)\"
+      echo \"main key fingerprint, unchanged: \$(grep '^OPENAI_API_KEY=' \"\$f\" | head -1 | cut -d= -f2- | tr -d '\\r\\n' | sha256sum | cut -c1-8)\"
+    "
+    ;;
+
   probe-utility-rewrite)
     [[ $# -eq 0 ]] || die "probe-utility-rewrite takes no arguments"
     script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-utility-rewrite.py"
@@ -671,6 +913,279 @@ case "$cmd" in
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-meta-graph)
+    # Read-only. Token set yes/no, its app id, and which WABAs it can read.
+    # Never prints the token.
+    [[ $# -eq 0 ]] || die "probe-meta-graph takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-meta-graph.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-meta-graph.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-send-404)
+    [[ $# -eq 0 ]] || die "probe-send-404 takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-send-404.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-send-404.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-nabiha-500)
+    [[ $# -eq 0 ]] || die "probe-nabiha-500 takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-nabiha-500.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-nabiha-500.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  fix-waba-typo-971507563104)
+    # One-off, fixed script: corrects one mistyped Business ID (evidence-gated
+    # inside the script) and re-syncs that WABA's templates.
+    [[ $# -eq 0 ]] || die "fix-waba-typo-971507563104 takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/fix-waba-typo-971507563104.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/fix-waba-typo-971507563104.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-template-header-media)
+    # Forced-login checks of the header-media route: the refusals, then one
+    # real sample upload, so one throwaway handle is minted through the gateway.
+    [[ $# -eq 0 ]] || die "probe-template-header-media takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-template-header-media.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-template-header-media.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-alots-media-template)
+    # One throwaway template: does alots turn a media id / URL into Meta's
+    # sample handle? Statuses and Meta's sentences only.
+    [[ $# -eq 0 ]] || die "probe-alots-media-template takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-media-template.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-media-template.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-alots-hvalue-create)
+    # Does the gateway accept a sample handle minted by alots' own panel, and
+    # does that panel upload take the API key? One throwaway template.
+    [[ $# -eq 0 ]] || die "probe-alots-hvalue-create takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-hvalue-create.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-hvalue-create.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-bulk-campaign)
+    # Forced-login checks of the Excel-campaign routes. Nothing is sent.
+    [[ $# -eq 0 ]] || die "probe-bulk-campaign takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-bulk-campaign.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-bulk-campaign.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-crm-entities)
+    # Read-only: the CRM-leads campaign code in the live image resolves
+    # deal / contact / lead rows to the right CRM id. Nothing is sent.
+    [[ $# -eq 0 ]] || die "probe-crm-entities takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-crm-entities.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-crm-entities.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-media-template-path)
+    # Read-only: is the Meta Graph token set, is the alots panel session alive —
+    # the two ways an IMAGE/VIDEO template sample handle can be minted. No secrets.
+    [[ $# -eq 0 ]] || die "probe-media-template-path takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-media-template-path.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-media-template-path.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-gateway-upload)
+    # Steps 1+2 of the icpaas.in PDF with our own API key: one upload session,
+    # one 70-byte PNG. Proves whether the gateway can mint the sample handle.
+    # No template is created and nothing is sent. Never prints the key.
+    [[ $# -eq 0 ]] || die "probe-gateway-upload takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-gateway-upload.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-gateway-upload.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-gateway-media-template)
+    # One throwaway IMAGE-header template (UTILITY, hidden from the panel at
+    # once) on WABA 1426351832653450, through the real header-media and create
+    # routes: proves a handle minted through the gateway is one Meta accepts.
+    [[ $# -eq 0 ]] || die "probe-gateway-media-template takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-gateway-media-template.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-gateway-media-template.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-gateway-media-template-status)
+    # Read-only: Meta's current status of the throwaway templates the probe
+    # above created (PENDING -> APPROVED/REJECTED). Nothing is sent.
+    [[ $# -eq 0 ]] || die "probe-gateway-media-template-status takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-gateway-media-template-status.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-gateway-media-template-status.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-crm-header-media)
+    # Signed like a7_lead_wa.php: the refusals, one real 1x1 PNG uploaded for
+    # 971524077268, then the token through send_from_leads in a rolled-back
+    # transaction with Celery stubbed. Nothing is sent.
+    [[ $# -eq 0 ]] || die "probe-crm-header-media takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-crm-header-media.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-crm-header-media.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-dump-inbox-sources)
+    # Read-only: the files the 2026-10 visibility change touched, exactly as the
+    # running web image has them (base64), to bring a local checkout level.
+    [[ $# -eq 0 ]] || die "probe-dump-inbox-sources takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-dump-inbox-sources.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-dump-inbox-sources.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-backend-md5)
+    # Read-only: md5 (line endings normalised) of every source file in the
+    # running web image, to diff a local checkout against what is live.
+    [[ $# -eq 0 ]] || die "probe-backend-md5 takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-backend-md5.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-backend-md5.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-list-channels)
+    # Read-only: Alots channel list vs catalog_wabanumber (find numbers not yet added).
+    [[ $# -eq 0 ]] || die "probe-list-channels takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-list-channels.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-list-channels.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-numbers-roster)
+    # Read-only: CSV of every Official number and who it is assigned to.
+    [[ $# -eq 0 ]] || die "probe-numbers-roster takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-numbers-roster.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-numbers-roster.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-lead-ai-fixture)
+    # Creates ONE synthetic Lead AI chat (customer 999000000001, "ZZ Lead AI
+    # test (delete)") for a browser test of the Lead AI screen. No message
+    # signals, closed window, nothing sent. Undo: probe-lead-ai-cleanup.
+    [[ $# -eq 0 ]] || die "probe-lead-ai-fixture takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-lead-ai-fixture.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-lead-ai-fixture.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-lead-ai-cleanup)
+    # Deletes the synthetic chat probe-lead-ai-fixture made, and nothing else.
+    [[ $# -eq 0 ]] || die "probe-lead-ai-cleanup takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-lead-ai-cleanup.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-lead-ai-cleanup.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-lead-ai-flow)
+    # Checks the Lead AI routing rules on the live code and data, inside ONE
+    # transaction that is always rolled back: campaign task and live events
+    # replaced, no message made, nothing sent, nothing kept.
+    [[ $# -eq 0 ]] || die "probe-lead-ai-flow takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-lead-ai-flow.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-lead-ai-flow.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  leadai-eval|leadai-eval-draft)
+    # The Lead AI prompt against the real model on the scripted chats of
+    # apps/leadai/management/commands/leadai_eval.py. Sends nothing and stores
+    # nothing (every database query is refused while it runs). Options:
+    # --only <scenario id or part of one>, --repeat 1-10, --show, --list.
+    # leadai-eval runs the deployed image (web); leadai-eval-draft runs in beat,
+    # whose /app is the build context, so pushed files are judged before a build.
+    service=web
+    [[ "$cmd" == leadai-eval-draft ]] && service=beat
+    args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --only)
+          [[ "${2:-}" =~ ^[a-z0-9-]{1,40}$ ]] || die "--only takes a scenario id (lowercase letters, digits, '-')"
+          args+=(--only "$2"); shift 2 ;;
+        --repeat)
+          [[ "${2:-}" =~ ^([1-9]|10)$ ]] || die "--repeat takes 1 to 10"
+          args+=(--repeat "$2"); shift 2 ;;
+        --show|--list) args+=("$1"); shift ;;
+        *) die "leadai-eval takes --only ID, --repeat N, --show and --list" ;;
+      esac
+    done
+    remote "cd $APP_DIR && docker compose exec -T $service python manage.py leadai_eval ${args[*]:-} 2>&1 | tail -200"
+    ;;
+
+  probe-leadai-turn)
+    # Three real Lead AI assistant turns (book, move, STOP) on the live code,
+    # database and Lead AI key, inside ONE transaction that is always rolled
+    # back: sends faked, live events faked, tasks never queued, nothing kept.
+    # Only the OpenAI calls leave (synthetic text, a few thousand tokens).
+    [[ $# -eq 0 ]] || die "probe-leadai-turn takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-turn.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-turn.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  test)
+    # Unit tests inside the live web image. Fixed runner and one path under
+    # apps/ — not a manage.py or pytest passthrough. Tests run against the
+    # image, so build first if the test file is new.
+    target="${1:-apps}"
+    [[ "$target" =~ ^apps(/[a-z_]+(/tests(/test_[a-z0-9_]+\.py)?)?)?$ ]] ||
+      die "test takes a path like apps/catalog/tests/test_templates.py"
+    remote "cd $APP_DIR && docker compose exec -T web python -m pytest -q -p no:cacheprovider '$target' 2>&1 | tail -40"
     ;;
 
   agent-reports-deploy)
@@ -768,6 +1283,119 @@ case "$cmd" in
       nginx -t
       systemctl reload nginx
     '
+    ;;
+
+  set-meta-graph-token)
+    # Writes META_GRAPH_ACCESS_TOKEN on the Official host from a local file
+    # (first line), recreates web/worker/beat so the new env is read, then
+    # runs the read-only probe. The token travels on stdin — never on a
+    # command line, never printed here. Shape-checked so this cannot become
+    # an arbitrary .env edit.
+    token_file="${1:-}"
+    [[ -f "$token_file" ]] || die "set-meta-graph-token wants a file whose first line is the token"
+    token="$(head -n1 "$token_file" | tr -d '\r\n[:space:]')"
+    [[ "$token" =~ ^[A-Za-z0-9_.-]{40,600}$ ]] || die "that file's first line does not look like a Meta access token"
+    printf '%s\n' "$token" | remote 'set -eu
+      IFS= read -r t
+      f=/opt/a7-wa/deploy/.env
+      [ -f "$f" ] || { echo "missing $f"; exit 1; }
+      { grep -v "^META_GRAPH_ACCESS_TOKEN=" "$f" || true; } > "$f.tmp"
+      printf "META_GRAPH_ACCESS_TOKEN=%s\n" "$t" >> "$f.tmp"
+      chmod --reference="$f" "$f.tmp" 2>/dev/null || true
+      mv "$f.tmp" "$f"
+      echo token=written
+      cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
+    echo "--- probe"
+    "$0" probe-meta-graph
+    ;;
+
+  set-alots-ui-cookie)
+    # Stores a signed-in alots *panel* session on the Official host, from a
+    # local file whose first line is the Cookie header string, as base64 in
+    # ALOTS_UI_COOKIE_B64. Travels on stdin, never printed. Recreates
+    # web/worker/beat, then proves the session with one tiny upload.
+    cookie_file="${1:-}"
+    [[ -f "$cookie_file" ]] || die "set-alots-ui-cookie wants a file whose first line is the Cookie header"
+    cookie="$(head -n1 "$cookie_file" | tr -d '\r\n')"
+    [[ ${#cookie} -ge 20 && ${#cookie} -le 8000 && "$cookie" == *=* ]] || die "that file's first line does not look like a Cookie header"
+    [[ "$cookie" =~ ^[[:print:]]+$ ]] || die "refusing unusual characters in the cookie"
+    encoded_cookie="$(printf '%s' "$cookie" | base64 -w0)"
+    printf '%s\n' "$encoded_cookie" | remote 'set -eu
+      IFS= read -r c
+      f=/opt/a7-wa/deploy/.env
+      [ -f "$f" ] || { echo "missing $f"; exit 1; }
+      { grep -v "^ALOTS_UI_COOKIE_B64=" "$f" || true; } > "$f.tmp"
+      printf "ALOTS_UI_COOKIE_B64=%s\n" "$c" >> "$f.tmp"
+      chmod --reference="$f" "$f.tmp" 2>/dev/null || true
+      mv "$f.tmp" "$f"
+      echo cookie=written
+      cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
+    echo "--- probe"
+    "$0" probe-alots-panel-session
+    ;;
+
+  probe-alots-panel-session)
+    [[ $# -eq 0 ]] || die "probe-alots-panel-session takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-panel-session.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-panel-session.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  ensure-crm-lead-secret)
+    # Writes one env key on the Official host if it is missing. Hex-only so
+    # this cannot become an arbitrary .env edit. The same value must be put
+    # in Bitrix a7_lead_wa.config.php — this command never prints it.
+    secret="${1:-}"
+    [[ "$secret" =~ ^[a-fA-F0-9]{64}$ ]] || die "ensure-crm-lead-secret wants 64 hex chars"
+    remote "set -eu
+      f=/opt/a7-wa/deploy/.env
+      [ -f \"\$f\" ] || { echo 'missing /opt/a7-wa/deploy/.env'; exit 1; }
+      if grep -q '^CRM_LEAD_WA_SECRET=.' \"\$f\"; then
+        echo already-set
+        exit 0
+      fi
+      if grep -q '^CRM_LEAD_WA_SECRET=' \"\$f\"; then
+        sed -i 's/^CRM_LEAD_WA_SECRET=.*/CRM_LEAD_WA_SECRET=$secret/' \"\$f\"
+      else
+        printf '\\nCRM_LEAD_WA_SECRET=$secret\\n' >> \"\$f\"
+      fi
+      echo written
+    "
+    ;;
+
+  submit-leadbot-template)
+    [[ $# -eq 0 ]] || die "submit-leadbot-template takes no arguments"
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_leadbot_template"
+    ;;
+
+  submit-leadai-reminder-template)
+    # The Lead AI 30-minute meeting reminder (UTILITY, 3 quick replies) to every
+    # active agent +971 WABA. Optional --dry-run lists the WABAs only.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "submit-leadai-reminder-template takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_leadai_reminder_template $flag"
+    ;;
+
+  leadai-switch)
+    # The Lead AI assistant's switch: on, off (an emergency stop) or status.
+    action="${1:-}"
+    [[ $# -eq 1 && "$action" =~ ^(on|off|status)$ ]] || die "leadai-switch takes on, off or status"
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch $action"
+    ;;
+
+  leadai-test-numbers)
+    # The customer numbers the assistant answers while it is switched off.
+    # No argument clears the list; each argument must be 8-15 digits.
+    for n in "$@"; do
+      [[ "$n" =~ ^[0-9]{8,15}$ ]] || die "'$n' is not a phone number with country code (digits only)"
+    done
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch test-numbers $*"
     ;;
 
   ""|-h|--help|help) usage ;;

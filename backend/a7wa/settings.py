@@ -69,6 +69,9 @@ INSTALLED_APPS = [
     "apps.crmlink",
     "apps.campaigns",
     "apps.inboxai",
+    "apps.leadbot",
+    # Lead AI screen: chats a CRM campaign sent there, kept out of the main inbox.
+    "apps.leadai",
     "apps.feedback",
 ]
 
@@ -132,6 +135,11 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TIMEZONE = "Asia/Dubai"
+# The Lead AI assistant's tasks run on their own queue and worker
+# (worker-leadai in deploy/docker-compose.yml): a busy assistant must never
+# slow the main inbox's webhooks or campaign sends, and a campaign day must
+# never delay a meeting reminder. Beat's leadai entry is routed by name too.
+CELERY_TASK_ROUTES = {"apps.leadai.tasks.*": {"queue": "leadai"}}
 
 # Templates are created and approved in the gateway's own panel, so the mirror
 # would go stale on its own. Hourly is frequent enough that a template approved
@@ -159,6 +167,19 @@ CELERY_BEAT_SCHEDULE = {
     # Campaign failed recipients: re-queue every minute; each row waits 5 min between tries (max 5).
     "retry-due-campaign-recipients": {
         "task": "apps.campaigns.tasks.retry_due_campaign_recipients",
+        "schedule": 60,
+    },
+    # The alots panel session that mints media-header samples: its auth
+    # ticket lasts six hours and slides, and its server session idles out in
+    # minutes. One signed-in page every ten minutes keeps both.
+    "alots-panel-keepalive": {
+        "task": "apps.gateway.tasks.panel_keepalive",
+        "schedule": 10 * 60,
+    },
+    # Lead AI: the customer's WhatsApp reminder 30 minutes before a booked
+    # office visit. Checked every minute so it goes out on time.
+    "leadai-due-reminders": {
+        "task": "apps.leadai.tasks.send_due_reminders",
         "schedule": 60,
     },
 }
@@ -202,12 +223,33 @@ ALOTS_TIMEOUT = float(env("ALOTS_TIMEOUT", "30"))
 # their panel as a Bearer token. Requests without it are rejected.
 ALOTS_WEBHOOK_TOKEN = env("ALOTS_WEBHOOK_TOKEN", "")
 
+# A signed-in alots *web panel* session, captured from a browser login and
+# stored base64 so the cookie string survives env_file quoting. Used for one
+# thing: minting the sample handle a media-header template needs, which the
+# public API has no route for. See apps/gateway/panel.py.
+def _decode_cookie(raw):
+    import base64
+    import binascii
+
+    try:
+        return base64.b64decode((raw or "").strip()).decode("utf-8").strip()
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return ""
+
+
+ALOTS_UI_COOKIE = _decode_cookie(env("ALOTS_UI_COOKIE_B64", ""))
+
 # Meta Graph API — template DELETE only. alots forwards GET/POST on
 # message_templates but returns HTTP 405 on DELETE, so removal bypasses the
 # gateway. Use the System User token from Meta Business Manager with
 # whatsapp_business_management (same permanent token as in alots WABA settings).
 META_GRAPH_ACCESS_TOKEN = env("META_GRAPH_ACCESS_TOKEN", "")
 META_GRAPH_BASE_URL = env("META_GRAPH_BASE_URL", "https://graph.facebook.com").rstrip("/")
+# The same token also uploads the sample image/video/PDF a media-header
+# template is reviewed with (Meta's Resumable Upload API, which the gateway has
+# no route for). That call is addressed to the app the token belongs to; it is
+# looked up from Graph once per process unless set here.
+META_APP_ID = env("META_APP_ID", "")
 
 # Meta closes the free-form window 24h after the customer's last inbound message.
 SESSION_WINDOW_HOURS = int(env("SESSION_WINDOW_HOURS", "24"))
@@ -262,6 +304,24 @@ BITRIX_WEBHOOK_URL = env("BITRIX_WEBHOOK_URL", "").strip()
 OPENAI_API_KEY = env("OPENAI_API_KEY", "")
 OPENAI_MODEL = env("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT = int(env("OPENAI_TIMEOUT", "45"))
+
+# Lead AI assistant (apps.leadai.assistant) — its OWN OpenAI key, used by the
+# Lead AI screen's assistant and nothing else. Empty turns the assistant off;
+# it never falls back to OPENAI_API_KEY above.
+LEADAI_OPENAI_API_KEY = env("LEADAI_OPENAI_API_KEY", "")
+LEADAI_OPENAI_MODEL = env("LEADAI_OPENAI_MODEL", "gpt-4.1-mini")
+LEADAI_TRANSCRIBE_MODEL = env("LEADAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+# Seconds one attempt of a Lead AI call waits for OpenAI. Every call is also cut
+# to its turn's deadline (apps/leadai/assistant/engine.py), and a retry is made
+# only with a whole attempt's time left, so keep it low: a long wait spends the
+# turn's time on one attempt.
+LEADAI_OPENAI_TIMEOUT = int(env("LEADAI_OPENAI_TIMEOUT", "25"))
+# The Bitrix-side tool that turns a Lead AI alert into a Bitrix notification;
+# the backend's own webhook has no "im" scope to do it.
+LEADAI_BITRIX_NOTIFY_URL = env(
+    "LEADAI_BITRIX_NOTIFY_URL",
+    "https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_notify.php",
+)
 # Official Conversation Health — same default as OpenWA linked-device monitor.
 CONVERSATION_HEALTH_OVERRIDE_PASSWORD = env("CONVERSATION_HEALTH_OVERRIDE_PASSWORD", "222007")
 
@@ -334,3 +394,14 @@ DEVICE_ALERT_PHONE_ID_BACKUP = env("DEVICE_ALERT_PHONE_ID_BACKUP", "119876466998
 # Shared with the gateway, which is the only thing that calls the alert route.
 # No default: an empty secret must refuse every caller rather than accept any.
 DEVICE_ALERT_SECRET = env("DEVICE_ALERT_SECRET", "")
+
+# Shared with the Bitrix CRM PHP tool (a7_lead_wa.config.php). The leads-list
+# button has a portal session, not a Django cookie, so the tool signs the JSON
+# body. Empty refuses every caller — same rule as DEVICE_ALERT_SECRET.
+CRM_LEAD_WA_SECRET = env("CRM_LEAD_WA_SECRET", "")
+
+# Official lead qualification (replaces n8n WhatsApp CRM v9).
+# Template must be APPROVED on each agent's 971 WABA before outreach can send.
+LEADBOT_OUTREACH_TEMPLATE = env("LEADBOT_OUTREACH_TEMPLATE", "a7_lead_enquiry_confirm")
+# Optional override. Empty falls back to CRM_LEAD_WA_SECRET (same HMAC as a7_lead_wa).
+LEADBOT_OUTREACH_SECRET = env("LEADBOT_OUTREACH_SECRET", "")

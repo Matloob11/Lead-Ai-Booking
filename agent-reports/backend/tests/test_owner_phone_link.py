@@ -28,13 +28,3 @@ def test_phone_from_item_falls_back_to_secondary():
         }
     )
     assert phone == "+971501111111"
-
-
-def test_phone_from_item_owner_no1_string():
-    _raw, phone = phone_from_item(
-        {
-            "ufCrm5_1768317611513": None,
-            "ufCrm5_1777563197150": "971503077393",
-        }
-    )
-    assert phone == "+971503077393"

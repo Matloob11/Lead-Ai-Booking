@@ -2,10 +2,11 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from .events import group_for_admins, group_for_agent, group_for_number
+from .visibility import sees_all_inbox_chats
 
 
 class InboxConsumer(AsyncJsonWebsocketConsumer):
-    """Streams inbox activity for every number the connected agent can see."""
+    """Streams inbox activity for chats this agent may open."""
 
     async def connect(self):
         user = self.scope.get("user")
@@ -29,12 +30,14 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _number_groups(self, user):
-        groups = [group_for_number(pk) for pk in user.visible_numbers.values_list("pk", flat=True)]
-        # Plus a channel of their own, for anything addressed to this agent
-        # rather than to everyone watching a number.
-        groups.append(group_for_agent(user.pk))
-        # Admins also hear what belongs to no number, such as an agent with
-        # nothing assigned asking for access.
+        groups = [group_for_agent(user.pk)]
+        # Number groups carry every chat on the line. Only panel admins join
+        # them; everyone else hears their own assigned threads on the agent
+        # channel so a colleague's inbound does not appear in the list.
+        if sees_all_inbox_chats(user):
+            groups.extend(
+                group_for_number(pk) for pk in user.visible_numbers.values_list("pk", flat=True)
+            )
         if user.has_admin_rights:
             groups.append(group_for_admins())
         return groups

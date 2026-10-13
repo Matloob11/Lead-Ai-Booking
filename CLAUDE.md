@@ -16,20 +16,29 @@ Push the file, then:
 
 ```bash
 ops/wa.sh push backend/apps/x/y.py /opt/a7-wa/backend/apps/x/y.py
-cd /opt/a7-wa/deploy && docker compose build && docker compose up -d
+ops/wa.sh build app              # docker compose build: every service
+ops/wa.sh migrate-new-image      # only when the build carries a new migration
+ops/wa.sh up app                 # docker compose up -d: every service
 ```
 
-`build` with **no service argument**, and `up -d`, not `restart`:
+`build` and `up` with **no service argument**, and `up -d`, not `restart`:
 
-- `web`, `worker` and `beat` build separately, so `build web` leaves the other
-  two on their old images. That is how the three services end up running three
-  different versions — and it is easy to miss, because webhook processing happens
-  in `worker` while everything you reach by hand answers from `web`. On
-  2026-08-05 a `web`-only build left `worker` with a `Message` model predating
-  `is_starred`; every inbound message failed for hours behind an endpoint that
-  tested perfectly healthy.
+- `web`, `worker`, `worker-leadai` and `beat` build and run separately, so
+  `build web` or `up app web` leaves the other three on their old code. That
+  is how the services end up running different versions — and it is easy to
+  miss, because webhook processing happens in `worker` and every Lead AI reply,
+  reminder and alert in `worker-leadai`, while everything you reach by hand
+  answers from `web`. On 2026-08-05 a `web`-only build left `worker` with a
+  `Message` model predating `is_starred`; every inbound message failed for
+  hours behind an endpoint that tested perfectly healthy. `worker-leadai` is
+  the only consumer of the `leadai` queue, and its sweep keeps running on an
+  old image, so nothing warns when it is left behind.
+- A new migration goes in with `ops/wa.sh migrate-new-image`, **before** `up`.
+  `ops/wa.sh migrate` runs inside the running `web` container, which is the old
+  code and cannot see a migration that is new in this build; and the new code
+  must not start before its tables exist.
 - `env_file:` is read when a container is *created*. A new environment variable
-  is invisible to `restart`.
+  is invisible to `restart`, and reaches only the services `up` recreates.
 
 `docker compose cp` into a container is worse still: it writes inside one
 container, as a uid that cannot overwrite what it needs to, and loses the write
@@ -41,7 +50,12 @@ where rsync exists; a `tar | ssh` pipe is the fallback.
 
 After any deploy, confirm what is live rather than assuming — compare `md5sum`
 against `https://wa.srv1802669.hstgr.cloud/app/assets/<file>`, and check
-`docker compose ps` for a service stuck in `Restarting`.
+`docker compose ps` for a service stuck in `Restarting`. After a backend deploy
+`ops/wa.sh ps` must list all four app services `Up` for the same few minutes,
+`worker-leadai` included, and `ops/wa.sh leadai-switch status` must show a
+`last_sweep_at` under two minutes old: `probe-leadai-turn` and `leadai-tests`
+run in `web` and in a one-off container, so they pass with `worker-leadai`
+missing.
 
 ## Migrations
 

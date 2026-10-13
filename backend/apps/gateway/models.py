@@ -36,6 +36,29 @@ class WebhookEvent(models.Model):
         return f"{self.status} event #{self.pk}"
 
 
+class PanelSession(models.Model):
+    """The one signed-in alots *panel* session the server keeps alive.
+
+    Seeded from ``ALOTS_UI_COOKIE_B64`` (a browser login — ``ops/wa.sh
+    set-alots-ui-cookie``). alots' auth ticket lasts six hours and slides, so
+    every answer that renews a cookie is folded back in here and a keepalive
+    request every few minutes stops both the ticket and the server-side
+    session from lapsing. One row; see ``apps/gateway/panel.py``.
+    """
+
+    cookie = models.TextField(blank=True)
+    # sha256 of the env seed this row came from — a new seed replaces the row.
+    seed_fingerprint = models.CharField(max_length=64, blank=True)
+    # The auth cookie's own Expires, when alots last said.
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_ok_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"alots panel session (ok {self.last_ok_at:%Y-%m-%d %H:%M})" if self.last_ok_at else "alots panel session"
+
+
 class ApiCall(models.Model):
     """Outbound calls to alots.io, for cost tracing and failure forensics."""
 

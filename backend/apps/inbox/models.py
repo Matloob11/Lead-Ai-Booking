@@ -79,10 +79,9 @@ class QuickReply(models.Model):
 class Conversation(models.Model):
     """One thread between one of our numbers and one customer.
 
-    Every agent assigned to the number can see the thread — a customer may
-    reach out to a number directly, so nothing is hidden behind ownership.
-    ``assigned_agent`` records who owns the reply, and an admin can move it to
-    somebody else without the history going anywhere.
+    ``assigned_agent`` is who may open the thread. A customer may still reach
+    a number directly; ingest then claims the row for that number's primary
+    agent. A panel admin can move it without the history going anywhere.
     """
 
     class Status(models.TextChoices):

@@ -1,7 +1,7 @@
 """Live updates pushed to the panel over WebSocket.
 
-Everyone assigned to a number sees the same stream — chats are not hidden behind
-ownership — so the channel group is keyed on the number, not the agent.
+Panel admins still subscribe to the number group. Agents only hear the
+channel keyed on themselves; ``publish`` always fans out there as well.
 
 Payloads carry the whole object rather than an id. A pushed message should be
 renderable on arrival; making the panel fetch what we already have in hand adds
@@ -62,6 +62,15 @@ def publish(conversation, event, data):
     if layer is None:
         return
 
+    # A chat in the Lead AI screen is heard there, under "leadai.<event>"; the
+    # main inbox does not listen for those, so it never shows the chat. Routing
+    # must never stop a live event, so any failure keeps the plain name.
+    try:
+        from apps.leadai.lane import event_name
+
+        event = event_name(conversation, event)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lead AI routing failed for conversation %s", getattr(conversation, "pk", None))
     message = {
         "type": "inbox.event",
         "event": event,

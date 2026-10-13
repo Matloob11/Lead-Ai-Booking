@@ -27,6 +27,10 @@ export const access = {
   resolve: (id) => apiFetch(`/api/accounts/access-requests/${id}/resolve/`, { method: "POST", body: {} }),
 };
 
+export const leadbot = {
+  board: () => apiFetch("/api/leadbot/board/"),
+};
+
 export const reports = {
   summary: (days = 7) => apiFetch(`/api/reports/summary/?days=${days}`),
   agents: (days = 7) => apiFetch(`/api/reports/agents/?days=${days}`),
@@ -34,6 +38,56 @@ export const reports = {
   failures: (days = 7) => apiFetch(`/api/reports/failures/?days=${days}`),
   templates: (days = 7) => apiFetch(`/api/reports/templates/?days=${days}`),
 };
+
+/**
+ * Multipart POST with upload progress.
+ *
+ * XMLHttpRequest rather than fetch: fetch still cannot report upload
+ * progress, and a 100 MB document sent over a phone connection needs a bar
+ * and a cancel button rather than a frozen dialog.
+ *
+ * @returns {{promise: Promise<object>, abort: () => void}}
+ */
+function xhrUpload(path, form, { onProgress } = {}) {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise((resolve, reject) => {
+    xhr.open("POST", `${window.location.origin}${path}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Accept", "application/json");
+    const csrf = csrfToken();
+    if (csrf) xhr.setRequestHeader("X-CSRFToken", csrf);
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    });
+
+    xhr.addEventListener("load", () => {
+      let payload = null;
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {
+        /* handled below */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && payload) {
+        resolve(payload);
+      } else {
+        reject(
+          new SsoError(
+            `http_${xhr.status}`,
+            payload?.detail || `Upload failed (HTTP ${xhr.status})`,
+            payload
+          )
+        );
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new SsoError("network", "The connection dropped during the upload.")));
+    xhr.addEventListener("abort", () => reject(new SsoError("aborted", "The upload was cancelled.")));
+    xhr.send(form);
+  });
+
+  return { promise, abort: () => xhr.abort() };
+}
 
 export const catalog = {
   // For an admin this also carries each number's assigned agents.
@@ -56,7 +110,32 @@ export const catalog = {
     apiFetch(`/api/catalog/templates/${id}/purge-meta/`, { method: "POST" }),
   suggestUtilityTemplates: (data) =>
     apiFetch("/api/catalog/templates/utility-suggestions/", { method: "POST", body: data }),
-  syncTemplates: () => apiFetch("/api/catalog/sync/", { method: "POST", body: { what: "templates" } }),
+  syncTemplates: (wabaBusinessId) =>
+    apiFetch("/api/catalog/sync/", {
+      method: "POST",
+      body: {
+        what: "templates",
+        ...(wabaBusinessId ? { waba_business_id: wabaBusinessId } : {}),
+      },
+      // One business account is a single Meta call. "All my numbers" is queued
+      // and returns immediately, so it must not sit on the 45s panel limit.
+      timeoutMs: wabaBusinessId ? 60000 : 20000,
+    }),
+
+  /** Can this server take a sample image/video/PDF for a template header? */
+  headerMediaStatus: () => apiFetch("/api/catalog/templates/header-media/"),
+
+  /**
+   * The sample a media-header template is reviewed against. Meta answers
+   * with a handle, which goes into the create call as header_handle.
+   */
+  uploadTemplateHeaderMedia(file, format, { wabaId = "", onProgress } = {}) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("format", format);
+    if (wabaId) form.append("waba_business_id", wabaId);
+    return xhrUpload("/api/catalog/templates/header-media/", form, { onProgress });
+  },
 
   /** Admin only. */
   agents: () => apiFetch("/api/catalog/agents/"),
@@ -189,11 +268,7 @@ export const inbox = {
   start: (body) => apiFetch("/api/inbox/start/", { method: "POST", body }),
 
   /**
-   * Uploads an attachment and reports progress.
-   *
-   * XMLHttpRequest rather than fetch: fetch still cannot report upload
-   * progress, and a 100 MB document sent over a phone connection needs a bar
-   * and a cancel button rather than a frozen dialog.
+   * Uploads an attachment and reports progress — see xhrUpload.
    *
    * @returns {{promise: Promise<{media_id: string}>, abort: () => void}}
    */
@@ -204,45 +279,7 @@ export const inbox = {
     // New Contact uploads a template's header image before any conversation
     // exists, so the number is the only thing available to bill the upload to.
     if (numberId) form.append("number_id", numberId);
-
-    const xhr = new XMLHttpRequest();
-    const promise = new Promise((resolve, reject) => {
-      xhr.open("POST", `${window.location.origin}/api/inbox/media/upload/`);
-      xhr.withCredentials = true;
-      xhr.setRequestHeader("Accept", "application/json");
-      const csrf = csrfToken();
-      if (csrf) xhr.setRequestHeader("X-CSRFToken", csrf);
-
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) onProgress?.(event.loaded / event.total);
-      });
-
-      xhr.addEventListener("load", () => {
-        let payload = null;
-        try {
-          payload = JSON.parse(xhr.responseText);
-        } catch {
-          /* handled below */
-        }
-        if (xhr.status >= 200 && xhr.status < 300 && payload) {
-          resolve(payload);
-        } else {
-          reject(
-            new SsoError(
-              `http_${xhr.status}`,
-              payload?.detail || `Upload failed (HTTP ${xhr.status})`,
-              payload
-            )
-          );
-        }
-      });
-
-      xhr.addEventListener("error", () => reject(new SsoError("network", "The connection dropped during the upload.")));
-      xhr.addEventListener("abort", () => reject(new SsoError("aborted", "The upload was cancelled.")));
-      xhr.send(form);
-    });
-
-    return { promise, abort: () => xhr.abort() };
+    return xhrUpload("/api/inbox/media/upload/", form, { onProgress });
   },
 
   sharedAssets: (params = {}) => {
@@ -363,6 +400,35 @@ export const campaigns = {
       method: "POST",
       body: numberId ? { number_id: numberId } : {},
     }),
+};
+
+/**
+ * Excel campaigns: one sheet split across several numbers, so many per
+ * number. Separate from `campaigns` on purpose — that screen is untouched.
+ */
+function bulkForm(fields, file) {
+  const form = new FormData();
+  if (file) form.append("file", file);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue;
+    form.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  return form;
+}
+
+export const bulkCampaigns = {
+  inspect: (file) =>
+    apiFetch("/api/campaigns/bulk/inspect/", { method: "POST", body: bulkForm({}, file) }),
+  preview: ({ file, template_id, mapping, number_ids, per_number_cap }) =>
+    apiFetch("/api/campaigns/bulk/preview/", {
+      method: "POST",
+      body: bulkForm({ template_id, mapping, number_ids, per_number_cap }, file),
+    }),
+  create: ({ file, ...fields }) =>
+    apiFetch("/api/campaigns/bulk/", { method: "POST", body: bulkForm(fields, file) }),
+  list: () => apiFetch("/api/campaigns/bulk/"),
+  get: (id) => apiFetch(`/api/campaigns/bulk/${id}/`),
+  cancel: (id) => apiFetch(`/api/campaigns/bulk/${id}/cancel/`, { method: "POST", body: {} }),
 };
 
 /**

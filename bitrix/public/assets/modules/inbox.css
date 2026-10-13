@@ -918,6 +918,36 @@ body {
   line-height: 1.4;
 }
 
+.conv__ai {
+  display: inline-block;
+  flex: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #fff;
+  background: #3d4a5c;
+}
+
+.conv__ai--active,
+.conv__ai--awaiting {
+  background: #1d6f42;
+}
+
+.conv__ai--qualified {
+  background: #1a4f8b;
+}
+
+.conv__ai--failed,
+.conv__ai--junk {
+  background: #8b2e2e;
+}
+
 .conv__meta {
   display: flex;
   align-items: center;

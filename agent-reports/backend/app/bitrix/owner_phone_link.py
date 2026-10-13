@@ -23,14 +23,7 @@ logger = logging.getLogger(__name__)
 ENTITY_TYPE_ID = 1042
 PHONE_UF_PRIMARY = "ufCrm5_1768317611513"
 PHONE_UF_SECONDARY = "ufCrm5_1769416533028"
-PHONE_UF_OWNER_NO1 = "ufCrm5_1777563197150"  # string "Owner no 1," — often filled on imports
-PHONE_UF_IMPORT_MOBILE = "ufCrm5_1768314841508"
-PHONE_UFS = (
-    PHONE_UF_PRIMARY,
-    PHONE_UF_SECONDARY,
-    PHONE_UF_OWNER_NO1,
-    PHONE_UF_IMPORT_MOBILE,
-)
+PHONE_UFS = (PHONE_UF_PRIMARY, PHONE_UF_SECONDARY)
 
 
 def normalize_uae(raw: Any) -> str:
@@ -110,16 +103,9 @@ def find_contact_by_phone(client: BitrixClient, phone: str) -> int | None:
     return None
 
 
-def _contact_phone_fields(phone: str) -> dict[str, Any]:
-    return {
-        "PHONE": [{"VALUE": phone, "VALUE_TYPE": "MOBILE"}],
-    }
-
-
 def ensure_contact(client: BitrixClient, phone: str, title: str) -> int:
     existing = find_contact_by_phone(client, phone)
     if existing:
-        _ensure_contact_phone(client, existing, phone)
         return existing
     name = (title or "").replace("Owner Data #", "Owner ").strip() or "Owner"
     payload = client._post(
@@ -129,21 +115,17 @@ def ensure_contact(client: BitrixClient, phone: str, title: str) -> int:
                 "NAME": name[:100],
                 "OPENED": "Y",
                 "TYPE_ID": "CLIENT",
-                **_contact_phone_fields(phone),
+                "FM": {
+                    "n0": {
+                        "VALUE": phone,
+                        "VALUE_TYPE": "MOBILE",
+                        "TYPE_ID": "PHONE",
+                    }
+                },
             }
         },
     )
     return int(payload["result"])
-
-
-def _ensure_contact_phone(client: BitrixClient, contact_id: int, phone: str) -> None:
-    ct = client._post("crm.contact.get", {"id": contact_id}).get("result") or {}
-    if str(ct.get("HAS_PHONE") or "").upper() == "Y" and ct.get("PHONE"):
-        return
-    client._post(
-        "crm.contact.update",
-        {"id": contact_id, "fields": _contact_phone_fields(phone)},
-    )
 
 
 def link_item(client: BitrixClient, item: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
@@ -213,72 +195,29 @@ def _list_page(client: BitrixClient, filter_: dict[str, Any], start: int) -> tup
 
 
 def iter_owner_items_with_phone(
-    client: BitrixClient,
-    *,
-    only_unlinked: bool = False,
-    category_id: int | None = None,
-    created_since: str | None = None,
-    id_min: int | None = None,
-    id_max: int | None = None,
+    client: BitrixClient, *, only_unlinked: bool = False
 ) -> Iterator[dict[str, Any]]:
-    """Yield phone-bearing Owner Data items.
-
-    Uses ``>id`` cursor pagination (always ``start=0``). Bitrix ``start``
-    offsets stop around 500 rows — workers were exiting early after one page
-    window even when thousands remained in the id range.
-    """
     seen: set[int] = set()
-    for phone_key in PHONE_UFS:
-        if phone_key in (PHONE_UF_OWNER_NO1, PHONE_UF_IMPORT_MOBILE):
-            base: dict[str, Any] = {f"!{phone_key}": ""}
-        else:
-            base = {f">{phone_key}": 0}
+    for phone_key in (PHONE_UF_PRIMARY, PHONE_UF_SECONDARY):
+        filt: dict[str, Any] = {f">{phone_key}": 0}
         if only_unlinked:
-            base["contactId"] = 0
-        if category_id is not None:
-            base["categoryId"] = category_id
-        if created_since:
-            base[">=createdTime"] = created_since
-        if id_min is not None:
-            base[">=id"] = id_min
-        if id_max is not None:
-            base["<id"] = id_max
-
-        # Cursor just below the floor so the first page includes id_min.
-        cursor = (id_min - 1) if id_min is not None else 0
-        empty_streak = 0
+            filt["contactId"] = 0
+        start = 0
         while True:
-            filt = dict(base)
-            filt[">id"] = cursor
-            items, _nxt = _list_page(client, filt, 0)
-            if not items:
-                empty_streak += 1
-                if empty_streak >= 1:
-                    break
-                continue
-            empty_streak = 0
-            page_max = cursor
-            yielded = 0
+            items, nxt = _list_page(client, filt, start)
             for item in items:
                 item_id = int(item.get("id") or 0)
-                if not item_id:
-                    continue
-                page_max = max(page_max, item_id)
-                if item_id in seen:
+                if not item_id or item_id in seen:
                     continue
                 if not phone_from_item(item)[1]:
                     continue
                 if only_unlinked and int(item.get("contactId") or 0):
                     continue
                 seen.add(item_id)
-                yielded += 1
                 yield item
-            if page_max <= cursor:
+            if nxt is None:
                 break
-            cursor = page_max
-            # Full Bitrix page is usually 50; shorter page ⇒ end of this filter.
-            if len(items) < 50:
-                break
+            start = nxt
 
 
 def _resolve_phones_batch(client: BitrixClient, phones: list[str]) -> dict[str, int]:
@@ -319,8 +258,9 @@ def _create_contacts_batch(
                 "fields[NAME]": name[:100],
                 "fields[OPENED]": "Y",
                 "fields[TYPE_ID]": "CLIENT",
-                "fields[PHONE][0][VALUE]": phone,
-                "fields[PHONE][0][VALUE_TYPE]": "MOBILE",
+                "fields[FM][n0][VALUE]": phone,
+                "fields[FM][n0][VALUE_TYPE]": "MOBILE",
+                "fields[FM][n0][TYPE_ID]": "PHONE",
             }
             cmds[f"c{j}"] = "crm.contact.add?" + urllib.parse.urlencode(params)
         results = batch_call(client, cmds)
@@ -359,10 +299,6 @@ def sync_owner_phone_links(
     dry_run: bool = False,
     sleep_s: float = 0.05,
     only_unlinked: bool = False,
-    category_id: int | None = None,
-    created_since: str | None = None,
-    id_min: int | None = None,
-    id_max: int | None = None,
 ) -> dict[str, Any]:
     """Bulk/periodic sync using batched Bitrix calls per list page."""
     counts: dict[str, int] = {
@@ -457,14 +393,7 @@ def sync_owner_phone_links(
         if sleep_s:
             time.sleep(sleep_s)
 
-    for item in iter_owner_items_with_phone(
-        client,
-        only_unlinked=only_unlinked,
-        category_id=category_id,
-        created_since=created_since,
-        id_min=id_min,
-        id_max=id_max,
-    ):
+    for item in iter_owner_items_with_phone(client, only_unlinked=only_unlinked):
         counts["seen"] += 1
         page.append(item)
         if len(page) >= 40:

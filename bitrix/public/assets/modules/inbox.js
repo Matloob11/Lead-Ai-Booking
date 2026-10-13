@@ -38,6 +38,9 @@ import { openAgentsAdminModal } from "./agents-admin.js";
 import { openForwardModal } from "./forward-picker.js";
 import { openReportsModal } from "./reports.js";
 import { openCampaignModal } from "./campaigns.js";
+// Lead AI is its own module (modules/lead-ai/, loaded by index.html) and adds
+// its own menu item; the inbox only reaches it through window.a7wa.openLeadAi,
+// so a fault there can never stop this inbox from starting.
 import { notifyNewMessage, playChime, requestNotificationPermission, isSoundEnabled, setSoundEnabled, isDesktopEnabled, setDesktopEnabled } from "../core/notifications.js";
 import { InboxSocket } from "../core/realtime.js";
 import { el, clear, dayKey, dayLabel, debounce, formatBytes, minutesUntil, modal, stamp, toast, untilText, initials } from "../core/dom.js";
@@ -199,13 +202,6 @@ export function mountInbox(root, { me, openRequest = null }) {
       icon("send", { size: 16 }),
       "Campaign",
     ]),
-    me.can_linked_devices !== false ? el("div.menu__section", {}, ["Linked phones"]) : null,
-    me.can_linked_devices !== false
-      ? el("button.btn.menu__item", { onclick: openLinkedDevices, type: "button" }, [
-          icon("smartphone", { size: 16 }),
-          "Linked phones",
-        ])
-      : null,
     me.is_wa_admin && me.can_linked_devices !== false
       ? el("button.btn.menu__item", { onclick: openLinkedPhones, type: "button" }, [
           icon("users", { size: 16 }),
@@ -685,6 +681,27 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   async function openConversation(id, { highlightMessageId } = {}) {
     if (state.loadingThread) return;
+
+    // A link to a chat that is not in this list (search, reminder, CRM tab,
+    // campaign history) may point at a Lead AI chat, which opens in the Lead AI
+    // screen instead. Ask first, so the chat open here, and a reply half
+    // written in it, are left as they are.
+    let prefetched = null;
+    if (!findConversation(id)) {
+      state.loadingThread = true;
+      try {
+        prefetched = await inbox.messages(id, { limit: PAGE_SIZE });
+      } catch {
+        prefetched = null;
+      } finally {
+        state.loadingThread = false;
+      }
+      if (prefetched?.conversation?.lead_ai) {
+        sendToLeadAi(id, highlightMessageId);
+        return;
+      }
+    }
+
     // The profile describes one customer; carrying it into another chat would
     // show the wrong person beside the right messages.
     if (state.activeId !== id) closeContactPanel();
@@ -699,7 +716,14 @@ export function mountInbox(root, { me, openRequest = null }) {
 
     try {
       renderThreadHeader(findConversation(id));
-      const payload = await inbox.messages(id, { limit: PAGE_SIZE });
+      const payload = prefetched || (await inbox.messages(id, { limit: PAGE_SIZE }));
+
+      // A listed chat that a Lead AI campaign moved a moment ago opens there.
+      if (payload?.conversation?.lead_ai) {
+        dropLeadAiChat(id, { quiet: true });
+        sendToLeadAi(id, highlightMessageId);
+        return;
+      }
 
       // The endpoint already hands back the newest slice in oldest-first order,
       // which is exactly the reading order — do not re-sort it.
@@ -1032,6 +1056,7 @@ export function mountInbox(root, { me, openRequest = null }) {
                     numberTitle(numberById(conversation.number_id) || conversation.number),
                   ]
                 ),
+                leadbotChip(conversation),
               ]),
             ]),
           ]
@@ -1047,6 +1072,13 @@ export function mountInbox(root, { me, openRequest = null }) {
   }
 
   const numberById = (id) => state.numbers.find((n) => String(n.id) === String(id));
+
+  function leadbotChip(conversation) {
+    const badge = conversation?.leadbot;
+    if (!badge || !badge.label) return null;
+    const kind = badge.kind || "pending";
+    return el("span.conv__ai", { class: "conv__ai--" + kind, title: badge.label }, [badge.label]);
+  }
 
   function isTransferredIn(conversation) {
     if (conversation?.is_transferred) return true;
@@ -1285,6 +1317,7 @@ export function mountInbox(root, { me, openRequest = null }) {
               "Transferred",
             ])
           : null,
+        leadbotChip(conversation),
         openLeadButton(conversation),
         el("button.btn.btn--ghost.btn--sm", {
           type: "button",
@@ -2110,20 +2143,31 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   /* ------------------------------------------------------------- modals */
 
-  async function templatesFor(numberId) {
-    if (state.templates.has(numberId)) return state.templates.get(numberId);
-    const ownsNumber = state.numbers.some((n) => String(n.id) === String(numberId));
-    const transferred = state.conversations.find(
-      (c) =>
-        String(c.number_id) === String(numberId) &&
-        String(c.assigned_agent?.id || c.assigned_agent) === String(state.me.id)
-    );
-    const list = ownsNumber
-      ? asList(await catalog.templates(numberId), "templates")
-      : transferred
-        ? asList(await inbox.conversationTemplates(transferred.id), "templates")
-        : asList(await catalog.templates(numberId), "templates");
-    state.templates.set(numberId, list);
+  async function templatesFor(numberId, conversation) {
+    const id = String(numberId || conversation?.number_id || "");
+    if (id && state.templates.has(id)) return state.templates.get(id);
+
+    const ownsNumber = Boolean(id) && state.numbers.some((n) => String(n.id) === id);
+    const thread =
+      conversation?.id
+        ? conversation
+        : state.conversations.find(
+            (c) =>
+              String(c.number_id) === id &&
+              String(c.assigned_agent?.id || c.assigned_agent) === String(state.me.id)
+          );
+
+    let list;
+    if (ownsNumber) {
+      list = asList(await catalog.templates(id), "templates");
+    } else if (thread?.id) {
+      // Transfer grants the thread, not the number roster. Catalog 404s
+      // on a number the agent does not hold — the chat endpoint does not.
+      list = asList(await inbox.conversationTemplates(thread.id), "templates");
+    } else {
+      throw new Error("This chat's WhatsApp number is not available.");
+    }
+    if (id) state.templates.set(id, list);
     return list;
   }
 
@@ -2371,6 +2415,17 @@ export function mountInbox(root, { me, openRequest = null }) {
       const payload = await inbox.conversations({ q: waId, limit: 10 });
       found = asList(payload, "conversations").find(match);
     }
+    if (!found && window.a7wa?.findLeadAiChat) {
+      // This list leaves Lead AI chats out; their own screen still knows them.
+      const leadAi = await window.a7wa.findLeadAiChat(waId).catch(() => null);
+      if (leadAi) {
+        return {
+          id: leadAi.id,
+          number_id: leadAi.number_id,
+          number_title: `${numberTitle(numberById(leadAi.number_id))} (in Lead AI)`,
+        };
+      }
+    }
     if (!found) return null;
 
     return {
@@ -2527,6 +2582,14 @@ export function mountInbox(root, { me, openRequest = null }) {
   // instead of refetching the list on every inbound message.
   function handleEvent(event, data) {
     if (event === "ready") return;
+    // Lead AI chats are heard by the Lead AI module (modules/lead-ai/). One
+    // that is still listed here just moved there, so it leaves this list.
+    if (String(event).startsWith("leadai.")) {
+      return dropLeadAiChat(data?.conversation?.id ?? data?.message?.conversation_id);
+    }
+    // A plain notice about a Lead AI chat (a transfer, a reminder's chat) must
+    // not pull it into this list or reset the filters for it.
+    if (data?.conversation?.lead_ai) return dropLeadAiChat(data.conversation.id);
     if (event === "message.new") return onMessageNew(data);
     if (event === "message.status") return onMessageStatus(data.message);
     if (event === "conversation.updated" || event === "conversation.assigned") {
@@ -2568,9 +2631,42 @@ export function mountInbox(root, { me, openRequest = null }) {
     await openConversation(conversation.id);
   }
 
+  /**
+   * Takes a chat that now lives in the Lead AI screen out of this inbox: off
+   * the list, and out of the thread pane if it was the open one.
+   */
+  function dropLeadAiChat(id, { quiet = false } = {}) {
+    if (id === undefined || id === null || id === "") return;
+    const before = state.conversations.length;
+    state.conversations = state.conversations.filter((c) => String(c.id) !== String(id));
+    if (String(state.activeId) === String(id)) {
+      closeContactPanel();
+      state.activeId = null;
+      state.messages = [];
+      state.replyTo = null;
+      renderEmptyThread();
+      // Said out loud: the open chat just went somewhere else.
+      if (!quiet) toast("This chat moved to Lead AI.");
+    }
+    if (state.conversations.length !== before) {
+      // The server's list shifted up by one; keep "Load more" from skipping a chat.
+      state.listOffset = Math.max(0, (state.listOffset || 0) - 1);
+      renderConversations();
+      renderListStatus();
+    }
+  }
+
+  function sendToLeadAi(id, highlightMessageId) {
+    if (window.a7wa?.openLeadAi) window.a7wa.openLeadAi(id, { highlightMessageId });
+    else toast("This chat is in Lead AI.", "err");
+  }
+
   /** Inserts or replaces a conversation, keeping the list newest-activity-first. */
   function upsertConversation(conversation, { force = false } = {}) {
     if (!conversation) return;
+    // Never list a Lead AI chat here, whatever path brought it (a closing
+    // warning, a transfer, an open from a link). See dropLeadAiChat.
+    if (conversation.lead_ai) return dropLeadAiChat(conversation.id);
     // A filtered-out number must not silently reappear in the list — unless
     // this chat was just transferred to the agent sitting here.
     if (

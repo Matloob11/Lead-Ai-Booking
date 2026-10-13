@@ -14,6 +14,7 @@
 const API_BASE = window.location.origin;
 const BX24_SDK = "https://api.bitrix24.com/api/v1/";
 const SDK_TIMEOUT_MS = 15000;
+const API_TIMEOUT_MS = 45000;
 
 export class SsoError extends Error {
   constructor(code, message, detail) {
@@ -246,11 +247,14 @@ function readCookie(name) {
  * fetch() against the panel API. Always sends the session cookie, attaches the
  * CSRF header when Django has handed us one, and surfaces the JSON error body.
  */
-export async function apiFetch(path, { method = "GET", body, headers = {}, raw = false } = {}) {
+export async function apiFetch(path, { method = "GET", body, headers = {}, raw = false, timeoutMs = API_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const init = {
     method,
     credentials: "include",
     headers: { Accept: "application/json", ...headers },
+    signal: controller.signal,
   };
 
   if (body instanceof FormData) {
@@ -265,7 +269,21 @@ export async function apiFetch(path, { method = "GET", body, headers = {}, raw =
     if (csrf) init.headers["X-CSRFToken"] = csrf;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, init);
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, init);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new SsoError(
+        "api_timeout",
+        "The inbox server did not answer.",
+        `${method} ${path} waited ${timeoutMs / 1000}s. The Official web service is down or stuck.`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   if (raw) return response;
 
   const payload = await response.json().catch(() => null);

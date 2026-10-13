@@ -68,6 +68,26 @@ def recipient_mismatch_detail(intended, response):
     )
 
 
+def _is_status_placeholder(row):
+    """A row the webhook made for this wamid before our send path could record it.
+
+    Outbound, no sender: either gateway.ingest._create_external_outbound's
+    status-only row (kind unknown, the placeholder body, the status entry as
+    its payload), or a row an echo of the send made or filled in, whose
+    payload is that echo, carrying the wamid as its id. Nothing our own send
+    paths store looks like either; the agent's sends carry sent_by and the
+    Lead AI's payload["source"].
+    """
+    from apps.gateway.parse import PLACEHOLDER_BODY
+
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    if row.direction != Message.Direction.OUTBOUND or row.sent_by_id is not None or payload.get("source"):
+        return False
+    if row.kind == Message.Kind.UNKNOWN and row.body == PLACEHOLDER_BODY:
+        return True
+    return bool(row.wamid) and payload.get("id") == row.wamid
+
+
 def _record_result(message, response, *, intended_to=None):
     """Attach the gateway's wamid, or the failure, to a queued message.
 
@@ -106,14 +126,26 @@ def _record_result(message, response, *, intended_to=None):
                 message.status = Message.Status.SENT
                 message.save(update_fields=["wamid", "status"])
         except IntegrityError:
-            # A status webhook already inserted this wamid as an external send.
+            # A status webhook already gave this wamid to another row.
             stub = (
                 Message.objects.filter(wamid=wamid).exclude(pk=message.pk).first()
             )
             if stub is None:
                 raise
-            Message.objects.filter(pk=stub.pk).update(wamid=None)
-            stub.delete()
+            if _is_status_placeholder(stub):
+                # The webhook's stand-in for this very send: merged into it.
+                Message.objects.filter(pk=stub.pk).update(wamid=None)
+                stub.delete()
+            else:
+                # A real message of ours whose own send is still in flight took
+                # the wamid (two senders in one chat): it keeps its row and gets
+                # its own wamid when its send returns. A failure already
+                # recorded on it stays. Only while it still holds this wamid:
+                # its own answer may have replaced it a moment ago.
+                detach = {"wamid": None}
+                if stub.status != Message.Status.FAILED:
+                    detach.update(status=Message.Status.QUEUED, delivered_at=None, read_at=None)
+                Message.objects.filter(pk=stub.pk, wamid=wamid).update(**detach)
             message.wamid = wamid
             message.status = Message.Status.SENT
             message.save(update_fields=["wamid", "status"])
@@ -240,8 +272,12 @@ def send_media(conversation, agent, kind, media_id, caption="", filename="", ass
     return message
 
 
-def send_location(conversation, agent, latitude, longitude, name="", address=""):
-    """Drop a pin — in this business, almost always a property's."""
+def send_location(conversation, agent, latitude, longitude, name="", address="", payload=None):
+    """Drop a pin — in this business, almost always a property's.
+
+    ``payload`` adds keys to the stored row (e.g. the Lead AI's source tag),
+    set before the gateway is called so a quick status webhook sees them.
+    """
     if not conversation.is_session_open:
         raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
 
@@ -266,7 +302,7 @@ def send_location(conversation, agent, latitude, longitude, name="", address="")
         direction=Message.Direction.OUTBOUND,
         kind=Message.Kind.LOCATION,
         body=preview,
-        payload={"location": location},
+        payload={**(payload or {}), "location": location},
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
@@ -379,11 +415,12 @@ def render_body(template, variables):
     return text
 
 
-def send_buttons(conversation, agent, body, buttons, header="", footer=""):
+def send_buttons(conversation, agent, body, buttons, header="", footer="", payload=None):
     """Send up to three tappable reply buttons.
 
     The customer's tap comes back as an ordinary inbound message carrying the
     button's id, so nothing special is needed to receive the answer.
+    ``payload`` adds keys to the stored row (e.g. the Lead AI's source tag).
     """
     if not conversation.is_session_open:
         raise SendBlocked("The 24-hour window is closed. Send an approved template first.")
@@ -415,7 +452,7 @@ def send_buttons(conversation, agent, body, buttons, header="", footer=""):
         direction=Message.Direction.OUTBOUND,
         kind=Message.Kind.INTERACTIVE,
         body=body,
-        payload={"interactive": interactive},
+        payload={**(payload or {}), "interactive": interactive},
         sent_by=agent,
         status=Message.Status.QUEUED,
     )
@@ -500,11 +537,13 @@ def send_template(
     header_variables=None,
     header_media_id=None,
     button_variables=None,
+    payload=None,
 ):
     """Send an approved template, which also reopens the free-form window.
 
     The window is only extended once the gateway accepts the message; assuming
     success would let an agent type into a window WhatsApp still considers shut.
+    ``payload`` adds keys to the stored row (e.g. the Lead AI's source tag).
     """
     if template.status != WaTemplate.Status.APPROVED:
         raise SendBlocked(f"Template '{template.name}' is {template.status}, not approved.")
@@ -532,6 +571,7 @@ def send_template(
         body=preview,
         template=template,
         payload={
+            **(payload or {}),
             "variables": variables or {},
             "header_variables": header_variables or {},
             "header_media_id": header_media_id or "",

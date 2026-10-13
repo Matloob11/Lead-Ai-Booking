@@ -43,6 +43,58 @@ def _records_for(conversation):
     return client.find_records(conversation.contact.wa_id)
 
 
+def _line_with_role(message, role):
+    """Live timeline line, with Tenant or Owner when the chat came from Renewals."""
+    line = _line(message)
+    label = {"tenant": "Tenant", "owner": "Owner"}.get(str(role or "").strip().lower())
+    if not label:
+        return line
+    return line.replace("WhatsApp · ", f"WhatsApp · {label} · ", 1)
+
+
+def _renewal_deals(conversation):
+    """Deals a Renewals campaign already messaged on this WhatsApp number.
+
+    Looked up by the number we sent from and the customer's phone, so a later
+    reply — from them or from an agent — lands on the same deal timeline.
+    """
+    from apps.campaigns.models import CampaignRecipient
+
+    phone = "".join(ch for ch in str(getattr(conversation.contact, "wa_id", "") or "") if ch.isdigit())
+    number_id = getattr(conversation, "number_id", None)
+    if not phone or not number_id:
+        return []
+    found = {}
+    rows = (
+        CampaignRecipient.objects.filter(
+            phone=phone,
+            campaign__number_id=number_id,
+            crm_deal_id__isnull=False,
+        )
+        .exclude(status=CampaignRecipient.Status.SKIPPED)
+        .order_by("id")
+    )
+    for row in rows:
+        found[int(row.crm_deal_id)] = row.crm_role or ""
+    return [
+        {"type": "deal", "id": deal_id, "kind": "deal", "role": role}
+        for deal_id, role in found.items()
+    ]
+
+
+def _mirror_records(conversation):
+    """Lead, contact, Owner Data, plus any Renewals deal this chat was sent to."""
+    records = list(_records_for(conversation))
+    seen = {(record["type"], record["id"]) for record in records}
+    for record in _renewal_deals(conversation):
+        key = (record["type"], record["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(record)
+    return records
+
+
 def _record_for(conversation):
     """The first of them, for the one caller that only wants somewhere to write."""
     records = _records_for(conversation)
@@ -54,6 +106,10 @@ def _line(message):
     who = "Customer" if message.direction == Message.Direction.INBOUND else "Agent"
     if message.direction == Message.Direction.OUTBOUND and message.sent_by:
         who = f"Agent · {message.sent_by.display_name or message.sent_by.get_username()}"
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    if message.direction == Message.Direction.OUTBOUND and str(payload.get("source") or "").startswith("leadai"):
+        # Written by the Lead AI assistant, not by a person.
+        who = "Lead AI assistant"
 
     body = (message.body or "").strip()
     if not body:
@@ -77,7 +133,7 @@ def mirror_message(message_id):
     if not message:
         return
 
-    records = _records_for(message.conversation)
+    records = _mirror_records(message.conversation)
     if not records:
         # Nothing in the CRM carries this number. Deliberately silent: the
         # customer simply is not entered anywhere, which is not an error.
@@ -95,7 +151,8 @@ def mirror_message(message_id):
             continue
 
         try:
-            comment_id = client.add_comment(record["type"], record["id"], _line(message))
+            text = _line_with_role(message, record.get("role")) if record.get("type") == "deal" else _line(message)
+            comment_id = client.add_comment(record["type"], record["id"], text)
         except client.BitrixError as exc:
             logger.warning("Could not mirror message %s to %s: %s", message_id, record, exc)
             continue
@@ -126,7 +183,7 @@ def refresh_summary(conversation_id):
     if not conversation:
         return
 
-    records = _records_for(conversation)
+    records = _mirror_records(conversation)
     if not records:
         return
 
@@ -153,12 +210,20 @@ def refresh_summary(conversation_id):
         f"(updated {stamp}, after {len(messages)} messages)"
     )
 
+    # A Lead AI chat (owner's choice, 2026-10-09): the summary is a comment
+    # only. Every lead update re-runs Bitrix's Lead Automation, which plans a
+    # new "Viewing/Meeting" to-do each time a lead sits in Meeting/Viewing
+    # Scheduled, and the assistant's own messages make these chats busier.
+    from apps.leadai.lane import is_lead_ai
+
+    comment_only = is_lead_ai(conversation)
+
     for record in records:
         # The pinned fields exist on leads and contacts, where
         # `setup_crm_fields` created them. A smart-process item has no such
         # fields, so it gets the summary as a comment and nothing is written
         # into a field that is not there.
-        if record["type"] in ("lead", "contact"):
+        if record["type"] in ("lead", "contact") and not comment_only:
             try:
                 client.update_fields(
                     record["type"],

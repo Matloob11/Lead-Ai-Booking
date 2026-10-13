@@ -10,10 +10,7 @@ ENTITY = 1042
 KEEP_TITLES = {
     "phone number",
     "phone number 1",
-    "owner no 1,",
-    "import owner mobile",
     "customer",
-    "contact",
     "responsible person",
     "source",
     "stage",
@@ -32,8 +29,6 @@ KEEP_NAMES = {
     "currencyId",
     "ufCrm5_1768317611513",  # phone number
     "ufCrm5_1769416533028",  # phone number 1
-    "ufCrm5_1777563197150",  # Owner no 1,
-    "ufCrm5_1768314841508",  # Import Owner Mobile
     "ufCrm5_1734247036310",  # lease price
     "ufCrm5_1734247021855",  # selling price
 }
@@ -49,10 +44,8 @@ def pick_elements(fields: dict[str, dict]) -> list[dict]:
     chosen: list[tuple[int, str, str]] = []
     order = [
         "title",
-        "ufCrm5_1777563197150",
         "ufCrm5_1768317611513",
         "ufCrm5_1769416533028",
-        "ufCrm5_1768314841508",
         "contactId",
         "assignedById",
         "stageId",
@@ -74,12 +67,7 @@ def pick_elements(fields: dict[str, dict]) -> list[dict]:
             seen.add(name)
             chosen.append((len(chosen), name, title))
     return [
-        {"name": name, "optionFlags": 1 if name in (
-            "title",
-            "ufCrm5_1777563197150",
-            "ufCrm5_1768317611513",
-            "contactId",
-        ) else 0}
+        {"name": name, "optionFlags": 1 if name in ("ufCrm5_1768317611513", "contactId", "title") else 0}
         for _, name, _ in sorted(chosen)
     ]
 
@@ -147,15 +135,14 @@ def main() -> None:
             results.append({"categoryId": cid, "error": str(exc)})
             print(f"cat {cid} SET ERR", exc)
 
-    for cid in (13, 14):
-        try:
-            force = client._post(
-                "crm.item.details.configuration.forceCommonScopeForAll",
-                {"entityTypeId": ENTITY, "extras": {"categoryId": cid}},
-            )
-            print(f"forceCommon {cid}:", force)
-        except Exception as exc:
-            print(f"forceCommon {cid} ERR", exc)
+    try:
+        force = client._post(
+            "crm.item.details.configuration.forceCommonScopeForAll",
+            {"entityTypeId": ENTITY, "extras": {"categoryId": 13}},
+        )
+        print("forceCommon 13:", force)
+    except Exception as exc:
+        print("forceCommon ERR", exc)
 
     print("\nDONE", json.dumps(results, ensure_ascii=False, indent=2))
 

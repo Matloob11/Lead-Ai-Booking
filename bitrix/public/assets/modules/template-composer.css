@@ -6,8 +6,17 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
   max-height: 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+/* The wide-modal body scrolls as one column; From/To lived above that fold.
+   Keep the scroll inside the list/form so the number picker stays on screen. */
+.modal__box--wide > .modal__body.tplc {
+  overflow: hidden;
+  min-height: 0;
 }
 
 .tplc-left {
@@ -15,7 +24,8 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .tplc-right {
@@ -31,6 +41,26 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  flex: 0 0 auto;
+}
+
+.tplc-from-warn,
+.tplc-recipient .tplc-dup {
+  grid-column: 1 / -1;
+}
+
+.tplc-from-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdf3e2;
+  border: 1px solid #f0dfbe;
+  color: #8a6d21;
+  font-size: 12.5px;
+}
+
+.tplc-from-warn[hidden] {
+  display: none !important;
 }
 
 .tplc-field {
@@ -127,6 +157,10 @@
   color: var(--ink);
   font: inherit;
   font-size: 13px;
+}
+
+.tplc-search {
+  flex: 0 0 auto;
 }
 
 .tplc-search:focus {
@@ -289,6 +323,11 @@
   display: flex;
   justify-content: flex-end;
   padding-top: 2px;
+  flex: 0 0 auto;
+}
+
+.tplc-error {
+  flex: 0 0 auto;
 }
 
 /* -------------------------------------------------------- phone preview */

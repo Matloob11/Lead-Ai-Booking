@@ -54,7 +54,9 @@ function flagsFor(number) {
 
   if (chats) flags.push(badge(`${chats} chat${chats === 1 ? "" : "s"}`));
   if (number.template_sync_error) {
-    flags.push(badge("Templates cannot be listed with the A7 gateway key", "warn"));
+    // Quotes the gateway. "Invalid WhatsApp configuration." has so far always
+    // meant the Business ID typed here is not one alots knows.
+    flags.push(badge(`Templates cannot be listed — ${number.template_sync_error}`, "warn"));
   }
   return flags;
 }

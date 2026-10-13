@@ -21,7 +21,7 @@ from .failures import (
     is_permanent_send_failure,
     permanent_fail_label,
 )
-from .models import MAX_SEND_ATTEMPTS, RETRY_AFTER_MINUTES, Campaign, CampaignRecipient
+from .models import MAX_SEND_ATTEMPTS, RETRY_AFTER_MINUTES, Campaign, CampaignRecipient, CrmTarget
 from .phones import (
     SpreadsheetFormatError,
     is_spreadsheet_workbook,
@@ -94,6 +94,14 @@ def resend_skipped_on_number(*, agent, campaign: Campaign, number: WabaNumber) -
         entry = {"phone": row.phone, "name": row.name or ""}
         if row.variables:
             entry["variables"] = _filled_vars(row.variables)
+        if row.crm_lead_id:
+            entry["crm_lead_id"] = row.crm_lead_id
+        if row.crm_deal_id:
+            entry["crm_deal_id"] = row.crm_deal_id
+        if row.crm_role:
+            entry["crm_role"] = row.crm_role
+        if row.owner_data_id:
+            entry["owner_data_id"] = row.owner_data_id
         rows.append(entry)
     if not rows:
         raise CampaignError("No skipped or marketing-cap numbers left to resend.")
@@ -136,16 +144,65 @@ def resend_skipped_on_number(*, agent, campaign: Campaign, number: WabaNumber) -
 
 def _filled_vars(raw: dict | None) -> dict[str, str]:
     """Keep only non-empty string values, keyed as Meta expects ("1", "2", …)."""
+    return _meta_body_vars(raw)
+
+
+def _meta_body_vars(raw: dict | None) -> dict[str, str]:
+    """Digit keys only — a CRM lead id must never become a Meta parameter."""
     out: dict[str, str] = {}
     for key, value in (raw or {}).items():
+        if not str(key).isdigit():
+            continue
         text = str(value or "").strip()
         if text:
             out[str(key)] = text
     return out
 
 
-def ensure_owner_data(phone: str, name: str = "") -> tuple[dict, bool]:
-    """Return (Owner Data record dict, created?). Never creates a CRM Lead."""
+def _crm_lead_id(row: dict) -> int | None:
+    raw = row.get("crm_lead_id")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _crm_deal_id(row: dict) -> int | None:
+    raw = row.get("crm_deal_id")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _crm_role(row: dict) -> str:
+    role = str(row.get("crm_role") or "").strip().lower()
+    return role if role in {"tenant", "owner"} else ""
+
+
+def _owner_data_id(row: dict) -> int | None:
+    raw = row.get("owner_data_id")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def ensure_owner_data(
+    phone: str,
+    name: str = "",
+    *,
+    category_id: int | None = None,
+    stage_id: str | None = None,
+) -> tuple[dict, bool]:
+    """Return (Owner Data record dict, created?). Never creates a CRM Lead.
+
+    An existing card carrying the number wins whatever board it sits on; a new
+    one lands on Availability unless the caller names another category.
+    """
     matches = bitrix._owner_data_matches(phone)
     if matches:
         return matches[0], False
@@ -154,10 +211,23 @@ def ensure_owner_data(phone: str, name: str = "") -> tuple[dict, bool]:
     record = bitrix.create_owner_data(
         phone,
         name=name,
-        stage_id=bitrix.OWNER_DATA_STAGE_NEW_AVAILABILITY,
-        category_id=bitrix.OWNER_DATA_CATEGORY_AVAILABILITY,
+        stage_id=stage_id or bitrix.OWNER_DATA_STAGE_NEW_AVAILABILITY,
+        category_id=bitrix.OWNER_DATA_CATEGORY_AVAILABILITY if category_id is None else category_id,
     )
     return record, True
+
+
+def crm_destination(target: str) -> tuple[int, str] | None:
+    """(category id, new-stage id) for a CRM target, or None when no card is wanted.
+
+    Empty is every campaign made before the Excel screen existed, and keeps
+    filing Availability cards exactly as it always did.
+    """
+    if target == CrmTarget.NONE:
+        return None
+    if target == CrmTarget.OWNER_DATA:
+        return bitrix.OWNER_DATA_CATEGORY_CALLING, bitrix.OWNER_DATA_STAGE_NEW_CALLING
+    return bitrix.OWNER_DATA_CATEGORY_AVAILABILITY, bitrix.OWNER_DATA_STAGE_NEW_AVAILABILITY
 
 
 def _validate_global_template_fields(
@@ -217,6 +287,7 @@ def create_campaign(
     header_variables: dict | None = None,
     button_variables: dict | None = None,
     header_media_id: str = "",
+    crm_target: str = "",
 ) -> Campaign:
     if template.status != WaTemplate.Status.APPROVED:
         raise CampaignError(f"Template '{template.name}' is not approved.")
@@ -234,7 +305,19 @@ def create_campaign(
         seen.add(phone)
         entry = {"phone": phone, "name": (row.get("name") or "")[:200]}
         if row.get("variables"):
-            entry["variables"] = _filled_vars(row["variables"])
+            entry["variables"] = _meta_body_vars(row["variables"])
+        lead_id = _crm_lead_id(row)
+        if lead_id:
+            entry["crm_lead_id"] = lead_id
+        deal_id = _crm_deal_id(row)
+        if deal_id:
+            entry["crm_deal_id"] = deal_id
+        role = _crm_role(row)
+        if role:
+            entry["crm_role"] = role
+        owner_id = _owner_data_id(row)
+        if owner_id:
+            entry["owner_data_id"] = owner_id
         clean.append(entry)
 
     if not clean:
@@ -288,6 +371,9 @@ def create_campaign(
             if key not in button_vars:
                 raise CampaignError(f'Fill in the link for "{button["text"] or "Button"}".')
 
+    allowed_targets = {"", CrmTarget.NONE, CrmTarget.OWNER_DATA, CrmTarget.AVAILABILITY}
+    target = crm_target if crm_target in allowed_targets else ""
+
     with transaction.atomic():
         campaign = Campaign.objects.create(
             name=(name or "").strip()[:200] or f"{template.name} · {timezone.localdate()}",
@@ -300,6 +386,7 @@ def create_campaign(
             button_variables=button_vars,
             header_media_id=media_id,
             total=len(clean),
+            crm_target=target,
         )
         CampaignRecipient.objects.bulk_create(
             [
@@ -308,6 +395,10 @@ def create_campaign(
                     phone=r["phone"],
                     name=r.get("name") or "",
                     variables=r.get("variables") or {},
+                    crm_lead_id=_crm_lead_id(r),
+                    crm_deal_id=_crm_deal_id(r),
+                    crm_role=_crm_role(r),
+                    owner_data_id=_owner_data_id(r),
                 )
                 for r in clean
             ]
@@ -478,23 +569,42 @@ def process_recipient(recipient_id: int) -> None:
 
     campaign = recipient.campaign
     body_vars = _filled_vars(recipient.variables) or campaign.variables
+    destination = crm_destination(campaign.crm_target or CrmTarget.AVAILABILITY)
 
     try:
-        record, created = ensure_owner_data(recipient.phone, recipient.name)
-        recipient.owner_data_id = int(record["id"])
-        recipient.owner_data_created = created
-        recipient.save(update_fields=["owner_data_id", "owner_data_created"])
+        record = None
+        if recipient.owner_data_id:
+            record = {
+                "type": f"DYNAMIC_{bitrix.OWNER_DATA_TYPE_ID}",
+                "id": int(recipient.owner_data_id),
+            }
+        elif destination is not None:
+            category_id, stage_id = destination
+            record, created = ensure_owner_data(
+                recipient.phone, recipient.name, category_id=category_id, stage_id=stage_id
+            )
+            recipient.owner_data_id = int(record["id"])
+            recipient.owner_data_created = created
+            recipient.save(update_fields=["owner_data_id", "owner_data_created"])
 
-        conversation = inbox_services.start_conversation(
-            campaign.number,
-            campaign.created_by,
-            recipient.phone,
-            campaign.template,
-            body_vars,
-            campaign.header_variables,
-            campaign.header_media_id,
-            campaign.button_variables,
-        )
+        # A Lead AI campaign (apps/leadai) puts the chat in the Lead AI screen
+        # before its first message is broadcast, so the main inbox never sees
+        # it. One transaction with the send: if the send fails, the mark (and a
+        # new customer's empty chat) roll back with it, exactly as before.
+        from apps.leadai.lane import before_campaign_send
+
+        with transaction.atomic():
+            before_campaign_send(campaign, recipient)
+            conversation = inbox_services.start_conversation(
+                campaign.number,
+                campaign.created_by,
+                recipient.phone,
+                campaign.template,
+                body_vars,
+                campaign.header_variables,
+                campaign.header_media_id,
+                campaign.button_variables,
+            )
         recipient.conversation = conversation
         recipient.status = CampaignRecipient.Status.SENT
         recipient.sent_at = timezone.now()
@@ -504,17 +614,33 @@ def process_recipient(recipient_id: int) -> None:
             update_fields=["conversation", "status", "sent_at", "error_detail", "next_retry_at"]
         )
 
-        try:
-            bitrix.add_comment(
-                record["type"],
-                record["id"],
-                f"WhatsApp campaign · {campaign.name}\n"
-                f"Template: {campaign.template.name}\n"
-                f"From: {campaign.number.phone_number}\n"
-                f"Attempt: {recipient.attempt_count}/{MAX_SEND_ATTEMPTS}",
-            )
-        except bitrix.BitrixError as exc:
-            logger.warning("Campaign Owner Data comment failed: %s", exc)
+        if record is not None:
+            try:
+                bitrix.add_comment(
+                    record["type"],
+                    record["id"],
+                    _lead_timeline_comment(campaign, recipient, body_vars),
+                )
+            except bitrix.BitrixError as exc:
+                logger.warning("Campaign Owner Data comment failed: %s", exc)
+
+        if recipient.crm_lead_id:
+            try:
+                bitrix.add_comment(
+                    "lead",
+                    recipient.crm_lead_id,
+                    _lead_timeline_comment(campaign, recipient, body_vars),
+                )
+            except bitrix.BitrixError as exc:
+                logger.warning("Campaign lead comment failed: %s", exc)
+
+        if recipient.crm_deal_id:
+            try:
+                from .renewals import post_deal_timeline
+
+                post_deal_timeline(recipient, conversation)
+            except Exception as exc:  # noqa: BLE001 - timeline must not fail the send
+                logger.warning("Campaign renewal deal comment failed: %s", exc)
 
     except (CampaignError, SendBlocked, bitrix.BitrixError, AlotsError) as exc:
         code = _error_code_from_exc(exc)
@@ -525,6 +651,22 @@ def process_recipient(recipient_id: int) -> None:
 
     refresh_campaign_counts(campaign)
     _maybe_pause_for_marketing_cap(campaign)
+
+
+def _lead_timeline_comment(campaign: Campaign, recipient: CampaignRecipient, body_vars: dict) -> str:
+    """What the selected CRM lead's timeline should show after a list send."""
+    filled = campaign.template.body_text or ""
+    for key, value in (body_vars or {}).items():
+        filled = filled.replace("{{" + str(key) + "}}", str(value))
+    filled = filled.strip() or f"[{campaign.template.name}]"
+    return (
+        f"WhatsApp message\n"
+        f"Template: {campaign.template.name}\n"
+        f"From: +{campaign.number.phone_number}\n"
+        f"To: +{recipient.phone}\n\n"
+        f"{filled}\n\n"
+        f"Campaign: {campaign.name}"
+    )
 
 
 def _error_code_from_exc(exc: Exception) -> str:

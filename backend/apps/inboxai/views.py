@@ -18,7 +18,9 @@ def _clip_context(raw) -> str:
 
 
 def _visible(user):
-    return Conversation.objects.filter(number__in=user.visible_numbers).select_related(
+    from apps.inbox.visibility import visible_conversation_q
+
+    return Conversation.objects.filter(visible_conversation_q(user)).select_related(
         "contact", "number", "assigned_agent"
     )
 

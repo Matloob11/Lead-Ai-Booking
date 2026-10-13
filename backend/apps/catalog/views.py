@@ -1,12 +1,14 @@
 import re
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.inbox.models import Conversation
@@ -89,7 +91,12 @@ def serialize_number_with_agents(number, template_counts=None, chat_counts=None)
 
 
 def serialize_agent_row(agent):
-    linked_count = agent.openwa_assignments.filter(is_active=True).count()
+    roster = getattr(agent, "active_number_assignments", None)
+    if roster is None:
+        roster = agent.number_assignments.filter(is_active=True).select_related("number")
+    linked_count = getattr(agent, "linked_session_count", None)
+    if linked_count is None:
+        linked_count = agent.openwa_assignments.filter(is_active=True).count()
     return {
         "id": agent.pk,
         "display_name": agent.display_name or agent.get_username(),
@@ -106,7 +113,7 @@ def serialize_agent_row(agent):
         "linked_session_count": linked_count,
         "numbers": [
             {"id": a.number_id, "phone_number": a.number.phone_number, "role": a.role}
-            for a in agent.number_assignments.filter(is_active=True).select_related("number")
+            for a in roster
         ],
     }
 
@@ -354,7 +361,7 @@ def number_list(request):
             .annotate(n=Count("pk"))
         )
         chat_counts = dict(
-            Conversation.objects.values_list("number_id").annotate(n=Count("pk"))
+            Conversation.objects.values("number_id").annotate(n=Count("id")).values_list("number_id", "n")
         )
         return Response(
             [serialize_number_with_agents(n, template_counts, chat_counts) for n in numbers]
@@ -485,7 +492,20 @@ def agent_list(request):
     agents = (
         get_user_model()
         .objects.filter(is_active=True)
-        .prefetch_related("number_assignments__number")
+        .prefetch_related(
+            Prefetch(
+                "number_assignments",
+                queryset=NumberAssignment.objects.filter(is_active=True).select_related("number"),
+                to_attr="active_number_assignments",
+            )
+        )
+        .annotate(
+            linked_session_count=Count(
+                "openwa_assignments",
+                filter=Q(openwa_assignments__is_active=True),
+                distinct=True,
+            )
+        )
         .order_by("display_name", "username")
     )
     return Response([serialize_agent_row(a) for a in agents])
@@ -602,9 +622,10 @@ def sync_now(request):
     Channels stay admin-only. That one rewrites the number catalogue this whole
     panel is addressed by, and it is not a refresh anybody needs mid-shift.
     """
-    from .tasks import sync_numbers, sync_templates_detail
+    from .tasks import sync_numbers, sync_templates, sync_templates_detail
 
     what = request.data.get("what", "templates")
+    waba = str(request.data.get("waba_business_id") or "").strip()
     if what in ("numbers", "all"):
         denied = _require_admin(request)
         if denied:
@@ -614,10 +635,22 @@ def sync_now(request):
         if what in ("numbers", "all"):
             result["numbers"] = sync_numbers()
         if what in ("templates", "all"):
-            total, failures = sync_templates_detail()
-            result["templates"] = total
-            result["wabas_failed"] = len(failures)
-            result["failures"] = failures[:8]
+            if waba:
+                if not WabaNumber.objects.filter(waba_business_id=waba, is_active=True).exists():
+                    return Response(
+                        {"detail": "That WhatsApp number is not on this inbox."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                total, failures = sync_templates_detail(waba)
+                result["templates"] = total
+                result["wabas_failed"] = len(failures)
+                result["failures"] = failures[:8]
+            else:
+                # Every business account in one request outlives the panel
+                # wait, so the button dies with "the inbox server did not answer"
+                # while the sync is still running. The worker finishes it.
+                sync_templates.delay()
+                result["sync"] = "started"
     except Exception as exc:  # noqa: BLE001 - surface the gateway's complaint
         return Response({"detail": f"Sync failed: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
@@ -692,6 +725,40 @@ def all_templates(request):
 
 #: {{1}}, {{2}} … as Meta writes them, in the order they must be exampled.
 VARIABLE_RE = re.compile(r"\{\{\s*(\d+)\s*\}\}")
+
+#: What a template header may be. The media ones are reviewed against a sample
+#: file, which Meta wants as a handle from its Resumable Upload API — see
+#: ``template_header_media`` — not as a WhatsApp media id.
+HEADER_FORMATS = {"TEXT", "IMAGE", "VIDEO", "DOCUMENT"}
+MEDIA_HEADER_FORMATS = {"IMAGE", "VIDEO", "DOCUMENT"}
+
+#: Meta's own limits for the sample, and the types it accepts for each.
+HEADER_SAMPLE_LIMITS = {
+    "IMAGE": 5 * 1024 * 1024,
+    "VIDEO": 16 * 1024 * 1024,
+    "DOCUMENT": 100 * 1024 * 1024,
+}
+HEADER_SAMPLE_TYPES = {
+    "IMAGE": {"image/jpeg", "image/png"},
+    "VIDEO": {"video/mp4"},
+    "DOCUMENT": {"application/pdf"},
+}
+HEADER_SAMPLE_WORDS = {
+    "IMAGE": "a JPEG or PNG up to 5 MB",
+    "VIDEO": "an MP4 up to 16 MB",
+    "DOCUMENT": "a PDF up to 100 MB",
+}
+
+
+def _sample_matches(head, header_format):
+    """Whether the first bytes are the type the browser claimed."""
+    if header_format == "IMAGE":
+        return head.startswith(b"\xff\xd8") or head.startswith(b"\x89PNG\r\n\x1a\n")
+    if header_format == "VIDEO":
+        return len(head) >= 12 and head[4:8] == b"ftyp"
+    if header_format == "DOCUMENT":
+        return head.startswith(b"%PDF")
+    return False
 
 
 def _variable_numbers(text):
@@ -797,6 +864,24 @@ def _parse_template_form(data):
     body_examples = data.get("body_examples", {})
     header_examples = data.get("header_examples", {})
 
+    # The panel says which kind of header it built; older callers only ever
+    # sent header_text, and for them a header is text when there is any.
+    header_format = str(data.get("header_format", "")).strip().upper()
+    header_handle = str(data.get("header_handle", "")).strip()
+    if header_format in {"", "NONE"}:
+        header_format = "TEXT" if header_text else ""
+    if header_format and header_format not in HEADER_FORMATS:
+        return None, "The header must be text, an image, a video or a document."
+    if header_format in MEDIA_HEADER_FORMATS and not header_handle:
+        return None, f"Upload the {header_format.lower()} for the header first."
+    if header_format != "TEXT":
+        header_text = ""
+        header_examples = {}
+    # Who minted the sample handle decides who must submit the template: a
+    # handle from Meta's own app only works on a Graph create, one from alots'
+    # panel only on the gateway create. The panel tells us which it got.
+    handle_via = str(data.get("header_handle_via", "alots")).strip().lower() or "alots"
+
     if len(header_text) > 60:
         return None, "Header text must be 60 characters or fewer."
     if len(footer_text) > 60:
@@ -820,7 +905,15 @@ def _parse_template_form(data):
             )
 
     components = []
-    if header_text:
+    if header_format in MEDIA_HEADER_FORMATS:
+        components.append(
+            {
+                "type": "HEADER",
+                "format": header_format,
+                "example": {"header_handle": [header_handle]},
+            }
+        )
+    elif header_text:
         header = {"type": "HEADER", "format": "TEXT", "text": header_text}
         samples = _examples_for(header_text, header_examples)
         if samples:
@@ -852,6 +945,10 @@ def _parse_template_form(data):
         "language": language,
         "components": components,
         "payload": payload,
+        # A handle minted by Meta for our own app must be submitted with that
+        # same token; the gateway would file it under alots' app and Meta would
+        # not recognise it. A handle minted by alots' panel is the reverse.
+        "via_graph": header_format in MEDIA_HEADER_FORMATS and handle_via == "graph",
     }
     return parsed, None
 
@@ -905,6 +1002,21 @@ def _template_on_waba(waba_id, name, language):
     ).first()
 
 
+def _looks_like_duplicate(detail):
+    """Meta saying the name is taken — and only that.
+
+    "Object with ID … does not exist" used to pass a plain ``"exist" in``
+    test, so a Business ID Meta had never heard of minted a local Pending row
+    for a template that was never submitted anywhere.
+    """
+    low = detail.lower()
+    if "already" in low:
+        return True
+    return "exist" in low and not any(
+        phrase in low for phrase in ("not exist", "does not", "doesn't", "no longer")
+    )
+
+
 def _submit_template_to_waba(waba_id, parsed):
     """POST one template to Meta and mirror locally. Returns (template, error, skipped)."""
     from apps.gateway.client import AlotsClient, AlotsError
@@ -914,10 +1026,15 @@ def _submit_template_to_waba(waba_id, parsed):
         return existing, None, True
 
     try:
-        meta_res = AlotsClient().create_template(waba_id, parsed["payload"]) or {}
+        if parsed.get("via_graph"):
+            from apps.gateway.graph import MetaGraphClient
+
+            meta_res = MetaGraphClient().create_template(waba_id, parsed["payload"]) or {}
+        else:
+            meta_res = AlotsClient().create_template(waba_id, parsed["payload"]) or {}
     except AlotsError as exc:
         detail = _meta_error_detail(exc)
-        if "already" in detail.lower() or "exist" in detail.lower():
+        if _looks_like_duplicate(detail):
             template, _ = WaTemplate.objects.update_or_create(
                 waba_business_id=waba_id,
                 name=parsed["clean_name"],
@@ -1016,6 +1133,139 @@ def create_template(request):
             status=status.HTTP_400_BAD_REQUEST,
     )
     return Response(serialize_template(template), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST"])
+@parser_classes([MultiPartParser, FormParser])
+def template_header_media(request):
+    """The sample file an image, video or document header is reviewed with.
+
+    GET says whether this server can do it at all, so the panel can say so
+    before an agent picks a file. POST checks the file is what it claims to be
+    and within Meta's limit, uploads it through Meta's Resumable Upload API and
+    returns the handle the create call wants. The handle belongs to the app,
+    not to a number, so one upload serves every business account the template
+    goes to.
+
+    Three ways to mint it, tried in this order: the gateway's own resumable
+    upload route, which needs nothing but the API key every other call uses
+    (alots documented it 2026-10-08) and is therefore the normal path; Meta's
+    own token; the alots panel cookie. The last two had both lapsed by late
+    September, which is why image and video templates stopped being created
+    while text ones kept working.
+    """
+    from apps.gateway.client import AlotsClient, AlotsError
+    from apps.gateway.graph import GraphNotConfigured, MetaGraphClient
+    from apps.gateway.panel import (
+        NOT_CONFIGURED,
+        AlotsPanelClient,
+        PanelSessionExpired,
+        panel_configured,
+    )
+
+    gateway_ready = bool((getattr(settings, "ALOTS_API_KEY", "") or "").strip())
+    graph_ready = bool((getattr(settings, "META_GRAPH_ACCESS_TOKEN", "") or "").strip())
+    panel_ready = panel_configured()
+    routes = [
+        name
+        for name, ready in (("gateway", gateway_ready), ("graph", graph_ready), ("alots", panel_ready))
+        if ready
+    ]
+    via = routes[0] if routes else ""
+    if request.method == "GET":
+        return Response({"configured": bool(via), "via": via, "detail": "" if via else NOT_CONFIGURED})
+
+    covered = _covered_waba_ids(request.user)
+    if not covered:
+        return Response(
+            {"detail": "No WhatsApp Business account found for your profile."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    # The panel upload is filed under one business account; the first one the
+    # template will be submitted to, or any the caller covers.
+    waba_id = str(request.data.get("waba_business_id", "")).strip()
+    if waba_id not in covered:
+        waba_id = next(iter(sorted(covered)))
+
+    header_format = str(request.data.get("format", "")).strip().upper()
+    if header_format not in MEDIA_HEADER_FORMATS:
+        return Response(
+            {"detail": "Say whether the header is an image, a video or a document."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    upload = request.FILES.get("file")
+    if not upload:
+        return Response({"detail": "Choose a file first."}, status=status.HTTP_400_BAD_REQUEST)
+
+    wanted = HEADER_SAMPLE_WORDS[header_format]
+    mime = (getattr(upload, "content_type", "") or "").split(";")[0].strip().lower()
+    if mime not in HEADER_SAMPLE_TYPES[header_format]:
+        return Response(
+            {"detail": f"Meta wants {wanted} for a {header_format.lower()} header."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    size = int(getattr(upload, "size", 0) or 0)
+    if size <= 0:
+        return Response({"detail": "That file is empty."}, status=status.HTTP_400_BAD_REQUEST)
+    if size > HEADER_SAMPLE_LIMITS[header_format]:
+        return Response(
+            {"detail": f"That file is too large — Meta wants {wanted}."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    head = upload.read(16)
+    upload.seek(0)
+    if not _sample_matches(head, header_format):
+        return Response(
+            {"detail": f"That file is not really {wanted.split(' up to')[0]}."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    name = (upload.name or "sample").strip()[:120] or "sample"
+    if not routes:
+        return Response({"detail": NOT_CONFIGURED}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    payload = upload.read()
+    handle = ""
+    failures = []
+    only_config_failures = True
+    for route in routes:
+        try:
+            if route == "gateway":
+                handle = AlotsClient().upload_sample(payload, name, mime)
+            elif route == "graph":
+                handle = MetaGraphClient().upload_sample(payload, name, mime)
+            else:
+                handle = AlotsPanelClient().upload_template_sample(
+                    payload, name, mime, header_format, waba_id
+                )
+            via = route
+            break
+        except (GraphNotConfigured, PanelSessionExpired) as exc:
+            failures.append(str(exc))
+        except AlotsError as exc:
+            only_config_failures = False
+            failures.append(_meta_error_detail(exc))
+    if not handle:
+        # Every route failed. The first sentence is the normal route's reason;
+        # a route that was merely unconfigured keeps its own wording.
+        detail = failures[0] if failures else NOT_CONFIGURED
+        if not only_config_failures:
+            detail = f"The sample was not accepted: {detail}"
+        return Response(
+            {"detail": detail},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE if only_config_failures else status.HTTP_502_BAD_GATEWAY,
+        )
+
+    return Response(
+        {
+            "header_handle": handle,
+            "via": via,
+            "format": header_format,
+            "name": name,
+            "size": size,
+            "mime": mime,
+        }
+    )
 
 
 @api_view(["POST"])

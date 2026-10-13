@@ -45,6 +45,22 @@ services:
       - "127.0.0.1:8100:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Recreate-without-rebuild: the image CMD still said --workers 2, and those
+    # children died in a loop (no HTTP, inbox stuck on Panel session).
+    command:
+      [
+        "uvicorn",
+        "a7wa.asgi:application",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "*",
+      ]
     volumes:
       # Bind mounts, not named volumes: the host nginx serves /static/ straight
       # off disk, and media must survive a stack rebuild.
@@ -72,6 +88,25 @@ services:
       - ../media:/app/media
       - ./alots.ui.cookie:/run/alots.ui.cookie:ro
     command: ["celery", "-A", "a7wa", "worker", "-l", "info", "--concurrency", "4"]
+
+  # The Lead AI assistant's own worker (queue "leadai", CELERY_TASK_ROUTES in
+  # a7wa/settings.py). Its model calls and meeting reminders never wait behind
+  # the main inbox's webhooks or a paced campaign, and never slow them down.
+  # The long stop grace lets a turn in flight finish during a deploy: it is
+  # above assistant_turn's hard time limit (210 s, apps/leadai/tasks.py).
+  worker-leadai:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes:
+      - ../media:/app/media
+    stop_grace_period: 240s
+    command: ["celery", "-A", "a7wa", "worker", "-Q", "leadai", "-n", "leadai@%h", "-l", "info", "--concurrency", "2"]
 
   beat:
     build:

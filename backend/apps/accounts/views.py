@@ -24,7 +24,10 @@ Agent = get_user_model()
 
 
 def _serialize(agent):
+    from apps.inbox.send_health import with_send_health
     from apps.inbox.serializers import serialize_number
+
+    numbers = with_send_health(agent.visible_numbers)
 
     return {
         "id": agent.pk,
@@ -38,7 +41,7 @@ def _serialize(agent):
         "can_official_api": bool(agent.can_official_api),
         "can_linked_devices": bool(agent.can_linked_devices),
         "role": "Administrator" if agent.has_admin_rights else "Agent",
-        "numbers": [serialize_number(n) for n in agent.visible_numbers],
+        "numbers": [serialize_number(n) for n in numbers],
         "capabilities": {
             "read_receipts": settings.GATEWAY_SUPPORTS_READ_RECEIPTS,
             "typing_indicator": settings.GATEWAY_SUPPORTS_TYPING,

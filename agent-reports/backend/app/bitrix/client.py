@@ -16,7 +16,7 @@ class BitrixError(Exception):
 
 
 class BitrixClient:
-    def __init__(self, webhook_base: str, *, timeout: float = 240.0):
+    def __init__(self, webhook_base: str, *, timeout: float = 120.0):
         base = (webhook_base or "").rstrip("/")
         if not base:
             raise ValueError("Bitrix webhook base URL is empty")
@@ -66,23 +66,10 @@ class BitrixClient:
 
     def _post(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base}/{method.lstrip('/')}.json"
-        last_exc: Exception | None = None
-        for attempt in range(3):
-            try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    response = client.post(url, json=params)
-                    response.raise_for_status()
-                    payload = response.json()
-                break
-            except (httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
-                last_exc = exc
-                if attempt >= 2:
-                    raise
-                continue
-        else:
-            if last_exc:
-                raise last_exc
-            raise RuntimeError(f"{method}: request failed")
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.post(url, json=params)
+            response.raise_for_status()
+            payload = response.json()
         if isinstance(payload, dict) and payload.get("error"):
             raise BitrixError(
                 method,

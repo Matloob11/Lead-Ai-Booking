@@ -4,23 +4,39 @@
    Tuned for classic + glass-dark; keeps WhatsApp green as the only accent.
    ========================================================================== */
 
+/* The Bitrix placement is an iframe. `vh` / `vw` are the outer portal, so this
+   dialog sizes to the frame (the fixed .modal) and scrolls inside it. */
+.modal:has(.modal__box--campaign) {
+  align-items: stretch;
+  justify-items: center;
+  padding: 8px;
+}
+
 .modal__box--campaign {
-  max-width: 1120px;
-  width: min(1120px, 96vw);
+  max-width: min(1080px, 100%);
+  width: min(1080px, 100%);
+  height: 100%;
+  max-height: 100%;
   padding: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  container: camp / size;
 }
 
 .modal__box--campaign .modal__head {
   padding: 14px 20px;
+  flex: none;
 }
 
 .camp-shell {
   display: flex;
   flex-direction: column;
-  max-height: calc(90vh - 52px);
-  min-height: 560px;
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
+  max-height: none;
+  overflow: hidden;
 }
 
 .camp-pane[hidden],
@@ -75,8 +91,9 @@
 
 .camp-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -88,6 +105,7 @@
   padding: 16px 18px 18px;
   overflow: auto;
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--line, #e2e8f0);
 }
 
@@ -99,6 +117,8 @@
   padding: 18px 16px 22px;
   background: linear-gradient(180deg, #f1f5f9 0%, #e8eef5 100%);
   overflow: auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 .camp-right__head {
@@ -204,6 +224,108 @@
   min-width: 0;
 }
 
+.camp-line {
+  position: relative;
+  min-width: 0;
+}
+
+.camp-line__native {
+  display: none !important;
+}
+
+.camp-line__box {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  background: #fff;
+  color: var(--ink, #1a2332);
+  cursor: text;
+}
+
+.camp-line__box:focus {
+  outline: none;
+  border-color: rgba(200, 163, 74, 0.7);
+  box-shadow: 0 0 0 3px rgba(200, 163, 74, 0.18);
+}
+
+.camp-line__box.is-open {
+  border-color: rgba(200, 163, 74, 0.7);
+  box-shadow: 0 0 0 3px rgba(200, 163, 74, 0.18);
+}
+
+.camp-line__value {
+  font-size: 14px;
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camp-line__value.is-placeholder {
+  color: var(--muted, #667485);
+}
+
+.camp-line__input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 0;
+}
+
+.camp-line__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.camp-line__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.camp-line__list[hidden] {
+  display: none !important;
+}
+
+.camp-line__opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.35;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.camp-line__opt:hover,
+.camp-line__opt.is-on {
+  background: rgba(200, 163, 74, 0.18);
+}
+
+.camp-line__empty {
+  padding: 10px;
+  font-size: 13px;
+  color: var(--muted, #667485);
+}
+
 .camp-numpick__search {
   margin: 0;
 }
@@ -216,6 +338,12 @@
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.camp-field[hidden],
+.camp-line__value[hidden],
+.camp-line__input[hidden] {
+  display: none !important;
 }
 
 .camp-field__label {
@@ -1043,7 +1171,10 @@
 /* ---- Phone preview ----------------------------------------------------- */
 
 .camp-phone {
-  width: 268px;
+  flex: 0 0 auto;
+  width: min(268px, 100%);
+  min-height: 280px;
+  height: auto;
   border: 7px solid #0b1220;
   border-radius: 26px;
   overflow: hidden;
@@ -1056,6 +1187,7 @@
 }
 
 .camp-phone__bar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -1083,8 +1215,9 @@
 }
 
 .camp-phone__screen {
-  min-height: 300px;
-  max-height: 400px;
+  flex: 0 0 auto;
+  min-height: 220px;
+  max-height: 360px;
   overflow-y: auto;
   padding: 14px 10px;
   background-color: #e5ddd5;
@@ -1240,6 +1373,25 @@
   color: #f1f5f9;
 }
 
+[data-wa-theme="glass-dark"] .camp-line__box,
+[data-wa-theme="glass-dark"] .camp-line__list {
+  background: rgba(16, 24, 38, 0.96);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eef3f9;
+}
+
+[data-wa-theme="glass-dark"] .camp-line__value.is-placeholder,
+[data-wa-theme="glass-dark"] .camp-line__input::placeholder,
+[data-wa-theme="glass-dark"] .camp-line__empty {
+  color: rgba(159, 176, 198, 0.9);
+}
+
+[data-wa-theme="glass-dark"] .camp-line__opt:hover,
+[data-wa-theme="glass-dark"] .camp-line__opt.is-on {
+  background: rgba(200, 163, 74, 0.28);
+  color: #eef3f9;
+}
+
 [data-wa-theme="glass-dark"] .camp-step {
   color: #6ee7b7;
   background: rgba(37, 211, 102, 0.12);
@@ -1380,16 +1532,20 @@
 
 
 /* ---- Responsive -------------------------------------------------------- */
+/* The dialog's own box, not the browser window: the iframe can be wide while
+   this modal is the only thing on screen, and the other way around. */
 
-@media (max-width: 960px) {
+@container camp (max-width: 760px) {
   .camp-main {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
     overflow: auto;
   }
 
-  .camp.camp-pane.is-active,
-  .camp-hist.camp-pane.is-active {
-    overflow: auto;
+  .camp-left,
+  .camp-right {
+    overflow: visible;
+    min-height: auto;
   }
 
   .camp-left {
@@ -1405,9 +1561,84 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .camp-phone {
+    min-height: 0;
+  }
+
+  .camp-phone__screen {
+    min-height: 160px;
+    max-height: 220px;
+  }
+
+  .camp-hist.camp-pane.is-active {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
   .camp-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .camp-actions__hint {
+    flex: 0 1 auto;
+  }
+
+  .camp-actions__btns {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+
+@container camp (max-height: 560px) {
+  .camp-phone {
+    min-height: 0;
+  }
+
+  .camp-phone__screen {
+    min-height: 120px;
+    max-height: 160px;
+  }
+}
+
+@media (max-width: 760px) {
+  .camp-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    overflow: auto;
+  }
+
+  .camp-left,
+  .camp-right {
+    overflow: visible;
+    min-height: auto;
+  }
+
+  .camp-left {
+    border-right: 0;
+    border-bottom: 1px solid var(--line, #e2e8f0);
+  }
+
+  .camp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .camp-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camp-hist.camp-pane.is-active {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .camp-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camp-actions__hint {
+    flex: 0 1 auto;
   }
 
   .camp-actions__btns {

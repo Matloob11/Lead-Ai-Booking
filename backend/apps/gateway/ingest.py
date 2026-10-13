@@ -6,12 +6,13 @@ them onto the right conversation by ``recipient_id`` so the thread is not silent
 and we fill the body later if an echo arrives with the same wamid.
 """
 
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
 from django.utils import timezone
 
 from apps.inbox.models import Contact, Conversation, MediaAsset, Message
+from apps.inbox.visibility import claim_unassigned
 
 from .media import download_media
 from .parse import (
@@ -227,6 +228,7 @@ def store_message(number, message, contact_profiles, metadata=None, *, force_out
         contact.save(update_fields=["profile_name"])
 
     conversation, _ = Conversation.objects.get_or_create(number=number, contact=contact)
+    claim_unassigned(conversation)
 
     kind = message.get("type", "unknown")
     if kind not in Message.Kind.values:
@@ -337,8 +339,18 @@ def store_message(number, message, contact_profiles, metadata=None, *, force_out
     return conversation
 
 
+ADOPT_WITHIN = timedelta(minutes=5)
+
+
 def _adopt_queued_outbound(number, status_entry):
-    """A status can beat the send path that still holds a queued row with no wamid."""
+    """A status can beat the send path that still holds a queued row with no wamid.
+
+    Only when that row is the one recent send still queued in the chat. With
+    two in flight (the Lead AI assistant and an agent, or two agents) nothing
+    says which one the status belongs to; the placeholder made instead is
+    replaced by the right row when its send returns (inbox.services._record_result).
+    A failed send keeps its empty wamid for good, so it is never a candidate.
+    """
     wamid = status_entry.get("id")
     recipient = digits(status_entry.get("recipient_id"))
     if not wamid or not recipient:
@@ -349,19 +361,21 @@ def _adopt_queued_outbound(number, status_entry):
     conversation = Conversation.objects.filter(number=number, contact=contact).first()
     if not conversation:
         return None
-    queued = (
+    candidates = list(
         Message.objects.filter(
             conversation=conversation,
             direction=Message.Direction.OUTBOUND,
             wamid__isnull=True,
             mirrored_from__isnull=True,
+            status=Message.Status.QUEUED,
+            created_at__gte=timezone.now() - ADOPT_WITHIN,
         )
         .exclude(kind=Message.Kind.SYSTEM)
-        .order_by("-id")
-        .first()
+        .order_by("-id")[:2]
     )
-    if not queued:
+    if len(candidates) != 1:
         return None
+    queued = candidates[0]
     queued.wamid = wamid
     queued.save(update_fields=["wamid"])
     return queued
@@ -379,6 +393,7 @@ def _create_external_outbound(number, status_entry):
 
     contact, _ = Contact.objects.get_or_create(wa_id=wa_id)
     conversation, _ = Conversation.objects.get_or_create(number=number, contact=contact)
+    claim_unassigned(conversation)
     sent_at = ts(status_entry.get("timestamp"))
     mapped = STATUS_MAP.get(status_entry.get("status", ""), Message.Status.SENT)
     if mapped == Message.Status.RECEIVED:
@@ -461,6 +476,19 @@ def apply_status(number, status_entry):
 def _reconcile_campaign_undelivered(message) -> None:
     if message.direction != Message.Direction.OUTBOUND:
         return
+    # In a Lead AI chat, a failed assistant reply, reminder or agent message is
+    # not the campaign's template failing; treating it as one would re-send the
+    # campaign template to the customer five minutes later. Lead AI decides
+    # (and tells the agents about its own failures).
+    try:
+        from apps.leadai.lane import handles_failed_outbound
+
+        if handles_failed_outbound(message):
+            return
+    except Exception:  # noqa: BLE001 - never block the campaign bookkeeping
+        import logging
+
+        logging.getLogger(__name__).exception("Lead AI failed-status hook broke for message %s", message.pk)
     try:
         from apps.campaigns.services import mark_recipient_undelivered
     except Exception:  # noqa: BLE001

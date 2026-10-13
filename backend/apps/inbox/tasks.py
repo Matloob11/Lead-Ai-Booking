@@ -66,9 +66,16 @@ def warn_closing_windows():
 
     count = 0
     for conversation in closing:
+        # A Lead AI chat's warning goes to the Lead AI screen, not the main list.
+        try:
+            from apps.leadai.lane import event_name
+
+            event = event_name(conversation, "session.closing")
+        except Exception:  # noqa: BLE001 - the warning still goes out
+            event = "session.closing"
         publish_to_agent(
             conversation.assigned_agent_id,
-            "session.closing",
+            event,
             {"conversation": serialize_conversation(conversation)},
         )
         count += 1

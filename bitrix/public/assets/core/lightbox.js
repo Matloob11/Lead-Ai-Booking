@@ -38,10 +38,10 @@ export function openLightbox(images, startIndex = 0) {
     [icon("download", { size: 18 })]
   );
 
-  const prevBtn = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Pichli (←)", onclick: () => step(-1) }, [
+  const prevBtn = el("button.lb__nav.lb__nav--prev", { type: "button", title: "Previous (←)", onclick: () => step(-1) }, [
     icon("chevronLeft", { size: 26 }),
   ]);
-  const nextBtn = el("button.lb__nav.lb__nav--next", { type: "button", title: "Agli (→)", onclick: () => step(1) }, [
+  const nextBtn = el("button.lb__nav.lb__nav--next", { type: "button", title: "Next (→)", onclick: () => step(1) }, [
     icon("chevronRight", { size: 26 }),
   ]);
 

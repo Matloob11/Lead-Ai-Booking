@@ -131,6 +131,18 @@ const BUTTON_ICON = {
 
 const buttonIcon = (type) => (BUTTON_ICON[type] || BUTTON_ICON.QUICK_REPLY)();
 
+/** The little picture WhatsApp draws for a header that is not text. */
+function mediaGlyph(format) {
+  return svg(
+    format === "VIDEO"
+      ? ["M23 7l-7 5 7 5V7z", "M1 5h15v14H1z"]
+      : format === "DOCUMENT"
+        ? ["M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z", "M14 2v6h6"]
+        : ["M3 3h18v18H3z", "M3 15l5-5 4 4 3-3 6 6"],
+    { size: 18 }
+  );
+}
+
 /* -------------------------------------------------------------- the modal */
 
 /**
@@ -151,8 +163,9 @@ const buttonIcon = (type) => (BUTTON_ICON[type] || BUTTON_ICON.QUICK_REPLY)();
 export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting, to = "" }) {
   const isNew = mode === "new";
 
+  const usable = numbers.find((n) => !n.send_blocked) || numbers[0];
   const state = {
-    numberId: isNew ? numbers[0]?.id ?? "" : conversation.number_id,
+    numberId: isNew ? usable?.id ?? "" : conversation.number_id,
     templates: [],
     selected: null,
     body: {},        // {"1": "Ali"}
@@ -172,13 +185,48 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     isNew ? "Start the chat" : "Send template",
   ]);
 
+  const fromWarn = el("div.tplc-from-warn", { hidden: true }, [
+    "This From-number cannot send — the provider banned it. Pick another number.",
+  ]);
+
+  function fromLabel(number) {
+    const base = numberNameWithDial(number);
+    return number.send_blocked ? `${base} — cannot send` : base;
+  }
+
+  function paintFromOptions() {
+    const current = String(state.numberId);
+    clear(numberSelect);
+    for (const n of numbers) {
+      numberSelect.append(el("option", { value: n.id }, [fromLabel(n)]));
+    }
+    const keep = numbers.some((n) => String(n.id) === current);
+    numberSelect.value = keep ? current : String(usable?.id || numbers[0]?.id || "");
+    state.numberId = numberSelect.value;
+    refreshFromWarn();
+  }
+
+  function refreshFromWarn() {
+    const chosen = numbers.find((n) => String(n.id) === String(state.numberId));
+    fromWarn.hidden = !chosen?.send_blocked;
+  }
+
   const numberSelect = el(
     "select.field",
     // The warning's wording depends on which of our numbers is selected, so a
     // change here has to re-evaluate it.
-    { onchange: () => { state.numberId = numberSelect.value; loadTemplates(); checkExisting(); } },
-    numbers.map((n) => el("option", { value: n.id }, [numberNameWithDial(n)]))
+    {
+      onchange: () => {
+        state.numberId = numberSelect.value;
+        refreshFromWarn();
+        loadTemplates();
+        checkExisting();
+      },
+    },
   );
+  // Reply mode is given no `numbers` list. Painting the From picker there
+  // emptied numberId and the next fetch became /catalog/numbers//templates/.
+  if (isNew) paintFromOptions();
   const phone = el("input.field", {
     type: "tel",
     placeholder: "971501234567",
@@ -222,8 +270,8 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     clear(dupNotice).append(
       el("div", {}, [
         sameNumber
-          ? "Is customer ki chat pehle se maujood hai — template usi chat mein chala jayega, nayi chat nahi banegi."
-          : `Is customer ki chat pehle se maujood hai, magar ${found.number_title} par. Doosre number se bhejne par alag chat banegi.`,
+          ? "This customer already has a chat on this number. The template will go in that chat, not a new one."
+          : `This customer already has a chat on ${found.number_title}. Sending from a different number opens a second chat.`,
       ]),
       // Deliberately not .btn--ghost: the theme forces white text on that class
       // with !important, which is invisible on this amber plate.
@@ -233,7 +281,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
           dialog.close();
           onOpenExisting?.(found.id);
         },
-      }, ["Wahi chat kholein"])
+      }, ["Open that chat"])
     );
     dupNotice.hidden = false;
   }, 350);
@@ -611,6 +659,13 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
       sendBtn.textContent = label;
       error.hidden = false;
       error.textContent = err.message;
+      if (/network banned/i.test(err.message || "")) {
+        const chosen = numbers.find((n) => String(n.id) === String(state.numberId));
+        if (chosen) chosen.send_blocked = true;
+        paintFromOptions();
+        numberSelect.focus();
+        numberSelect.scrollIntoView({ block: "nearest" });
+      }
     }
   });
 
@@ -628,6 +683,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
       ? el("div.tplc-recipient", {}, [
           el("label.tplc-field", {}, [el("span", {}, ["From"]), numberSelect]),
           el("label.tplc-field", {}, [el("span", {}, ["To"]), phone]),
+          fromWarn,
           dupNotice,
         ])
       : null,
@@ -647,7 +703,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     renderForm();
     renderPreview();
     try {
-      state.templates = await templatesFor(state.numberId);
+      state.templates = await templatesFor(state.numberId, conversation);
     } catch (err) {
       clear(list).append(el("div.tplc-empty", {}, [`Could not load templates: ${err.message}`]));
       return;
@@ -699,7 +755,7 @@ export function openTemplateManager({ onUseTemplate, isAdmin = false } = {}) {
   ]);
 
   const notice = el("p.tmc-notice", { hidden: true });
-  const unreachableNote = el("p.tmc-notice.tmc-notice--warn", { hidden: true });
+  const unreachableNote = el("div.tmc-notice.tmc-notice--warn", { hidden: true });
 
   /** Whichever of the caller's numbers sit on a template's business account. */
   const numbersFor = (wabaId) =>
@@ -762,7 +818,18 @@ export function openTemplateManager({ onUseTemplate, isAdmin = false } = {}) {
     clear(syncBtn).append("Syncing…");
     notice.hidden = true;
     try {
-      const result = await catalog.syncTemplates();
+      const result = await catalog.syncTemplates(filterWaba || "");
+      if (result?.sync === "started") {
+        clear(notice).append(
+          "Sync is running across every number. Statuses refresh in a moment — Pending usually becomes Approved within a minute."
+        );
+        notice.className = "tmc-notice tmc-notice--ok";
+        notice.hidden = false;
+        clearTemplateCaches();
+        setTimeout(() => fetchTemplates({ force: true, silent: true }).catch(() => {}), 8000);
+        setTimeout(() => fetchTemplates({ force: true, silent: true }).catch(() => {}), 25000);
+        return;
+      }
       clearTemplateCaches();
       await fetchTemplates({ force: true });
       // Said out loud, because the common outcome of a successful sync is that
@@ -883,13 +950,31 @@ export function openTemplateManager({ onUseTemplate, isAdmin = false } = {}) {
   }
 
   function paintUnreachable() {
-    const bad = numbers.some((n) => n.template_sync_error);
-    if (!bad) {
+    const bad = numbers.filter((n) => n.template_sync_error);
+    if (!bad.length) {
       unreachableNote.hidden = true;
       return;
     }
+    // Names the numbers, not "this Business ID": with a hundred numbers on
+    // the account, a warning that does not say which one is only noise — and
+    // quotes the gateway, because "Invalid WhatsApp configuration" has so far
+    // always meant a mistyped Business ID, not a key problem.
+    const one = bad.length === 1;
     clear(unreachableNote).append(
-      "Templates for this Business ID cannot be listed with the A7 gateway key."
+      el("strong", {}, [`${bad.length} number${one ? "" : "s"} cannot list templates.`]),
+      ` The gateway does not know the Business ID on file, so nothing can be synced or created for ${one ? "it" : "them"} until the ID is corrected${isAdmin ? " in Numbers Management" : ""}. Every other number here is unaffected.`,
+      el(
+        "ul.tmc-notice__list",
+        {},
+        bad.map((n) => {
+          const { phone, name } = formatWaNumber(n);
+          return el("li", {}, [
+            el("strong", {}, [phone]),
+            [name, n.account_username].filter(Boolean).map((bit) => ` · ${bit}`).join(""),
+            ` — "${n.template_sync_error}"`,
+          ]);
+        })
+      )
     );
     unreachableNote.hidden = false;
   }
@@ -1144,12 +1229,37 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
   const numberSelect = el("select.field");
   const wabaNote = el("div.tplc-waba-note", {}, ["Loading numbers…"]);
   const deployAllInput = el("input", { type: "checkbox", checked: true, id: "tplc-deploy-all" });
-  const deployList = el("div.tplc-deploy-list");
+  // Closed by default. A hundred rows of checkboxes pushed Name, Body and the
+  // Submit button off the screen; one line saying how many are selected is
+  // what an admin needs, and the list opens only for someone changing it.
+  const deployList = el("div.tplc-deploy-list", { hidden: true });
+  const deployCount = el("span.tplc-deploy-toggle__count", {}, ["Loading numbers…"]);
+  const deployHint = el("span.tplc-deploy-toggle__hint");
+  const deployToggle = el(
+    "button.tplc-deploy-toggle",
+    { type: "button", "aria-expanded": "false", title: "Show or hide the list of numbers" },
+    [deployCount, deployHint]
+  );
+  const chevron = () => svg(["M6 9l6 6 6-6"], { size: 14 });
+  clear(deployHint).append("Choose numbers", chevron());
+  deployToggle.addEventListener("click", () => {
+    deployList.hidden = !deployList.hidden;
+    deployToggle.setAttribute("aria-expanded", String(!deployList.hidden));
+    clear(deployHint).append(deployList.hidden ? "Choose numbers" : "Done", chevron());
+  });
   let allNumbers = Array.isArray(numbers) ? numbers : [];
 
   function syncDeployAllFromRows() {
     const boxes = [...deployList.querySelectorAll('input[type="checkbox"]')];
-    deployAllInput.checked = boxes.length > 0 && boxes.every((box) => box.checked);
+    const picked = boxes.filter((box) => box.checked).length;
+    deployAllInput.checked = boxes.length > 0 && picked === boxes.length;
+    deployCount.textContent = !boxes.length
+      ? "No numbers available"
+      : picked === boxes.length
+        ? `All ${boxes.length} numbers selected`
+        : picked === 0
+          ? `None of ${boxes.length} numbers selected`
+          : `${picked} of ${boxes.length} numbers selected`;
   }
 
   function paintDeployTargets() {
@@ -1179,6 +1289,7 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     for (const box of deployList.querySelectorAll('input[type="checkbox"]')) {
       box.checked = deployAllInput.checked;
     }
+    syncDeployAllFromRows();
   });
 
   function paintNumbers() {
@@ -1232,6 +1343,7 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
           el("span", {}, ["Numbers"]),
           el("label.tplc-deploy-all", {}, [deployAllInput, " Select all"]),
         ]),
+        deployToggle,
         deployList,
       ])
     : el("label.tplc-field", {}, [el("span", {}, ["Number"]), numberSelect, wabaNote]);
@@ -1252,7 +1364,146 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     el("option", { value: "ur" }, ["Urdu"]),
   ]);
 
-  const headerInput = el("input.field", { type: "text", placeholder: "Header (optional)" });
+  /* --------------------------------------------------------------- header */
+
+  // Text is typed here. An image, video or document is a sample file that
+  // Meta reviews the template against — the agent attaches the real one each
+  // time they send. Text is the default so an empty box still means no header.
+  const headerKind = el("select.field.tplc-header__kind", { "aria-label": "Header type" }, [
+    el("option", { value: "TEXT" }, ["Text"]),
+    el("option", { value: "IMAGE" }, ["Image"]),
+    el("option", { value: "VIDEO" }, ["Video"]),
+    el("option", { value: "DOCUMENT" }, ["Document (PDF)"]),
+  ]);
+  const headerInput = el("input.field", { type: "text", placeholder: "Header text (optional)" });
+  const headerSample = { handle: "", format: "", name: "", size: 0, previewUrl: "", uploading: false };
+  const headerFile = el("input", { type: "file", hidden: true });
+  const headerPick = el(
+    "button.btn.btn--ghost.btn--sm",
+    {
+      type: "button",
+      onclick: () => {
+        // A silently disabled button read as "broken". Say why — right here
+        // beside the button, not in the error line below the fold.
+        if (headerMediaConfigured === false) {
+          headerStatus.classList.add("is-bad");
+          headerStatus.textContent =
+            "Cannot upload yet: this server has no way to send Meta a sample file (see the note below).";
+          headerCapNote.scrollIntoView({ block: "nearest" });
+          return;
+        }
+        errorEl.hidden = true;
+        headerFile.click();
+      },
+    },
+    [icon("paperclip", { size: 14 }), " Choose file"]
+  );
+  const headerStatus = el("span.tplc-media__status", {}, ["No file chosen yet"]);
+  const headerMediaRow = el("div.tplc-media__row", { hidden: true }, [headerPick, headerStatus, headerFile]);
+  const headerHint = el("span.tplc-field__hint", { hidden: true });
+  const headerCapNote = el("div.tplc-note.tplc-note--warn", { hidden: true });
+  // Unknown until the server answers; null keeps the button usable meanwhile.
+  let headerMediaConfigured = null;
+
+  const SAMPLE_ACCEPT = { IMAGE: "image/jpeg,image/png", VIDEO: "video/mp4", DOCUMENT: "application/pdf,.pdf" };
+  const SAMPLE_WORDS = { IMAGE: "JPEG or PNG up to 5 MB", VIDEO: "MP4 up to 16 MB", DOCUMENT: "PDF up to 100 MB" };
+
+  const isMediaHeader = () => Boolean(MEDIA_HEADERS[headerKind.value]);
+
+  function resetHeaderSample() {
+    if (headerSample.previewUrl) URL.revokeObjectURL(headerSample.previewUrl);
+    Object.assign(headerSample, { handle: "", format: "", name: "", size: 0, previewUrl: "", uploading: false });
+  }
+
+  function paintHeaderKind() {
+    const kind = headerKind.value;
+    const media = isMediaHeader();
+    headerInput.hidden = media;
+    headerMediaRow.hidden = !media;
+    headerHint.hidden = !media;
+    headerCapNote.hidden = !(media && headerMediaConfigured === false);
+    if (media) {
+      // A sample uploaded as an image is not a sample for a video.
+      if (headerSample.format && headerSample.format !== kind) resetHeaderSample();
+      headerFile.accept = SAMPLE_ACCEPT[kind];
+      headerHint.textContent = `${SAMPLE_WORDS[kind]}. Meta reviews this sample; agents attach the real ${MEDIA_HEADERS[kind]} each time they send.`;
+      headerPick.classList.toggle("is-off", headerMediaConfigured === false);
+      headerPick.title = headerMediaConfigured === false ? "Not available until the server can send Meta a sample file" : "";
+      if (!headerSample.uploading) {
+        headerStatus.classList.remove("is-bad");
+        headerStatus.textContent = headerSample.handle
+          ? `${headerSample.name} · ${formatBytes(headerSample.size)} · uploaded`
+          : "No file chosen yet";
+      }
+    }
+    updatePreview();
+  }
+
+  headerKind.addEventListener("change", paintHeaderKind);
+
+  headerFile.addEventListener("change", async () => {
+    const file = headerFile.files?.[0];
+    headerFile.value = "";
+    if (!file) return;
+    const kind = headerKind.value;
+
+    resetHeaderSample();
+    headerSample.uploading = true;
+    headerSample.format = kind;
+    headerStatus.classList.remove("is-bad");
+    headerStatus.textContent = `Uploading ${file.name}…`;
+    errorEl.hidden = true;
+    updatePreview();
+
+    try {
+      // The business account the sample is filed under: the first ticked
+      // number's, or the picked one. The handle itself is account-agnostic.
+      const firstTicked = isAdmin
+        ? deployList.querySelector('input[type="checkbox"]:checked')?.dataset.numberId
+        : null;
+      const firstNumber = firstTicked ? allNumbers.find((n) => String(n.id) === String(firstTicked)) : null;
+      const wabaId = isAdmin ? firstNumber?.waba_business_id || "" : numberSelect.value;
+      const result = await catalog.uploadTemplateHeaderMedia(file, kind, {
+        wabaId,
+        onProgress: (ratio) => {
+          headerStatus.textContent = `Uploading ${file.name}… ${Math.round(ratio * 100)}%`;
+        },
+      }).promise;
+      Object.assign(headerSample, {
+        handle: result.header_handle || "",
+        // Who minted it decides which route submits the template later.
+        via: result.via || "alots",
+        name: file.name,
+        size: file.size,
+        // Drawn from the local file, so the preview is the actual picture.
+        previewUrl: kind === "IMAGE" ? URL.createObjectURL(file) : "",
+      });
+      headerStatus.textContent = `${file.name} · ${formatBytes(file.size)} · uploaded`;
+    } catch (err) {
+      headerSample.format = "";
+      headerStatus.classList.add("is-bad");
+      headerStatus.textContent = err.message || "Upload failed.";
+    } finally {
+      headerSample.uploading = false;
+      updatePreview();
+    }
+  });
+
+  // Asked once when the form opens, so a server that cannot take a sample
+  // says so beside the picker rather than as the failure of an upload.
+  catalog
+    .headerMediaStatus()
+    .then((answer) => {
+      headerMediaConfigured = Boolean(answer?.configured);
+      if (!headerMediaConfigured) {
+        clear(headerCapNote).append(
+          answer?.detail || "Image, video and document headers are not available on this server yet."
+        );
+      }
+      paintHeaderKind();
+    })
+    .catch(() => {});
+
   const bodyTextarea = el("textarea.field", {
     rows: 4,
     placeholder: "Hello {{1}}, your appointment is on {{2}}.",
@@ -1426,12 +1677,30 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     el("div.tplc-phone__screen", {}, [el("div.tplc-out", {}, [previewBody])]),
   ]);
 
+  function sampleBubble(kind) {
+    if (kind === "IMAGE" && headerSample.previewUrl) {
+      return el("img.tplc-bubble__image", { src: headerSample.previewUrl, alt: "" });
+    }
+    const label = headerSample.handle
+      ? `${headerSample.name} · ${formatBytes(headerSample.size)}`
+      : headerSample.uploading
+        ? "Uploading…"
+        : `${MEDIA_HEADERS[kind]} header — no file chosen yet`;
+    return el("div.tplc-bubble__media", { class: headerSample.handle ? "" : "is-missing" }, [
+      mediaGlyph(kind),
+      el("span", {}, [label]),
+    ]);
+  }
+
   function updatePreview() {
-    paintVariables(headerInput.value, headerExamples, headerVars, "header");
+    const media = isMediaHeader();
+    paintVariables(media ? "" : headerInput.value, headerExamples, headerVars, "header");
     paintVariables(bodyTextarea.value, bodyExamples, bodyVars, "body");
 
     clear(previewBody);
-    if (headerInput.value.trim()) {
+    if (media) {
+      previewBody.append(sampleBubble(headerKind.value));
+    } else if (headerInput.value.trim()) {
       previewBody.append(
         el("div.tplc-bubble__header", {}, [withValues(headerInput.value.trim(), headerExamples)])
       );
@@ -1490,7 +1759,15 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     nameInput.value = row.name;
     nameHint.textContent = row.name || "lowercase_with_underscores";
     categorySelect.value = "UTILITY";
-    headerInput.value = row.header || "";
+    // A suggested wording comes with text or with no header; a sample file
+    // the agent already uploaded is kept unless the suggestion has text.
+    if (row.header) {
+      headerKind.value = "TEXT";
+      headerInput.value = row.header;
+    } else if (headerKind.value === "TEXT") {
+      headerInput.value = "";
+    }
+    paintHeaderKind();
     bodyTextarea.value = row.body || "";
     footerInput.value = row.footer || "";
     fillExampleStore(headerExamples, row.header_examples);
@@ -1575,7 +1852,7 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
         name: nameInput.value.trim(),
         category: categorySelect.value,
         language: langSelect.value,
-        header_text: headerInput.value.trim(),
+        header_text: isMediaHeader() ? "" : headerInput.value.trim(),
         body_text: bodyText,
         footer_text: footerInput.value.trim(),
       });
@@ -1606,7 +1883,12 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
       categorySelect,
     ]),
     el("label.tplc-field", {}, [el("span", {}, ["Language"]), langSelect]),
-    el("label.tplc-field", {}, [el("span", {}, ["Header"]), headerInput]),
+    el("div.tplc-field", {}, [
+      el("span", {}, ["Header"]),
+      el("div.tplc-header", {}, [headerKind, headerInput, headerMediaRow]),
+      headerHint,
+      headerCapNote,
+    ]),
     headerVars,
     el("label.tplc-field", {}, [
       el("div.tplc-field__head", {}, [el("span", {}, ["Body"]), addVariable]),
@@ -1654,7 +1936,12 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
         return "Body cannot start or end with a variable — Meta rejects that. Add words before {{1}} and after the last one.";
       }
     }
-    if (headerInput.value.trim().length > 60) return "Header text must be 60 characters or fewer.";
+    if (isMediaHeader()) {
+      if (headerSample.uploading) return "Wait for the header file to finish uploading.";
+      if (!headerSample.handle) return `Choose the ${MEDIA_HEADERS[headerKind.value]} for the header.`;
+    } else if (headerInput.value.trim().length > 60) {
+      return "Header text must be 60 characters or fewer.";
+    }
     if (footerInput.value.trim().length > 60) return "Footer text must be 60 characters or fewer.";
     for (const button of buttons) {
       if (!button.text.trim()) return "Every button needs a label, or remove it.";
@@ -1676,8 +1963,11 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
       name: nameInput.value.trim(),
       category: categorySelect.value,
       language: langSelect.value,
-      header_text: headerInput.value.trim(),
+      header_format: headerKind.value,
+      header_text: isMediaHeader() ? "" : headerInput.value.trim(),
       header_examples: headerExamples,
+      header_handle: isMediaHeader() ? headerSample.handle : "",
+      header_handle_via: isMediaHeader() ? headerSample.via || "alots" : "",
       body_text: bodyTextarea.value.trim(),
       body_examples: bodyExamples,
       footer_text: footerInput.value.trim(),

@@ -22,6 +22,14 @@ from .parse import digits, normalize_webhook_payload
 logger = logging.getLogger(__name__)
 
 
+@shared_task(ignore_result=True)
+def panel_keepalive():
+    """Keep the alots panel session alive — see apps/gateway/panel.py."""
+    from .panel import keepalive_session
+
+    return keepalive_session()
+
+
 def _resolve_waba_number(value):
     """Match catalog row by Meta phone_number_id, or by our MSISDN on ``from``.
 

@@ -94,14 +94,26 @@ function fieldLabel(label, control, hint) {
 }
 
 export function openCampaignModal() {
-  const numberFilter = el("input.field.camp-numpick__search", {
+  const numberSelect = el("select.camp-line__native", { hidden: true, tabindex: "-1" });
+  const numberValue = el("span.camp-line__value.is-placeholder", {}, ["WhatsApp number"]);
+  const numberSearch = el("input.camp-line__input", {
     type: "search",
-    placeholder: "Search by name or number…",
+    placeholder: "Search name or number",
     autocomplete: "off",
+    hidden: true,
+    "aria-label": "Search WhatsApp numbers",
   });
-  const numberSelect = el("select.field.camp-numpick__select");
-  const numberPicker = el("div.camp-numpick", {}, [numberFilter, numberSelect]);
+  const numberList = el("ul.camp-line__list", { hidden: true, role: "listbox" });
+  const numberBox = el("div.camp-line__box", {
+    tabindex: "0",
+    role: "combobox",
+    "aria-expanded": "false",
+    "aria-haspopup": "listbox",
+  }, [numberValue, numberSearch]);
+  const numberPicker = el("div.camp-line", {}, [numberBox, numberList, numberSelect]);
   const templateSelect = el("select.field", { disabled: true });
+  const templateField = fieldLabel("Approved template", templateSelect);
+  templateField.hidden = true;
   const nameInput = el("input.field", {
     type: "text",
     placeholder: "e.g. March owner follow-up",
@@ -192,14 +204,11 @@ export function openCampaignModal() {
         el("span.camp-step", {}, ["1"]),
         el("div", {}, [
           el("h3.camp-card__title", {}, ["Number & template"]),
-          el("p.camp-card__sub", {}, ["Pick the WhatsApp line and an approved Meta template."]),
         ]),
       ]),
-      el("div.camp-grid", {}, [
-        fieldLabel("From WhatsApp number", numberPicker, "Type to filter the list — name or digits."),
-        fieldLabel("Approved template", templateSelect),
-      ]),
-      fieldLabel("Campaign name", nameInput, "Optional — defaults to template name + today’s date."),
+      numberPicker,
+      templateField,
+      fieldLabel("Campaign name", nameInput),
     ]),
     el("section.camp-card", {}, [
       el("header.camp-card__head", {}, [
@@ -318,9 +327,14 @@ export function openCampaignModal() {
 
   const body = el("div.camp-shell", {}, [tabs, newPane, historyPane]);
 
+  document.addEventListener("keydown", onNumberKey, true);
+  document.addEventListener("pointerdown", onNumberPointer, true);
+
   const dialog = modal(titleEl, body, {
     wide: true,
     onClose: () => {
+      document.removeEventListener("keydown", onNumberKey, true);
+      document.removeEventListener("pointerdown", onNumberPointer, true);
       if (state.pollTimer) clearInterval(state.pollTimer);
       if (state.histPollTimer) clearInterval(state.histPollTimer);
       if (state.headerMedia?.previewUrl) URL.revokeObjectURL(state.headerMedia.previewUrl);
@@ -656,27 +670,96 @@ export function openCampaignModal() {
     return false;
   }
 
-  function fillNumberOptions() {
+  function syncHiddenNumbers() {
     const selected = numberSelect.value;
-    const query = numberFilter.value;
     clear(numberSelect);
-    numberSelect.append(el("option", { value: "" }, ["Select number…"]));
-    let shown = 0;
+    numberSelect.append(el("option", { value: "" }, [""]));
     for (const n of state.numbers) {
-      if (!numberMatchesQuery(n, query)) continue;
-      numberSelect.append(
-        el("option", { value: String(n.id) }, [numberOptionLabel(n)])
-      );
-      shown += 1;
-    }
-    if (query.trim() && !shown) {
-      numberSelect.append(
-        el("option", { value: "", disabled: true }, ["No numbers match that search"])
-      );
+      numberSelect.append(el("option", { value: String(n.id) }, [numberOptionLabel(n)]));
     }
     if ([...numberSelect.options].some((opt) => opt.value === selected && selected)) {
       numberSelect.value = selected;
     }
+    paintNumberFace();
+  }
+
+  function paintNumberFace() {
+    const chosen = state.numbers.find((n) => String(n.id) === String(numberSelect.value));
+    numberValue.textContent = chosen ? numberOptionLabel(chosen) : "WhatsApp number";
+    numberValue.classList.toggle("is-placeholder", !chosen);
+  }
+
+  function renderNumberList() {
+    clear(numberList);
+    const query = numberSearch.value;
+    let shown = 0;
+    for (const n of state.numbers) {
+      if (!numberMatchesQuery(n, query)) continue;
+      shown += 1;
+      const on = String(n.id) === String(numberSelect.value);
+      numberList.append(
+        el("li", {}, [
+          el(`button.camp-line__opt${on ? ".is-on" : ""}`, {
+            type: "button",
+            role: "option",
+            "aria-selected": on ? "true" : "false",
+            onclick: (event) => {
+              event.stopPropagation();
+              chooseNumber(n.id);
+            },
+          }, [numberOptionLabel(n)]),
+        ])
+      );
+    }
+    if (!shown) {
+      numberList.append(
+        el("li.camp-line__empty", {}, [query.trim() ? "No numbers match" : "No numbers"])
+      );
+    }
+  }
+
+  function openNumberList() {
+    state.numberOpen = true;
+    numberSearch.hidden = false;
+    numberValue.hidden = true;
+    numberList.hidden = false;
+    numberBox.classList.add("is-open");
+    numberBox.setAttribute("aria-expanded", "true");
+    numberSearch.value = "";
+    renderNumberList();
+    numberSearch.focus();
+  }
+
+  function closeNumberList() {
+    if (!state.numberOpen) return;
+    state.numberOpen = false;
+    numberSearch.hidden = true;
+    numberValue.hidden = false;
+    numberList.hidden = true;
+    numberBox.classList.remove("is-open");
+    numberBox.setAttribute("aria-expanded", "false");
+    paintNumberFace();
+  }
+
+  function chooseNumber(id) {
+    numberSelect.value = String(id);
+    closeNumberList();
+    loadTemplates();
+    refreshSendState();
+  }
+
+  function onNumberKey(event) {
+    if (!state.numberOpen || event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    closeNumberList();
+  }
+
+  function onNumberPointer(event) {
+    if (!state.numberOpen) return;
+    if (numberPicker.contains(event.target)) return;
+    closeNumberList();
   }
 
   async function loadNumbers() {
@@ -687,8 +770,8 @@ export function openCampaignModal() {
       toast(err?.message || "Could not load numbers", "err");
       state.numbers = [];
     }
-    numberFilter.value = "";
-    fillNumberOptions();
+    syncHiddenNumbers();
+    if (state.numberOpen) renderNumberList();
   }
 
   async function loadTemplates() {
@@ -697,8 +780,9 @@ export function openCampaignModal() {
     templateSelect.disabled = true;
     state.templates = [];
     renderFields();
+    templateField.hidden = !id;
     if (!id) {
-      templateSelect.append(el("option", { value: "" }, ["Pick a number first"]));
+      templateSelect.append(el("option", { value: "" }, ["Select approved template…"]));
       return;
     }
     templateSelect.append(el("option", { value: "" }, ["Loading…"]));
@@ -1402,12 +1486,21 @@ export function openCampaignModal() {
     }, 2500);
   }
 
-  numberFilter.addEventListener("input", () => {
-    fillNumberOptions();
+  numberBox.addEventListener("click", () => {
+    if (!state.numberOpen) openNumberList();
   });
-  numberSelect.addEventListener("change", () => {
-    loadTemplates();
-    refreshSendState();
+  numberBox.addEventListener("keydown", (event) => {
+    if (state.numberOpen) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openNumberList();
+    }
+  });
+  numberSearch.addEventListener("input", () => renderNumberList());
+  numberSearch.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    numberList.querySelector(".camp-line__opt")?.click();
   });
   templateSelect.addEventListener("change", () => {
     renderFields();

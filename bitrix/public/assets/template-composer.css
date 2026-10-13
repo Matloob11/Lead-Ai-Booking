@@ -1,0 +1,509 @@
+/* Template composer — fields on the left, the customer's phone on the right.
+   Own file, own .tplc- prefix, so it cannot collide with the inbox or with the
+   companion modules' styles. */
+
+.tplc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+  max-height: min(78vh, 720px);
+}
+
+.tplc-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: min(78vh, 720px);
+}
+
+.tplc-right {
+  display: flex;
+  justify-content: center;
+  position: sticky;
+  top: 0;
+}
+
+/* -------------------------------------------------- recipient + search */
+
+.tplc-recipient {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tplc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tplc-field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.tplc-search {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.tplc-search:focus {
+  outline: none;
+  border-color: var(--navy-soft);
+}
+
+/* ------------------------------------------------------ template list */
+
+.tplc-list {
+  flex: 0 0 auto;
+  max-height: 210px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.tplc-item {
+  display: block;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tplc-item:last-child {
+  border-bottom: 0;
+}
+
+.tplc-item:hover {
+  background: var(--menu-hover);
+}
+
+.tplc-item.is-selected {
+  background: #fff;
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.tplc-item__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.tplc-item__name {
+  font-weight: 650;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tplc-item__lang {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tplc-item__text {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tplc-item__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.tplc-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Marketing templates share Meta's per-customer daily cap, so they are the
+   ones that come back as "not delivered" when nothing is wrong with the send.
+   Worth seeing before choosing, not after. */
+.tplc-tag--marketing {
+  background: #fdf0e3;
+  color: #a05a17;
+}
+
+.tplc-tag--utility {
+  background: #e6f2ec;
+  color: var(--ok);
+}
+
+.tplc-tag--vars,
+.tplc-tag--btns,
+.tplc-tag--media {
+  background: var(--line);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------- fields */
+
+.tplc-form {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-right: 2px;
+  min-height: 90px;
+}
+
+.tplc-form__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tplc-empty,
+.tplc-note {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.tplc-media__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tplc-media__status {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tplc-error {
+  margin: 0;
+}
+
+.tplc-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+/* -------------------------------------------------------- phone preview */
+
+.tplc-phone {
+  width: 300px;
+  border: 8px solid #101a26;
+  border-radius: 30px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(14, 42, 71, 0.24);
+  display: flex;
+  flex-direction: column;
+}
+
+.tplc-phone__bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  background: #075e54;
+  color: #fff;
+}
+
+.tplc-phone__avatar {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.tplc-phone__who {
+  min-width: 0;
+}
+
+.tplc-phone__name {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tplc-phone__sub {
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+/* The doodle wallpaper in two flat layers — no image to ship, and it reads as
+   WhatsApp at a glance, which is the whole point of the frame. */
+.tplc-phone__screen {
+  flex: 1;
+  min-height: 340px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 14px 10px;
+  background-color: #e5ddd5;
+  background-image:
+    radial-gradient(circle at 20% 25%, rgba(255, 255, 255, 0.5) 0 2px, transparent 2px),
+    radial-gradient(circle at 70% 65%, rgba(255, 255, 255, 0.35) 0 3px, transparent 3px);
+  background-size: 46px 46px, 74px 74px;
+}
+
+.tplc-out {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.tplc-bubble {
+  max-width: 90%;
+  padding: 7px 9px 5px;
+  border-radius: 8px 2px 8px 8px;
+  background: #d9fdd3;
+  color: #111b21;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.13);
+  word-break: break-word;
+}
+
+.tplc-bubble.is-empty {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tplc-bubble__hint {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.tplc-bubble__header {
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.tplc-bubble__image {
+  display: block;
+  width: 100%;
+  border-radius: 5px;
+  margin-bottom: 5px;
+}
+
+.tplc-bubble__media {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px;
+  margin-bottom: 5px;
+  border-radius: 5px;
+  background: rgba(11, 20, 26, 0.07);
+  font-size: 11.5px;
+}
+
+.tplc-bubble__media.is-missing {
+  border: 1px dashed rgba(11, 20, 26, 0.3);
+  background: transparent;
+  color: #7a5b18;
+}
+
+.tplc-bubble__body {
+  white-space: pre-wrap;
+}
+
+.tplc-bubble__body code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.tplc-bubble__footer {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(17, 27, 33, 0.55);
+}
+
+.tplc-bubble__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: rgba(17, 27, 33, 0.45);
+}
+
+.tplc-bubble__meta svg {
+  color: #53bdeb;
+}
+
+/* An unfilled {{n}}, left visible so the gap is obvious in the message itself
+   rather than only in a validation line under the form. */
+.tplc-hole {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #ffe8b8;
+  color: #8a5a00;
+  font-weight: 650;
+}
+
+.tplc-btns {
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.tplc-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+  color: #027eb5;
+  font-size: 12.5px;
+  font-weight: 550;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.13);
+}
+
+.tplc-btn--more {
+  color: rgba(17, 27, 33, 0.6);
+}
+
+/* ------------------------------------------------------------ dark theme */
+
+body[data-wa-theme="glass-dark"] .tplc-search,
+body[data-wa-theme="glass-dark"] .tplc-item.is-selected {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--menu-line);
+  color: var(--menu-ink);
+}
+
+body[data-wa-theme="glass-dark"] .tplc-list,
+body[data-wa-theme="glass-dark"] .tplc-empty,
+body[data-wa-theme="glass-dark"] .tplc-note {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--menu-line);
+  color: var(--menu-ink);
+}
+
+body[data-wa-theme="glass-dark"] .tplc-item {
+  border-bottom-color: var(--menu-line);
+  color: var(--menu-ink);
+}
+
+body[data-wa-theme="glass-dark"] .tplc-phone__screen {
+  background-color: #0b141a;
+  background-image:
+    radial-gradient(circle at 20% 25%, rgba(255, 255, 255, 0.06) 0 2px, transparent 2px),
+    radial-gradient(circle at 70% 65%, rgba(255, 255, 255, 0.04) 0 3px, transparent 3px);
+}
+
+body[data-wa-theme="glass-dark"] .tplc-bubble {
+  background: #005c4b;
+  color: #e9edef;
+}
+
+body[data-wa-theme="glass-dark"] .tplc-bubble__footer,
+body[data-wa-theme="glass-dark"] .tplc-bubble__meta {
+  color: rgba(233, 237, 239, 0.6);
+}
+
+body[data-wa-theme="glass-dark"] .tplc-btn {
+  background: #1f2c33;
+  color: #53bdeb;
+}
+
+/* ------------------------------------------------------------ narrow */
+
+@media (max-width: 860px) {
+  .tplc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tplc-right {
+    position: static;
+    order: -1;
+  }
+
+  .tplc-phone {
+    width: 270px;
+  }
+
+  .tplc-phone__screen {
+    min-height: 220px;
+  }
+}
+
+/* Warning that this customer already has a thread. Not an error — sending is
+   still allowed; it only makes the second thread a deliberate choice. */
+.tplc-dup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #fdf3e2;
+  border: 1px solid #f0dfbe;
+  color: #8a6d21;
+  font-size: 12.5px;
+}
+
+.tplc-dup[hidden] {
+  display: none;
+}
+
+/* The plate is amber whatever the theme does, so the button on it states its
+   own colours. It avoids the shared .btn classes entirely — the themes force
+   colours on those with !important, which would be unreadable here. */
+.tplc-dup__btn {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid rgb(206 160 70 / 55%);
+  color: #7a5f1b;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tplc-dup__btn:hover {
+  background: #fffaf0;
+  border-color: #c8a34a;
+}

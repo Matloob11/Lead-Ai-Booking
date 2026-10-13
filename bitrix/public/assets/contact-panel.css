@@ -1,0 +1,424 @@
+/* Contact profile — a phone-width drawer against the right edge, so the thread
+   it belongs to stays visible behind it. Own file, own .cp- prefix. */
+
+.cp {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  width: min(360px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--menu-bg);
+  color: var(--menu-ink);
+  border-left: 1px solid var(--menu-line);
+  box-shadow: -18px 0 40px rgba(14, 42, 71, 0.18);
+  animation: cp-in 160ms ease-out;
+}
+
+@keyframes cp-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp {
+    animation: none;
+  }
+}
+
+.cp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--menu-line);
+}
+
+.cp-head__title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cp-x {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.cp-x:hover {
+  background: var(--menu-hover);
+}
+
+.cp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cp-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------- identity */
+
+.cp-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cp-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: #fff;
+  font-size: 19px;
+  font-weight: 650;
+}
+
+.cp-identity__text {
+  min-width: 0;
+}
+
+.cp-identity__name {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.cp-identity__wa {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cp-identity__profile {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------- blocks */
+
+.cp-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cp-block__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cp-saved {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cp-field > span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.cp-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--menu-line);
+  border-radius: 8px;
+  background: var(--menu-hover);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.cp-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.cp-notes {
+  resize: vertical;
+  min-height: 70px;
+  line-height: 1.5;
+}
+
+.cp-note {
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: var(--menu-hover);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* ----------------------------------------------------------------- rows */
+
+.cp-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+
+.cp-row__label {
+  color: var(--muted);
+}
+
+.cp-row__value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  word-break: break-word;
+}
+
+.cp-row__value--muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.cp-num,
+.cp-label {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--menu-hover);
+  font-size: 11.5px;
+}
+
+.cp-label {
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- stats */
+
+.cp-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 6px;
+}
+
+.cp-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  border-radius: 9px;
+  background: var(--menu-hover);
+}
+
+.cp-stat b {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cp-stat span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.cp-stat--bad b {
+  color: var(--err);
+}
+
+/* ------------------------------------------------------------- handovers */
+
+.cp-timeline {
+  margin: 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  border-left: 2px solid var(--menu-line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cp-event {
+  position: relative;
+}
+
+.cp-event::before {
+  content: "";
+  position: absolute;
+  left: -19px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+}
+
+.cp-event__line {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.cp-event__reason {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.cp-event__meta {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ----------------------------------------------------------------- files */
+
+.cp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.cp-thumb {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  background-color: var(--menu-hover);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+
+.cp-thumb:hover {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.cp-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--menu-hover);
+  color: inherit;
+  text-decoration: none;
+  font-size: 12.5px;
+}
+
+.cp-file:hover {
+  outline: 1px solid var(--gold);
+}
+
+.cp-file__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-file__size {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* -------------------------------------------------------- other chats */
+
+.cp-other {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--menu-line);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cp-other:hover {
+  background: var(--menu-hover);
+}
+
+.cp-other__num {
+  font-size: 12.5px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-other__when {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cp-other__last {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The thread makes room rather than being covered, so the message being
+   discussed stays readable while the profile is open. */
+@media (min-width: 1100px) {
+  body.has-cp .app {
+    padding-right: 360px;
+  }
+}
+
+/* The profile is a whole screen on a narrow one, and the thread behind it
+   would not have been readable anyway. */
+@media (max-width: 520px) {
+  .cp {
+    width: 100vw;
+  }
+}

@@ -1,6 +1,7 @@
 import csv
+import logging
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import FileResponse, Http404, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -13,10 +14,13 @@ from rest_framework.response import Response
 
 from apps.catalog.models import WaTemplate
 from apps.gateway.client import AlotsError
+from apps.leadai.lane import hide_lead_ai
+from apps.leadbot.models import LeadAutomation
 
 from . import services
 from .events import publish_conversation
 from .models import Conversation, Label, MediaAsset, Message, QuickReply, Reminder, SharedAsset
+from .send_health import with_send_health
 from .serializers import (
     serialize_agent,
     serialize_conversation,
@@ -26,6 +30,8 @@ from .serializers import (
     serialize_reminder,
     serialize_shared_asset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Echo:
@@ -77,13 +83,27 @@ SHARED_ASSET_TYPES = {
 def _visible_conversations(user):
     """Chats this agent may open.
 
-    Everyone assigned to a number sees every chat on it. A transferred chat is
-    also visible to the receiving agent — only that thread, not the rest of
-    the number.
+    A thread belongs to ``assigned_agent``. Covering a number does not dump
+    every chat on it into the list. Unassigned inbound on a held number stays
+    visible until ingest claims it for the primary. A transfer is visible to
+    the receiving agent only. Panel admins still see the whole roster.
     """
+    from .visibility import visible_conversation_q
+
     return (
-        Conversation.objects.filter(Q(number__in=user.visible_numbers) | Q(assigned_agent=user))
-        .select_related("contact", "number", "assigned_agent", "linked_conversation__number")
+        Conversation.objects.filter(visible_conversation_q(user))
+        .select_related(
+            "contact", "number", "assigned_agent", "linked_conversation__number",
+            # serialize_conversation's lead_ai flag, without a query per chat.
+            "lead_ai_chat",
+        )
+        .prefetch_related(
+            Prefetch(
+                "lead_automations",
+                queryset=LeadAutomation.objects.order_by("-id"),
+                to_attr="leadbot_rows",
+            )
+        )
         .distinct()
     )
 
@@ -102,7 +122,9 @@ def _transferred_in_q(user, own_ids):
 
 @api_view(["GET"])
 def conversation_list(request):
-    queryset = _visible_conversations(request.user)
+    # A chat a Lead AI campaign sent to the Lead AI screen is listed there, not
+    # here, until an agent moves it back (apps/leadai).
+    queryset = hide_lead_ai(_visible_conversations(request.user))
     own_ids = _own_number_ids(request.user)
 
     number_id = request.GET.get("number")
@@ -555,7 +577,10 @@ def search(request):
             | Q(conversation__contact__wa_id__icontains=term)
             | Q(media__file_name__icontains=term)
         )
-        .select_related("conversation", "conversation__contact", "conversation__number", "sent_by", "media")
+        .select_related(
+            "conversation", "conversation__contact", "conversation__number", "sent_by", "media",
+            "conversation__lead_ai_chat",
+        )
     )
 
     if request.GET.get("conversation"):
@@ -655,6 +680,11 @@ def start(request):
     except services.SendBlocked as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
     except AlotsError as exc:
+        logger.warning(
+            "New contact template refused on number %s: %s",
+            number.pk,
+            exc,
+        )
         return Response({"detail": f"Gateway rejected the template: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
 
     return Response(serialize_conversation(conversation), status=status.HTTP_201_CREATED)
@@ -701,7 +731,7 @@ def lookup(request):
     # arrived on. The CRM tab printed "Channel #16" — a database id shown to an
     # agent as though it meant something. The join is done here rather than
     # left to the caller, because there is exactly one right answer to it.
-    numbers = [serialize_number(n) for n in request.user.visible_numbers]
+    numbers = [serialize_number(n) for n in with_send_health(request.user.visible_numbers)]
     by_id = {n["id"]: n for n in numbers}
 
     rows = []
@@ -883,7 +913,10 @@ def starred(request):
         Message.objects.filter(
             conversation__in=_visible_conversations(request.user), is_starred=True
         )
-        .select_related("conversation", "conversation__contact", "conversation__number", "media", "sent_by")
+        .select_related(
+            "conversation", "conversation__contact", "conversation__number", "media", "sent_by",
+            "conversation__lead_ai_chat",
+        )
         .order_by("-created_at")
     )
 

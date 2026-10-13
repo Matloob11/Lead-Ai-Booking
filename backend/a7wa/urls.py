@@ -17,6 +17,8 @@ urlpatterns = [
     path("api/crm/", include("apps.crmlink.urls")),
     path("api/campaigns/", include("apps.campaigns.urls")),
     path("api/inboxai/", include("apps.inboxai.urls")),
+    path("api/leadbot/", include("apps.leadbot.urls")),
+    path("api/leadai/", include("apps.leadai.urls")),
     path("api/feedback/", include("apps.feedback.urls")),
     path("api/auth/", include("apps.accounts.urls")),
     # The same app under the name it actually has. /api/auth/ came first and the

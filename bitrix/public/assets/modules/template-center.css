@@ -423,6 +423,102 @@
   white-space: nowrap;
 }
 
+/* The numbers picker, folded behind its count. Opening it is a click; the
+   count is what an admin reads before pressing Submit. */
+.tplc-deploy-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tplc-deploy-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tplc-deploy-toggle__count {
+  font-weight: 650;
+}
+
+.tplc-deploy-toggle__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.tplc-deploy-toggle[aria-expanded="true"] .tplc-deploy-toggle__hint svg {
+  transform: rotate(180deg);
+}
+
+/* Header row: the kind on the left, then either the text box or the file
+   picker. Both carry `hidden`, which has to beat the flex/grid display. */
+.tplc-header {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.tplc-header > [hidden] {
+  display: none !important;
+}
+
+.tplc-header .tplc-media__row {
+  min-width: 0;
+}
+
+.tplc-media__status.is-bad {
+  color: #b42318;
+  white-space: normal;
+}
+
+/* The file button when the server has no Meta token: still clickable so it
+   can say why, but plainly not the normal button. */
+.tplc-header .btn.is-off {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.tplc-note--warn {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: inherit;
+}
+
+.tplc-note[hidden],
+.tplc-field__hint[hidden] {
+  display: none !important;
+}
+
+/* The unreachable-numbers notice lists each number on its own line. */
+.tmc-notice__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.tmc-notice__list li {
+  margin: 2px 0;
+}
+
+@media (max-width: 720px) {
+  .tplc-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Create-template Utility rewrite — lives here because Create already loads
    this file (index + JS inject). Prefix .tplc-ai- so it cannot collide. */
 

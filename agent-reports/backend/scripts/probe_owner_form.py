@@ -12,9 +12,9 @@ def main() -> None:
     c = BitrixClient(webhook)
     for params in (
         {"entityTypeId": 1042, "scope": "C"},
-        {"entityTypeId": 1042, "scope": "C", "extras": {"categoryId": 13}},
-        {"entityTypeId": 1042, "scope": "C", "extras": {"categoryId": 14}},
-        {"entityTypeId": 1042, "scope": "P", "userId": 1, "extras": {"categoryId": 13}},
+        {"entityTypeId": 1042, "scope": "C", "categoryId": 13},
+        {"entityTypeId": 1042, "scope": "C", "categoryId": 14},
+        {"entityTypeId": 1042, "scope": "P", "userId": 1},
     ):
         try:
             r = c._post("crm.item.details.configuration.get", params)

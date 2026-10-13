@@ -42,6 +42,11 @@ def describe_alots_failure(fallback, payload=None):
             f"{sentence} This From-number cannot send until the provider unbans it. "
             "Pick another number and try again."
         )
+    if sentence.strip().lower() in {
+        "internal server error occurred.",
+        "an unexpected error occurred.",
+    }:
+        return "The WhatsApp provider had an internal error. Send the message again."
     return sentence
 
 
@@ -74,6 +79,31 @@ class AlotsError(Exception):
         self.payload = payload
 
 
+def _is_transient_send_failure(exc):
+    """Gateway blips that the same payload often survives a second later."""
+    code = exc.status_code
+    if code == 500 and "internal" in str(exc).lower():
+        return True
+    if code in (502, 503):
+        return True
+    # IIS/alots HTML 404, not Meta's JSON ``error`` object.
+    if code == 404 and exc.payload is None:
+        return True
+    return False
+
+
+def _payload_without_plus_to(payload):
+    """Alots 500s on some ``+92…`` sends that work as bare digits."""
+    if not isinstance(payload, dict):
+        return None
+    to = payload.get("to")
+    if not isinstance(to, str) or not to.startswith("+") or len(to) < 8:
+        return None
+    alt = dict(payload)
+    alt["to"] = to[1:]
+    return alt
+
+
 class AlotsClient:
     def __init__(self, api_key=None, base_url=None, version=None, timeout=None):
         self.api_key = api_key or settings.ALOTS_API_KEY
@@ -91,20 +121,36 @@ class AlotsClient:
             "Accept": "application/json",
         }
 
-    def _request(self, method, path, *, json=None, files=None, params=None, log_body=True, headers=None, redact_response=False, timeout=None):
+    def _request(self, method, path, *, json=None, files=None, data=None, content=None, params=None, log_body=True, headers=None, redact_response=False, timeout=None):
         url = f"{self.base_url}{path}"
         started = time.monotonic()
+        if content is not None:
+            # A raw upload: neither the bytes nor the session's own signature
+            # (it rides in ``params``) belong in the audit row.
+            logged = None
+        elif log_body:
+            logged = json if json is not None else data
+        else:
+            logged = params if params else None
         record = ApiCall(
             method=method,
-            path=path,
-            request_body=json if log_body else (params if params else None),
+            # An upload session id carries its own ?sig=; the audit row keeps the route, not the signature.
+            path=path.split("?", 1)[0][:255],
+            request_body=logged,
         )
         use_headers = headers or self._headers
 
         try:
             with httpx.Client(timeout=timeout or self.timeout, follow_redirects=False) as client:
                 response = client.request(
-                    method, url, headers=use_headers, json=json, files=files, params=params
+                    method,
+                    url,
+                    headers=use_headers,
+                    json=json,
+                    files=files,
+                    data=data,
+                    content=content,
+                    params=params,
                 )
         except httpx.HTTPError as exc:
             record.error = str(exc)
@@ -134,8 +180,19 @@ class AlotsClient:
 
         if response.status_code >= 400:
             raw = f"{method} {path} -> HTTP {response.status_code}"
+            sentence = describe_alots_failure(raw, body if not redact_response else None)
+            # A plain-text refusal ("Invalid WhatsApp configuration.") is not
+            # JSON, so it used to vanish behind the bare status code.
+            text = " ".join(response.text.split())
+            if sentence == raw and body is None and text and not text.startswith("<"):
+                sentence = f"{raw}: {text[:200]}"
+            elif sentence == raw and body is None and response.status_code in (404, 502, 503):
+                sentence = (
+                    "The WhatsApp provider was briefly unreachable. "
+                    "Send the message again."
+                )
             raise AlotsError(
-                describe_alots_failure(raw, body if not redact_response else None),
+                sentence,
                 status_code=response.status_code,
                 payload=body if not redact_response else None,
             )
@@ -160,6 +217,59 @@ class AlotsClient:
             f"/{self.version}/{waba_business_id}/message_templates",
             json=payload,
         )
+
+    def upload_sample(self, payload, filename, mime_type):
+        """Resumable Upload through the gateway: the handle a media header is reviewed with.
+
+        Meta reviews an image, video or document header against a sample, and
+        that sample is not a media id but an ``h`` handle from the Resumable
+        Upload API. The gateway brokers that API with the ordinary key (it
+        swaps it for Meta's token on the way through; alots documented the
+        route on 2026-10-08), so no Meta token and no panel cookie are needed:
+        open a session with the file's size, type and name, then send the
+        bytes to it. Meta may answer with two handles, one per region,
+        newline-separated; the first one goes into ``example.header_handle``.
+        The handle is app-scoped, so one upload serves every business account
+        the same template is submitted to, and the create must go through the
+        gateway too so the handle and the template belong to the same app.
+        """
+        opened = (
+            self._request(
+                "POST",
+                f"/{self.version}/app/uploads",
+                data={
+                    "file_length": str(len(payload)),
+                    "file_type": mime_type,
+                    "file_name": filename,
+                },
+            )
+            or {}
+        )
+        session = str(opened.get("id") or "").strip()
+        if not session.startswith("upload:"):
+            raise AlotsError("The gateway did not open an upload session for the sample file.")
+        # "upload:<blob>?sig=<signature>": the signature travels as a query
+        # parameter so it is sent verbatim rather than re-encoded in the path.
+        session_path, _, query = session.partition("?")
+        params = dict(part.split("=", 1) for part in query.split("&") if "=" in part) or None
+        finished = (
+            self._request(
+                "POST",
+                f"/{self.version}/{session_path}",
+                params=params,
+                content=payload,
+                headers={**self._headers, "file_offset": "0", "Content-Type": mime_type},
+                log_body=False,
+                timeout=max(self.timeout, 180),
+            )
+            or {}
+        )
+        # Two handles may come back, one per region, whitespace-separated; the first one is ours.
+        handles = str(finished.get("h") or "").split()
+        handle = handles[0] if handles else ""
+        if not handle:
+            raise AlotsError("The gateway accepted the file but returned no media handle.")
+        return handle
 
     def delete_template(self, waba_business_id, name, *, meta_template_id=""):
         """Remove a template from Meta by name.
@@ -253,8 +363,33 @@ class AlotsClient:
 
     # Messages -------------------------------------------------------------
     def send_raw(self, phone_number_id, payload):
-        """Post a Meta Cloud API payload verbatim and return the response."""
-        return self._request("POST", f"/{self.version}/{phone_number_id}/messages", json=payload)
+        """Post a Meta Cloud API payload verbatim and return the response.
+
+        Alots sometimes answers a valid send with HTTP 500, a bare HTML 404,
+        or 502/503 while the same payload works a moment later. One retry
+        covers that blip. A Meta JSON 404 (wrong phone id) is not retried.
+
+        Pakistan ``+92…`` is a second case: the same recipient can 500 with
+        the leading plus and 200 without it (UAE keeps the plus so Alots
+        does not prefix India 91). After a transient failure we try once
+        without the plus, then one last time with the original payload.
+        """
+        path = f"/{self.version}/{phone_number_id}/messages"
+        try:
+            return self._request("POST", path, json=payload)
+        except AlotsError as exc:
+            if not _is_transient_send_failure(exc):
+                raise
+            alt = _payload_without_plus_to(payload)
+            if alt is not None:
+                time.sleep(0.6)
+                try:
+                    return self._request("POST", path, json=alt)
+                except AlotsError as exc2:
+                    if not _is_transient_send_failure(exc2):
+                        raise
+            time.sleep(1.2)
+            return self._request("POST", path, json=payload)
 
     def send_text(self, phone_number_id, to, body, preview_url=False, reply_to_wamid=None):
         payload = {

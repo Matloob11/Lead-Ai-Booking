@@ -52,8 +52,10 @@
 }
 
 .modal__box--campaign {
-  width: min(100%, 900px) !important;
-  max-width: min(100%, 900px) !important;
+  width: min(100%, 1080px) !important;
+  max-width: min(100%, 1080px) !important;
+  height: 100%;
+  max-height: 100% !important;
 }
 
 .modal__box--wide,
@@ -86,8 +88,12 @@
   min-height: 0 !important;
 }
 
-.camp-shell {
-  overflow: auto;
+.modal__box--campaign > .camp-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cp {
@@ -374,13 +380,18 @@
 /* ------------------------------------------------------------------ campaign */
 
 [data-wa-theme="glass-dark"] .camp-tabs,
-[data-wa-theme="glass-dark"] .camp-left,
 [data-wa-theme="glass-dark"] .camp-actions,
 [data-wa-theme="glass-dark"] .camp-hist.camp-pane.is-active {
   background: transparent !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
+[data-wa-theme="glass-dark"] .modal__box--campaign .camp-left {
+  background: rgba(8, 16, 28, 0.78) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-wa-theme="glass-dark"] .modal__box--campaign .camp-card,
 [data-wa-theme="glass-dark"] .camp-card,
 [data-wa-theme="glass-dark"] .camp-step,
 [data-wa-theme="glass-dark"] .camp-format,
@@ -418,8 +429,9 @@
   color: #9fb0c6 !important;
 }
 
+[data-wa-theme="glass-dark"] .modal__box--campaign .camp-right,
 [data-wa-theme="glass-dark"] .camp-right {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(6, 14, 26, 0.72) !important;
 }
 
 [data-wa-theme="glass-dark"] .camp-chip--key {
