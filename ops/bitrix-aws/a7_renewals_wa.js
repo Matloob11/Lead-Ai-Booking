@@ -512,6 +512,9 @@
       ".a7-rwa-leadai:hover{background:#f8fafc;}",
       ".a7-rwa-leadai.is-on{border-color:#7c3aed;background:#f5f3ff;color:#5b21b6;}",
       ".a7-rwa-leadai input{margin:0;width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;}",
+      ".a7-rwa-scriptwrap{display:inline-flex;align-items:center;gap:6px;height:36px;border:1px solid #ddd6fe;border-radius:10px;padding:0 8px;font:700 13px/1 Segoe UI,Arial,sans-serif !important;color:#5b21b6;background:#f5f3ff;}",
+      ".a7-rwa-scriptwrap span{white-space:nowrap;}",
+      ".a7-rwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font:600 13px/1.2 Segoe UI,Arial,sans-serif !important;color:#1e1b4b;background:#fff;max-width:220px;}",
       ".a7-rwa-cancel,.a7-rwa-send{height:36px;border-radius:10px;padding:0 14px;cursor:pointer;font:700 13px/1 Segoe UI,Arial,sans-serif !important;}",
       ".a7-rwa-cancel{background:#fff !important;color:#334155 !important;border:1px solid #cbd5e1 !important;}",
       ".a7-rwa-send{background:#166534 !important;color:#fff !important;border:0;}",
@@ -1294,11 +1297,25 @@
       className: "a7-rwa-leadai",
       title: "Replies go to the Lead AI screen in the WhatsApp panel, not the main inbox. Agents answer them there."
     }, [leadAiBox, el("span", { text: "Lead AI" })]);
+    var scriptSelect = el("select", {
+      className: "a7-rwa-script",
+      title: "Which script the assistant follows in these chats"
+    });
+    [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
+      scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
+    });
+    scriptSelect.value = "general";
+    var scriptWrap = el("label", { className: "a7-rwa-scriptwrap" }, [
+      el("span", { text: "Script" }),
+      scriptSelect
+    ]);
+    scriptWrap.style.display = "none";
     function sendLabel() {
       return "Send " + total + " message" + (total === 1 ? "" : "s") + (leadAiBox.checked ? " to Lead AI" : "");
     }
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.className = "a7-rwa-leadai" + (leadAiBox.checked ? " is-on" : "");
+      scriptWrap.style.display = leadAiBox.checked ? "" : "none";
       if (!busy) {
         sendBtn.textContent = sendLabel();
       }
@@ -1438,7 +1455,8 @@
         owner_button_variables: ownerPicker.buttonVars(),
         tenant_header_media_token: tenantPicker.mediaToken(),
         owner_header_media_token: ownerPicker.mediaToken(),
-        lead_ai: !!leadAiBox.checked
+        lead_ai: !!leadAiBox.checked,
+        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : ""
       }));
       fetchJson(ENDPOINT, {
         method: "POST",
@@ -1531,6 +1549,7 @@
         }),
         el("div", { className: "a7-rwa-actions" }, [
           leadAiToggle,
+          scriptWrap,
           el("button", { className: "a7-rwa-cancel", type: "button", text: "Cancel" }),
           sendBtn
         ])

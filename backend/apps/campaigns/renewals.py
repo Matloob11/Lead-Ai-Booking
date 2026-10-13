@@ -24,6 +24,7 @@ from .crm_leads import (
     build_recipients,
     context_for_agent,
     lead_display_name,
+    mark_lead_ai,
     number_for_agent,
 )
 from .models import CrmTarget
@@ -279,12 +280,11 @@ def send_renewals(
     tenant_header_media_token="",
     owner_header_media_token="",
     lead_ai=False,
+    lead_ai_playbook: str = "",
     tenant_field_map=None,
     owner_field_map=None,
 ) -> dict:
     """Queue the tenant campaign and the owner campaign from one Official number."""
-    from apps.leadai.lane import mark_campaign
-
     from .crm_media import header_media_id_for
 
     number = number_for_agent(agent, number_id)
@@ -316,8 +316,10 @@ def send_renewals(
     )
 
     queued = []
+    playbook = ""
 
     def queue(rows, template, header, buttons, role):
+        nonlocal playbook
         if not rows or template is None:
             return
         campaign = create_campaign(
@@ -333,8 +335,8 @@ def send_renewals(
             crm_target=CrmTarget.NONE,
         )
         if lead_ai:
-            # The popup's "Lead AI" box: both sides' chats go to the Lead AI screen.
-            mark_campaign(campaign)
+            # The popup's "Lead AI" box: both sides follow the same script.
+            playbook = mark_lead_ai(campaign, lead_ai_playbook)
         queued.append({"campaign": campaign, "role": role})
 
     queue(
@@ -371,6 +373,7 @@ def send_renewals(
         "from_number": number.phone_number,
         "cap": PER_NUMBER_CAP,
         "lead_ai": bool(lead_ai),
+        "playbook": playbook,
     }
 
 

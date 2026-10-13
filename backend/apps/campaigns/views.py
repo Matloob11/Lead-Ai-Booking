@@ -226,6 +226,7 @@ def crm_leads_send(request):
             entity=data.get("entity") or "lead",
             header_media_token=str(data.get("header_media_token") or ""),
             lead_ai=_flag(data.get("lead_ai")),
+            lead_ai_playbook=str(data.get("lead_ai_playbook") or ""),
             field_map=data.get("variable_fields") if isinstance(data.get("variable_fields"), dict) else {},
         )
         return Response(result, status=status.HTTP_201_CREATED)
@@ -280,6 +281,7 @@ def crm_renewals_send(request):
             tenant_header_media_token=str(data.get("tenant_header_media_token") or ""),
             owner_header_media_token=str(data.get("owner_header_media_token") or ""),
             lead_ai=_flag(data.get("lead_ai")),
+            lead_ai_playbook=str(data.get("lead_ai_playbook") or ""),
             tenant_field_map=data.get("tenant_variable_fields") if isinstance(data.get("tenant_variable_fields"), dict) else {},
             owner_field_map=data.get("owner_variable_fields") if isinstance(data.get("owner_variable_fields"), dict) else {},
         )

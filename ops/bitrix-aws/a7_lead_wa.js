@@ -489,6 +489,11 @@
       ".a7-lwa-leadai:hover{background:#f8fafc;}" +
       ".a7-lwa-leadai.is-on{border-color:#7c3aed;background:#f5f3ff;color:#5b21b6;}" +
       ".a7-lwa-leadai input{margin:0;width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;}" +
+      ".a7-lwa-scriptwrap{display:inline-flex;align-items:center;gap:6px;border:1px solid #ddd6fe;" +
+      "border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;color:#5b21b6;background:#f5f3ff;}" +
+      ".a7-lwa-scriptwrap span{white-space:nowrap;}" +
+      ".a7-lwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;" +
+      "color:#1e1b4b;background:#fff;max-width:220px;}" +
       ".a7-lwa-send{background:#25D366;color:#fff;border:0;border-radius:8px;padding:8px 12px;" +
       "font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}" +
       ".a7-lwa-send .a7-lwa-ic{color:#fff;}" +
@@ -768,6 +773,19 @@
       className: "a7-lwa-leadai",
       title: "Replies go to the Lead AI screen in the WhatsApp panel, not the main inbox. Agents answer them there."
     }, [leadAiBox, el("span", { text: "Lead AI" })]);
+    var scriptSelect = el("select", {
+      className: "a7-lwa-script",
+      title: "Which script the assistant follows in these chats"
+    });
+    [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
+      scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
+    });
+    scriptSelect.value = "general";
+    var scriptWrap = el("label", { className: "a7-lwa-scriptwrap" }, [
+      el("span", { text: "Script" }),
+      scriptSelect
+    ]);
+    scriptWrap.style.display = "none";
 
     function setSendLabel(text) {
       while (sendBtn.firstChild) {
@@ -784,6 +802,7 @@
     setSendLabel(queueLabel());
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.classList.toggle("is-on", leadAiBox.checked);
+      scriptWrap.style.display = leadAiBox.checked ? "" : "none";
       if (!busy) {
         setSendLabel(queueLabel());
       }
@@ -1382,7 +1401,8 @@
         header_variables: headerVariables,
         button_variables: buttonVariables,
         header_media_token: kind && media ? media.token : "",
-        lead_ai: !!leadAiBox.checked
+        lead_ai: !!leadAiBox.checked,
+        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : ""
       }));
       fetchJson(ENDPOINT, {
         method: "POST",
@@ -1467,6 +1487,7 @@
         }),
         el("div", { className: "a7-lwa-actions" }, [
           leadAiToggle,
+          scriptWrap,
           el("button", { className: "a7-lwa-cancel", type: "button", text: "Cancel", onClick: closeStudio }),
           sendBtn
         ])

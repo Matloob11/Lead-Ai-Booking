@@ -1,3 +1,9 @@
+## 2026-10-13 — Script choice reaches the Lead AI playbook (Cursor)
+
+The campaign popups already send `lead_ai_playbook` (`general` or `ic_shops`). Django now passes it through. `views.py` `883c6d98` and `renewals.py` `7623a8f2` are on web, worker, worker-leadai and beat. No campaign was queued or running. `mark_campaign` on the live image accepts `playbook`. `test_crm_leads` 29 OK, `test_renewals` 11 OK. Lead AI sweep `2026-10-13 11:17:53 UTC`. Bitrix `a7_lead_wa.js` `9dad6212`, `a7_renewals_wa.js` `83ba1f86`, `a7_renewals_wa.php` `eeb4c9d0` already matched the repo. No WhatsApp message was sent.
+
+---
+
 ## 2026-10-13 — Lead AI batch 1 live: the first chat's fixes, playbook, alerts to 2311, Broker label, CRM mirror on commit (Claude Code)
 
 Board tasks T05, T10–T17, T20a and part of T24 (SHOPS-BOT-BOARD.md), from conversation 35283's defects and Matloob's 2026-10-13 decisions.

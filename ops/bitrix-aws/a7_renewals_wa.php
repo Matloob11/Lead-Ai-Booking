@@ -26,6 +26,12 @@ const A7_RENEWALS_OWNER_PHONES = ['UF_CRM_1735377605713', 'UF_CRM_1735379548586'
 const A7_RENEWALS_TENANT_NAMES = ['UF_CRM_1734263559057', 'UF_CRM_1782041950987'];
 const A7_RENEWALS_OWNER_NAMES = ['UF_CRM_1734263542611'];
 
+function a7_renewals_wa_playbook($raw): string
+{
+    $value = strtolower(trim((string)$raw));
+    return in_array($value, ['general', 'ic_shops'], true) ? $value : 'general';
+}
+
 function a7_renewals_wa_json(array $payload, int $code = 200): void
 {
     http_response_code($code);
@@ -409,7 +415,11 @@ if ($action === 'send') {
             'tenant_header_media_token' => (string)($input['tenant_header_media_token'] ?? ''),
             'owner_header_media_token' => (string)($input['owner_header_media_token'] ?? ''),
             // The popup's "Lead AI" box: both sides' chats go to the Lead AI screen.
+            // Script is only forwarded for that box, and only as one of the two names.
             'lead_ai' => !empty($input['lead_ai']),
+            'lead_ai_playbook' => !empty($input['lead_ai'])
+                ? a7_renewals_wa_playbook($input['lead_ai_playbook'] ?? '')
+                : '',
         ],
         $cfg
     );
