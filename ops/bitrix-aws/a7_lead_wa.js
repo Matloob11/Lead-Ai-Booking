@@ -795,17 +795,25 @@
       sendBtn.appendChild(document.createTextNode(text));
     }
 
+    var canSend = leadIds.length;
     function queueLabel() {
-      return "Queue " + leadIds.length + " message" + (leadIds.length === 1 ? "" : "s") +
+      if (!canSend) {
+        return "Nothing to send: all left out";
+      }
+      return "Queue " + canSend + " message" + (canSend === 1 ? "" : "s") +
         (leadAiBox.checked ? " to Lead AI" : "");
     }
-    setSendLabel(queueLabel());
+    function applySendState() {
+      if (busy) {
+        return;
+      }
+      setSendLabel(queueLabel());
+      sendBtn.disabled = !canSend || !!(media && media.uploading);
+    }
+    applySendState();
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.classList.toggle("is-on", leadAiBox.checked);
       scriptWrap.style.display = leadAiBox.checked ? "" : "none";
-      if (!busy) {
-        setSendLabel(queueLabel());
-      }
       renderLeads();
     });
 
@@ -988,7 +996,7 @@
       mediaBar.style.display = media && media.uploading ? "" : "none";
       mediaBar.firstChild.style.width = Math.round(ratio * 100) + "%";
       if (!busy) {
-        sendBtn.disabled = !!(media && media.uploading);
+        applySendState();
       }
     }
 
@@ -1002,7 +1010,7 @@
       if (!kind) {
         mediaBox.style.display = "none";
         if (!busy) {
-          sendBtn.disabled = false;
+          applySendState();
         }
         renderPreview();
         return;
@@ -1253,8 +1261,6 @@
       var messaged = usable;
       if (!leads.length) {
         messaged = leadIds.length;
-      } else if (!leadAiBox.checked && !usable && !leftOutSentence(leftCounts)) {
-        messaged = leadIds.length;
       }
       var bits = [
         leadIds.length + " selected",
@@ -1268,6 +1274,8 @@
         bits.push(left);
       }
       sub.textContent = bits.join(" · ");
+      canSend = messaged;
+      applySendState();
     }
 
     function renderNote() {
@@ -1453,7 +1461,7 @@
     search.addEventListener("input", renderList);
 
     sendBtn.addEventListener("click", function () {
-      if (busy) {
+      if (busy || !canSend) {
         return;
       }
       if (!selected) {
@@ -1551,8 +1559,7 @@
         })
         .catch(function (e) {
           busy = false;
-          sendBtn.disabled = false;
-          setSendLabel(queueLabel());
+          applySendState();
           err.textContent = e && e.message ? e.message : "Send failed.";
         });
     });

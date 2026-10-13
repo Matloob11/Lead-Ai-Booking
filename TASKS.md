@@ -1,3 +1,11 @@
+## 2026-10-13 — Popup send button counts only who can be messaged (Cursor)
+
+The five CRM popups no longer put the selected count on the send button. The button uses the number that can actually be messaged. At 0 it is disabled and reads `Nothing to send: all left out`.
+
+Playwright, sends blocked. Leads 79577 (Broker) and 79578 (WhatsApp Opt-out Yes), then deleted: with the box off the button was `Queue 1 message` and the line was `1 left out: opted out 1`; with the box on it was disabled, `Nothing to send: all left out`, and the line was `2 left out: opted out 1, broker 1`. Deals and Contacts: `Queue 1 message to Lead AI`. Renewals: `Send 1 message to Lead AI`. Owner Data with no phone: disabled, `Nothing to send: all left out`. Campaigns 397 before and 397 after. Live JS `040c73cb` and `5075d2c3`. Screenshot `files/temp/c13-popups/shots/leads-c14.png`. No WhatsApp message was sent.
+
+---
+
 ## 2026-10-13 — Five CRM popups checked in a browser, every send blocked (Cursor)
 
 Playwright opened the live CRM as admin. Each list loaded before the guard: an in-page fetch/XHR wrapper plus `page.route` on the two popup tools and `/api/campaigns/`. The queue click was caught in the page, so no send request left.

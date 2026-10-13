@@ -1334,7 +1334,9 @@
     var sendBtn = el("button", {
       className: "a7-rwa-send",
       type: "button",
-      text: "Send " + total + " message" + (total === 1 ? "" : "s")
+      text: total
+        ? "Send " + total + " message" + (total === 1 ? "" : "s")
+        : "Nothing to send: all left out"
     });
     if (over || !total || !numbers.length) {
       sendBtn.disabled = true;
@@ -1360,6 +1362,9 @@
     ]);
     scriptWrap.style.display = "none";
     function sendLabel() {
+      if (!total) {
+        return "Nothing to send: all left out";
+      }
       return "Send " + total + " message" + (total === 1 ? "" : "s") + (leadAiBox.checked ? " to Lead AI" : "");
     }
     leadAiBox.addEventListener("change", function () {
