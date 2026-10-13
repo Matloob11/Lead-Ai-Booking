@@ -22,6 +22,27 @@ deploy/alots.ui.cookie
 **/.env.alots_ui
 **/alots.ui.cookie
 **/alots.storage.json
+files/secrets/
+ops/bitrix-aws/live/secrets/
+ops/bitrix-aws/live/www/bitrix/php_interface/a7_call_intelligence.env
+ops/bitrix-aws/live/www/upload/
+# Bitrix-side configs hold live passwords and the HMAC secret shared with
+# Django. a7_tl_phone_mask.config.php predates this rule and is still tracked.
+ops/bitrix-aws/*.config.php
+ops/bitrix-aws/*.env
+ops/bitrix-aws/live/www/bitrix/php_interface/*.config.php
+ops/bitrix-aws/live/**/*.env
+# The 3CX tools carry an OpenAI key, Bitrix webhook tokens and 3CX secrets
+# in their source. Keep them out until those move to a config file.
+ops/bitrix-aws/a7_3cx_ai_recording_analyzer.php
+ops/bitrix-aws/a7_3cx_click_to_call.php
+ops/bitrix-aws/a7_3cx_click_to_call.php.disabled
+ops/bitrix-aws/a7_3cx_click_to_call.generated.php
+ops/bitrix-aws/live/www/a7_3cx_click_to_call.php
+ops/bitrix-aws/live/www/bitrix/tools/a7_3cx_ai_recording_analyzer.php
+ops/bitrix-aws/live/www/bitrix/tools/a7_3cx_click_to_call.php
+ops/bitrix-aws/live/www/bitrix/tools/a7_3cx_click_to_call.php.disabled
+ops/bitrix-aws/live/www/bitrix/tools/a7_3cx_click_to_call.generated.php
 *.pem
 *.p12
 *.pfx
@@ -29,6 +50,7 @@ id_rsa
 id_rsa.pub
 id_ed25519
 id_ed25519.pub
+_live_pull/
 
 # Local databases, logs, live dumps (not source)
 *.db
@@ -44,6 +66,13 @@ files/briefs/Bitrix-Users.pdf
 files/briefs/Official-971-Numbers.pdf
 files/briefs/Official-WhatsApp-API-Numbers.pdf
 files/briefs/AGENTS DETAILS .pdf
+files/briefs/Official-WA-*.pdf
+/Official-WhatsApp-Numbers-*.pdf
+/Official-WhatsApp-Numbers-*.xlsx
+/A7-WhatsApp-CRM-v9-Workflow-Detailed-Guide.pdf
+ops/catalog/_numbers_roster.*
+ops/_q_failed.*
+ops/bitrix-aws/_n8n_*.sql
 ops/test-bin/
 
 # Node / frontend

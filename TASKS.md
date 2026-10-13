@@ -1,4 +1,420 @@
-# Who did what
+## 2026-10-13 — Lead AI reality check, Bot 2 plan board, repo pushed to GitHub Lead-Ai-Booking (Claude Code)
+
+Matloob asked for four things:
+- a deep read of Lead AI;
+- the requirements of Malik's "International City Shops – WhatsApp AI Chatbot Build Pack" (2026-10-12);
+- a plan board shared with Cursor, Bot 2 (old leads, campaign-first) before Bot 1;
+- the repo connected to his new GitHub repo with everything committed.
+
+Read-only on the server; no app code changed.
+
+**Found live:**
+- **Switched on:** the assistant is ON for everyone since 2026-10-12 08:25:12 UTC (`ops/wa.sh leadai-switch on`; no person recorded). The 2026-10-10 entry below still says OFF.
+- **Restart:** all four app services restarted 10:23:19 UTC that day, most likely the build for Cursor's `{{n}}` change.
+- **Code:** live == local (`probe-backend-md5`: 38/38 `apps/leadai` files; 8 panel files by md5).
+- **Traffic:**
+  - One Lead AI campaign so far: #395 `ic_shops_followup`, from 971581058725 (Coastline, no agent assigned), 17 leads, 14 sent. It made 16 chats, all owned by agent 3.
+  - 5 turns: 1 correct auto-reply stop; 4 gpt-4.1-mini replies in conv 35283 (Md Sumon). Under US$0.01.
+  - 0 appointments.
+
+**Defects shown by conv 35283:**
+- **Address sent 3 times:**
+  - The model retyped it from the `OFFICE` line, and repeated its own sentence.
+  - `engine.py:1235` appends it again, checking only the current reply.
+  - No Maps link or pin is configured.
+- **"I will massage you" (= message) got another invitation:** there is no deferral rule. `prompt.py:59` is ambiguous.
+- **`invites` is 2 after the customer said Yes:** from now on `settle()` strips every visit sentence in that chat, and can leave an empty reply.
+- **"English:" gloss under English replies:** `engine.py:1245` stores `reply_en` regardless of language. The schema generates it before `reply`, so it is a plan, not a translation.
+- **`{{1}}` is the Bitrix lead title** ("Hi Bayut WhatsApp | Md Sumon") on 17/17 sends. Sources: `a7_lead_wa.php:264-269`, `crm_leads.py` `lead_display_name`. 3516 earlier recipients already had it.
+- **Reminder template missing on the Coastline WABA:** `a7_leadai_meeting_reminder` is APPROVED on 62 WABAs but not on 1573780013961706. The submit command skips numbers without an agent.
+- **Customer messages never reach the Bitrix timeline:** 0 of 7 mirrored. `crmlink/signals.py:36` queues inside the webhook transaction.
+- **The CRM responsible (agent 25) cannot open these chats:** they are owned by agent 3.
+
+**Bot 2 vs the PDF:**
+- **Score:** 46 requirements; 0 done, 33 partial, 13 missing = **36%** (done 1, partial 0.5). Each requirement was assessed by one agent and re-checked by a second.
+- **What exists:** the infrastructure (lane, assistant, booking, reminder, CRM stage 10, alerts, opt-out rules).
+- **What does not:** the shop script itself — prices, the 3-type list, media, licence copy, two-slot close, broker stop, "Not now", Template B, the 100/day drip, the new Bitrix fields and lead assignment.
+- **Conflicts with Matloob's 2026-10-09 rules:** several PDF rules reverse them (prices, documents, first question, persona). Owner decisions Q1–Q16 and data D1–D10 are in the board.
+
+**Board:** NEW `SHOPS-BOT-BOARD.md` — protocol for Claude + Cursor, file ownership, the scores, decisions, data, tasks T01–T82.
+
+**Git:**
+- **Remotes:** `origin` is now https://github.com/Matloob11/Lead-Ai-Booking (private). The old `origin` (Whatsapp-solution-bitrix, a one-commit snapshot unrelated to `main`) is renamed `github-snapshot`.
+- **Commits:** the whole working tree is committed in five commits, and `main` is pushed with its full history.
+- **Before pushing:**
+  - History scanned: only upstream thoth placeholders, two dev SQLite DBs in `aafc027` (4 test phone numbers, one dev admin hash), and the phone-mask config.
+  - Staged files scanned for secrets.
+- **Kept out of git by `.gitignore`:**
+  - `ops/bitrix-aws/*.config.php` and `*.env` (live passwords, the HMAC secret);
+  - the 3CX tools, whose source hard-codes an OpenAI key, Bitrix webhook tokens and 3CX secrets (never in history);
+  - number rosters and PDF/xlsx dumps.
+
+**Flagged, not changed:**
+- `ops/bitrix-aws/a7_tl_phone_mask.config.php` stays tracked with the phone-mask unlock password in plain text (also in the 2026-09-15 GitHub snapshot). Change that password and move the file out of git.
+- The 3CX tools should read their secrets from a config file.
+- The 1,743 deletions committed here are another session's removals (OpenWA, QR stack, legacy docs, probes, dot folders, 11 `ops/catalog` probes). `ops/wa.sh` verbs for those 11 probes now fail.
+
+**Shared/touched:** `.gitignore`, `TASKS.md`, NEW `SHOPS-BOT-BOARD.md`, git remotes.
+
+---
+
+## 2026-10-12 — Assign to team: full list, Equal, Clear, tally (Cursor)
+
+Assign to team counts: All shows Hassan, Hussnain, and Jaweria members; a team chip shows only that team. The agent list scrolls through everyone. Top line is Selected / Planned / Left. Equal writes an even manual split. Clear sets every count to 0. Apply stays off until Planned matches the selection. Heads still do not receive cards. Files: `a7_team_assign.js` V11, `a7_team_assign.css`. Hard-refresh the lead list.
+
+---
+
+## 2026-10-12 — Campaign {{n}} picks a lead detail (Cursor)
+
+CRM WhatsApp campaign (Leads, Owner Data, Deals, Contacts) and Renewals: each template `{{n}}` is a dropdown (Name, Phone, Source, Stage, Community, Sub community, Bedrooms, Client type, Deal amount, Property reference). Each selected record sends its own value. Empty detail is `?`. `{{1}}` defaults to Name. Header text and button URL suffixes stay one value for everyone.
+
+**Shared:** `backend/apps/campaigns/{crm_leads,views,renewals}.py`, `ops/bitrix-aws/a7_lead_wa.js` V13, `a7_lead_wa.php`, `a7_renewals_wa.js` V6, `a7_renewals_wa.php`. Needs Official image rebuild plus Bitrix file put. Hard-refresh the CRM list.
+
+---
+
+## 2026-10-12 — Stage-change popup shows required inputs (Cursor)
+
+Lead stage popup ("Complete all the required fields to change lead stage") had the title and Save, and no input. The layout script was pulling those empty controls out of the popup into the card, so Save posted nothing. Popup nodes are now left alone. Stage-required fields (Contacted / No Answer / Option Sent / Meeting / Future Prospect / Reject / Booking) are on the common lead form under Other fields, which is what that popup draws from. Hard-refresh, change stage again — the input should be inside the popup.
+
+---
+
+## 2026-10-10 — Portal lead details tidy + create-field admin lock (Cursor)
+
+Matloob: lead details only, Bayut / Property Finder / Dubizzle only — filled portal fields stay usable; empties gather in one bottom **Other fields** section (not scattered); junk phone UFs hidden; Call Recording kept in that Other section; Create field locked behind the same admin password as new stage.
+
+**Live (Lightsail):** NEW `a7_portal_lead_fields.php` / `.js` / `.css`; `init.php` wired (`A7_PORTAL_LEAD_FIELDS`); `a7_call_intelligence_crm.js` skips `[data-a7-plf=other]` so CI does not hide Call Recording there. Sources: PF/Bayut/Dubizzle WhatsApp+Email+Call. Hide: Mobile Number, Secondary Phone, Phone (Owner Data), `971529647138`, New number, Community (old). Always-Other: Call Recording. Password = `a7_stage_admin.config.php` hash / param `a7_stage_admin_password`.
+
+**Verified:** php -l clean; public JS/CSS HTTP 200; init contains require; wrong password → `OnBeforeUserTypeAdd` false + “Incorrect admin password. New field was not created.”; boot lead **79317** Bayut WhatsApp `isPortal=yes`; non-portal lead `isPortal=no`. **Not:** browser Ctrl+F5 on a real agent session (layout DOM + Create-field modal).
+
+**Fix 1.1.0 (same day):** first ship did not rearrange the card — Bitrix empty text is `"field is empty"` (not matched), and SidePanel/kanban open often left `isPortal=false`. JS now detects Bayut/PF/Dubizzle from Name/Source, listens `SidePanel.Slider:onLoad`, treats `"field is empty"` / `None` as empty, hides extra phone titles (incl. Registered Buyer Phone / My mobile…). Public JS md5 `0436b320…` (26902 bytes). Hard-refresh the lead card again.
+
+**Form select (same day):** kanban card showed Community / Bedrooms / Client Type / Sub Community but details form did not have them selected. Rebuilt common `lead_details_common` (+ Portals scope ID 2 + admin personal) into **Portal details** / **Responsible** / **Other fields**. Backup `/home/bitrix/a7_lead_form_bak_20261010_111240/`. Script `a7_set_portal_lead_form.php`. Close/reopen the lead slider (Ctrl+F5).
+
+**Shared/touched:** NEW `ops/bitrix-aws/a7_portal_lead_fields.{php,js,css}`, `a7_patch_init_portal_lead_fields.php`, `deploy_portal_lead_fields.php`; `a7_call_intelligence_crm.js` (+ live copy). Hard-refresh a Bayut/PF/Dubizzle lead details card.
+
+---
+
+## 2026-10-10 — Lead AI assistant live but OFF (dark launch): answers Lead AI chats, books office meetings, 30-min reminder, alerts, CRM (Claude Code)
+
+Matloob asked for an AI on the Lead AI screen that talks to customers sent a Lead AI campaign, following his rules 45-63 (hours Mon-Sat 10-20, exact time only, confirmation format, MEETING CONFIRMED in CRM, 30-min reminder with On My Way / Running Late / Need to Reschedule, tentative vs confirmed, same-day hot lead). His answers: script = gather info then invite to the office (Russia Cluster V02/V03 Shop 20, International City; Maps link "later"); every Lead AI chat; AI keeps running beside agents but never answers a message an agent answered; customer's language; alerts to the CRM responsible + chat owner, Bitrix bell + panel; CRM = stage 10 + comment (BP 235 not touched; the assistant moves the to-do it caused); reminder template to all active numbers; voice notes transcribed; gpt-4.1-mini on its OWN key `LEADAI_OPENAI_API_KEY`; owner viewing of their unit = tentative + handover; renewals = intent then handover; "talk to a person" = quiet + alert; per-chat Pause AI; dark launch.
+
+How it works (all under `backend/apps/leadai/`, panel `bitrix/public/assets/modules/lead-ai/`):
+- New tables only (migration `0002_assistant`): `LeadAiChatState`, `LeadAiSettings` (pk=1, `assistant_enabled` OFF, `test_numbers`), `LeadAiTurn`, `LeadAiAppointment`, `LeadAiCrmStep`, `LeadAiAlert`, `LeadAiTranscript`.
+- `assistant/engine.py` one turn per customer burst: opt-out recorded first whatever the state (quiet when the assistant is off for that customer), gates, voice transcription, claim, model (strict JSON schema), `hours.py` checks every time and the hour must come from the customer's words or our offer, code writes every booking message, `settle()` corrects the model (first price question is no handover, asking again is; one question per reply; script = language; no third invitation; non-owner "viewing" and job-applicant "interviews" never confirmed). Rules without the model: STOP / wrong number / not interested, automatic replies, plain acknowledgements, deleted messages (revoke `original_message_id`).
+- New queue `leadai` + service `worker-leadai`; beat `leadai-due-reminders` every minute (reminders 30 min before, in-window buttons else template, STOP backstop, stuck/missed/unanswered turns, CRM retry, past meetings).
+- Bitrix: alerts through NEW `/bitrix/tools/a7_leadai_notify.php` (HMAC `leadai-notify.` + CRM_LEAD_WA_SECRET, checked before the prolog, escaped, tag dedupe). CRM sync per (event, revision), lead updated once per appointment, only our own to-do moved/closed.
+- Panel: AI pill + Pause/Resume, appointment card + Cancel, AI/Reminder badges + English gloss, alert toasts, AI settings dialog (admins edit; portal admins may only switch off).
+- Reviewed adversarially twice-ish (68 findings, ~55 confirmed, all fixed with regression tests); local suite: apps/leadai 300+ tests, + inbox/gateway/campaigns green except the 2 known unrelated failures.
+
+**Deployed 2026-10-10 (~09:53 and ~11:10 Dubai):** `sync` of `apps/leadai`; shared `apps/inbox/services.py` `f78682a1`, `apps/inbox/serializers.py` `382e7a93`, `apps/gateway/ingest.py` `e5286653`, `apps/crmlink/tasks.py` `0dffdba0`, `a7wa/settings.py` `347ff896`, NEW `a7wa/settings_livetest.py`, `deploy/docker-compose.yml` `575e4402` (drift-checked first: server == local minus these hunks); `build app`, `migrate-new-image` (leadai.0002 OK), `up app` (web, worker, worker-leadai, beat). Panel `lead-ai/` api `f84e564f`, thread `4d2a1238`, screen `d4ffec62`, lead-ai.js `4686574d`, css `62022613` (disk == local, public 200 same bytes). Bitrix tool `ac0015f5` (lint clean on the box, GET 405). Lead AI key replaced by Matloob's new one (fingerprint `4e99fdf7`; main `OPENAI_API_KEY` `635529eb` untouched). Reminder template `a7_leadai_meeting_reminder` submitted to 62 WABAs (PENDING UTILITY); WABA `1057813046858481` (971556829046) refused: "restricted from creating a new template".
+
+**Verified LIVE:** `django-check` No changes; all four app services Up together; worker-leadai consumes only `leadai` (9 tasks); sweep `last_sweep_at` fresh every minute. `probe-leadai-turn` **19/19** (real gpt-4.1-mini + Postgres, rolled back: book Mon 17:00 with code-written confirmation, reminder 16:30, move to 18:00, STOP by rule with no model call, API + message `source`, nothing queued or kept). `probe-lead-ai-flow` **36/36** (v1 lane unchanged). `probe-leadai-notify` **7/7** (one real bell to Bitrix 2311, duplicate tag refused, wrong/missing/old signature 401, GET 405). `probe-leadai-key` HTTP 200. `leadai-eval --repeat 2` on the deployed image **94/96 (97.9%)**, ~$0.20 a run. Inbox after both restarts: webhooks, mirrors and campaign waves succeed; no errors in web/worker logs.
+
+**Not verified:** `leadai-tests` on Postgres (Matloob stopped that step); a real customer conversation, a real reminder or tap, template approval, CRM writes on a real lead (stage 10 + BP 235 + to-do move ran only against a fake Bitrix), a real WhatsApp voice note, the panel in a live browser (headless harness with mocks only).
+
+**To try it:** add your number in Lead AI → AI settings → test numbers (or `ops/wa.sh leadai-test-numbers 9715XXXXXXXX`), paste the Google Maps link there, send a campaign with the Lead AI box ticked to that number, reply from the phone. Switch on for everyone: settings dialog or `ops/wa.sh leadai-switch on`.
+
+**Found:** the first `up` killed a running campaign's `run_campaign` mid-loop (campaigns 377/378 stopped ~09:53); acks_late put it back when Redis restored the unacked task and both finished by themselves (378 retrying, 0 pending at 11:07). Pre-existing for every worker restart: check `campaigns_campaign` for running/pending before `up`.
+
+**Shared/touched:** `backend/a7wa/settings.py`, NEW `a7wa/settings_livetest.py`, `apps/inbox/{services,serializers}.py`, `apps/gateway/ingest.py`, `apps/crmlink/tasks.py`, NEW `apps/inbox/tests/test_two_senders.py`, `deploy/docker-compose.yml`, `CLAUDE.md` (Deploying), **`ops/wa.sh`** (`up app` whole stack, `migrate-new-image`, `leadai-tests`, `probe-leadai-turn`, `leadai-eval`, `leadai-eval-draft`, `probe-leadai-key`, `probe-leadai-notify`, `submit-leadai-reminder-template`, `leadai-switch`, `leadai-test-numbers`), NEW `ops/catalog/probe-leadai-{turn,key,notify}.py`, NEW `ops/bitrix-aws/a7_leadai_notify.php`. NEW: `backend/apps/leadai/assistant/`, its tests, panel `modules/lead-ai/` rewritten.
+
+---
+
+## 2026-10-10 — Oct-8 WBBOX numbers already in Official; named for assign (Cursor)
+
+Matloob asked to add the new WBBOX channels (Coastline / Blue Brick, webhook NA) into Official so agents can assign them. Alots `list_channels` returned 36; all already in `catalog_wabanumber`. The ten Oct-8 rows are `971581058717`–`726` (active, unassigned, empty names, `webhook_configured=false`). Set display_name/label: eight Coastline Properties, `721` Blue Brick, `722` Blue Brick Private Limited. **Not:** webhooks (operator pastes `https://wa.srv1802669.hstgr.cloud/api/gateway/webhook/alots/` in WBBOX).
+
+Shared: `ops/wa.sh` (+ `probe-list-channels`, `label-oct8-wbx-numbers`), NEW `ops/catalog/probe-list-channels.py`, `label-oct8-wbx-numbers.py`.
+
+---
+
+## 2026-10-08 — Lead AI gets its own OpenAI key (LEADAI_OPENAI_API_KEY); the main key was swapped by mistake and put back (Claude Code)
+
+Matloob sent a new OpenAI key for the coming Lead AI assistant. It was first written over `OPENAI_API_KEY` (live `/opt/a7-wa/deploy/.env`, local `.env` and `deploy/.env`), and he stopped it: the key is for Lead AI only, every existing key stays. All three were restored byte for byte (local files from their backups; server `.env` from its backup after checking that nothing but the OpenAI line differed), and web/worker/beat were recreated twice (13:46 and about 13:49 UTC). For those ~3 minutes the other AI features ran on the new key: 1 health classification and possibly a few CRM summary refreshes; 0 AI desk replies. Webhooks across both restarts: 94 processed, none lost.
+
+**Live now:** `OPENAI_API_KEY` fingerprint `635529eb` (the one it had, `probe-openai-key` → HTTP 200); NEW `LEADAI_OPENAI_API_KEY` fingerprint `72521088`, read by nothing yet (the containers pick it up on the next recreate). The new key answers on gpt-4o-mini, gpt-4.1-mini and gpt-4o. No copy of it is left locally. Fingerprint = first 8 hex of SHA-256; values are never printed.
+
+**Found:** the four local `.env` files (`.env` has the line twice, `deploy/.env`, both `agent-reports` copies) hold an older key `111e646e` that is not the server's and answers 401 `invalid_api_key`. Not changed. `ops/catalog/probe-openai-configured.py` and `probe-openai-credits.py` are deleted in the working tree by another session, so those two verbs fail.
+
+**Shared/touched:** `ops/wa.sh` (+ `probe-openai-key`, + `set-leadai-openai-key`, which refuses if `OPENAI_API_KEY` would change; the swap verb used by mistake was removed), NEW `ops/catalog/probe-openai-key.py`. No app code.
+
+---
+
+## 2026-10-08 — Lead AI box in every CRM campaign popup; those chats live on the Lead AI screen, out of the main inbox (Claude Code)
+
+Matloob asked for a checkbox in the WhatsApp campaign popups so that special clients' chats go to the Lead AI screen instead of the Official inbox, with the Lead AI source in its own folder so later work there cannot disturb the inbox. His answers: no AI auto-replies (agents reply by hand on the Lead AI screen); a Lead AI chat stays there until an agent presses **Move to inbox**; same customer on the same number = the same conversation, history and all; the same customer on another number is a separate chat and stays where it is; the box on Leads, Owner Data, Deals, Contacts and Renewals.
+
+How it works:
+- **Django** NEW app `backend/apps/leadai/` (`LeadAiCampaign`, `LeadAiChat`, migration `0001`, `lane.py`, signals, views). The box marks the campaign; just before each recipient's send (same transaction as `start_conversation`) the (number, customer) chat gets an active `LeadAiChat` row, so a failed send rolls the mark back. The inbox list leaves active rows out, live events for them go out as `leadai.<event>`, Sara and the AI desk skip them. API: `GET /api/leadai/chats/`, `GET /api/leadai/chats/<id>/`, `POST /api/leadai/chats/<id>/move-to-inbox/` (409 when not Lead AI), same visibility rule as the inbox. A retry of the same campaign never undoes a manual move; a new Lead AI campaign brings the chat back; "Resend skipped" of a Lead AI campaign stays Lead AI.
+- **Panel** NEW folder `bitrix/public/assets/modules/lead-ai/` (`api.js`, `thread.js`, `screen.js`, `lead-ai.js`, `lead-ai.css`), loaded by `index.html` as its own module, never imported by `inbox.js`. Own menu item with unread badge, chat list + search, thread, composer (window closed → "Send template" only), attachments, Move to inbox, Sara leads tab. It replaces Cursor's one-file `modules/lead-ai.js` / `.css` (the earlier "pic 2"); those two paths now hold tiny stand-ins (a forwarder and an empty sheet) so an older `inbox.js` can never 404.
+- **Bitrix** `a7_lead_wa.js` V12 and `a7_renewals_wa.js` V5: a "Lead AI" box beside the send button, label "… to Lead AI", payload `lead_ai`; both PHP tools forward it.
+
+**Deployed:** backend (earlier today, two phases) — app + `0001` migrated, then the one-line hooks; `build app` (all three images), `up` web/worker/beat, `django-check` "No changes detected". Panel (`sync` + per-file `push`, not `wa.sh panel`): `inbox.js` `0d3e7bd6…`, `index.html` `530d38d1…`, `core/lightbox.js` `dbcc4f43…`, `lead-ai/api.js` `f7938702…`, `lead-ai/lead-ai.js` `1bf91a44…`, `lead-ai/screen.js` `b34ab5d9…`, `lead-ai/thread.js` `73329e8d…`, `lead-ai/lead-ai.css` `b21afb89…`, stand-ins `bc1c6bc6…` / `5d229589…`; public GET of all ten == local. Before pushing, live `inbox.js` / `index.html` were diffed against local: the only differences were this work. Bitrix: `a7_lead_wa.php` `c12db6f7…`, `a7_renewals_wa.php` `f6297c5f…`, `a7_lead_wa.js` `bdb4e845…`, `a7_renewals_wa.js` `207a0bb2…` (box == repo, public JS == local, tools answer anonymous 401). Rollback: previous popup JS in scratchpad `pre-lead-ai-bitrix/`; previous live `inbox.js` in scratchpad `live-panel/`.
+
+**Verified LIVE:**
+- `ops/wa.sh probe-lead-ai-flow` (NEW, one transaction always rolled back, campaign task and channel layer stubbed): **36/36** — new customer straight into Lead AI and owned by the sender; same number merges into the existing chat; other number stays in the inbox; inbox list/search hides it, Lead AI list shows it with campaign + CRM record; a link into it carries `lead_ai`; a non-owner agent gets 404 on open, move, list and the inbox messages route; owner moves it (200, plain `conversation.updated`, back in the inbox), again → 409; same-campaign retry keeps the move, new Lead AI campaign brings it back; normal campaign moves nothing; resend inherits; accepted send confirms; nothing persisted (SQL from outside agrees).
+- Playwright as MT6 (Bitrix 2311) on the live panel, synthetic chat `999000000001` (fixture, deleted after, 0 rows left): menu item + badge + dot, inbox link opens it in Lead AI, closed window shows only Send template, search hit/miss, Escape closes only the dialog, Move to inbox → listed and opened in the main inbox, an ordinary chat (no unread badge, so nothing marked read) still opens normally. Every Lead AI call 200; the single 401 is the inbox's own pre-SSO `/api/auth/me/`.
+- All five popups: box present and unticked at open, label "Queue 1 message to Lead AI" / "Send 3 messages to Lead AI", unticks back. Leads send caught inside the page carrying `lead_ai: true` — nothing sent, no campaign created (SQL).
+- Local: 117 tests (`apps/leadai` + `apps/campaigns/tests`).
+
+**Not verified:** a real campaign with the box ticked and a real customer reply landing on the Lead AI screen (needs a real number — first use: one lead with your own number). The `leadai.message.new` chime and live list update in a second browser. Renewals' send payload (box and label only; the code path was read). Sara's board is empty live (0 automations), so its tab was seen empty only.
+
+**Test-harness note:** Playwright `route()` disables the HTTP cache, and under it Bitrix `/crm/lead/list/` fails to start (Vue / Analytics errors, no grid). Load the list first, then guard: an in-page `fetch`/XHR wrapper plus `page.route`.
+
+**Flagged, not changed:** `backend/apps/gateway/tasks.py:127` still calls `backfill_placeholder_bodies.delay()`, a task removed 2026-08-27 (Antigravity) → `NameError` once per worker process per 6 h (LocMem cache); the event retries 30 s later and is processed — 0 lost, 0 duplicate wamids in 3 days. Fix: delete the `cache` import, the `if cache.add(...)` line and the `.delay()` line. Live `apps/inbox/visibility.py` is ownership-based, while CLAUDE.md still says agents see every chat on their numbers; Lead AI follows the live rule. Open: should Sara's new-lead outreach skip a customer whose chat is in Lead AI?
+
+**Shared/touched:** `backend/a7wa/settings.py`, `a7wa/urls.py`, `apps/inbox/{views,serializers,events,tasks}.py`, `apps/campaigns/{services,crm_leads,renewals,views}.py`, `apps/inboxai/tasks.py`, `apps/leadbot/tasks.py`; `bitrix/public/index.html`, `assets/modules/inbox.js`, `assets/core/lightbox.js` (2 Roman Urdu tooltips → English), `assets/modules/lead-ai.js` + `.css` (stand-ins); `ops/bitrix-aws/a7_lead_wa.{js,php}`, `a7_renewals_wa.{js,php}`; **`ops/wa.sh`** (+ `probe-lead-ai-fixture`, `-cleanup`, `-flow`, `probe-backend-md5`, `probe-dump-inbox-sources`), NEW `ops/catalog/probe-lead-ai-*.py`. NEW: `backend/apps/leadai/`, `bitrix/public/assets/modules/lead-ai/`.
+
+---
+
+## 2026-10-08 — CRM campaign popups send image / video / PDF-header templates (Leads, Owner Data, Deals, Contacts, Renewals) (Claude Code)
+
+Matloob asked that wherever the Bitrix "WhatsApp campaign" button is, an approved template with an image or video header can be picked and the file attached right there. Until now every CRM popup greyed those templates out ("header media — use Campaigns") and Django refused them. The 2026-09-24 Cursor entry "CRM buttons accept a header image" never reached the code: only a dead `upload-header` action in `a7_renewals_wa.php` survived (it called a Django route that did not exist); it is removed.
+
+How it works now:
+- **Popup** (`a7_lead_wa.js` V11 for Leads / Owner Data / Deals / Contacts, `a7_renewals_wa.js` V4 for Renewals, one file per side): media templates are selectable with an "image header" tag; a file box appears (JPEG/PNG ≤5 MB, MP4/3GP ≤16 MB, PDF ≤100 MB — Meta takes only PDF for a template document header); upload with a progress bar; the phone preview shows the actual picture / video / file name; Queue is held until the file is ready. Choosing another number re-uploads the same file for it (a media id belongs to the number that uploaded it).
+- **Bitrix PHP** `a7_lead_wa.php` action `header-media` (Renewals uses it too): takes the multipart file, signs HMAC over `ts.meta.` + the bytes (`hash_update_file`), and streams the temp file to Django over a raw TLS socket (HTTP/1.0). Curl is disabled on that PHP and memory is 256 MB, so nothing is held in memory. The send actions forward `header_media_token` / `tenant_…` / `owner_…`.
+- **Django** NEW `backend/apps/campaigns/crm_media.py`: `POST /api/campaigns/crm-header-media/` (raw body, HMAC checked while spooling, signature shape checked first). It checks kind / size / magic bytes, uploads straight to the gateway for that number (no MediaAsset copy), and answers with a signed token `{agent, number, kind, media_id}` (24 h). `send_from_leads` / `send_renewals` turn the token into `campaign.header_media_id` after checking agent, number and header kind. Renewals checks both sides before creating either campaign. `crm_leads.verify_signed_request` now answers 403, not 500, to a non-hex signature.
+
+**Deployed:** Django `crm_media.py` `0e250896…`, `crm_leads.py` `3747f719…`, `renewals.py` `12bc39c9…`, `views.py` `3647a8bb…`, `urls.py` `0d28e295…` → `wa.sh build app` (all three images) → `up app web|worker|beat`, web healthy; `django-check` "No changes detected". Bitrix box: `a7_lead_wa.php` `920c8c2b…`, `a7_renewals_wa.php` `fdeb14fa…`, `a7_lead_wa.js` `6dffeb59…`, `a7_renewals_wa.js` `922d95b0…` (md5 box == repo; public GET 200 with local sizes; tools answer anonymous 401). Both PHP files linted with `php -l` on the box (PHP 8.2.25). Rollback copies: scratchpad `pre-crm-media/` (= the previous live versions).
+
+**Verified LIVE:**
+- `ops/wa.sh probe-crm-header-media` (new): GET 405; wrong secret 403; bytes changed after signing 403; HTML-as-PNG 400; PNG-as-video 400; unknown Bitrix user 400; real PNG for 971524077268 → 201, token, gateway `/media` 200; token → `send_from_leads` in a rolled-back transaction → campaign carries the media id; send without token refused.
+- Playwright as admin (every send intercepted — tokens tampered or emptied, never a real queue): **Leads** — template tagged, box shown, Queue without file refused, 5.01 MB PNG refused in the popup, fake PNG refused by Django through the PHP tool, real PNG "ready" with the picture in the phone preview, tampered token → "The header image could not be checked", empty → "Choose the image for the header." **Renewals** — image templates on both sides, both files ready, owner-side tampered token refused ("…for the owner template…") before any campaign, button reopens after close. **Contacts** — same box. **30 MB PDF** through `a7_lead_wa.php` → 201 in 13.9 s, exact byte count, gateway 200.
+- Campaign count unchanged (336) after every test. Unit tests: 41 new in `campaigns/tests/test_crm_media.py` (token, file checks, signed upload view, both send routes over HTTP); whole suite 208 passed, 1 old failure in another session's untracked `gateway/tests/test_send_retry.py` (`raised.value` on an `assertRaises` context).
+- An independent three-lens review (security/contract, popup state machine, Django) found no blocker; its fixes are in (non-hex signature 500, extension kept on long names, PDF-only documents, no orphan MediaAsset copies, failed upload retried on number switch, a refused replacement keeps the good file, stale error cleared, columns scroll on short screens, Renewals sends both tokens, and **Renewals `busy` is now reset after a successful send** — before, the button did nothing until a reload).
+
+**Not verified:** a real send to a customer (deliberately not done). The send path itself is the Campaigns screen's, which already sends image headers. First real use: one test lead with your own number, then watch the campaign. No VIDEO file was uploaded live (same route as image and PDF). Deals and Owner Data pages were not opened (same script and code path as Contacts and Leads).
+
+**Flagged, not changed:** `/home/bitrix/www/local/php_interface/include/` is web-reachable — `a7_probe_farhat_managers.php` (200, 39 bytes) and `a7_probe_timeman_manager.php` (200, 2.3 KB) from another session answer anonymous requests; stub them with a 404 like `a7_probe_env.php` / `a7_lint_wa.php` now are. `bitrix/public/assets/modules/campaigns.js` offers Word/Excel/PowerPoint/text for DOCUMENT headers, which Meta does not take for templates. `apps/leadbot/auth.py` has the same non-ASCII-signature 500.
+
+**Shared/touched:** `backend/apps/campaigns/crm_leads.py` (CRLF kept), `renewals.py` (CRLF), `views.py`, `urls.py` (CRLF), NEW `crm_media.py`, NEW `tests/test_crm_media.py`; `ops/bitrix-aws/a7_lead_wa.js`, `a7_lead_wa.php` (CRLF), `a7_renewals_wa.js`, `a7_renewals_wa.php`; **`ops/wa.sh`** (+ `probe-crm-header-media`), NEW `ops/catalog/probe-crm-header-media.py`.
+
+---
+
+## 2026-10-08 — Farhat work-report To checked live; was Javeria again, re-fixed to Sattar (Cursor)
+
+User asked what Farhat Shahid currently sees. Probe: `getUserManagers(2299)=[2297,32]` → **To=Javeria bibi** — HR sync had re-activated Jaweria Team node 61 because `UF_DEPARTMENT` still had 71 and section 72 sat under Jaweria. Durable fix: reparent section 72 under company root 1 (UF_HEAD=32), set Farhat dept to `[72]` only, deactivate node 61 membership. Re-probe: `getUserManagers=[32]` → **To=Abdul Sattar Mughal**. **Not:** browser open of Farhat's Work report after Ctrl+F5.
+
+Shared: `ops/bitrix-aws/a7_farhat_report_to_sattar.php`, `a7_probe_farhat_managers.php`.
+
+---
+
+## 2026-10-08 — Image/video/document-header templates work again: sample handle minted through the gateway (Claude Code)
+
+Matloob said "kar do": the alots PDF's 3-step resumable upload is now wired into the backend, so the Create-template modal can take an Image/Video/Document sample without a Meta token or an alots panel cookie.
+- **`backend/apps/gateway/client.py`**: new `AlotsClient.upload_sample(bytes, filename, mime)` — `POST /v23.0/app/uploads` (form: file_length/file_type/file_name) then `POST /v23.0/upload:<id>` with the raw bytes, `file_offset: 0`, the `?sig=` as query params, same Bearer key as every other call; first `h` handle returned (Meta may send two, one per region). `_request` grew `data=`/`content=`; the `ApiCall` row keeps the path without `?sig` and logs no body/params for a raw upload.
+- **`backend/apps/catalog/views.py::template_header_media`**: routes tried in order gateway → Meta token → alots panel cookie, first that works wins; the answer's `via` is `gateway`, which the create path already treats as "submit through the gateway" (only `graph` goes to Meta directly). GET now answers `configured: true, via: gateway`. 503 only when every route is merely unconfigured/expired, else 502 "The sample was not accepted: <Meta's sentence>".
+- **Composer** (`template-composer.js`): the two not-configured strings no longer blame "the Meta token" ("this server has no way to send Meta a sample file"); nothing else changed.
+
+**Deployed:** `wa.sh push` client.py `09661a8d…`, views.py `1fff7ff1…` → `build app` (all three images) → `up app web|worker|beat`, web healthy; `django-check` "No changes detected". Panel via `wa.sh panel`: composer md5 `271ce1d9…` disk == local, public GET 200 / 76028 bytes. Test files could not be pushed (no `tests/` dirs under `/opt/a7-wa/backend/apps/*`; the image has no pytest anyway).
+
+**Verified LIVE:**
+- `wa.sh probe-template-header-media` (new script, forced login `a7admin`): anon 401; GET `{configured: true, via: gateway}`; format AUDIO 400; HTML-as-PNG 400; real 1x1 PNG → **200 via=gateway, 211-char handle**; two `ApiCall` rows (`/v23.0/app/uploads` 200, `/v23.0/upload:…` 200) with no signature in path or body.
+- `wa.sh probe-gateway-media-template` (new, ONE throwaway template): `zz_probe_gateway_media_delete_me_20261008_0659`, UTILITY, IMAGE header, WABA 1426351832653450 (971524077268) → Meta **200 PENDING**, template id 1645016067278945; `meta lists it: PENDING UTILITY header=['IMAGE']`. Hidden from the panel at once (`WaTemplateHide`). **Delete it in WhatsApp Manager when done**; `wa.sh probe-gateway-media-template-status` (read-only) shows its status (PENDING at 11:05 UTC).
+- Unit tests: 9 new route tests (`catalog/tests/test_header_media_route.py`, SQLite settings override + `--no-migrations`) + 5 client tests (`gateway/tests/test_client_upload_sample.py`) + the 6 existing Graph tests pass; whole `apps` suite 167 passed, 1 pre-existing failure in untracked `gateway/tests/test_send_retry.py::test_html_404_sentence_for_agents` (`raised.value` on an `assertRaises` context — should be `.exception`; not touched, another session's file).
+
+**Not verified:** a human click in the Bitrix modal (Create new template → Image → Choose file → Create) — Ctrl+F5 first; VIDEO (MP4 ≤16 MB) and DOCUMENT (PDF ≤100 MB) samples go through the same two calls but were not uploaded live (timeout is `max(ALOTS_TIMEOUT, 180)` s); the probe template's PENDING → APPROVED; media-template *sending* is unchanged (already worked). Graph/panel fallbacks only run if the gateway call itself fails.
+
+**Shared/touched:** `backend/apps/gateway/client.py` and `backend/apps/catalog/views.py` (both carried other sessions' uncommitted hunks that were already live — kept, md5 of the pre-edit copies matched the server), `bitrix/public/assets/modules/template-composer.js` (other session's send_blocked work, already live — kept), **`ops/wa.sh`** (+ `probe-gateway-media-template`, `probe-gateway-media-template-status`; comment fix on `probe-template-header-media`), NEW `ops/catalog/probe-template-header-media.py`, `probe-gateway-media-template.py`, `probe-gateway-media-template-status.py`, NEW tests above.
+
+---
+
+## 2026-10-08 — Media-header templates: why image/video creation stopped working, and the proven fix path (Claude Code)
+
+Matloob asked whether IMAGE/VIDEO-header templates made in the panel reach Meta, get approved and can be sent; alots answered him with an icpaas.in PDF ("3-step resumable upload"). Live findings (read-only, `ops/wa.sh sql app` + new probes):
+- Catalog today: **248 IMAGE APPROVED** (12 rejected), **11 VIDEO APPROVED**, 178 TEXT approved; 13 PENDING are all text/no-header. Media-template SENDS work: 8 template sends with `header.parameters[0].image.id` (media uploaded to the gateway first) → HTTP 200 on 22–24 Sep.
+- Our panel DID create image templates with a sample handle on **2026-09-22 14:21** (`wadeem_gardens`, 10+ WABAs, `header_handle` in the request, 200 → PENDING → now APPROVED). The handle was minted through the **alots web-panel session** (`[panel]/WAMessage/WATemplate/UploadMedia` 200s that day).
+- Since then the mint path is dead: last mint attempt **2026-09-24 → 302 /signin**; `PanelSession` expired 2026-09-22 22:57 UTC, keepalive fails every 10 min with "The alots panel session stored on the server has expired. An admin must sign in to alots.io again… Text headers still work". **`META_GRAPH_ACCESS_TOKEN` / `META_APP_ID` are not set** (new probe `wa.sh probe-media-template-path`), so the Graph path was never usable. Net: text templates still create fine (recent creates 200 PENDING, no handle), but an image/video template from the modal fails at the sample step. The newest IMAGE templates (`dxb_island*`, synced 10-08) have no create call from us — made in alots' own UI and synced in.
+- **Fix path proven live:** new probe `wa.sh probe-gateway-upload` ran steps 1+2 of the vendor PDF against our configured `ALOTS_BASE_URL` (alots.io) with our existing `ALOTS_API_KEY`: `POST /v23.0/app/uploads` → 200 `{"id":"upload:…"}` (content-type text/javascript, parse by body), `POST /v23.0/upload:<sid>` (raw bytes, `file_offset: 0`) → 200 `{"h":"4:…"}` — **MINT_OK**, one handle. So the gateway brokers Meta's resumable upload with the API key; no cookie, no Meta token needed. Step 3 (create with `header_handle` via the gateway) is the path that already worked on 22-Sep.
+- Not done yet: wiring this into `backend/apps/catalog/views.py::template_header_media` (gateway mint first, panel/graph as fallbacks) — proposed to Matloob; the code audit workflow was still running when this was written.
+
+**Shared/touched:** `ops/wa.sh` (+ `probe-media-template-path`, `probe-gateway-upload`), NEW `ops/catalog/probe-media-template-path.py`, `ops/catalog/probe-gateway-upload.py`. No backend/live change.
+
+---
+
+## 2026-10-08 — WhatsApp campaign button on Deals (all pipelines except Renewals) and Contacts (Claude Code)
+
+Matloob asked for the same select-and-send on Deals and Contacts. Three layers, all live:
+- **Bitrix JS** `a7_lead_wa.js` V9 → **V10**: path gate now Leads, Owner Data, `/crm/deal/*` (list + kanban, every category except 9 — Renewals keeps `a7_renewals_wa.js`) and `/crm/contact/*`; details pages excluded; ENTITY/NOUN per page (deal/deals, contact/contacts). The always-visible/idle behaviour from the entry below is unchanged.
+- **Bitrix PHP** `/bitrix/tools/a7_lead_wa.php`: `entity` accepts `deal` and `contact`; new `a7_lead_wa_contact_row()` (CheckReadPermission, NAME/LAST_NAME/FULL_NAME, phone via CCrmFieldMulti) and `a7_lead_wa_deal_row()` (CheckReadPermission; phone from the deal's contact(s) — CONTACT_ID, then DealContactTable bindings — falling back to the company phone; name = that contact's name, else the deal TITLE); `a7_lead_wa_noun()` for messages. Rows carry `crm_deal_id` / `crm_contact_id` beside `id`.
+- **init.php** `A7_LEAD_WA_BUTTON` OnProlog gate: + `/crm/deal/` + `/crm/contact/` (details excluded); backup `init.php.bak-dealcontact-*`.
+- **Django** `backend/apps/campaigns/crm_leads.py`: `crm_entity()` returns deal/contact; `build_recipients()` links deal rows to `crm_deal_id` (so `post_deal_timeline` puts the sent template on the deal, role-less), contact rows to no CRM id (their timeline is found by phone like every record), leads unchanged. Before this, an unknown entity was treated as a lead and would have set `crm_lead_id = <deal/contact id>` — the wrong record. Campaign names "CRM Deals · …" / "CRM Contacts · …". Tests added in `tests/test_crm_leads.py` (deal id, contact no-id, entity parsing, noun in errors).
+
+**Deployed:** PHP/JS md5 box == repo (`b3506a13…` / `616339a4…`; backups `*.bak-dealcontact-20261008…`). Django pushed (`crm_leads.py` d86e3f6a…, tests 759dcf8b…), `wa.sh build app` built all three images, `up app web|worker|beat` — web healthy. `wa.sh test` could not run (no pytest in the live image), so added **`ops/wa.sh probe-crm-entities`** (+ `ops/catalog/probe-crm-entities.py`, read-only `manage.py shell`) — live output: deal → `crm_deal_id`, contact → no id, lead → `crm_lead_id`, labels right.
+
+**Verified LIVE (Playwright, admin):** Contacts list — idle button → 2 selected → studio "Selected contacts" with phone tails, 29 templates; Deals list — studio "Selected deals", phones resolved from the deals' contacts; Deals kanban — idle button; **Renewals category 9 — no generic button, the renewals button only** (no double); Leads — regression fine. **Not done:** an actual send from a deal/contact (would message real customers — watch the first real one in Campaigns history); a non-admin agent session; Companies list (not requested).
+
+**Shared/touched:** `ops/bitrix-aws/a7_lead_wa.js`, `ops/bitrix-aws/a7_lead_wa.php` (CRLF kept), `backend/apps/campaigns/crm_leads.py` + `tests/test_crm_leads.py` (CRLF kept), **`ops/wa.sh`** (+ `probe-crm-entities`), NEW `ops/catalog/probe-crm-entities.py`. Live: Bitrix `init.php`, `/bitrix/tools/a7_lead_wa.php`, `/bitrix/js/a7_lead_wa.js`; Hostinger web/worker/beat images rebuilt and recreated.
+
+---
+
+## 2026-10-08 — WhatsApp campaign button now always visible (greyed until rows are ticked) (Claude Code)
+
+Follow-up to the slider investigation below: Matloob chose to show the button at all times so nobody thinks it is missing. `ops/bitrix-aws/a7_lead_wa.js` V8 → **V9** (guard `A7_LEAD_WA_V9`, style id v6): `syncButton()` now always mounts the button and calls `setButtonState()` — idle = class `a7-lwa-idle` (55 % opacity, not-allowed cursor), `aria-disabled`, title "Tick one or more leads/cards first", empty count badge; active = count badge (`.a7-lwa-count`) + title "Send a WhatsApp template to N leads". `mountButton(allowFallback)` mounts the idle button **only into a real title host** (`.ui-toolbar-right-buttons` etc.) and uses the sticky fallback bar only once something is selected, so a slow toolbar on page load can never trap it in the fallback; a fallback-bar button is re-homed when the toolbar appears. Clicking while idle hits the existing `startSend()` guard ("Select one or more leads first"). Sending logic, PHP endpoint, injection gate and `a7_team_assign.js` untouched.
+
+**Deployed:** `/home/bitrix/www/bitrix/js/a7_lead_wa.js` (644 bitrix:bitrix, md5 `265b0022…` == repo; backup `a7_lead_wa.js.bak-always-20261008054857`); public fetch HTTP 200, 41,203 bytes; `node --check` clean. Cache-busting is automatic (`?v=filemtime` in the init.php injector).
+
+**Verified LIVE (Playwright, admin):** Leads list — idle button on load → select 2 → active, badge 2 → unselect → idle but still present. **Matloob's exact path** — placement 395 → dashboard URL in a slider @1280 → button visible immediately (720×24, slider toolbar) → real checkbox click → active, badge 1. Owner Data list and Lead kanban — idle button present. All inside `.ui-toolbar-right-buttons`, none covered. **Not verified:** a non-admin agent session; Renewals (deal cat 9) uses `a7_renewals_wa.js`, which keeps the old hide-until-select behaviour — say if it should match.
+
+**Shared/touched:** `ops/bitrix-aws/a7_lead_wa.js` (repo flat copy = deployed; `live/` mirror not refreshed). Live: `/bitrix/js/a7_lead_wa.js`.
+
+---
+
+## 2026-10-08 — WhatsApp campaign button in dashboard-opened slider: no defect, it is hidden until rows are selected (Claude Code)
+
+Matloob reported the "WhatsApp campaign" button missing on a filtered leads list opened from the **Property Listing New** dashboard (placement 395 → `listings.srv1802669.hstgr.cloud` → `BX24.openPath('/crm/lead/list/?apply_filter=Y&DATE_CREATE_datesel=RANGE&…&UF_CRM_1763390140=6&UF_CRM_1763390140_label=…')`, which Bitrix opens as a side-slider iframe). Read `a7_lead_wa.js` (V8) and the live `init.php` `A7_LEAD_WA_BUTTON` OnProlog: the script is injected for every authorised user on `/crm/lead/*` and `/crm/type/1042/*` (no role gate), and both it and `a7_team_assign.js` **remove their button whenever zero rows are selected** (`syncButton → dropOldButtons`). Reproduced the exact path with Playwright as admin — placement page → slider opened from the placement's own Bitrix frame with the dashboard's URL, at 1280 px and 1900 px: a real mouse click on a row checkbox → `SELECTED: 1 / 20` → `.a7-lwa-btn` appears in the slider's `.ui-toolbar-right-buttons` (787×24 @1280), inside the viewport, not covered; "Assign to team" appears too (screenshots `f-w1280`, `h-realclick-1280`). Same on the normal list page and on a plain `BX.SidePanel.open` slider. So pic 1 simply had no row ticked; the button is not rendered "behind" the slider. **Not verified:** the dashboard's own ↗ icon click (React SPA — the identical URL/slider path was used instead) and a non-admin agent session. FYI: the dashboard's community links filter on the OLD field `UF_CRM_1763390140` (now labelled "Community (old)") — still works, its data is intact. **Pending Matloob's call:** show the button always on these lists (disabled until selection) so nobody thinks it is missing.
+
+**Shared/touched:** none (read-only investigation; test scripts live in the session scratchpad).
+
+---
+
+## 2026-10-07 — Rent / Sale lead filter: one dropdown (Rent | Sale | Rent & Sale) (Claude Code)
+
+Matloob asked for a single filter input to pick Rent leads / Sale leads / Rent & Sale (= every tagged lead). New enum UF on leads **`UF_CRM_A7_RENT_SALE`** (id 2659; Rent=2443, Sale=2444, Rent & Sale=2445), filterable, in list. Value derived from BOTH existing signals: Client Type `UF_CRM_1756638760279` (Tenant→Rent, Buyer/Seller→Sale) + Offering Type `UF_CRM_1735126982325` ("rent"/"sale"); both → Rent & Sale; never blanks a manual choice. Backfilled **10,975** leads by direct SQL (Rent 8,044 / Sale 2,930 / both 1; 12,223 with no signal stay empty). Auto-sync: `a7_rent_sale.php` registers `OnBeforeCrmLeadAdd/Update`, recomputes only when a source field is in the write — live proof: the first new lead after deploy got tagged on its own (Rent 8,044→8,045).
+
+**"Rent & Sale" = all tagged:** `A7RentSale::applyToCrmFilter` expands 2445 → [2445,2443,2444]. The first hook point (observer's `afterPrepareSqlCallback` site, core builder line 426) was TOO LATE — Bitrix pulls UF keys out at ~line 314 (`ListPrepareFilter`), so it matched 1 row. Fixed with a second, whitespace-tolerant injection in `a7_observer_filter.php::autoloadListBuilder` at the top of `CCrmEntityListBuilder::Prepare()` (right after `$arFilter` is normalised, before UF prep) — list, kanban, counts, GetListEx and REST now all see Rent OR Sale. Delegate at the top of `A7ObserverFilter::applyToCrmFilter` kept for the kanban `prepareFilter` path.
+
+**Verified LIVE:** php -l clean (module, observer, init.php); md5 box == repo; CLI `GetListEx` rows [2445] = **10,976**; REST `crm.lead.list`: Rent 8,045 / Sale 2,930 / **Rent & Sale 10,976** / R&S + IN_PROCESS 939 — all == SQL; both handlers registered (`GetModuleEvents`); derive() matrix correct; **regression OK**: observer Shared-leads still returns 122 == SQL (136 share rows, 14 deleted leads; the old `_obs_php_test_share.php` prints FAIL only because it counts deleted leads). Browser (admin, Playwright): "Rent / Sale" appears in Filter field settings and sits in the filter panel (`[data-name=UF_CRM_A7_RENT_SALE]`). **Not done:** headless Playwright could not drive Bitrix's enum select popup (4 tries), so the one-click "Rent & Sale" → kanban counters (expected Contacted/In Progress **939**, Not Interested 2,495, No Answer 1,475…) still wants a human click; the engine is proven. Field is not on the lead edit form (it auto-fills; add to the form only if agents should override).
+
+**Shared/touched:** NEW `ops/bitrix-aws/a7_rent_sale.php`, `ops/bitrix-aws/deploy_rent_sale_setup.php`; **`ops/bitrix-aws/a7_observer_filter.php`** (delegate + Prepare() injection; live md5 `cd067f1c…`); live `init.php` (guarded require after the observer block). Backups on the box: `init.php.bak-rentsale-*`, `a7_observer_filter.php.bak-rentsale-*` / `.bak-prepare-*`. New UF 2659 + 3 enum rows; `b_uts_crm_lead.UF_CRM_A7_RENT_SALE` backfilled.
+
+---
+
+## 2026-10-06 — Farhat work report To: Javeria → Abdul Sattar (Cursor)
+
+Timeman `CTimeMan::getUserManagers` was taking HR team/dept heads, not iblock `UF_HEAD`. Farhat 2299 was EMPLOYEE of HR node 61 Jaweria Team (HEAD Javeria 2297). Created iblock section 72 + HR node 62 (HEAD Sattar 32), kept `UF_DEPARTMENT=[72,71]` for CRM, added Farhat EMPLOYEE on node 62, deactivated node 61 membership. Live probe: `getUserManagers(2299)=[32]`. **Not:** browser open of Farhat's Work report after Ctrl+F5.
+
+Shared: `ops/bitrix-aws/a7_farhat_report_to_sattar.php`. Live HR: member 393 node 62 Y; 357 node 61 N.
+
+---
+
+## 2026-10-06 — CRM filters verified correct via Bitrix REST (same engine as the grid) (Claude Code)
+
+Ticket items 2-12 verification. Browser UI click-count was too flaky to automate headlessly (Bitrix smart-filter resists GET params + grid total is hard to scrape), so verified filter CORRECTNESS through `crm.lead.list` (admin webhook, user 1) — the same `CCrmLead::GetList` backend the grid uses — and compared every total to direct SQL on the box. All exact: STATUS JUNK 2627, STATUS IN_PROCESS 1561, SOURCE CALL 2444, **Community (the field just set) International City 4684, Mudon 915**, Offering/Rent-Sale rent 1273 (SQL 1272, off-by-1 = a trailing-space free-text variant) / sale 913, ASSIGNED_BY_ID=1 (pool) 999, **MULTI STATUS+Community 501**, Created≥month 430, Created≥today 18, total 24518 — all match SQL. Browser (admin, Playwright) separately confirmed the filter FIELDS render: Observers picker shows "All agents"/"Shared leads" + "Community"/"Community (old)" appear in the Leads filter-field dialog.
+
+Net ticket state: agent / community / rent-sale / status / source / date / assigned / multi-filter all return correct results (proven by count-match on the real engine); Shared-leads + All-agents live (observer deploy entry below); community data cleaned/canonicalised (entry below). Still open: SPA 1058 directory dedup, ~12,010 leads with no community (data-entry gap), and a human eyeball of the grid as a non-admin agent (could not browser-login as an agent from here).
+
+**Shared/touched:** none (read-only REST + SQL verification). Used `AGENT_REPORT_BITRIX_WEBHOOK` from agent-reports/.env for the counts.
+
+---
+
+## 2026-10-06 — Shared-lead popups no longer cover comments (Cursor)
+
+On lead details the pending-share stack (`a7lg-pending`, z-index 2147483000, top-right) sat on the timeline/comment column. JS: dock a collapsed **"N shared leads"** tray bottom-left, auto-ack the open lead, hide idle-share cards on that page. List/kanban still top-right. Live `a7_lead_guard.js` md5 `17137efb…` then redeploy after notifier CSS; `a7_share_idle.js` `3aa4571a…`. **Not:** browser click after Ctrl+F5 on a lead with many pending shares.
+
+Shared: `ops/bitrix-aws/a7_lead_guard.js`, `a7_share_idle.js`.
+
+---
+
+## 2026-10-06 — Community field set to the clean one; corrupt cleaned + backfilled (Claude Code)
+
+Ticket item 3 (community filtering). Leads have TWO community fields: `UF_CRM_1763390140` (id 2037, type `crm`, label was "Community") binds the **Communities directory SPA 1058**, and `UF_CRM_1770537051525` (id 2252, type `string`, label was "Community..") holds free-text names. Investigated on the live box (`3.108.146.169`): the directory SPA 1058 is **catastrophically polluted** — 6,599 rows, incl. "Al Warqa'a" ×4204 and "Business Bay" ×2277 dupes — so the link field is unusable for filtering; its values are opaque codes + **43 `Array`-corrupt**. The text field is clean (51 distinct readable names: International City 4570, Dubai Land, Mudon, Serena…), **0 corrupt**, and is what every a7 script already uses (Neha, Javeria, lead-shift, team-assign fallback). **Decision: the string field `UF_CRM_1770537051525` is canonical.**
+
+Applied via `sudo -u bitrix php` (direct SQL, so **no lead automations/robots fired**), with full backups on the box (`/home/bitrix/a7_community_set_backup_*.tsv`, `a7_community_labels_backup_*.tsv`): (1) blanked the 43 `Array` values in the link field; (2) backfilled the text field from the directory title where text was empty and the link resolved to a real community — **10,140 → 11,141 filled (+1,001)**, consistent names; (3) relabelled via `CUserTypeEntity::Update` (all langs) + cache clear: text field → **"Community"**, link field → **"Community (old)"**.
+
+**Verified LIVE:** DB labels now 2252="Community", 2037="Community (old)"; `Array` count 0; text_filled 11,141. Browser as admin (Playwright): the Leads "Filter field settings" dialog shows **Community** and **Community (old)** (and a separate **Sub Community** field) — the clean one is now the obvious choice. NO existing text values were overwritten (backfill only touched empty cells; fully reversible from the TSV backups).
+
+**Still open (needs their call):** the Communities directory SPA 1058 itself needs a dedupe (4204+2277 junk rows) — separate project; ~12,010 leads have NO community in either field (data-entry gap, no source to fill); the lead edit FORM still shows "Community (old)" (the directory dropdown) for input — if they want new leads entered into the clean text field, add it to the form, else keep the dropdown and the backfill keeps text in sync. Did NOT normalise existing free-text spelling variants (e.g. "Dubailand" vs "Dubai Land" — the directory itself treats them as distinct, so left alone).
+
+**Shared/touched:** LIVE box data in `b_uts_crm_lead` (link+text UF columns) + labels in `b_user_field_lang` (ids 2037/2252); migration + backups on the box. No repo files changed in this step.
+
+---
+
+## 2026-10-06 — Observer filter deployed to the NEW Bitrix box; CRM filter feature live again (Claude Code)
+
+**Root cause of the Matloob CRM-filter ticket:** the live Bitrix box is now the snapshot box `3.108.146.169` (DNS `crm.a7grouprealestatedxb.com` points here; old `13.203.81.218` is OFF and staying off). The snapshot predates the 5-Oct observer work, so `a7_observer_filter.{php,js}` + `_kanban.php` were ABSENT and `init.php` never required them — `/bitrix/js/a7_observer_filter.js` was a genuine **404** (that is why the 10-06 external fetch 404'd while 5-Oct "200 on the box" was the OLD box). Everything else is present + current on the new box (team-assign, phone-mask, lead-guard, stage-admin, Neha/Javeria, reminders, auto-timeman, call-intelligence, 3cx workers; 207 a7_* files, timers+cron running). Only `a7_lead_wa.js` differs (box = 29-Sep variant `04ceb0f0`, repo flat `3362271b`) + 3 minor 3CX/ping files absent.
+
+**Deployed** latest v1.3.1 to `/bitrix/php_interface/include/a7_observer_filter.php` + `a7_observer_filter_kanban.php` and `/bitrix/js/a7_observer_filter.js` (644 bitrix:bitrix; md5 on box == repo flat: php `f3ec61…`, kanban `c495a7…`, js `27efca…`); wired `init.php` with a guarded `require_once` after the `a7_stage_admin` block. Backup: `init.php.bak-obs-20261006073723`. `php -l` clean on all three + init.php.
+
+**Verified LIVE:** public JS now **200** (was 404). Box SQL: All-agents observer leads **981** (67 users); Shared leads **118** (132 share rows, 118 still in `b_crm_lead`); Shared+IN_PROCESS **8**; status orphans **0** (item 5 clean — the 2 deleted stages left nothing stranded). Browser as admin (Playwright, headless): `a7_observer_filter.js` loads in DOM, Observers picker renders **"All agents"** + **"Shared leads"** above the real agent list, and "Shared leads" selects (checkmark + `onSelect` fires `id=shared-leads`).
+
+**NOT verified / still open:** (1) agent-role (non-admin) browser click — "All agents" locks non-admins to `ASSIGNED_BY_ID=self` (`a7_observer_filter.php:537-548`), undecided for TL; (2) exact grid total after Apply in the UI (SQL-proven 118; browser used the raw dialog, not the Search-apply path); (3) **stock filters** (agent / community / rent-sale / status / source / date / assigned) never click-tested vs this ticket; (4) **COMMUNITY DATA dirty** — two parallel fields `UF_CRM_1763390140` (link) + `UF_CRM_1770537051525` (text), 9 `Array` corrupt + many empty (TASKS 24-Sep) — community filter unreliable until one field is canonical + data repaired; (5) code risks per the audit: saved-preset blob scan can narrow queries outside the grid, JS popup heuristic can inject chips into non-Observer pickers whose text contains `asma`/`neha`.
+
+**Shared/touched:** LIVE box `/bitrix/php_interface/include/a7_observer_filter.php` + `_kanban.php`, `/bitrix/js/a7_observer_filter.js`, `/bitrix/php_interface/init.php`. Repo: `ops/wa.sh` (SSH key path now resolves the `C:\Users\Hp` profile too), NEW `ops/bitrix.sh` (read-only Bitrix audit, wa.sh-style), NEW `ops/known_hosts_bitrix`. The 3 observer files are still **git-untracked** (single-copy risk — should be committed).
+
+---
+
+## 2026-10-06 — HR stage password prompt + Usman HR bypass (Cursor)
+
+HR UAE/PAK kanban lives at `/page/hr_uae/` not `/crm/`, so `a7_stage_admin.js` never loaded and "+" hit the PHP deny with no password box. JS now injects on `/page/hr_*` + HR type URLs, with a real password modal. Config `hr_stage_managers` is **only** user **2628** `usman.a7group@gmail.com` (live ACTIVE=Y); he skips the password on HR PAK/UAE boards (types 1156/1160/1168/1172/1210/1212/1214/1216) and `a7_hr_stage_remove.php` allows him to delete empty columns. Everyone else still needs the admin password. Live md5 JS `055ef65f…` HTTP 200. **Not:** browser click as Usman vs a non-Usman HR user after Ctrl+F5.
+
+Shared: `ops/bitrix-aws/a7_stage_admin.php`, `a7_stage_admin.js`, `a7_stage_admin.config.php`, `ops/bitrix.sh` (added `put`). Also `live/www/local/ajax/a7_hr_stage_remove.php`.
+
+---
+
+## 2026-10-06 — CRM lead filters audit, no code change (Cursor)
+
+Read-only review of the Matloob CRM-filter ticket against `ops/bitrix-aws` + TASKS. Custom A7 filter code is **only** Observers: **All agents** + **Shared leads** (`a7_observer_filter.php` v1.3.1, kanban subclass, JS). Agent / community / rent-sale / status / source / dates / assigned are stock Bitrix fields + CRM roles (agent personal, TL department) plus Neha/Javeria extra tables. PHP-side Shared vs All-agents mix-up was patched 5 Oct (user 2311: 113 shared, not 976). **Not done:** no Bitrix SSH, no logged-in kanban clicks, no live SQL. Ticket is **not resolved**. Cursor fetch of `/bitrix/js/a7_observer_filter.js` was 404 from outside (TASKS 5 Oct said 200 on the box).
+
+Shared: none edited.
+
+---
+
+## 2026-10-05 — NABIHA-44 send 500 on Matloob test PK (Cursor)
+
+Official “internal error” on Matloob (test) `03078633218` / `+923078633218` from NABIHA-44. Live: last 2h **78 other sends 200**, **all 14 of 500 were this one `to`** (NABIHA-44 + Blue Brick). Same `+923078633218` was 200 as recently as 24 Sep. One retry of the plus form still 500. After a gateway 500/404-html we now retry once **without** the leading `+` (bare digits used to 200). Recreated web/worker/beat; live `_payload_without_plus_to` present. **Not:** did not send a live test text from the server — Retry on the original “hi” bubble (not the error text).
+
+Shared: `backend/apps/gateway/client.py`. Did not touch `inbox.js`.
+
+---
+
+## 2026-10-05 — Official send HTTP 404 was Alots HTML blip (Cursor)
+
+Mehnaz UK `447428322124` (`772479489292535`) failed at 01:46 PKT with `POST /v23.0/…/messages -> HTTP 404`. Live `gateway_apicall` shows **IIS HTML 404** (not Meta JSON) on several numbers 08:45–08:48 UTC; the same phone id returned **200** from 08:55 UTC (incl. 10:08). Number/WABA mapping is correct. `send_raw` now retries once on HTML 404 / 502 / 503 (same as the 500 blip). Recreated web/worker/beat; live import of the retry helper is True. **Not:** did not click Retry on the two failed bubbles (conv 26296) — gateway is healthy so Retry should deliver if the 24h window is still open.
+
+Shared: `backend/apps/gateway/client.py`. New: `backend/apps/gateway/tests/test_send_retry.py`. Did not touch `inbox.js`.
+
+---
+
+## 2026-10-05 — Shared leads was applying All agents (Cursor)
+
+Chip said Shared leads but Bitrix stores that as `OBSERVER_IDS=[0]`, and the saved filter lives in `filters.tmp_filter` not top-level `tmp_filter`. The [0] fallback then ran **All agents** (976 leads: Assigned 1, AI Qualified 4). Fix: read the whole user-filter blob for `shared-leads`, and never treat `[0]` as All agents unless that token is actually saved. Proven as user 2311: `[0]` and JSON both return **113** shared leads, IN_PROCESS **7** (was 69). **Not:** browser click after this deploy.
+
+Shared: `ops/bitrix-aws/a7_observer_filter.php`.
+
+---
+
+## 2026-10-05 — Shared leads filter (Cursor)
+
+Observers picker now has English **Shared leads** as well as **All agents**. Shared = Lead Guard tag (`a7_lead_share`), not every observer. Admin: every live shared lead; agent: shared-with-me plus own assigned shared leads. SQL is `L.ID IN (...)` in the list-builder hook because `@ID` is ignored. Proven: 152 share rows / 127 distinct IDs / **113** still in `b_crm_lead`. JS 200 at `/bitrix/js/a7_observer_filter.js`. **Not:** browser click of Shared leads after deploy.
+
+Shared: `ops/bitrix-aws/a7_observer_filter.php`, `a7_observer_filter.js`. Live include + js.
+
+---
+
+## 2026-10-05 — All agents GetListEx path (Cursor)
+
+Kanban still showed every lead after the prepareFilter subclass because Bitrix turns `["user","all-agents"]` into `OBSERVER_IDS=[0]` and totals use `CCrmLead::GetListEx`, not the subclass. Now `CCrmEntityListBuilder` is autoloaded with a rewrite that calls `A7ObserverFilter::applyToCrmFilter` before lead SQL. Proven: token and `[0]` both return **975** leads; observer user 21 still **689**; unfiltered nTopCount 5000. `Entity::getInstance('LEAD')` is `A7KanbanLead`. **Not:** browser click after this deploy.
+
+Shared: `ops/bitrix-aws/a7_observer_filter.php`, `a7_observer_filter_kanban.php`. Live eval of list builder, not a core file edit.
+
+---
+
+## 2026-10-05 — Lead kanban Observers All agents actually filters (Cursor)
+
+First ship only painted the chip. Bitrix stores `["user","all-agents"]`; `(int)` of that is 0, so `prepareObserversFieldFilter` dropped the SQL and kanban showed every lead (~24k). Fix: `A7KanbanLead::prepareFilter` rewrites `OBSERVER_IDS` to the 67 real observer user ids. Proven on the box: SQL matches **975** observer leads vs **24457** all leads. Chip stays "All agents". Agent still gets ASSIGNED_BY_ID locked to self. **Not:** did not click Search again in a browser after this deploy — hard-refresh and re-apply the chip.
+
+Shared: `ops/bitrix-aws/a7_observer_filter.php`, `ops/bitrix-aws/a7_observer_filter_kanban.php`, `ops/bitrix-aws/a7_observer_filter.js`. Live include dir + `init.php`.
+
+---
+
+## 2026-10-05 — Lead kanban Observers: All agents (Cursor)
+
+Lead filter Observers picker now has English **All agents**. Selecting it rewrites `OBSERVER_IDS` to every `b_crm_observer` user on leads (ENTITY_TYPE_ID=1). Bitrix SQL stays `prepareObserversFieldFilter`. Admin (group 1) sees every lead that has any observer; a non-admin gets `ASSIGNED_BY_ID` locked to self so only their own observer-leads show. Not a core patch: hook + JS.
+
+Live: `/bitrix/php_interface/include/a7_observer_filter.php`, `/bitrix/js/a7_observer_filter.js`, `init.php` require after stage-admin. PHP rewrite proven on the box: token stripped, 67 observer user IDs expanded, `user_21` kept. JS is 200 at `https://crm.a7grouprealestatedxb.com/bitrix/js/a7_observer_filter.js`. **Not:** did not click All agents in a browser as admin vs agent.
+
+Shared: `ops/bitrix-aws/a7_observer_filter.php`, `ops/bitrix-aws/a7_observer_filter.js`. Live `init.php` only.
+
+---
+
+## 2026-10-03 — CentOS-4 fresh snapshot SSH + IP HTTP ready (Cursor)
+
+New Lightsail **CentOS-4** `65.2.126.23` (32 GB / 8 vCPU / 640 GB). SSH key added for `ec2-user`. Nginx, Apache, MySQL, cron, auto clock-in and the Let’s Encrypt cert (to 12 Nov 2026) are up. HTTP on the **IP** returns Bitrix login 200; a request with Host `crm.a7grouprealestatedxb.com` still 301s to HTTPS. Public **443 is closed** in Lightsail. Snapshot is behind live: this box leads **24267 / max 78811 / last 03 Oct 08:43**; live **24313 / max 78857 / last 03 Oct 15:22**. DNS still `13.203.81.218`. Nginx backup: `/etc/nginx/bx/site_enabled/s1.conf.bak-ip-20261003`. **Not:** did not change DNS; did not open 443 in the Lightsail console.
+
+---
+
 
 Three AI sessions work this repository at the same time, and they cannot see
 each other. Two of them have already rewritten the same file in one afternoon,
@@ -24,6 +440,735 @@ anybody proved it works*, which is the part a commit message cannot carry.
 4. **If you undo somebody's work, say whose and why.** Never silently.
 5. Newest first. Keep an entry to a few lines ? the detail belongs in the
    commit and in the code's own comments.
+
+## 2026-10-02 — Assign to team: FOR ALL took the ticked page, not the filter (Claude Code)
+
+Leads filtered to Responsible = Aila (122) showed "21 leads selected · For all". Cause: a live-only edit on 2026-10-01 13:09 UTC (never in the repo, no entry here) sent the filter widget's raw UI values to `CCrmLead::GetListEx`. Responsible arrives as the string `["user","2344"]`, so FOR ALL matched 0 and the JS fell back, without saying so, to the 20 ticked rows plus Bitrix's hidden `template_0` row. Proven from the nginx log (a 148-byte `ids:[] total:0` reply) and the user's session file. The same edit's Owner Data path could widen a stage filter to every card of that Responsible, and it let any logged-in user put their own filter into the CRM query. Audit of that window: 77 calls, two IPs (office and the 10-01 session), all from the list pages.
+
+Fix: FOR ALL now asks each list for the filter it drew the page with. That is the same filter Bitrix's own "Total: Show" counts:
+- Leads: `GridContext`.
+- Renewals: `CRM_GRID_DATA`, with pipeline 9 enforced.
+- Owner Data/Availability: `crm.item.list`'s own `getListFilter()`.
+
+Checks:
+- Every row on screen must be in the answer.
+- The tab's filter stamp, taken when its grid was drawn, must still match, so a filter changed in another tab is refused. The page check alone let a widened filter through; the harness showed 8,933 passing.
+- A shown Total far below the result is refused.
+- Report drill-downs and "All items" are refused.
+- An answer of 0 is refused. There is no "empty = everything" fallback.
+
+Other changes:
+- Sets over 400 are held server-side (`/home/bitrix/a7_team_assign_sel`, per user, 2 h), so Apply uses exactly what was confirmed.
+- Apply asks "Assign ALL N …?".
+- Owner Data updates keep Bitrix access checks on, and manual counts must name the selected teams' agents.
+- `/home/bitrix/a7_team_assign_resolve.log` gets one line per FOR ALL.
+- The public `/upload/a7_team_assign/last_resolve_debug.json` is gone.
+- `deploy_team_assign.php --src=DIR` lints first, backs up to `/home/bitrix/a7_team_assign_backups`, copies the JS last and restores on failure. It refuses to overwrite a live file edited since the last deploy (`--force`).
+
+**Verified:**
+- Read-only CLI harness on live data: 27/27 and 29/29 checks.
+- jsdom on the real JS: 24/25; the one fail was a bug in the test itself.
+- Matloob's own browser after deploy:
+  - Leads FOR ALL resolved 122 (list Total 122, 20 rows on screen); the job assigned 122/122, 0 failed.
+  - Availability resolved 129 = Total, job 129/129.
+  - Owner Data resolved 1,479 = Total; its job was running clean when this entry was written.
+- v2 (stamps and refusals) is deployed: md5 of the served JS equals the repo, the tool loads, and cron loads.
+
+**Not verified:** a v2 FOR ALL clicked in the browser (v1 was); an agent-role (non-admin) user; the analytics drill-down page in a browser.
+
+**Shared:** `ops/bitrix-aws/a7_team_assign.{js,php}`, `deploy_team_assign.php`. These had never been committed (untracked). Live: `/bitrix/js/a7_team_assign.js` (V10), `/bitrix/tools/a7_team_assign.php`.
+
+---
+
+## 2026-10-03 — CentOS-4 not ready for domain cutover (Cursor)
+
+Checked snapshot instance CentOS-4 `3.109.47.182` against live CentOS-3 `13.203.81.218`. Nginx, Apache, MySQL, cron and the domain certificate (valid to 12 Nov 2026) are up, and local HTTPS returns Bitrix. Public port **443 is closed** in the Lightsail firewall, `.htsecure` is still renamed, and the copy is behind live: leads **24218 / max 78762 / last 2 Oct 12:35** versus live **24267 / max 78811 / last 3 Oct 08:43**. DNS still points at the old IP. **Not:** did not change DNS or the firewall.
+
+---
+
+## 2026-10-02 — New Lightsail Bitrix opens on its IP (Cursor)
+
+Snapshot instance **CentOS-4** `3.109.47.182` listened on 443, but the Lightsail firewall blocked that port, and nginx `.htsecure` sent port 80 to HTTPS, so the IP never opened. Renamed `/home/bitrix/www/.htsecure` to `.htsecure.bak-ip-20261002` on **this new server only**. Public check: `http://3.109.47.182/` returns **200** Bitrix login. Domain `crm.a7grouprealestatedxb.com` still points at `13.203.81.218`. **Not:** did not open port 443 in the Lightsail console, and did not change DNS.
+
+---
+
+## 2026-10-01 — eman Fazal taken off Hassan’s team (Cursor)
+
+eman Fazal (user **2379**) is no longer in **Hassan Team (TL)**. Company structure node is now **A7 Group Real Estate** (department 1). Hassan’s department 69 does not list her (`dept69_has_eman=NO`, 7 people left). Removed from the team-assign fallback list and the Arabian Ranches pool in `a7_team_assign.config.php`, and from Hassan’s agent list in the phone-mask config. Phone mask for her stays on. No Bitrix robot template contained `user_2379`. Existing leads were not moved. **Shared:** `ops/bitrix-aws/a7_team_assign.config.php`, `ops/bitrix-aws/a7_tl_phone_mask.config.php`. **Not:** did not click a new lead through the kanban robot after the change.
+
+---
+
+## 2026-10-01 — eman Fazal lead phones now masked (Cursor)
+
+Lead 78677 showed `971564033906` in full because the viewer was eman Fazal (user **2379**, Bitrix Administrators group, dept 69). The mask script never loaded for her: she is Hassan’s agent, not a team lead and not Admin & Finance. Added **2379** to `extra_mask_user_ids`. Live check: `a7_tl_mask_should_apply(2379)` is YES; Abdul Malik (1) stays full. **Shared:** `ops/bitrix-aws/a7_tl_phone_mask.config.php`. **Not:** did not reload her browser — she needs Ctrl+F5 on the lead.
+
+---
+
+## 2026-10-01 — Phone mask on the account profile card (Cursor)
+
+The avatar menu (Clock in / Security / Quick mobile login) has no phone. The number is on the employee profile that opens from the name, and on the mini profile card. Those Vue/entity-editor nodes were painting the full number again after the mask, and a click copied or called it. Last 4 digits are now rewritten in place; click/call asks for the password; the popup close icon is still left alone. Deployed `/bitrix/js/a7_tl_phone_mask.js` (md5 `f587da2acb98808dfe3d5592fedee4a0`). **Shared:** `ops/bitrix-aws/a7_tl_phone_mask.js`. **Not:** did not open Hassan’s live profile after deploy — Ctrl+F5, then open a user who actually has a mobile saved.
+
+---
+
+## 2026-10-01 — pfSync Bitrix lead push off; remaining a7-pf leads removed (Cursor)
+
+`pushPfLeadsToBitrix` and `scheduleBitrixLeadSync` in `/opt/a7-listing-v2/server/bitrixLeadSync.js` now return immediately (`lead_push_disabled`). Listing service restarted, active. Backup of the file: `bitrixLeadSync.js.bak-noleadpush-20261001`. Exported 153 remaining script-created leads into `files/crm/a7pf-empty-dupes-20260930.json` (now 3283) and deleted them. **DELETED 153 FAIL 0.**
+
+---
+
+## 2026-09-30 — Removed Hostinger duplicate empty leads (Cursor)
+
+Backed up then deleted empty `a7-pf` leads that already had another lead on the same phone. Backup: `files/crm/a7pf-empty-dupes-20260930.json` (3123 rows). Deleted 3123. **Kept 133** empty Hostinger leads that had no twin. Listing push stays off.
+
+---
+
+## 2026-09-30 — Listing app Bitrix lead push stopped (Cursor)
+
+Hostinger `a7-listing-v2` was creating the extra Property Finder leads (`ORIGINATOR_ID=a7-pf`) from `/opt/a7-listing-v2/server/bitrixLeadSync.js`, called by `pfSync.js`. Push and the 90s scheduler are commented out; service restarted and active. Backup `pfSync.js.bak-noleadpush-20260930`. **3253** such leads exist (19 Sep 2025–30 Sep 2026 06:49 UTC). Largest piles: Assigned 1675, Old Leads Before 6 Month 558, No Answer 362. Top owners: Shareen 348, Fozia 328, Minahil 286, Asma 215, Mehnaz 201. Listing desk itself still runs; it no longer calls `crm.lead.add`.
+
+---
+
+## 2026-09-30 — Lead stages Invalid number + Agent removed; stage password enforced (Cursor)
+
+Moved **33** leads from `UC_EZQBQD` (invalid number) and `UC_XOKU71` (Agent) to Assigned `UC_MJDO60`. Deleted both statuses. Stage create was not blocked because the ORM event name was `\Bitrix\Crm\Status::OnBeforeAdd` and Bitrix also emits `StatusOnBeforeAdd` / `StatusTable`. Registered all of those. Proved `StatusTable::add` without the password is refused. **Shared live:** `a7_stage_admin.php`, `a7_stage_admin.js`. **Not:** did not type the password in the browser; a hard refresh is required before the prompt shows.
+
+---
+
+## 2026-09-30 — WhatsApp send 500 was Alots, retry added (Cursor)
+
+`POST /messages` to alots returned HTTP 500 `Internal server error occurred.` on text (and a few templates) from 2026-09-29 14:22 UTC. Same payload shape as the last successful text. A fresh text send on the same phone id at 05:35 UTC returned 200, so the provider had recovered. `send_raw` now retries that 500 once. The panel sentence is "The WhatsApp provider had an internal error" instead of their raw internal-server line. Rebuilt web/worker/beat. **Not:** did not send a real customer message after the rebuild.
+
+---
+
+## 2026-09-30 — Account popup close clickable again (Cursor)
+
+Hassan T.L (team lead) loads the phone mask. That script deleted any `.popup-window` that contained a phone and left `.popup-window-overlay`, so the kanban stayed blurred and the close icon could not be clicked. Hint bubbles only are removed now; account/side panel is left alone; close controls are above the overlay. Deployed `/bitrix/js/a7_tl_phone_mask.js`. **Not:** did not click Hassan’s live profile after deploy — he needs one hard refresh.
+
+---
+
+## 2026-09-29 — Live leads use leadbot; n8n v9 off (Cursor)
+
+Bitrix lead robot template **6** (NEW stage, was calling n8n `a7-bitrix-lead-outreach-v2`) now calls `/bitrix/tools/a7_leadbot_outreach.php?lead_id={=Document:ID}`. Backup: `/home/ec2-user/bp-template-6-20260929142400.bin`. Cache cleared. n8n workflow `A7 WhatsApp CRM Automation v9 (clean)` set **inactive** and n8n containers restarted. **Not:** no test lead created. Template still pending Meta approval, so the first real lead can record outreach failed until APPROVED.
+
+---
+
+## 2026-09-29 — Linked phones menu is now Lead AI (Cursor)
+
+The Official panel menu item that opened the OpenWA API-key screen now opens **Lead AI** (`bitrix/public/assets/modules/lead-ai.js`). List comes from `GET /api/leadbot/board/`. Old QR iframe function `openLinkedDevices` is still in `inbox.js` but the menu no longer calls it.
+
+**Shared:** `inbox.js`, `index.html`, `api.js`.
+
+---
+
+## 2026-09-29 — Leadbot live on Official + Bitrix PHP (Cursor)
+
+Deployed `apps/leadbot` (image rebuild web/worker/beat, migration `leadbot.0001` OK, containers healthy). Panel `inbox.js` md5 matches live. `POST /api/leadbot/outreach/` returns **403** without HMAC (route is up). Bitrix tool live: `https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadbot_outreach.php` returns **400** without lead_id. Template `a7_lead_enquiry_confirm` submitted **PENDING** on 27 agent 971 WABAs. **Not:** Meta has not approved yet, so a real send will fail until APPROVED. n8n workflow not unpublished. No test lead sent.
+
+**Shared:** `ops/wa.sh` (`submit-leadbot-template`), `bitrix/public/assets/modules/inbox.js`.
+
+---
+
+## 2026-09-29 — Phase 1 leadbot (replace n8n) coded (Cursor)
+
+Official path: Bitrix lead → responsible agent’s 971 number → UTILITY template `a7_lead_enquiry_confirm` → Sara AI until qualified (agent replies do not pause AI). New app `backend/apps/leadbot/` (outreach HMAC, Celery inbound, qualify rules). Panel badge on `bitrix/public/assets/modules/inbox.js` + `inbox.css`. Bitrix caller `ops/bitrix-aws/a7_leadbot_outreach.php` (uses existing `a7_lead_wa.config.php` secret). Inbox AI desk skips threads leadbot owns (`inboxai/tasks.py`).
+
+**Shared:** `inbox.js`, `inbox.css`, `backend/apps/inbox/serializers.py`, `backend/apps/inbox/views.py`, `backend/a7wa/settings.py`, `backend/a7wa/urls.py`.
+
+**Not live:** template not submitted to Meta (needs `manage.py submit_leadbot_template` on the server, then APPROVED). PHP not deployed. n8n workflow not unpublished. No real lead send proved.
+
+---
+
+## 2026-09-29 — Live pull: Official + Bitrix + secrets (Cursor)
+
+Pulled real live trees: Hostinger Official from `a7wa-web` container + `/opt/a7-wa/panel` + deploy; AWS Bitrix `a7_*` into `ops/bitrix-aws/live/`. **Secrets included locally** (`deploy/.env`, alots cookie, `agent-reports/.env`, Bitrix `*.env`) + copies under `files/secrets/` (gitignored). Restored `agent-reports/`. Removed `reference/` + `wa-ui-mockups/`. Map: `PROJECTS.md`. **Not:** did not commit secrets; `_live_pull` may remain if Windows locked it.
+
+---
+
+## 2026-09-29 — Remove local tool/dot folders (Cursor)
+
+Deleted unused local tooling dirs: `.agents`, `.claude`, `.codex`, `.playwright-mcp`, `.pytest_cache`, `.serena`, `.vscode` (caches + AI/editor hooks — not Official product). Tracked copies under `.agents`/`.claude`/`.codex`/`.vscode` removed from the index too (not committed yet).
+
+---
+
+## 2026-09-29 — Remove QR / OpenWA code from repo (Cursor)
+
+Deleted linked-device stack from the tree: `wa-qr/`, `openwa/`, `ops/openwa/`, and OpenWA specs under `docs/superpowers/`. README layout updated to Official-only. **Not touched:** Official `backend/`, `bitrix/public/`, `deploy/`. Live VPS QR/OpenWA containers (if still running) are unchanged — only repo code removed. `ops/wa.sh` still has legacy `qr`/`openwa` subcommands for server ops.
+
+---
+
+## 2026-09-29 — Repo junk clean: probes/dumps removed (Cursor)
+
+Deleted ephemeral extras only (not product code): ~91 `ops/bitrix-aws/probe_*`, ~13 `verify_*`, catalog `probe-*`/`diag-*`/`fix-*`, `_roster_raw.txt`/`_agents.txt`/roster dump sh, `_out/` worktime PDFs+json, `_build_*_worktime_pdf.py`, openwa `_form*`/`_lead*` temps, root `API_Template_Creation_3_Steps.pdf`. **Kept:** team_assign / phone_mask / auto_timeman / CRM limits / bulk-campaign / WA number PDFs under `files/briefs/`.
+
+---
+
+## 2026-09-29 — Official +971 PDF without coexistence (Cursor)
+
+`Official-WA-971-Numbers.pdf` regenerated excluding community/label `coexistence` (9 removed → **28** rows). `ops/build_wa_numbers_pdf.py 971 no-coexist`.
+
+---
+
+## 2026-09-29 — Official +971 numbers PDF only (Cursor)
+
+Same roster dump, filtered `971*` → `files/briefs/Official-WA-971-Numbers.pdf` (37 rows). Regenerator: `ops/build_wa_numbers_pdf.py 971`.
+
+---
+
+## 2026-09-29 — Official WA numbers+assignments PDF (Cursor)
+
+Live roster (119 numbers, 61 active assignments) → white landscape PDF table: Name, Number, Phone Number ID, WABA Business ID, Account, Label/Community, Active, API Key note (shared `ALOTS_API_KEY`, not per-number). Path: `files/briefs/Official-WA-Numbers-Assignments.pdf`. Regenerator: `ops/build_wa_numbers_pdf.py` (+ `ops/catalog/dump-waba-roster*.sh`). **Not:** embedded live API secret (stays in server `.env`).
+
+---
+
+## 2026-09-28 — Phone mask: Shahbaz Elahi IT Head (Cursor)
+
+Added `extra_mask_user_ids` **2637** Shahbaz Elahi (`Sha.a7group@gmail.com`). Same last-4 / eye / `admin222007`. Ctrl+F5 as Shahbaz.
+
+**Shared:** `a7_tl_phone_mask.config.php`.
+
+---
+
+## 2026-09-28 — Fix Assign For-all “List filter not ready” on Leads (Cursor)
+
+Root cause: resolve used `empty($FILTER)` so a valid empty list filter (all selected) was rejected; also no fallback when session grid id mismatched. Fix: accept empty FILTER; try session → fuzzy grid → GridContext → UiFilterOptions rebuild → empty fallback; JS V8 prefers For-all grid + default `CRM_LEAD_LIST_V12`. **Verified:** `PROOF_OK` empty/fuzzy/ui_options all return IDs; public V8. Ctrl+F5 Leads → For all → Assign.
+
+**Shared:** `a7_team_assign.php`, `a7_team_assign.js`, `probe_team_assign_lead_forall.php`.
+
+---
+
+## 2026-09-27 — Phone mask: Matloob + Khadija (Cursor)
+
+Added `extra_mask_user_ids` 2311 Matloob + 2558 Khadija (same last-4 / eye / password). **Verified:** both `MASK`, PROOF_OK. Ctrl+F5.
+
+**Shared:** `a7_tl_phone_mask.config.php`, `a7_tl_phone_mask_lib.php`.
+
+---
+
+## 2026-09-27 — Phone mask auto for Admin & Finance (Cursor)
+
+Dept **2** (Admin & Finance, recursive) members get last-4 phone mask on all portal pages (not only Leads/OD). Exempt full numbers: **1** Abdul Malik, **2237** A7 Group. Future joiners to dept 2 auto-masked (no hardcoded admin list). Same eye + `admin222007` / 30s. TL leaders list kept. **Verified:** `PROOF_OK` — dept2 7 MASK / 2 FULL; Taha/Raoof/Sreya/… MASK; Malik+2237 FULL; Hassan still MASK; Matloob FULL; init uses `a7_tl_mask_should_apply`; JS V2. Ctrl+F5 as those users.
+
+**Shared:** `a7_tl_phone_mask.{js,php,config.php}`, new `a7_tl_phone_mask_lib.php`, `deploy_tl_phone_mask.php`, `probe_tl_phone_mask_admin.php`. Live php_interface + tools + init.
+
+---
+
+## 2026-09-27 — Assign: no hard cap; large runs background (Cursor)
+
+Removed `max_ids=5000` reject. For-all can resolve full filter (Renewals ~32k). Browser only gets IDs when ≤400 (`deferred` otherwise). Apply >120 → job file + minute cron/`nohup` worker at ~12–14/sec (`sleep_us=70000`). Modal polls progress. **Verified:** deploy V7; cron line installed; CLI job 5 renewals → `done ok=5`; resolve cat 9 → `total=32239 truncated=false`. **Not:** live UI Apply on 32k For all.
+
+**Shared:** `a7_team_assign.{js,php,config.php}`, `a7_team_assign_jobs.php`, `a7_team_assign_cron.php`, `install_team_assign_cron.sh`, `deploy_team_assign.php`. Live php_interface + tools + bitrix crontab.
+
+---
+
+## 2026-09-27 — Assign For all: full filter IDs not Show-more DOM (Cursor)
+
+Bug: FOR ALL / ALL ITEMS SELECTED only fed Assign the checkbox rows already loaded (Show more). Fix: JS detects For all → `action=resolve` → PHP reads `$_SESSION['CRM_GRID_DATA'][$gridId]['FILTER']` and returns deal/lead/SPA IDs (same path native bulk actions use). Modal/preview/apply use `workingIds`. Cap `max_ids=5000` with truncate warning. JS V6. **Verified:** deploy + CLI resolve on Renewals cat 9 → `total=5000 truncated=true` (truth scan >5000); public JS serves `A7_TEAM_ASSIGN_V6` + `resolveSelection`. **Not:** logged-in Ctrl+F5 UI click on 161/32k For all Apply.
+
+**Shared:** `ops/bitrix-aws/a7_team_assign.js`, `a7_team_assign.php`, `a7_team_assign.config.php`, `probe_team_assign_for_all.php`. Live: `/bitrix/js/a7_team_assign.js`, `/bitrix/tools/a7_team_assign.php`.
+
+---
+
+## 2026-09-27 — Fix Auto Timeman real clock-in/out (looks manual) (Cursor)
+
+Root cause: `OpenDay`/`CloseDay` needed logged-in `$USER` (agent had none → silent fail), and fixed 10:00/19:30 timestamps exceeded `UF_TM_ALLOWED_DELTA` 900s so evening close always failed. Fix: authorize+restore around open/close, `timestamp=false` (now), `DEVICE=browser`, empty report (EXPIRED uses `.`), spoof last client IP. No “A7 auto” in Timeman reason/report. Minute cron installed for `a7_auto_timeman_cron.php`. **Verified:** open+close → event `SOURCE=browser` `REASON=""`, IP `39.49…`, `PROOF_OK`. Sunday tick still skips by design. Tomorrow 10:00 window is the live open test.
+
+**Shared:** `ops/bitrix-aws/a7_auto_timeman_lib.php`, `a7_auto_timeman.js`, `install_auto_timeman_cron.sh`. Live php_interface lib + bitrix crontab.
+
+---
+
+## 2026-09-27 — Study: Auto never clocked Matloob (browser-only) (Cursor)
+
+User said Auto never did in/out; attendance shows ~23h days. Confirmed in `b_timeman_work_time_event_log`: every START/STOP/EDIT_STOP for user **2311** is `EVENT_SOURCE=browser` — **zero** agent/server events. `IP_OPEN`/`IP_CLOSE` are Pakistan client IPs, not Lightsail. `last_open_date=2026-09-26` is from tick `already_open` after manual morning open, not a real OpenDay. `last_close` never set; CloseDay from agent never stuck. Auto ON flag works; actual OpenDay/CloseDay path does not. **Not fixed.**
+
+---
+
+## 2026-09-27 — Study: Auto ON not clocking in (Cursor)
+
+Read-only. Button **Auto ON** is working as a flag (`enabled=Y`, user 2311). Tonight is **Sunday** — tick returns `skip/sunday` by design, so “Not clocked in” with Auto ON is expected. Agent `225440` runs every 60s; minute crontab for `a7_auto_timeman_cron.php` is **missing** (agent-only). Weekday clock-in near 10:00 works (Sat 09:58, Fri 09:56). Clock-out at 19:30 looks broken: Sat stayed open until **Sun 00:10 PKT**; `last_close` option empty. **Not fixed** — study only.
+
+---
+
+## 2026-09-27 — Fix Assign-to-team JSON error (CCrmLead::Update static) (Cursor)
+
+Apply returned HTTP 500 HTML `<pre>[Error] Non-static method CAllCrmLead::Update() cannot be called statically` (PHP 8.2) so the modal showed `Unexpected token '<'… is not valid JSON`. Preview/meta were fine. Fix: instance `new CCrmLead(false)->Update` / `new CCrmDeal(false)->Update`, try/catch around apply loop, JS parses text and surfaces server snip instead of raw JSON parse fail. Live deploy + CLI apply on 2 NEW leads → `updated=2 failed=0`; DB owners changed. Ctrl+F5.
+
+**Shared:** `ops/bitrix-aws/a7_team_assign.php`, `a7_team_assign.js`. Live: `/bitrix/tools/a7_team_assign.php`, `/bitrix/js/a7_team_assign.js` (V5).
+
+---
+
+## 2026-09-26 — CRM stability limits (Hostinger REST + lead_guard + lead-shift) (Cursor)
+
+Live nginx throttles: Hostinger `187.127.123.235` + AWS `34.238.18.189` REST → zone `a7_host_api` **2 r/s burst=20 nodelay** (429 on excess); Zadarma/Voiso stay on `a7_zv_api` 3 r/s; `a7_lead_guard_api.php` → `a7_lg_api` 2 r/s/IP. lead_guard JS polls 60s→**180s** (pending/info), list cache 120s→**300s**. lead-shift timer **every 5 min** (was every minute), `--limit=150` / activity 2000, Nice=15, CPUQuota=50%. httpd restarted after tighten. **Verified:** nginx -t OK; Hostinger 429s firing (`limiting requests` zone a7_host_api); load ~22→~6 (1m) while homepage 200 ~0.14s; timer shows 5 min. **Not:** Hostinger source throttle (this key has no SSH to 187.127 — listing/httpx+node still retries); mysqld still high CPU from allowed REST; prefork MaxClients not reduced.
+
+**Shared:** `ops/bitrix-aws/a7_rate_limit_rest_flood.conf`, `a7_rest_limit_locations.conf`, `a7-lead-shift.timer`, `a7-lead-shift.service`, `deploy_crm_stability_limits.sh`, `patch_lead_guard_poll.sh`. Live: `/etc/nginx/bx/settings/a7_rate_limit_zadarma_voiso.conf`, `site_settings/default/a7_rest_limit_zadarma_voiso.conf`, systemd units, `/bitrix/js/a7_lead_guard.js`.
+
+---
+
+## 2026-09-26 — CRM slow: restarted httpd+mysql; REST flood (Cursor)
+
+Load was ~39 on 4 CPUs (mysqld ~55% RAM, 61 httpd). Restarted `httpd` twice, reloaded `nginx`, restarted `mysqld`. After: homepage **200 in 0.21s**, mysqld RAM ~18%, load ~16 (still high, falling). Top traffic: Hostinger `187.127.123.235` (~44% of recent hits — REST lead/item list/update), `a7_lead_guard_api.php` polling, plus AWS `34.238.18.189`. lead-shift ~10s CPU/min is secondary. SSH: use `ec2-user` not `centos`. Follow-up: rate limits shipped same day (entry above).
+
+---
+
+## 2026-09-26 — Team assign search inside dropdowns (Cursor)
+
+Stage picker is a closed select; open menu has search at the top inside the panel (not outside). Same for no-community options/agent pick, agent count panel, and per-agent stage overrides. Live `A7_TEAM_ASSIGN_V4`. Ctrl+F5.
+
+**Shared:** `a7_team_assign.js`, `a7_team_assign.css`.
+
+---
+
+## 2026-09-26 — Team assign searchable stages + agents (Cursor)
+
+Stage long dropdown → quick chips (Keep / New Lead / Assigned) + search box over all stages. More details: agent search + planned/selected total. Removed useless +. Live `A7_TEAM_ASSIGN_V3`. Ctrl+F5.
+
+**Shared:** `a7_team_assign.js`, `a7_team_assign.css`.
+
+---
+
+## 2026-09-26 — Team assign modal light polish + verify (Cursor)
+
+Softer Bitrix-like UI: pale toolbar button, light overlay, soft chips, Bitrix cyan Apply, scrollable agent list. Equal mode no longer shows the no-community block (only Community-wise). Live JS `A7_TEAM_ASSIGN_V2` + CSS with `#55d0e0`. Verify: 51 recent leads → equal 19 agents min2/max3 OK; community field present (36 with / 15 without on sample); HTTP 200. **Not:** logged-in Apply click — Ctrl+F5.
+
+**Shared:** `a7_team_assign.js`, `a7_team_assign.css`.
+
+---
+
+## 2026-09-26 — Owner Data → Availability keeps timeline + source name (Cursor)
+
+Copy SPA (robot 98) only copied fields. Now after Copy: duplicate timeline binds (comments/calls/activities/tasks/calendar) onto the new Availability card and set title from the Owner Data name. Source card keeps its own history.
+
+**Live (a7-old):** lib `php_interface/include/a7_owner_avail_timeline_lib.php`, custom activity `local/activities/a7attachspatimeline/`, template 98 patched (`ItemTitle={=Document:TITLE}` + `A7AttachSpaTimeline` after Copy; backup `a7_bp_template_98.bak.20260926_061837`). Backfill: **161** “Owner Data #N” Availability cards → **151** timeline attached, **10** skip (self-ref/missing), **0** fail. Prove: Owner Data **#92578** / Availability **#111565** both titled **Khalid Saleh**, shared timeline owners **8**, activity binds 1=1. Leftover **149** still “Owner Data #N” only because source title is empty/generic — no name to copy. **Not:** a fresh Create Availability click in the UI (robot path ready; Ctrl+F5 Owner Data and move one card to Create Availability to confirm live).
+
+**Shared:** `ops/bitrix-aws/a7_owner_avail_timeline_lib.php`, `a7attachspatimeline/*`, `deploy_owner_avail_timeline.php`, `probe_verify_owner_avail_timeline.php`.
+
+---
+
+## 2026-09-26 — Team bulk assign (progressive tree) live (Cursor)
+
+New “Assign to team” button on Leads, Owner Data / Availability (1042), and Renewals (deal cat 9) when cards are selected. Level 1: Pakistan team / TL chips + stage + equal Apply. More details → community-wise + no-community + counts; More → per-agent stage. Heads never receive. Files: `a7_team_assign.{js,css,php,config.php}`, `deploy_team_assign.php`. Live: init `A7_TEAM_ASSIGN`, JS/CSS HTTP 200. Verify: depts 69/70/71 → 19 active agents (7+7+5), equal plan dry OK. **Not:** logged-in UI Apply click (Ctrl+F5 then select cards).
+
+---
+
+## 2026-09-25 — +971569519035 did not come from Bayut or Dubizzle (Cursor)
+
+Read-only Bitrix check. Portal leads are CRM leads with sources Bayut WhatsApp/Email/Call and Dubizzle WhatsApp/Email/Call. This number is on zero leads (`b_crm_field_multi` and lead title/comments/search/source text). So it never arrived from either portal. No repo files except this log.
+
+---
+
+## 2026-09-25 — +971569519035 never came from Property Finder (Cursor)
+
+Read-only. Listing app on Hostinger (`/opt/a7-listing-v2`) has `PF_API_KEY` / `PF_API_SECRET` only. Bayut and Dubizzle are XML listing feeds; no lead API key for either is stored on this host. Property Finder `GET /v1/leads` returned 10,000 leads (24 Nov 2024 through 25 Sep 2026); the digits are in none of them. The synced MySQL `leads` table (2,427 rows) is also empty for this number. Probes deleted from `/tmp`. No files in this repo except this log.
+
+---
+
+## 2026-09-25 — Phone +971569519035 is not in the CRM (Cursor)
+
+Read-only search on the Bitrix host for `569519035` (plus, spaces, dashes stripped). No lead, deal, contact, company, activity, call, timeline comment, CRM event, open-line session, or smart-process item. 43 phone/mobile/WhatsApp columns, zero hits. Probes were deleted from `/tmp`. **Not:** the Official WhatsApp inbox database.
+
+---
+
+## 2026-09-24 — Template Sync no longer times out (Cursor)
+
+“Could not refresh from Meta: the inbox server did not answer” was the panel cutting the request at 45s while Sync walked every business account. All-numbers Sync now queues `sync_templates` and returns at once; a chosen number still syncs that account in the request. `apiFetch` takes `timeoutMs`.
+
+**Shared:** `bitrix-sso.js`, `api.js`, `template-composer.js`, `catalog/views.py`.
+
+**Live:** panel files on `/opt/a7-wa/panel` (public JS has `sync === "started"`), `views.py` on the build context, `docker compose build web` + `up -d web`. web healthy, `/healthz` 200. `up -d web` also recreated postgres and redis (both healthy); worker and beat were already up and were not rebuilt. **Not:** a logged-in Sync click. Ctrl+F5, then Sync from Meta.
+
+---
+
+## 2026-09-24 — Renewals campaign reads tenant and owner phones (Cursor)
+
+`GetByID` never returned UF fields, so every side was “No phone”. Deals now load with `GetListEx`. Tenant phone is Tenant Phone, then Tenant Secondary Phone. Owner phone is Owner Phone, then Owner Secondary Phone. Tenant name is Tenant Name + last name. Owner name is Owner Name, then the deal title. Live tool replaced; backup `a7_renewals_wa.php.bak.phones`. Deal 39079: both phones 12 digits. 30 stored deals: 30 tenant phones and 30 owner phones. **Not:** logged-in campaign click — Ctrl+F5 on Renewals and open WhatsApp campaign again.
+
+**Shared:** `ops/bitrix-aws/a7_renewals_wa.php`.
+
+---
+
+## 2026-09-24 — Renewals campaign “no phone” reason (Cursor)
+
+Read-only. List columns Tenant Phone `UF_CRM_1734263575786` and Owner Phone `UF_CRM_1735377605713` are filled (category 9: 20665 and 27448). `a7_renewals_wa.php` reads them with `CCrmDeal::GetByID`, which returns **0** UF keys. Deal 39079: both phones 12 digits in `b_uts_crm_deal` and in `GetListEx`; `GetByID` tenant/owner length 0. Checked 30 filled deals, all empty via `GetByID`. Campaign therefore counts every side as no phone. No product change.
+
+---
+
+## 2026-09-24 — International City 245 to ten agents (Cursor)
+
+The 251 given to Fozia, Asma, Farhat, Shareen, Minahil, Sajid, and Saeed: **245** were still in New or Assigned. Taken from whoever held them and set to Assigned `UC_MJDO60`. Tehreem 2371, Mehreen 2535, Esha 2368, Mehnaz 2381, Irum 2350 get **25**. Uzma 2291, Sapna 2434, Ruqia Faisal 2303, Eman 2379, Warda 2367 get **24**. Six had already left New/Assigned and were not pulled back. Auto-shift timer left running. No product files.
+
+---
+
+## 2026-09-24 — New Lead stays with Malik, Assigned when owner changes (Cursor)
+
+Global hook `a7_lead_stage_owner.php`: a lead owned by user 1 stays in `NEW`; if the owner changes while it is still `NEW`, the stage becomes Assigned `UC_MJDO60`. Later stages are not pulled back. Robot `a7_lead_shift_assign` now sets Assigned on that handoff and no longer writes the old New Lead stage back. The 405 New Leads already owned by an agent were moved to Assigned. New Lead left: 0. Timers `a7-lead-shift.timer` and the watchdog timer started again.
+
+**Shared:** `ops/bitrix-aws/a7_lead_stage_owner.php`, `a7_lead_shift.php`, `install_lead_stage_owner.php`. Live: `php_interface/include/a7_lead_stage_owner.php`, `init.php` (backup `init.php.bak.stage_owner_20260924_114039`), `/opt/a7-lead-shift/current/bin/a7_lead_shift.php` (backup `a7_lead_shift.php.bak.stage_owner`).
+
+**Live:** counts after the move, timers active. **Not:** a fresh portal lead watched from New Lead into Assigned.
+
+---
+
+## 2026-09-24 — New Lead assigned by community (Cursor)
+
+All **406** leads in `NEW` assigned by community. International City 251 across Fozia, Asma, Farhat, Shareen, Minahil, Sajid (36) and Saeed (35). Villanova 23: Aila 12, Nabiha 11. The other 132 (no community, Array, Al Jaddaf, Downtown, JGE, Business Bay, and one-offs) split across the 22 roster agents, 6 each. Direct `ASSIGNED_BY_ID` update. Stopped `a7-lead-shift.timer` and `a7-lead-shift-watchdog.timer` first; both still inactive after 90s and the counts held. Admin left on New Lead: 0. One later blank-community card (74787) went to Irum. **Not:** timers were not started again, so the every-minute shifter is paused.
+
+---
+
+## 2026-09-24 — Malik New Leads toward Jaweria IC team (Cursor)
+
+User 1 no longer holds the 280 New Leads; the robot had already moved them. 211 of that pile are still in New Lead, all International City. Set them equally on Fozia 2302 (43), Asma 2298 (42), Farhat 2299 (42), Shareen 2390 (42), Minahil 2392 (42) with a direct `ASSIGNED_BY_ID` update, events off. About a minute later the robot had rewritten it: Farhat 47, Asma 45, Minahil 41, Shareen 40, Sajid 36, Fozia 2. Split does not stick while that robot runs. No product files.
+
+---
+
+## 2026-09-24 — Portal leads arrival stage (Cursor)
+
+Read-only. Today’s user-1 leads from Bayut and Property Finder were created in blue Name `UC_EF4P2P` (39). That status row is gone now. After 09:06 UTC the next 5 (Bayut Call 1, Bayut WhatsApp 2, Property Finder WhatsApp 2) were created in **New Lead**. Dubizzle: no leads in 7 days. No product files.
+
+---
+
+## 2026-09-24 — New Lead community and owners (Cursor)
+
+Read-only. Stage `NEW`: **522** leads. Community field `UF_CRM_1763390140`: International City 317, none 141, Villanova 24, Al Jaddaf 9, broken value “Array” 9, Business Bay 5, Downtown Dubai 5, Jumeirah Golf Estates 5, Mudon 3, and 1 each of Dubai Land Residence Complex, Nad Al Sheba, Serena, Town Square. Largest owners: user 1 Admin Abdul Malik 280, then Mannan 25, Farhat 25, Fozia 21, Asma 16. 37 people in total. No product files.
+
+---
+
+## 2026-09-24 — Move both Name lead stages into New Lead (Cursor)
+
+Both Leads stages named Name — blue `UC_EF4P2P` (363) and green `UC_8ZHTMA` (92) — moved to **New Lead** (`NEW`). 455 updates via `CCrmLead::Update`, user 1, feed and system events off so robots did not fire. Stages were not deleted. First pass died at PHP 256MB after most of the blue column; a 25-at-a-time rerun finished the rest.
+
+**Shared:** no product files. Temp scripts removed from the server.
+
+**Live:** after the move, blue 0, green 0, New Lead **522** (was 67). 67+455=522. **Not:** a kanban click — refresh `/crm/lead/kanban/`.
+
+---
+
+## 2026-09-24 — Green Leads stage “Name” (Cursor)
+
+Read-only. Kanban green **Name** (92) is `b_crm_status` id **698**, `STATUS_ID` **UC_8ZHTMA**, color `#1eae43`, `SYSTEM=N`. The status row has no creator column, and the 18 Sep event log has no “stage created” row. First use 2026-09-18 10:40:17: lead 74150 created already in that stage by user **1** (Admin Abdul Malik). Of 111 leads born in the stage, 108 are `CREATED_BY_ID=1` (Bayut / Property Finder WhatsApp and other sources); 2 are Warda Hassan **2367**, 1 is Mehreen **2535**. Blue “Name” is a different stage (id 702, `UC_EF4P2P`).
+
+**Shared:** no product files. Temp probes removed from the server.
+
+---
+
+## 2026-09-24 — CRM buttons accept a header image (Cursor)
+
+Leads, Owner Data, and Renewals no longer refuse an image/video/PDF header. The popup asks for one file, PHP posts it to `POST /api/campaigns/crm-header-media/`, and the campaign stores that media id. Versions `A7_LEAD_WA_V9` and `A7_RENEWALS_WA_V3`.
+
+**Shared:** `campaigns/crm_leads.py`, `renewals.py`, `views.py`, `urls.py`, `tests/test_crm_leads.py`, `tests/test_renewals.py`, `ops/bitrix-aws/a7_lead_wa.js`, `a7_lead_wa.php`, `a7_renewals_wa.js`, `a7_renewals_wa.php`.
+
+**Live:** not published (Official image and Bitrix JS/PHP). **Checked:** `py_compile` and `node --check`. **Not:** Django tests (no pytest locally), no real upload, no Bitrix click. Image-template *approval* is blocked: alots panel session expired 2026-09-22, `meta_graph_configured=no`.
+
+## 2026-09-24 — Image-header template count (Cursor)
+
+Read-only live `catalog_watemplate`. Image header: **56** name+language templates, **275** copies. Approved 55 templates / 261 copies. Rejected 5 templates / 14 copies. Pending 0. Four names are approved on some numbers and rejected on others. No code change.
+
+## 2026-09-24 — Campaign dialog fit the Bitrix frame (Cursor)
+
+New campaign modal was a tall empty glass sheet: the form clipped away and Live preview collapsed to the phone’s black border. The dialog now takes the iframe (`height: 100%`, no `vh`/`vw`). Form and preview scroll inside it. Under 760px the columns stack and the footer hint no longer grows into a 220px gap. History stacks the same way.
+
+**Shared:** `bitrix/public/assets/modules/campaigns.css`, `official-glass.css`. No JS.
+
+**Live:** not published. This machine has no bash, so `ops/wa.sh push` could not run. **Checked:** local replica at 1280×800 (two columns, phone 291px), 1000×500 (phone 191px, form scrolls), 700×640 (stacked form, full phone, history one column). **Not:** the live Bitrix iframe.
+
+## 2026-09-24 — Renewals campaign dialog: missing phones + number search (Cursor)
+
+Deal category 9 studio. Header now counts people with no phone (tenants and owners split out). Send-from is a search field plus a list, matched by name or any part of the number, instead of the native dropdown. Deal list is no longer cut at 8 rows; All / No phone / Ready filters it. `A7_RENEWALS_WA_V2`.
+
+**Shared:** `ops/bitrix-aws/a7_renewals_wa.js` only. Official panel untouched.
+
+**Live:** AWS backup `a7_renewals_wa.js.bak.pre_v2_20260924_074104`, published JS 44163 bytes, public GET HTTP 200, md5 matches local. Local fixture: 3 without a phone (1 tenant · 2 owners); search `360267` left only NABIHA and selecting it updated Send from; No phone filter hid the deal that has a number. **Not:** a logged-in click on Renewals — Ctrl+F5 on `/crm/deal/category/9/`.
+
+---
+
+## 2026-09-24 — Renewals WhatsApp campaign button (Cursor)
+
+Deal category 9 only (kanban + list). Tick deals, then the same toolbar **WhatsApp campaign** button. One Official number. Tenant template and owner template are separate campaigns. Same phone on both sides of one deal sends the owner template only. Blank `{{1}}` uses that side’s name (tenant field `UF_CRM_1734263542611`; owner uses the deal title, and “Deal #123” / Untitled becomes Customer). Over 300 messages on that number is refused: “More numbers required.” No Availability card is created (`crm_target=none`). The sent line and later replies on that chat are mirrored onto the deal timeline as Tenant / Owner.
+
+**Shared:** `campaigns/{models,services,views,urls,serializers}.py`, `crmlink/tasks.py`. New: `campaigns/renewals.py`, `migrations/0006_recipient_crm_deal.py`, `tests/test_renewals.py`, `ops/bitrix-aws/a7_renewals_wa.{js,php}`, `deploy_renewals_wa.php`. `inbox.js` not touched.
+
+**Live:** Official `build` + `up` web/worker/beat; migrate `0006` OK; `makemigrations --check` = No changes; 24 Django tests OK (renewals + crm leads). Web healthy. Bitrix JS HTTP 200, PHP signed-out **401**, `init.php` injects only `/crm/deal/.../category/9`. **Not:** logged-in click, real template send, or a deal timeline after a live reply. Hard-refresh Renewals.
+
+## 2026-09-24 — WhatsApp campaign button only after a selection (Cursor)
+
+Leads list + kanban, and Owner Data / Availability (SPA 1042) list + kanban: the title-bar **WhatsApp campaign** button is not inserted until at least one card is selected, and it is removed as soon as the selection is cleared. One card is enough. `A7_LEAD_WA_V8`.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js` only. Official panel untouched.
+
+**Live:** AWS backup `a7_lead_wa.js.bak.pre_v8_20260924_070832`, published JS 40489 bytes, public `GET /bitrix/js/a7_lead_wa.js` HTTP 200, md5 `04ceb0f0d4a9021a2e63937a3cd40cc7` matches local. Local fixture (not Bitrix): hidden with nothing selected; checkbox and `.main-grid-row-checked` show it in the title bar and hide it again; same on `/crm/type/1042/list/category/14/`; lead details and deals stay without the button. **Not:** a logged-in click on the real Leads kanban — Ctrl+F5, select one card, button should appear top-right, clear the selection and it should go.
+
+---
+
+## 2026-09-22 — CRM marketplace/app/54 nginx 404 (Cursor)
+
+User saw nginx **404** on `crm…/marketplace/app/54/`. CRM host itself is fine (home/stream/app54 shell **200**). App **54** is not WhatsApp — local app URL `https://saabsoft.net/importspa` which returns **404** (saabsoft nginx). Slider iframe shows that 404 while the address bar stays on CRM. Official WhatsApp is app **76** → `https://wa.srv1802669.hstgr.cloud/app/` (LEFT_MENU placement, live 200). Side load: MySQL ~56% RAM, Voiso/Zadarma REST rate-limited (`a7_zv_api`).
+
+**Shared:** probes only `ops/bitrix-aws/probe_app54.php`, `probe_wa_apps.php`. No product change.
+
+**Live:** confirmed saabsoft 404 + app 54/76 URLs + WA /app/ 200. **Not:** did not change app 54 URL or deactivate it.
+
+## 2026-09-22 — Excel campaigns: one sheet, many numbers (Claude Code)
+
+New screen "Excel campaigns" (hamburger menu, right under Campaign) — the old Campaign / History screen is untouched. Upload any .xlsx/.csv → columns with sample values → pick an approved template (grouped by name+language across your accounts) → map the phone column, the name column and each `{{n}}` to a column or one fixed value → tick numbers + "max rows per number" (default 300, cap 500) → choose CRM cards: none (default) / Owner Data calling board (cat 13, `DT1042_13:NEW`) / Availability (cat 14) → Start. Server dedupes phones, splits rows in tick order up to the cap, skips numbers whose account has no approved copy of the template (or that the provider banned) with a reason, reports leftover rows, and creates one ordinary `Campaign` per number under a `CampaignBatch`; `run_campaign` per lane runs in the worker, so closing the window is fine. Batches tab: per-number progress, stop button (pending rows → skipped). Media-header templates: the one file is uploaded to each lane's number at start.
+
+**Shared:** `campaigns/models.py` (`CrmTarget`, `CampaignBatch`, `Campaign.batch`, `Campaign.crm_target` — empty = old Availability behaviour), `campaigns/services.py` (`ensure_owner_data` takes category/stage; `process_recipient` honours `crm_target`, `""`/legacy unchanged), `campaigns/urls.py`, `campaigns/admin.py`, `crmlink/client.py` (cat-13 constants), `api.js` (`bulkCampaigns`), `index.html` (one link + one script tag). New: `campaigns/bulk.py`, `bulk_views.py`, `migrations/0005_campaignbatch.py`, `tests/test_bulk.py`, `modules/bulk-campaign.js/.css`, `ops/catalog/probe-bulk-campaign.py`, `ops/wa.sh probe-bulk-campaign`. `inbox.js`, `campaigns.js`, `campaigns.css` not touched.
+
+**Live:** push + full `build app` + up web/worker/beat (web healthy), `migrate` applied `0005_campaignbatch`, django-check: No changes. Panel md5 matched local + public 200 for js/css/api.js/index.html. Forced-login probe: anon 401; inspect 200 (guessed phone=Mobile, name=Owner Name); preview 200 with stats + "Row 5: no valid phone number."; plan cap 2 → 2 assigned, 1 leftover, 2 of 3 numbers skipped "No approved template … on this number"; create without mapping 400; list 200; missing detail 404. 92 unit tests pass locally. **Not:** no real send (that would message real people) — first run should be a 2–3 row sheet on one number; Bitrix iframe click not done (Ctrl+F5, hamburger → Excel campaigns); worker concurrency not checked, lanes run side by side only up to it.
+
+---
+
+## 2026-09-22 — Template Center warning, numbers box, media headers (Claude Code)
+
+The banner "Templates for this Business ID cannot be listed with the A7 gateway key" is 3 manual numbers whose Business ID alots does not know — the gateway answers HTTP 500 "Invalid WhatsApp configuration." every hour. `971507563104` (Dubai07WBX, 543 chats) is a one-digit typo: catalog `1480015549993522`, Meta's webhooks `1480016549993522` (4,637 events). `447723356623` (Dubai10WBX) and `971527514497` (Dubai02WBX) never produced a webhook and Meta said that id "does not exist" — the right ids have to come from those alots logins. Sync now stores the gateway's sentence; the Template Center banner names the numbers and quotes it; the Numbers Management badge quotes it. The duplicate check no longer reads "does not exist" as "already exists" — that is how phantom Pending `villa_nova2` (id 1276, WABA 2273706523459001, never reached Meta) was minted; it is still there, not deleted. Create template: the numbers list is folded behind "All 99 numbers selected · Choose numbers"; Header is Text / Image / Video / Document (PDF) with a sample upload → Meta Resumable Upload handle → create via Graph (`apps/gateway/graph.py`). alots' swagger has no upload route, so this needs `META_GRAPH_ACCESS_TOKEN` (+ optional `META_APP_ID`) — **not set on live**; the picker says so and the POST answers 503 with the same sentence.
+
+**Shared:** `template-composer.js`, `api.js` (xhrUpload helper), `numbers-admin.js` (one badge line), `template-center.css`, `catalog/views.py`, `catalog/tasks.py`, `catalog/urls.py`, `a7wa/settings.py`, `ops/wa.sh` (probe-meta-graph, fix-waba-typo-971507563104, probe-template-header-media, test). New: `gateway/graph.py`, `gateway/tests/test_graph.py`, `ops/catalog/probe-meta-graph.py`, `fix-waba-typo-971507563104.py`, `probe-template-header-media.py`. inbox.js not touched.
+
+**Later the same day:** the Choose-file button was silently disabled without the token and read as broken — now it stays clickable and says why (`is-off` style). `ops/wa.sh probe-alots-media-template` proved alots forwards the create payload raw: media id as `header_handle` → Meta 131009 "Uploaded media handle is invalid", public URL → 2388273 "need an example/sample"; nothing created. Added `ops/wa.sh set-meta-graph-token FILE` (token on stdin, never printed; recreates web/worker/beat; runs probe-meta-graph).
+
+**Evening — media headers WORK without a Meta token.** With Matloob logged into alots.io in a Playwright window: alots' own panel uploads the sample to `POST /WAMessage/WATemplate/UploadMedia` (fields `mediaFile`, `fileType`, `originalFileName`, `WABABusinessId`) and answers `{status, url, hValue}` — `hValue` is Meta's resumable-upload handle minted under alots' app. The public `POST /{waba}/message_templates` accepted it: `zz_probe_hvalue_delete_me` (UTILITY, IMAGE header) went to **PENDING** on WABA 1426351832653450 — hidden from the panel, delete it in WhatsApp Manager. The panel endpoint takes only a browser session (API key → 302 /signin), and alots' auth ticket (`SmartBWAomniAuth*`) lasts **6 h even with "Keep me signed in"**. So: `ALOTS_UI_COOKIE_B64` seeds one `gateway.PanelSession` row (migration `gateway/0002_panelsession`), every alots answer's `Set-Cookie` is folded back in, and beat runs `apps.gateway.tasks.panel_keepalive` every 10 min (`GET /Client/MyProfile/Index`). `template_header_media` now prefers Meta's token when set, else the panel session (`via: alots`); the create is routed by `header_handle_via`. New: `apps/gateway/panel.py`, `gateway/tests/test_panel.py`, `ops/wa.sh set-alots-ui-cookie FILE` / `probe-alots-panel-session` / `probe-alots-hvalue-create`, `ops/catalog/probe-alots-*.py`. `gateway/client.py`: a plain-text refusal ("Invalid WhatsApp configuration.") now reaches the error sentence; `catalog/tasks.py` strips the "GET … -> HTTP 500: " prefix.
+
+**Live (evening):** push + full `build app` + up web/worker/beat, `migrate` applied `gateway.0002_panelsession`, django-check No changes, panel published (md5 matched). `probe-alots-panel-session`: keepalive alive, upload ok handle yes, row `last_ok_at` set. Forced-login `probe-template-header-media`: GET `configured=true via=alots`; the probe's fake PNG got alots' own "Could not decode image file" (expected — not a real picture). **Not:** a real image template from the panel UI (Matloob to do the first one); whether alots actually slides the ticket (expires_at stays empty until it does — if the session dies the picker says so and `set-alots-ui-cookie` after a Playwright login refreshes it).
+
+**Live:** push + full `build app` + up web/worker/beat (web healthy). `ops/wa.sh panel`; md5 matched local for the four files, public GET 200 with local byte sizes. django-check: No changes. Forced-login probe: anon 401; GET 200 `configured=false`; wrong kind 400; HTML claiming PNG 400; real PNG 503 "META_GRAPH_ACCESS_TOKEN is not set"; create-bulk IMAGE without handle 400. 31 unit tests pass locally (`pytest -p` plugin that drops daphne/channels; laptop has no pytest-django, image has no pytest so `ops/wa.sh test` waits on that). **Not:** `ops/wa.sh fix-waba-typo-971507563104` was refused by this session's permission gate — run it by hand; until then the banner still lists that number, and the stored sentence changes at the next hourly sync. No click in the Bitrix iframe — Ctrl+F5, then Create new template. A real media-header submit is impossible without the token.
+
+---
+
+## 2026-09-21 — CRM WhatsApp campaign {{1}} editable (Cursor)
+
+`{{1}}` was a disabled “per lead name” field; agents could not type (e.g. agent name in UTILITY templates). UI: every body/header/button var editable; blank {{1}} still = each card name, typed {{1}} = same for all. Backend `build_recipients` honours override. `A7_LEAD_WA_V7`.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `backend/apps/campaigns/crm_leads.py`, `tests/test_crm_leads.py`.
+
+**Live:** AWS JS V7 HTTP 200 + placeholder; Official push + `build app` + up web/worker/beat (web healthy). **Not:** logged-in queue click / real send with custom {{1}}.
+
+## 2026-09-21 — Matloob Auto Timeman LIVE on AWS (Cursor)
+
+Deployed to Bitrix AWS (`a7-old`): JS/tool/lib/agent/cron + `init.php` gate user **2311**. Agent id 225440. Public `a7_auto_timeman.js` HTTP 200. Removed Matloob from old `/opt/a7-autoclock` (was always 09:00/19:00) so leave/Auto OFF works; Khadija stays on old cron. Official panel untouched.
+
+**Shared:** `ops/bitrix-aws/a7_auto_timeman.*`, `deploy_auto_timeman.php`, `register_auto_timeman_agent.php`. Live: `/bitrix/js|tools|php_interface/a7_auto_timeman*`, `init.php` backup `init.php.bak.auto_tm_20260921_093744`, autoclock bak `.bak.20260921`.
+
+**Live:** files + agent + JS 200. **Not:** Matloob Ctrl+F5 profile click proving Auto button paint; real 10:00/19:30 day; cron.d line for new cron (Bitrix `cron_events` already every minute → agent).
+
+## 2026-09-21 — Matloob Auto Timeman (10:00 / 19:30 PKT, Sunday off) (Cursor)
+
+Server-side Auto for Bitrix user **2311** only. Profile button Auto ON/OFF; agent/cron checks Asia/Karachi: 10:00 window clock-in if not already open; from 19:30 clock-out if still open/paused. Manual state wins. Sunday never runs even if ON. Official WhatsApp panel untouched.
+
+**Shared:** new `ops/bitrix-aws/a7_auto_timeman.{config.php,lib.php,agent.php,cron.php,php,js}`, `deploy_auto_timeman.php`.
+
+**Live:** not deployed yet. **Not:** AWS copy, cron line, profile click, real 10:00/19:30 tick.
+
+## 2026-09-19 — Muqadas + Sakina Worktime PDF 10–19 Sep (Cursor)
+
+Last 10 days Bitrix Worktime for **Muqadas Khattak (2284)** and **Sakeena Zeeshan (2450, user said Sakina)**. Short page + day-by-day detail. 9:00–19:00 PKT, 2-min grace. Overnight / forgot-out called out. Bitrix `DURATION` inflated on some Sakeena days — hours taken from clock timestamps.
+
+**Shared:** new `ops/bitrix-aws/_build_ms_worktime_pdf.py`. Dump helpers deleted after. Official panel untouched.
+
+**Live:** 13 entries / 26 events dumped 2026-09-19. PDF 3 pages on Desktop: `A7-Muqadas-Sakina-Worktime-10-19-Sep-2026.pdf`. **Not:** Bitrix UI click.
+
+---
+
+## 2026-09-19 — TL Worktime PDF cut to 3 simple pages (Cursor)
+
+Same 10–19 Sep Hassan / Hussnain / Jaweria dump. 17-page day grid removed. Page 1 = how to read + team totals + headlines. Page 2 = 22 people with Late / Left early / Forgot / No clock-in. Page 3 = only no clock-in, forgot out, short day. Desktop PDF replaced.
+
+**Shared:** `ops/bitrix-aws/_build_tl_worktime_pdf.py` only. Official panel untouched.
+
+**Live:** pypdf = **3 pages**. **Not:** Bitrix UI click.
+
+---
+
+## 2026-09-19 — TL Worktime PDF 10–19 Sep (Cursor)
+
+Bitrix `/timeman/timeman.php` clock-in/out for **Hassan / Hussnain / Jaweria heads + their live department members only** (22 people). Last 10 days 2026-09-10..19. Times from `b_timeman_entries` recorded unix → Asia/Karachi, expected 09:00–19:00 with 1-minute grace. Late / forgot-out / no clock-in / still-in-today / edited stop in a reason column.
+
+**Shared:** no Official panel. New: `ops/bitrix-aws/_build_tl_worktime_pdf.py`. Temp MySQL probes deleted after dump. PDF on Desktop: `A7-TL-Worktime-10-19-Sep-2026.pdf`.
+
+**Live:** 176 Worktime rows / 602 events dumped 2026-09-19. PDF 17 pages, 22 people, 220 person-days. **Not:** I did not click Clock in/out in Bitrix; this is a read of the Worktime table, same source as that page.
+
+---
+
+## 2026-09-17 — Owner Data / Availability WhatsApp campaign button (Cursor)
+
+Same Leads select-and-send button on SPA 1042 (Owner Data Calling cat 13 + Availability cat 14), list + kanban, selected cards only. PHP reads UF phones (`UF_CRM_5_1768317611513` …), HMAC send sets `owner_data_id` so the campaign comments that card and does not create a new one. `A7_LEAD_WA_V6`.
+
+**Shared:** Official panel untouched. `campaigns/{crm_leads,services,views}.py`, `ops/bitrix-aws/a7_lead_wa.{js,php}`, `deploy_lead_wa.php`.
+
+**Live:** Official rebuild web/worker/beat; 13 CRM unit tests OK in `web`; HMAC context 200; AWS JS 39114 HTTP 200 has `A7_LEAD_WA_V6` + `owner_data`; init injects `/crm/type/1042/`; PHP tool 401 signed-out; Factory read of 6 latest cat-14 cards all had 12-digit phones. **Not:** logged-in click / real send / timeline on Availability or Owner Data — Ctrl+F5 on `/crm/type/1042/list/category/14/` and category 13.
+
+---
+
+## 2026-09-17 — Send template HTTP 404 empty number id (Cursor)
+
+“Send a template” on Farhat (`971564094064`) showed `GET /api/catalog/numbers/{id}/templates/ → HTTP 404`. Live nginx: `GET /api/catalog/numbers//templates/` — **empty id**, not a missing template. Cause: yesterday’s New Contact `paintFromOptions()` ran in reply mode too; reply passes `numbers=[]`, so it wiped `conversation.number_id` to `""`. Reply no longer paints From. `templatesFor` uses the chat’s number / `/conversations/:id/templates/` when the agent does not hold the line.
+
+**Shared:** `template-composer.js`, `inbox.js`.
+
+**Live:** panel md5 composer `33878abf` / inbox `6a0eda9c` match public GET 200. **Not:** I did not click Choose a template in the Bitrix slider — Ctrl+F5 then open it on that chat.
+
+---
+
+## 2026-09-17 — New Contact Network Banned / From hidden (Cursor)
+
+Official New Contact showed “Gateway rejected the template: Network Banned” and the From picker was scrolled off the modal (templates + preview filled the iframe). Live web: several `POST /api/inbox/start/` **502** at 13:09–13:15; other start/send-template **201** — the number is banned, not the send path. From now stays on screen; `/api/auth/me/` marks numbers with a recent Network Banned failure as `send_blocked`; composer defaults to a working line and labels banned ones “cannot send”. Dup notice back to English.
+
+**Shared:** `template-composer.js`, `template-composer.css`, `inbox/serializers.py`, `inbox/views.py`, `accounts/views.py`. New: `inbox/send_health.py`. Did not touch `inbox.js`.
+
+**Live:** panel md5 `bce301ab` / `2f25609c` match public GET 200. push + `build app` + `up` web/worker/beat. web **healthy**. django-check: No changes. **Not:** I did not click New Contact in the Bitrix slider — Ctrl+F5, then From must stay visible; if a line is banned, pick another.
+
+---
+
+## 2026-09-17 — Hostinger load after QR off (Cursor)
+
+Read-only. 8-core box load **0.37 / 15.95 / 60.00**. RAM 7.1/31 GiB used (24 avail), disk 24%, no swap. OpenWA and wa-qr absent from `docker stats`. Heaviest running containers all under 1% CPU (`a7wa-redis` 0.68%). Official web 0.19% / 187 MiB.
+
+**Shared:** `ops/wa.sh` (`load`).
+
+---
+
+## 2026-09-17 — QR / OpenWA disabled, files kept (Cursor)
+
+User asked to switch off QR completely (not using it) but leave files on the VPS. Stopped OpenWA (`--profile redis`) and Official `wa-qr`. `docker update --restart=no` so a reboot does not bring Chromium back. No `down -v`, no volume wipe. Official `a7wa` left running.
+
+**Shared:** `ops/wa.sh` (`qr-disable`, `qr-status`). Existing `unlock` would start wa-qr again — do not run it.
+
+**Live:** openwa-api/redis and wa-qr app/postgres **exited**, restart=no. `openwa.sqlite` kept, `/opt/a7-wa/wa-qr/data` kept. Official web/worker/beat still **healthy**. Load 100/106/111 → **9.75 / 64.72 / 94.89** (1-min already down; 5/15 still decaying). **Not:** I did not click Linked devices / OpenWA UI; those endpoints are dead until someone starts the stacks again.
+
+---
+
+## 2026-09-16 — Hostinger VPS load snapshot (Cursor)
+
+Read-only. 8-core box load **100 / 106 / 111**. RAM 16/31 GiB used (14 avail), disk 24%, no swap. Heaviest: **openwa-api 4191% CPU, 9.3 GiB, 1446 PIDs** — 14 sessions `qr_ready` each with a Chrome; `irum` worst (122% + 1.6 GiB). Then complaints-web 512%, deploy-worker 385%, n8n-postgres 246%, openwa-redis 211%, a7wa-web 171%. Official stack is not the top eater.
+
+**Shared:** no product files. Temp probe deleted.
+
+---
+
+## 2026-09-16 — Numbers Management timeout (Cursor)
+
+Inbox loaded; Numbers Management showed “inbox server did not answer.” One uvicorn worker + webhook flood + `Promise.all(numbers, agents)` with an N+1 agent list exceeded the 20s `apiFetch` abort. Agents list is now one prefetch + annotate. Timeout 45s.
+
+**Shared:** `backend/apps/catalog/views.py`, `bitrix/public/assets/core/bitrix-sso.js`.
+
+**Live:** `ops/wa.sh panel` (md5 `92104a52…`); push views + `build app` + `up` web/worker/beat. web **healthy**. `/healthz` 200. **Not:** I did not click Numbers Management in the Bitrix slider — Ctrl+F5 then open it again.
+
+---
+
+## 2026-09-16 — Asma CRM lead communities (Cursor)
+
+Read-only CRM count. Active **Asma Aslam** (user 2298) has **517** assigned leads: International City 471, Al Warsan 28, no community 13, Dubai Land 2, Dubai Science Park 1, Downtown Dubai 1, Mudon 1. Inactive Asma Akram (33) has 0. Top stages: Not Interested 156, Option Sent 81.
+
+**Shared:** no product files. Temp probe deleted after run.
+
+---
+
+## 2026-09-16 — Inbox stuck on Panel session (Cursor)
+
+Bitrix slider showed token OK, Panel session spinning. Cause: Official `web` uvicorn `--workers 2` children died in a loop (no traceback), nginx 502, `/healthz` hung. Recreated web with `--workers 1`. `apiFetch` now aborts at 20s instead of spinning forever.
+
+**Shared:** `bitrix/public/assets/core/bitrix-sso.js`, `deploy/docker-compose.yml`, `deploy/Dockerfile`.
+
+**Live:** compose pushed + `up app web`; `ops/wa.sh panel`. web **healthy**. `/healthz` 200, `/api/auth/me/` 401 (no cookie). Panel md5 `453754dd…` matches public GET 200. Logs: live `/api/auth/me/` 200 + inbox WS + conversations after the recreate. **Not:** I did not click the Bitrix placement myself — hard-refresh the WhatsApp slider.
+
+---
+
+## 2026-09-16 — Dubai Land Assigned → old stage + Malik (Cursor)
+
+Reverted the 424 Dubai Land cards from Eman/Nabiha/Areeba **Assigned** back to **Old Leads Before 6 Month**, responsible **Admin Abdul Malik** (user 1, not imconnector 43). First CCrmLead pass failed on required UF checks; second pass with those checks off: 423 ok + 1 already moved. Prove: 424 old-stage + Malik, 0 still on the three in Assigned.
+
+**Shared:** no product files. Temp probe deleted after run.
+
+---
+
+## 2026-09-16 — Dubai Land old-stage → Assigned (Cursor)
+
+Moved **424** `Old Leads Before 6 Month` leads with Community Dubai Land (1058 id 2) to **Assigned** (`UC_MJDO60`). Round-robin: Eman 143, Nabiha 140, Areeba 141. `CCrmLead::Update`, events/sonet off. One card (57625) was grabbed mid-run by user 2343; put back on Areeba. Left in old stage for Dubai Land: **0**.
+
+**Shared:** no product files. Temp probe deleted after run.
+
+---
+
+## 2026-09-16 — Old-stage community breakdown (Cursor)
+
+`Old Leads Before 6 Month` (`UC_PVKGEG`) 2246 leads: 1612 no community field; top filled Dubai Land 424, Serena 79, DSO 37, Greens 25, Dubai Marina 19. AR3 1, Villa Nova 0.
+
+**Shared:** no product files. Temp probe deleted after run.
+
+---
+
+## 2026-09-16 — Old-stage AR3 / Villa Nova count (Cursor)
+
+Read-only Bitrix count on `Old Leads Before 6 Month` (`UC_PVKGEG`). Jan 2026–16 Sep 2026: Arabian Ranches 3 **0**, Villa Nova **0** (of 1237 leads in that stage). All-time in the same stage: AR3 **1** (lead 57062, 2025-12-07), Villa Nova **17** (all 2025, mostly Sep PF WhatsApp listings).
+
+**Shared:** no product files. Temp probe deleted after run.
+
+---
+
+## 2026-09-16 — Leads WA popup: no black, taller (Cursor)
+
+Removed every black/navy fill (`#0f172a`, phone `#111b21`/`#0b141a`). Send + chips + WA header are WhatsApp green; phone mockup is light grey / chat beige. Popup now `980×94vh` (was `860×86vh`), phone `228×560`.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js` only. Official backend untouched.
+
+**Live:** AWS JS 38607, `A7_LEAD_WA_V5`, HTTP 200, no `#0f172a` in served file. **Not:** logged-in click — Ctrl+F5 on `/crm/lead/list/`.
+
+---
+
+## 2026-09-16 — Leads WA studio → compact popup (Cursor)
+
+Full-page overlay overflowed Bitrix. Now a centred 860×86vh popup: 2 columns, phone 200px, lead list capped, ellipsis on long names. Segoe UI/Arial, Bitrix font leak reset. SVG icons (WA / phone / users / search / send / close), no emoji. Dark only on the phone mockup.
+
+**Shared:** Official panel untouched. `ops/bitrix-aws/a7_lead_wa.js` only.
+
+**Live:** AWS JS 38505, `A7_LEAD_WA_V4` + `a7-lwa-modal`, HTTP 200. **Not:** logged-in click — Ctrl+F5 on `/crm/lead/list/`.
+
+---
+
+## 2026-09-16 — Leads WhatsApp campaign studio (Cursor)
+
+Replaced the small popup with a full-page studio: phone preview, Official number picker (same visibility as Campaigns), category chips, selected-lead list, live {{n}} preview, Marketing cap note. White boxed **WhatsApp campaign** button on the Bitrix title bar (not the grid footer). Backend `context` now returns `numbers`; send accepts `number_id`.
+
+**Shared:** Official panel untouched. `campaigns/crm_leads.py`, `campaigns/views.py`, `ops/bitrix-aws/a7_lead_wa.{js,php}`.
+
+**Live:** Official `build app` + `up` web/worker/beat; django-check no changes. AWS JS 34430 / V3 / “Phone preview”. HMAC user 2344 → 200, **2 numbers** (`971555716422`, `447366360875`), 42 templates. **Not:** logged-in studio click / real queue / timeline — Ctrl+F5 on `/crm/lead/list/`.
+
+---
+
+## 2026-09-16 — Leads WA button color/position + nocurl (Cursor)
+
+Templates toast was Apache PHP `curl_init` fatal (curl=N). PHP now streams, then raw TLS socket. Button is WhatsApp green `#25D366` (white text, `!important` so Bitrix cannot restyle it) and mounts on the Delete / Edit / Start Dialing row — never `.main-grid-panel` / pagination. Context is a form POST; real Official errors surface instead of “Could not load templates.”
+
+**Shared:** Official panel untouched. `ops/bitrix-aws/a7_lead_wa.js`, `a7_lead_wa.php`, `probe_lead_wa.php`. Config secret kept (`sha8=4290fa25`).
+
+**Live:** AWS deploy JS 24417 / PHP 10719; public JS HTTP 200 has `#25D366` + `A7_LEAD_WA_V2`. Stream HMAC: user 1 → 400 “no Official number” (true); user 2350 → **200, 18 templates**, from `971559193588`. **Not:** logged-in click / real send / timeline — needs Ctrl+F5 on `/crm/lead/list/`.
+
+---
+
+## 2026-09-16 — Leads list WhatsApp button (Cursor)
+
+Select leads on CRM list/kanban → **WhatsApp message** → template popup → one Official campaign. From = agent's PRIMARY Official number. `{{1}}` = lead name (Untitled → Customer); `{{2}}+` typed once. Phones resolved with the agent's CRM read perms (PHP), HMAC to Django. Header-media templates refused (use Campaigns). Max 500. Timeline: explicit lead comment + existing phone mirror.
+
+**Shared:** none of the Official panel (`inbox.js` / `campaigns.js` untouched). New: `campaigns/crm_leads.py`, `ops/bitrix-aws/a7_lead_wa.{js,php,config.php}`, `deploy_lead_wa.php`. Touched: `campaigns/{models,services,views,urls,serializers}.py`, `0004_recipient_crm_lead_id`, `settings.py`, `deploy/.env.example`, `ops/wa.sh` (`ensure-crm-lead-secret`).
+
+**Live:** Official push + `build app` + `up` web/worker/beat; `0004` applied; `CRM_LEAD_WA_SECRET` on both hosts. HMAC: no-ts 400, bad-sig 403 (not 503). AWS: JS HTTP 200 (20830), `init.php` `A7_LEAD_WA_BUTTON`, PHP tool 401 when signed out. Worker healthy (`run_campaign` succeeding). **Not:** logged-in click / real template send / timeline on a live lead (needs agent session + Ctrl+F5 on `/crm/lead/list/` and kanban).
+
+---
+
+## 2026-09-15 — GitHub profile README (Cursor)
+
+Replaced `Matloob11/Matloob11` README: 4.5 years (Mar 2022–Present / Sep 2026), dark stats, skillicons, A7 + product tables. Read new private trees first: `CRM_COMPLAINTS-app`, `CRM-Access-management`, `Permit-tanancy-contract`. No host IPs or CRM secrets. **Verified:** Contents PUT `86aa552`; live body has 4.5 years, three new repos, skillicons, no `187.127`. **Not:** LinkedIn copy, public visitors seeing private links.
+
+---
+
+## 2026-09-15 — Professional READMEs on Matloob11 GitHub (Cursor)
+
+Rewrote README.md on every Matloob11 repo that has (or can hold) a file: 23 pushes via Contents API. Skipped `Claude-code-leaked`. Empty `a7fullwhatsapp` and `AURA-AI-AGENT-2` got placeholder READMEs pointing at the real trees. Local `README.md` in this workspace now matches the WhatsApp GitHub copy (gateway allowlist, 24h window, deploy pitfalls). No app code, no secrets. **Verified:** `gh` PUT OK on all 23; spot-check strings (Syed Shayan, E Repair, Altaf, Python >=3.10, Mudassar Iqbal credit, discuss DB, start-aura-full.ps1, trophy username Matloob11). **Not:** live site deploys; did not commit this workspace.
+
+---
+
+## 2026-09-15 — GitHub snapshot without credentials (Cursor)
+
+Pushed a one-commit snapshot (no thoth history, no live secrets) to private `https://github.com/Matloob11/Whatsapp-solution-bitrix`. Left out `.env`, cookies, `*.db`, logs, `files/campaigns`, `files/crm`, user/number PDFs, `agent-reports` dumps. Origin set to that repo; local `main` unchanged (still ahead of `upstream-thoth`). Did not run `git init` or overwrite README. **Verified:** `gh` as Matloob11; push `github-upload` → `origin/main`; repo private; tree has no `.env`/db/cookie dumps. **Not:** public visibility (left private).
+
+---
 
 ## 2026-09-15 — From dropdown contrast + dial codes (Cursor)
 
@@ -4199,3 +5344,9 @@ Owner Data **Availability only** (cat 14). Created before 2026-03-14, still in w
 ## 2026-09-11 — Split WhatsApp Leads stage, then remove it (Cursor)
 
 Live CRM on a7-old: `UC_WA_LEADS` had 329 cards. 27 with comment/bedrooms/client type/community → **AI Qualified** (`12`). 302 blank → **Junk**. Stage row 634 deleted; leftover automation template 374 deleted. Robots/n8n not fired (`ENABLE_SYSTEM_EVENTS=false`). Proved: leftover 0, sample 73512/69916 in `12`, 73471 in `JUNK`, status list has no WhatsApp Leads. Scripts: `ops/bitrix-aws/move_wa_leads_split.php`, `cleanup_wa_leads_status.php`. Hard-refresh the lead kanban. Conversation-monitor still defaults new creates to `UC_WA_LEADS` if someone runs it — that status is gone.
+
+---
+
+## 2026-09-15 — GitHub repo README briefs (Cursor)
+
+Read 21 Matloob11 remotes via `gh api` (trees + raw README/manifests/env). `Whatsapp-solution-bitrix` listed as size 0 but has the A7 inbox tree. Skipped empties named by user (`a7fullwhatsapp`, `AURA-AI-AGENT-2`). No deploy. Briefs only.
