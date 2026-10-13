@@ -1115,6 +1115,9 @@
       if (opt === 2482 || bot === 2481) {
         return "opted_out";
       }
+      if (!leadAiBox.checked) {
+        return "";
+      }
       if (bot === 2479) {
         return "broker";
       }
@@ -1211,7 +1214,7 @@
       var missing = 0;
       var leftCounts = { opted_out: 0, broker: 0, lost: 0 };
       leads.forEach(function (row) {
-        var reason = leadAiBox.checked ? leftOutReason(row) : "";
+        var reason = leftOutReason(row);
         if (reason) {
           leftCounts[reason] += 1;
         } else if (row.phone_ok) {
@@ -1223,7 +1226,7 @@
       var shown = leads.slice(0, 8);
       shown.forEach(function (row) {
         var name = row.name || "Untitled";
-        var reason = leadAiBox.checked ? leftOutReason(row) : "";
+        var reason = leftOutReason(row);
         var line = el("div", { className: "a7-lwa-lead" + (row.phone_ok && !reason ? "" : " is-bad") }, [
           el("b", { text: name, title: name }),
           el("span", {
@@ -1250,7 +1253,7 @@
       var messaged = usable;
       if (!leads.length) {
         messaged = leadIds.length;
-      } else if (!leadAiBox.checked && !usable) {
+      } else if (!leadAiBox.checked && !usable && !leftOutSentence(leftCounts)) {
         messaged = leadIds.length;
       }
       var bits = [
@@ -1260,7 +1263,7 @@
       if (missing) {
         bits.push(missing + " missing a phone");
       }
-      var left = leadAiBox.checked ? leftOutSentence(leftCounts) : "";
+      var left = leftOutSentence(leftCounts);
       if (left) {
         bits.push(left);
       }

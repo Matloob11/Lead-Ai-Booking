@@ -222,7 +222,14 @@ def parse_mapped_rows(
     recipients: list[dict] = []
     warnings: list[str] = []
     seen: set[str] = set()
-    stats = {"rows": 0, "valid": 0, "invalid_phone": 0, "duplicate": 0, "empty_value": 0}
+    stats = {
+        "rows": 0,
+        "valid": 0,
+        "invalid_phone": 0,
+        "duplicate": 0,
+        "empty_value": 0,
+        "opted_out": 0,
+    }
 
     def note(text):
         if len(warnings) < MAX_WARNINGS:
@@ -263,6 +270,13 @@ def parse_mapped_rows(
             name = ""
         recipients.append({"phone": phone, "name": name[:200], "variables": variables})
 
+    from .crm_leads import drop_opted_out_rows, left_out_sentence
+
+    recipients, opted = drop_opted_out_rows(recipients)
+    stats["opted_out"] = len(opted)
+    sentence = left_out_sentence(opted)
+    if sentence:
+        warnings.insert(0, sentence)
     stats["valid"] = len(recipients)
     if not recipients:
         detail = "No usable rows found."

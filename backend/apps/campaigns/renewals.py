@@ -27,6 +27,7 @@ from .crm_leads import (
     left_out_sentence,
     mark_lead_ai,
     number_for_agent,
+    phones_opted_out,
 )
 from .models import CrmTarget
 from .phones import normalize_phone
@@ -82,6 +83,12 @@ def classify_deals(deals) -> dict:
     rows: list[dict] = []
     seen_tenant: set[str] = set()
     seen_owner: set[str] = set()
+    phone_set: set[str] = set()
+    for raw in deals or []:
+        if isinstance(raw, dict):
+            phone_set.add(_phone(raw.get("tenant_phone")))
+            phone_set.add(_phone(raw.get("owner_phone")))
+    blocked = phones_opted_out({phone for phone in phone_set if phone})
 
     for raw in deals or []:
         if not isinstance(raw, dict):
@@ -111,7 +118,10 @@ def classify_deals(deals) -> dict:
             tenant_state = "same"
 
         if tenant_send:
-            if tenant_send in seen_tenant:
+            if tenant_send in blocked:
+                skipped.append({"id": deal_id, "role": "tenant", "reason": "Opted out."})
+                tenant_state = "opted_out"
+            elif tenant_send in seen_tenant:
                 skipped.append({"id": deal_id, "role": "tenant", "reason": "Duplicate phone."})
                 tenant_state = "duplicate"
             else:
@@ -127,7 +137,10 @@ def classify_deals(deals) -> dict:
             skipped.append({"id": deal_id, "role": "tenant", "reason": "No phone number on this deal."})
 
         if owner_phone:
-            if owner_phone in seen_owner:
+            if owner_phone in blocked:
+                skipped.append({"id": deal_id, "role": "owner", "reason": "Opted out."})
+                owner_state = "opted_out"
+            elif owner_phone in seen_owner:
                 skipped.append({"id": deal_id, "role": "owner", "reason": "Duplicate phone."})
                 owner_state = "duplicate"
             else:

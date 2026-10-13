@@ -406,6 +406,16 @@ def create_campaign(
     return campaign
 
 
+def _without_opt_outs(rows: list[dict], warnings: list[str]) -> tuple[list[dict], list[str]]:
+    from .crm_leads import drop_opted_out_rows, left_out_sentence
+
+    kept, skipped = drop_opted_out_rows(rows)
+    sentence = left_out_sentence(skipped)
+    if sentence:
+        warnings = [sentence, *warnings]
+    return kept, warnings
+
+
 def parse_recipient_inputs(
     *,
     text: str = "",
@@ -430,7 +440,7 @@ def parse_recipient_inputs(
                 filename=filename,
                 body_var_count=body_vars,
             )
-            return rows, warnings
+            return _without_opt_outs(rows, warnings)
         except SpreadsheetFormatError as exc:
             if body_vars:
                 raise CampaignError(str(exc)) from exc
@@ -443,7 +453,7 @@ def parse_recipient_inputs(
                 filename=filename,
                 body_var_count=body_vars,
             )
-            return rows, warnings
+            return _without_opt_outs(rows, warnings)
         except SpreadsheetFormatError as exc:
             raise CampaignError(str(exc)) from exc
 
@@ -473,7 +483,7 @@ def parse_recipient_inputs(
             continue
         seen.add(row["phone"])
         out.append(row)
-    return out, warnings
+    return _without_opt_outs(out, warnings)
 
 
 def recipient_counts(campaign: Campaign) -> dict[str, int]:

@@ -591,6 +591,9 @@
     if (state === "duplicate") {
       return "Duplicate";
     }
+    if (state === "opted_out") {
+      return "Opted out";
+    }
     return "No phone";
   }
 
@@ -681,8 +684,22 @@
       return parts.join(" and ") + " have no phone number.";
     }
 
+    function optedOutSentence() {
+      var n = 0;
+      for (var i = 0; i < rows.length; i += 1) {
+        if (rows[i].tenant_state === "opted_out") {
+          n += 1;
+        }
+        if (rows[i].owner_state === "opted_out") {
+          n += 1;
+        }
+      }
+      return n ? n + " left out: opted out " + n : "";
+    }
+
     function setSub() {
-      sub.textContent = missingSentence();
+      var left = optedOutSentence();
+      sub.textContent = missingSentence() + (left ? " · " + left : "");
     }
     setSub();
 

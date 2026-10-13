@@ -31,6 +31,33 @@ class ClassifyTests(SimpleTestCase):
         self.assertEqual(classified["rows"][0]["owner_state"], "send")
         self.assertTrue(any("Same number" in row["reason"] for row in classified["skipped"]))
 
+    def test_an_opted_out_phone_is_left_out_with_the_box_off(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value={"971501111111"},
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        ):
+            classified = classify_deals(
+                [
+                    {
+                        "id": 12,
+                        "tenant_phone": "971501111111",
+                        "tenant_name": "Sara",
+                        "owner_phone": "971502222222",
+                        "owner_name": "Ali",
+                    }
+                ]
+            )
+        self.assertEqual(classified["tenant_messages"], 0)
+        self.assertEqual(classified["owner_messages"], 1)
+        self.assertEqual(classified["rows"][0]["tenant_state"], "opted_out")
+        self.assertEqual(classified["rows"][0]["owner_state"], "send")
+        self.assertTrue(any(row["reason"] == "Opted out." for row in classified["skipped"]))
+
     def test_different_numbers_keep_both_sides(self):
         classified = classify_deals(
             [

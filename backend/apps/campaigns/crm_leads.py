@@ -325,12 +325,20 @@ def _digits(value) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
-def lead_ai_skip_reason(raw: dict) -> str:
-    """Why Lead AI must not message this lead, or "" when it may."""
+def opt_out_reason(raw: dict) -> str:
+    """WhatsApp Opt-out Yes or Bot Status Opted out. Every campaign, box on or off."""
     opt = _enum_id(raw.get("wa_opt_out"))
     bot = _enum_id(raw.get("bot_status"))
     if opt == WA_OPT_OUT_YES or bot == BOT_STATUS_OPTED_OUT:
         return "Opted out."
+    return ""
+
+
+def lead_ai_skip_reason(raw: dict) -> str:
+    """Broker and Lost. Lead AI only; an opt-out is ``opt_out_reason``."""
+    if opt_out_reason(raw):
+        return "Opted out."
+    bot = _enum_id(raw.get("bot_status"))
     if bot == BOT_STATUS_BROKER:
         return "Broker."
     if bot == BOT_STATUS_LOST:
@@ -355,6 +363,111 @@ def left_out_sentence(skipped: list[dict]) -> str:
     if not total:
         return ""
     return f"{total} left out: {', '.join(parts)}"
+
+
+def _canon_phone(value) -> str:
+    from .phones import normalize_phone
+
+    return normalize_phone(str(value or "")) or ""
+
+
+def _lead_phones(row: dict) -> set[str]:
+    raw = row.get("PHONE") or []
+    if isinstance(raw, dict):
+        raw = list(raw.values())
+    elif isinstance(raw, str):
+        raw = [raw]
+    found: set[str] = set()
+    for item in raw or []:
+        if isinstance(item, dict):
+            item = item.get("VALUE")
+        phone = _canon_phone(item)
+        if phone:
+            found.add(phone)
+    return found
+
+
+def bitrix_opted_out_phones(phones: set[str]) -> set[str]:
+    """Phones on leads whose WhatsApp Opt-out is Yes or Bot Status is Opted out.
+
+    Empty when no webhook is configured, or the portal cannot be asked.
+    """
+    if not phones:
+        return set()
+    from apps.crmlink import client as bitrix
+
+    if not bitrix.configured():
+        return set()
+    wanted = {phone for phone in (_canon_phone(raw) for raw in phones) if phone}
+    if not wanted:
+        return set()
+    found: set[str] = set()
+    try:
+        for field, value in (
+            ("UF_CRM_A7_WA_OPT_OUT", WA_OPT_OUT_YES),
+            ("UF_CRM_A7_BOT_STATUS", BOT_STATUS_OPTED_OUT),
+        ):
+            start = 0
+            for _page in range(40):
+                result = bitrix.call(
+                    "crm.lead.list",
+                    {
+                        "filter": {field: value},
+                        "select": ["ID", "PHONE"],
+                        "start": start,
+                    },
+                )
+                rows = result if isinstance(result, list) else []
+                if not rows:
+                    break
+                for row in rows:
+                    if isinstance(row, dict):
+                        found |= _lead_phones(row) & wanted
+                if found >= wanted or len(rows) < 50:
+                    break
+                start += 50
+            if found >= wanted:
+                break
+    except bitrix.BitrixError:
+        logger.warning("Could not read opted-out leads from Bitrix")
+        return found
+    return found
+
+
+def phones_opted_out(phones: set[str]) -> set[str]:
+    """Phones no campaign may message.
+
+    The T60 registry (``phones_blocked_by_registry``) and leads marked
+    WhatsApp Opt-out Yes or Bot Status Opted out. Broker and Lost are not
+    in this set.
+    """
+    if not phones:
+        return set()
+    blocked = set(phones_blocked_by_registry(phones))
+    blocked |= bitrix_opted_out_phones(phones)
+    return {phone for phone in (_canon_phone(raw) for raw in blocked) if phone}
+
+
+def drop_opted_out_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Take opted-out phones out of a sheet or a pasted list. Same reason string."""
+    phones = {
+        str(row.get("phone") or "")
+        for row in rows or []
+        if isinstance(row, dict) and row.get("phone")
+    }
+    blocked = phones_opted_out(phones)
+    kept: list[dict] = []
+    skipped: list[dict] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        phone = str(row.get("phone") or "")
+        canon = _canon_phone(phone)
+        if phone in blocked or (canon and canon in blocked):
+            skipped.append({"phone": phone, "reason": "Opted out."})
+            continue
+        kept.append(row)
+    return kept, skipped
 
 
 def phones_blocked_by_registry(phones: set[str]) -> set[str]:
@@ -420,16 +533,14 @@ def build_recipients(
     seen: set[str] = set()
     skipped: list[dict] = []
     noun, plural, _label = ENTITY_NOUNS[kind]
-    recent: set[str] = set()
-    blocked: set[str] = set()
-    if lead_ai:
-        phones = {
-            _digits(raw.get("phone"))
-            for raw in (leads or [])
-            if isinstance(raw, dict) and len(_digits(raw.get("phone"))) >= 8
-        }
-        recent = phones_sent_same_template(template, phones)
-        blocked = phones_blocked_by_registry(phones)
+    phones = {
+        _digits(raw.get("phone"))
+        for raw in (leads or [])
+        if isinstance(raw, dict) and len(_digits(raw.get("phone"))) >= 8
+    }
+    # Opt-out holds on every send. The 30-day template rule stays Lead AI only.
+    blocked = phones_opted_out(phones)
+    recent = phones_sent_same_template(template, phones) if lead_ai else set()
 
     for raw in leads or []:
         if not isinstance(raw, dict):
@@ -440,6 +551,9 @@ def build_recipients(
         if item_id <= 0:
             skipped.append({"id": item_id, "reason": f"Invalid {noun}."})
             continue
+        if opt_out_reason(raw):
+            skipped.append({"id": item_id, "reason": "Opted out."})
+            continue
         if lead_ai:
             reason = lead_ai_skip_reason(raw)
             if reason:
@@ -448,7 +562,8 @@ def build_recipients(
         if len(phone) < 8:
             skipped.append({"id": item_id, "reason": f"No phone number on this {noun}."})
             continue
-        if lead_ai and phone in blocked:
+        canon = _canon_phone(phone)
+        if phone in blocked or (canon and canon in blocked):
             skipped.append({"id": item_id, "reason": "Opted out."})
             continue
         if lead_ai and phone in recent:

@@ -870,13 +870,14 @@ export function openBulkCampaignModal() {
         stat(s.valid || 0, "recipients", "is-ok"),
         stat(plan.assigned || 0, "will send", "is-send"),
         stat(plan.leftover || 0, "left out", plan.leftover ? "is-bad" : ""),
-        stat((s.invalid_phone || 0) + (s.duplicate || 0) + (s.empty_value || 0), "rows skipped", ""),
+        stat((s.invalid_phone || 0) + (s.duplicate || 0) + (s.empty_value || 0) + (s.opted_out || 0), "rows skipped", ""),
       ])
     );
     const drops = [];
     if (s.invalid_phone) drops.push(`${s.invalid_phone} without a valid phone`);
     if (s.duplicate) drops.push(`${s.duplicate} duplicate${s.duplicate === 1 ? "" : "s"}`);
     if (s.empty_value) drops.push(`${s.empty_value} with an empty value`);
+    if (s.opted_out) drops.push(`${s.opted_out} opted out`);
     if (drops.length) summaryBox.append(el("p.bc-summary__drops", {}, [`Skipped: ${drops.join(", ")}.`]));
     if ((p.warnings || []).length) {
       summaryBox.append(el("ul.bc-warnings", {}, p.warnings.slice(0, 6).map((w) => el("li", {}, [w]))));

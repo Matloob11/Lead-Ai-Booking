@@ -185,6 +185,7 @@ function a7_lead_wa_summaries(array $ids, string $entity = 'lead'): array
         if ($row === null) {
             continue;
         }
+        $row = a7_lead_wa_stamp_opt_out($row);
         $phone = (string)($row['phone'] ?? '');
         $rows[] = [
             'id' => $row['id'],
@@ -361,12 +362,15 @@ function a7_lead_wa_row(int $leadId): ?array
     return $row;
 }
 
-function a7_lead_wa_left_out_reason(array $row): string
+function a7_lead_wa_left_out_reason(array $row, bool $leadAi = false): string
 {
     $opt = (int)($row['wa_opt_out'] ?? 0);
     $bot = (int)($row['bot_status'] ?? 0);
     if ($opt === 2482 || $bot === 2481) {
         return 'opted_out';
+    }
+    if (!$leadAi) {
+        return '';
     }
     if ($bot === 2479) {
         return 'broker';
@@ -375,6 +379,68 @@ function a7_lead_wa_left_out_reason(array $row): string
         return 'lost';
     }
     return '';
+}
+
+function a7_lead_wa_phone_keys(string $digits): array
+{
+    $keys = [];
+    if (strlen($digits) >= 8) {
+        $keys[$digits] = true;
+    }
+    if (strlen($digits) === 10 && substr($digits, 0, 2) === '05') {
+        $keys['971' . substr($digits, 1)] = true;
+    }
+    if (strlen($digits) === 12 && substr($digits, 0, 4) === '9715') {
+        $keys['0' . substr($digits, 3)] = true;
+    }
+    return array_keys($keys);
+}
+
+function a7_lead_wa_opted_out_phone_set(): array
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $cache = [];
+    if (!class_exists('CCrmLead') || !class_exists('CCrmFieldMulti')) {
+        return $cache;
+    }
+    $ids = [];
+    foreach (['UF_CRM_A7_WA_OPT_OUT' => 2482, 'UF_CRM_A7_BOT_STATUS' => 2481] as $field => $value) {
+        $res = CCrmLead::GetListEx(
+            [],
+            ['=' . $field => $value, 'CHECK_PERMISSIONS' => 'N'],
+            false,
+            false,
+            ['ID']
+        );
+        while ($res && ($lead = $res->Fetch())) {
+            $ids[(int)$lead['ID']] = true;
+        }
+    }
+    if (!$ids) {
+        return $cache;
+    }
+    foreach (array_keys($ids) as $id) {
+        foreach (a7_lead_wa_phone_keys(a7_lead_wa_phone((int)$id)) as $key) {
+            $cache[$key] = true;
+        }
+    }
+    return $cache;
+}
+
+function a7_lead_wa_stamp_opt_out(array $row): array
+{
+    $digits = a7_lead_wa_digits((string)($row['phone'] ?? ''));
+    $blocked = a7_lead_wa_opted_out_phone_set();
+    foreach (a7_lead_wa_phone_keys($digits) as $key) {
+        if (!empty($blocked[$key])) {
+            $row['wa_opt_out'] = 2482;
+            break;
+        }
+    }
+    return $row;
 }
 
 function a7_lead_wa_left_out_text(array $counts): string
@@ -1127,17 +1193,16 @@ if ($action === 'send') {
             $unreadable++;
             continue;
         }
-        if ($leadAi) {
-            $reason = a7_lead_wa_left_out_reason($row);
-            if ($reason !== '') {
-                $leftOut[$reason]++;
-                continue;
-            }
+        $row = a7_lead_wa_stamp_opt_out($row);
+        $reason = a7_lead_wa_left_out_reason($row, $leadAi);
+        if ($reason !== '') {
+            $leftOut[$reason]++;
+            continue;
         }
         $leads[] = $row;
     }
     if (!$leads) {
-        $note = $leadAi ? a7_lead_wa_left_out_text($leftOut) : '';
+        $note = a7_lead_wa_left_out_text($leftOut);
         if ($note !== '') {
             a7_lead_wa_json(['ok' => false, 'error' => $note], 400);
         }
@@ -1173,17 +1238,15 @@ if ($action === 'send') {
         a7_lead_wa_json(['ok' => false, 'error' => $detail], $reply['http'] >= 400 ? $reply['http'] : 502);
     }
     $out = ['ok' => true, 'unreadable' => $unreadable] + $reply['data'];
-    if ($leadAi) {
-        $skipped = is_array($out['skipped'] ?? null) ? $out['skipped'] : [];
-        $reasons = ['opted_out' => 'Opted out.', 'broker' => 'Broker.', 'lost' => 'Lost.'];
-        foreach ($reasons as $key => $reason) {
-            for ($i = 0; $i < $leftOut[$key]; $i++) {
-                $skipped[] = ['id' => 0, 'reason' => $reason];
-            }
+    $skipped = is_array($out['skipped'] ?? null) ? $out['skipped'] : [];
+    $reasons = ['opted_out' => 'Opted out.', 'broker' => 'Broker.', 'lost' => 'Lost.'];
+    foreach ($reasons as $key => $reason) {
+        for ($i = 0; $i < $leftOut[$key]; $i++) {
+            $skipped[] = ['id' => 0, 'reason' => $reason];
         }
-        $out['skipped'] = $skipped;
-        $out['skipped_count'] = count($skipped);
     }
+    $out['skipped'] = $skipped;
+    $out['skipped_count'] = count($skipped);
     a7_lead_wa_json($out, 201);
 }
 

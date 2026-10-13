@@ -83,7 +83,14 @@ def test_rows_follow_the_mapping_and_report_what_was_dropped():
         "name": "Sara Khan",
         "variables": {"1": "Sara Khan", "2": "Damac Hills"},
     }
-    assert stats == {"rows": 5, "valid": 2, "invalid_phone": 1, "duplicate": 1, "empty_value": 1}
+    assert stats == {
+        "rows": 5,
+        "valid": 2,
+        "invalid_phone": 1,
+        "duplicate": 1,
+        "empty_value": 1,
+        "opted_out": 0,
+    }
     # Sheet row numbers, blank row included, so the agent can find them.
     assert warnings == [
         "Row 5: no valid phone number.",

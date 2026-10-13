@@ -363,6 +363,9 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         ), patch(
             "apps.campaigns.crm_leads.phones_blocked_by_registry",
             return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
         ):
             return build_recipients(
                 template=FakeTemplate(0),
@@ -466,4 +469,89 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         ])
         self.assertEqual(len(rows), 1)
         self.assertEqual(skipped[0]["reason"], "Duplicate phone.")
+
+    def test_opt_out_holds_when_lead_ai_is_off_and_a_broker_still_sends(self):
+        rows, skipped = self._rows(
+            [
+                {"id": 1, "phone": "971501111111", "name": "Sara", "wa_opt_out": 2482},
+                {"id": 2, "phone": "971502222222", "name": "Ali", "bot_status": 2481},
+                {"id": 3, "phone": "971503333333", "name": "Omar", "bot_status": 2479},
+                {"id": 4, "phone": "971504444444", "name": "Hana", "bot_status": 2480},
+            ],
+            lead_ai=False,
+        )
+        self.assertEqual([row["phone"] for row in rows], ["971503333333", "971504444444"])
+        self.assertEqual([item["reason"] for item in skipped], ["Opted out.", "Opted out."])
+
+    def test_the_registry_blocks_a_normal_campaign(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value={"971501111111"},
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        ):
+            rows, skipped = build_recipients(
+                template=FakeTemplate(0),
+                leads=[
+                    {"id": 1, "phone": "971501111111", "name": "Sara"},
+                    {"id": 2, "phone": "971502222222", "name": "Ali"},
+                ],
+                extra_body={},
+                lead_ai=False,
+            )
+        self.assertEqual([row["phone"] for row in rows], ["971502222222"])
+        self.assertEqual(skipped[0]["reason"], "Opted out.")
+
+    def test_a_local_number_matches_the_bitrix_opt_out_list(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value={"971501111111"},
+        ):
+            with self.assertRaises(CrmLeadSendError) as caught:
+                build_recipients(
+                    template=FakeTemplate(0),
+                    leads=[{"id": 9, "phone": "0501111111", "name": "Sara"}],
+                    extra_body={},
+                    lead_ai=False,
+                )
+        self.assertEqual(str(caught.exception), "1 left out: opted out 1")
+
+    def test_excel_rows_use_the_same_opt_out_list(self):
+        from unittest.mock import patch
+
+        from apps.campaigns.bulk import parse_mapped_rows
+
+        sheet = (
+            "Owner Name,Mobile,Community\n"
+            "Sara Khan,0501234567,Damac Hills\n"
+            "Ali Hassan,971552223333,Arabian Ranches\n"
+        ).encode("utf-8")
+
+        class SheetTemplate:
+            variable_count = 2
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value={"971501234567"},
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        ):
+            recipients, stats, warnings = parse_mapped_rows(
+                sheet,
+                "owners.csv",
+                mapping={"phone": 1, "name": 0, "vars": {"1": {"column": 0}, "2": {"column": 2}}},
+                template=SheetTemplate(),
+            )
+        self.assertEqual([row["phone"] for row in recipients], ["971552223333"])
+        self.assertEqual(stats["opted_out"], 1)
+        self.assertIn("1 left out: opted out 1", warnings)
 

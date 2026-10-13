@@ -1,3 +1,11 @@
+## 2026-10-13 — Opt-out holds on every campaign (Cursor)
+
+WhatsApp Opt-out Yes (2482) and Bot Status Opted out (2481) are left out of every send, Lead AI box on or off: Leads, Owner Data, Deals, Contacts, Renewals, the Excel bulk screen, and a pasted list. The same line is shown: `1 left out: opted out 1`. Broker and Lost stay Lead AI only. `phones_blocked_by_registry` sits on that shared phone check, with the Bitrix lead lookup beside it, so a later registry blocks every path too.
+
+Live: `test_crm_leads` 41 OK, `test_renewals` 12 OK, on the image before `up`. No campaign was queued or running. A Bitrix count of those two values was 0, matching SQL, so the filter is not returning every lead. PHP `c3750a0e` (401, 47 bytes), lead JS `47984536` (200, 66396 bytes), renewals JS `b4ade6a5` (200, 68832 bytes), bulk JS `b9197b85` (200, 49117 bytes). web, worker, worker-leadai and beat came up together. Lead AI sweep `2026-10-13 12:06:53 UTC`. No WhatsApp message was sent.
+
+---
+
 ## 2026-10-13 — Lead AI campaigns leave out brokers, lost leads and opt-outs (Cursor)
 
 With the Lead AI box ticked, the lead popup and the send both leave out Bot Status Broker (2479), Lost (2480) and Opted out (2481), and WhatsApp Opt-out Yes (2482). A phone already in this send, or reached by the same template in the last 30 days, is left out too. The popup line is `3 left out: opted out 1, broker 1, lost 1`, beside the missing-phone note, and it updates when the box is ticked. `phones_blocked_by_registry` is the empty hook for the later global opt-out list. Renewals uses the same builder when its Lead AI box is ticked.
