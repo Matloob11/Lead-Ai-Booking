@@ -23,6 +23,19 @@ function a7_leadai_fields_json(array $payload, int $code = 200): void
 
 function a7_leadai_fields_datetime(string $text): ?string
 {
+    $text = trim($text);
+    if ($text === '') {
+        return null;
+    }
+    if (preg_match('/(?:Z|[+-]\d{2}:?\d{2})$/', $text)) {
+        try {
+            $when = new \DateTime($text);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        $when->setTimezone(new \DateTimeZone('Asia/Dubai'));
+        return $when->format('Y-m-d H:i:s');
+    }
     foreach (['Y-m-d H:i:s', 'Y-m-d\TH:i:s', 'Y-m-d\TH:i'] as $format) {
         $when = \DateTime::createFromFormat('!' . $format, $text);
         $errors = \DateTime::getLastErrors();
@@ -181,6 +194,31 @@ if ($license !== null) {
     $licenseMime = $mime;
 }
 
+$booking = null;
+if (array_key_exists('booking', $in) && $in['booking'] !== null) {
+    if (!is_array($in['booking'])) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+    }
+    $event = (string)($in['booking']['event'] ?? '');
+    if (!in_array($event, ['confirmed', 'rescheduled', 'cancelled'], true)) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+    }
+    $meeting = null;
+    if ($event !== 'cancelled') {
+        $meeting = a7_leadai_fields_datetime((string)($in['booking']['meeting_at'] ?? ''));
+        $mode = $in['booking']['mode'] ?? null;
+        if ($meeting === null || (int)$mode !== 42) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+        }
+    }
+    $booking = ['event' => $event, 'meeting' => $meeting];
+    if ($event !== 'cancelled') {
+        $writes['UF_CRM_1731838813769'] = ['datetime' => $meeting];
+        $writes['UF_CRM_1731838790184'] = 42;
+        $writes['UF_CRM_A7_BOT_STATUS'] = 2477;
+    }
+}
+
 $lostIn = $in['lost'] ?? null;
 $lostStatus = null;
 $lostReason = '';
@@ -196,6 +234,9 @@ if ($lostIn !== null) {
     if ($lostReason === '') {
         a7_leadai_fields_json(['ok' => false, 'error' => 'Lost needs the customer\'s words.'], 400);
     }
+}
+if ($booking !== null && $lostStatus !== null) {
+    a7_leadai_fields_json(['ok' => false, 'error' => 'A booking cannot also mark the lead lost.'], 400);
 }
 $extraComment = '';
 if (array_key_exists('comment', $in) && $in['comment'] !== null && $in['comment'] !== '') {
@@ -244,7 +285,9 @@ $skipped = [];
 $licenseFileId = 0;
 try {
 foreach ($writes as $code => $value) {
-    if (isset($onlySet[$code]) && !a7_leadai_fields_empty($item->get($code))) {
+    $bookingForces = ($booking !== null && $booking['event'] !== 'cancelled'
+        && in_array($code, ['UF_CRM_1731838813769', 'UF_CRM_1731838790184', 'UF_CRM_A7_BOT_STATUS'], true));
+    if (!$bookingForces && isset($onlySet[$code]) && !a7_leadai_fields_empty($item->get($code))) {
         $skipped[] = $code;
         continue;
     }
@@ -253,6 +296,9 @@ foreach ($writes as $code => $value) {
     }
     $item->set($code, $value);
     $updated[] = $code;
+}
+if ($booking !== null && $booking['event'] !== 'cancelled') {
+    $item->setStageId('10');
 }
 
 if ($licenseBytes !== '') {
@@ -348,10 +394,94 @@ if ($extraComment !== '') {
     a7_leadai_fields_comment($leadId, $extraComment);
 }
 
+function a7_leadai_fields_open_todo(int $leadId): int
+{
+    $row = \Bitrix\Main\Application::getConnection()->query(
+        "SELECT a.ID FROM b_crm_act a
+         JOIN b_crm_act_bind b ON b.ACTIVITY_ID=a.ID
+         WHERE b.OWNER_TYPE_ID=1 AND b.OWNER_ID={$leadId}
+           AND a.PROVIDER_ID='CRM_TODO' AND a.SUBJECT='Viewing/Meeting' AND a.COMPLETED='N'
+         ORDER BY a.ID DESC LIMIT 1"
+    )->fetch();
+    return is_array($row) ? (int)$row['ID'] : 0;
+}
+
+function a7_leadai_fields_todo_window(string $meeting): array
+{
+    $start = new \Bitrix\Main\Type\DateTime($meeting, 'Y-m-d H:i:s');
+    $end = clone $start;
+    $end->add('1 hour');
+    return [$start->toString(), $end->toString()];
+}
+
+function a7_leadai_fields_plan_todo(int $leadId, int $responsible, string $meeting): int
+{
+    [$start, $end] = a7_leadai_fields_todo_window($meeting);
+    $existing = a7_leadai_fields_open_todo($leadId);
+    $fields = [
+        'DEADLINE' => $start,
+        'START_TIME' => $start,
+        'END_TIME' => $end,
+        'RESPONSIBLE_ID' => $responsible,
+        'COMPLETED' => 'N',
+    ];
+    if ($existing > 0) {
+        $ok = \CCrmActivity::Update($existing, $fields, false, false, ['REGISTER_SONET_EVENT' => false]);
+        if (!$ok) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Could not move the viewing.'], 502);
+        }
+        return $existing;
+    }
+    $fields += [
+        'TYPE_ID' => 6,
+        'PROVIDER_ID' => 'CRM_TODO',
+        'PROVIDER_TYPE_ID' => 'TODO',
+        'SUBJECT' => 'Viewing/Meeting',
+        'DESCRIPTION' => 'Viewing/Meeting',
+        'DESCRIPTION_TYPE' => 2,
+        'DIRECTION' => 0,
+        'PRIORITY' => 1,
+        'NOTIFY_TYPE' => 0,
+        'OWNER_TYPE_ID' => \CCrmOwnerType::Lead,
+        'OWNER_ID' => $leadId,
+        'BINDINGS' => [[
+            'OWNER_TYPE_ID' => \CCrmOwnerType::Lead,
+            'OWNER_ID' => $leadId,
+        ]],
+    ];
+    $id = (int)\CCrmActivity::Add($fields, false, false, ['REGISTER_SONET_EVENT' => false]);
+    if ($id <= 0) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Could not plan the viewing.'], 502);
+    }
+    return $id;
+}
+
+$todoId = null;
+if ($booking !== null) {
+    $responsible = (int)$item->getAssignedById();
+    if ($responsible <= 0) {
+        $responsible = 1;
+    }
+    if ($booking['event'] === 'cancelled') {
+        $open = a7_leadai_fields_open_todo($leadId);
+        if ($open > 0) {
+            $fields = ['COMPLETED' => 'Y'];
+            $ok = \CCrmActivity::Update($open, $fields, false, false, ['REGISTER_SONET_EVENT' => false]);
+            if (!$ok) {
+                a7_leadai_fields_json(['ok' => false, 'error' => 'Could not close the viewing.'], 502);
+            }
+            $todoId = $open;
+        }
+    } else {
+        $todoId = a7_leadai_fields_plan_todo($leadId, $responsible, (string)$booking['meeting']);
+    }
+}
+
 a7_leadai_fields_json([
     'ok' => true,
     'lead_id' => $leadId,
     'updated' => $updated,
     'skipped' => $skipped,
     'lost' => $lostStatus,
+    'todo_id' => $todoId,
 ]);
