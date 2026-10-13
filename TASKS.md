@@ -1,3 +1,11 @@
+## 2026-10-13 — Lead AI field writer on Bitrix (Cursor)
+
+The assistant can write the shops fields without starting BP 235. Tool: `POST https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_fields.php`, signed like the notify tool with the prefix `leadai-fields.`. File: `ops/bitrix-aws/a7_leadai_fields.php` (`2a22361e`). `php -l` clean.
+
+**Live proof** on throwaway lead 79544 (deleted after): GET 405; unsigned, wrong and old signatures 401; unknown field 400. Shop Type 2471 and Bot Status 2476 saved with title, stage and Meeting Date unchanged and to-dos still 0. `lost` to status `1` left the comment `Lead AI: …`. A small PDF landed on `UF_CRM_A7_TRADE_LICENSE_FILE` (column id, because the CRM item save drops a file id). The lost move keeps bizproc off so BP 235 does not create a Lead Pool item or rewrite the title. A licence is `license_file`, not a file id in `fields`.
+
+---
+
 ## 2026-10-13 — Honorifics are not the greeting name (Cursor)
 
 `{{1}}` skips a leading Md, Mohd, Muhammad, Mohammad, Mohammed, Muhammed, Mohamed, Dr, Mr, Mrs, Ms, Miss, Engr or Eng (with or without a dot) when another word follows. "Md Sumon" and "Mr. Ali Hassan" greet as Sumon and Ali. A prefix with no following word stays as it is. Same rule in `a7_lead_wa_display` and `lead_display_name`.
