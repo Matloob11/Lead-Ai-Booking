@@ -87,7 +87,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | Q7 | Sending | default: automatic drip ~100/day, 11:00–18:00 Mon–Sat, spread over the sending numbers; Template B once after 72 h to non-repliers |
 | Q8 | Opt-out | default: block the phone on every number and campaign (Sara too); import the 279 past Unsubscribe/Stop |
 | Q9 | "Not now" | default: "check back in a month?" → yes: Template B after 30 days; no: lost |
-| Q10 | Which Bitrix stage is "lost" | **open**: Cursor lists the stage ids (C3), Matloob picks |
+| Q10 | Which Bitrix stage is "lost" | **decided** (2026-10-13): not interested, already rented, or "Not now" then no → **Not Interested (`1`)**; wrong number or spam → **Junk Lead (`JUNK`)**. Neither needs a stage field |
 | Q11 | Broker or "I want a person" | **decided**: the chat gets a **Broker** label in the panel so the team can find and manage it; the bot stays silent until an agent presses Resume |
 | Q12 | Shop agent | **decided**: Khurram and Admin Abdul Malik are one person, Bitrix user **1** (portal admin; sees every chat, no number of his own). **Booking alerts go to Matloob** (Bitrix 2311, agent 3). No reassignment on booking (user 1 is the "hold" user) |
 | Q13 | Agent alerts | **decided**: Bitrix bell + panel, to Matloob (and the chat owner) |
@@ -183,9 +183,9 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
 | T50 | Bitrix field map and the missing fields (C3) | Cursor | — | Open |
-| T51 | Write those fields whenever they change, not only at booking | Claude | T50 | Open |
+| T51 | Write those fields whenever they change, not only at booking. Per C4, a REST `crm.lead.update` runs BP 235 on every edit (at stage 10 it clears Meeting Date & Time, plans a to-do and rewrites the title), so the writes go through a small HMAC-signed Bitrix tool that uses the CRM factory with `disableBizProc()` / `disableAutomation()` and never sends `STATUS_ID` / `ASSIGNED_BY_ID`. Cursor builds the tool, Claude calls it. Also check today's booking write (stage 10 + Meeting Date over REST) against BP 235 on a test lead | Claude + Cursor | T50 | Open |
 | T52 | Bot Status set in Bitrix (Handed to agent / Broker / Opted out) silences the bot | Claude + Cursor | T50 | Open |
-| T53 | mark_lost: move to the lost stage with the reason in the client's words | Claude | Q10 | Blocked Q10 |
+| T53 | mark_lost: Not Interested (`1`) or Junk (`JUNK`) per Q10, with the reason in the client's words | Claude (+ Cursor tool, T51) | T51 | Open |
 | T54 | Each campaign reply (Yes / Not now / Stop) written to the lead | Claude | T50 | Open |
 
 ### P6 — Sending
