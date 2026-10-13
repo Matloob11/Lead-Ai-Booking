@@ -594,7 +594,39 @@
     return "No phone";
   }
 
-  function openStudio(dealIds, context) {
+    function leftOutNote(data) {
+      var rows = data && data.skipped;
+      if (!rows || !rows.length) {
+        return "";
+      }
+      var labels = [
+        ["Opted out.", "opted out"],
+        ["Broker.", "broker"],
+        ["Lost.", "lost"],
+        ["Sent this template in the last 30 days.", "already sent"]
+      ];
+      var counts = {};
+      rows.forEach(function (row) {
+        var reason = row && row.reason ? String(row.reason) : "";
+        labels.forEach(function (pair) {
+          if (reason === pair[0]) {
+            counts[pair[0]] = (counts[pair[0]] || 0) + 1;
+          }
+        });
+      });
+      var parts = [];
+      var total = 0;
+      labels.forEach(function (pair) {
+        var n = counts[pair[0]] || 0;
+        if (n) {
+          total += n;
+          parts.push(pair[1] + " " + n);
+        }
+      });
+      return total ? total + " left out: " + parts.join(", ") + "." : "";
+    }
+
+    function openStudio(dealIds, context) {
     ensureStyles();
     closeStudio();
     var preview = context.preview || {};
@@ -1476,6 +1508,7 @@
         notify(
           "Queued " + queued + " WhatsApp message" + (queued === 1 ? "" : "s") +
             (parts.length ? " (" + parts.join(", ") + ")." : ".") +
+            (leftOutNote(data) ? " " + leftOutNote(data) : "") +
             (data.lead_ai ? " Replies will show in Lead AI." : ""),
           true
         );

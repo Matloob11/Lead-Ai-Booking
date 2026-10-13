@@ -1,3 +1,13 @@
+## 2026-10-13 — Lead AI campaigns leave out brokers, lost leads and opt-outs (Cursor)
+
+With the Lead AI box ticked, the lead popup and the send both leave out Bot Status Broker (2479), Lost (2480) and Opted out (2481), and WhatsApp Opt-out Yes (2482). A phone already in this send, or reached by the same template in the last 30 days, is left out too. The popup line is `3 left out: opted out 1, broker 1, lost 1`, beside the missing-phone note, and it updates when the box is ticked. `phones_blocked_by_registry` is the empty hook for the later global opt-out list. Renewals uses the same builder when its Lead AI box is ticked.
+
+Live: `test_crm_leads` 37 OK, `test_renewals` 11 OK, on the image before `up`. No campaign was queued or running. PHP `527920b6` (401, 47 bytes), lead JS `dd959359` (200, 66380 bytes), renewals JS `b8cf1278` (200, 68371 bytes). web, worker, worker-leadai and beat came up together. Lead AI sweep `2026-10-13 11:42:53 UTC`. No WhatsApp message was sent.
+
+---
+
+
+
 ## 2026-10-13 — Booking action on the Lead AI fields tool (Cursor)
 
 `a7_leadai_fields.php` now takes `booking`. `confirmed` and `rescheduled` set stage 10, Meeting Date & Time, Mode 42 and Bot Status 2477, with bizproc and automation off, and create or move one Viewing/Meeting to-do for the lead's responsible at the meeting time. `cancelled` closes that to-do and leaves the stage. The title is not written. Live file `cef5a977`, `php -l` clean.

@@ -806,6 +806,7 @@
       if (!busy) {
         setSendLabel(queueLabel());
       }
+      renderLeads();
     });
 
     function currentNumber() {
@@ -1108,23 +1109,127 @@
       return wrap;
     }
 
+    function leftOutReason(row) {
+      var opt = Number(row.wa_opt_out || 0);
+      var bot = Number(row.bot_status || 0);
+      if (opt === 2482 || bot === 2481) {
+        return "opted_out";
+      }
+      if (bot === 2479) {
+        return "broker";
+      }
+      if (bot === 2480) {
+        return "lost";
+      }
+      return "";
+    }
+
+    function leftOutLabel(reason) {
+      if (reason === "opted_out") {
+        return "Opted out";
+      }
+      if (reason === "broker") {
+        return "Broker";
+      }
+      if (reason === "lost") {
+        return "Lost";
+      }
+      return "";
+    }
+
+    function leftOutSentence(counts) {
+      var order = [
+        ["opted_out", "opted out"],
+        ["broker", "broker"],
+        ["lost", "lost"]
+      ];
+      var parts = [];
+      var total = 0;
+      order.forEach(function (pair) {
+        var n = counts[pair[0]] || 0;
+        if (n) {
+          total += n;
+          parts.push(pair[1] + " " + n);
+        }
+      });
+      if (!total) {
+        return "";
+      }
+      return total + " left out: " + parts.join(", ");
+    }
+
+    function skipSentence(data) {
+      var rows = data && data.skipped;
+      if (!rows || !rows.length) {
+        return "";
+      }
+      var labels = [
+        ["Opted out.", "opted out"],
+        ["Broker.", "broker"],
+        ["Lost.", "lost"],
+        ["Sent this template in the last 30 days.", "already sent"]
+      ];
+      var counts = {};
+      var other = 0;
+      rows.forEach(function (row) {
+        var reason = row && row.reason ? String(row.reason) : "";
+        var known = false;
+        labels.forEach(function (pair) {
+          if (reason === pair[0]) {
+            counts[pair[0]] = (counts[pair[0]] || 0) + 1;
+            known = true;
+          }
+        });
+        if (!known) {
+          other += 1;
+        }
+      });
+      var parts = [];
+      var total = 0;
+      labels.forEach(function (pair) {
+        var n = counts[pair[0]] || 0;
+        if (n) {
+          total += n;
+          parts.push(pair[1] + " " + n);
+        }
+      });
+      var text = "";
+      if (total) {
+        text = total + " left out: " + parts.join(", ") + ".";
+      }
+      if (other) {
+        text += (text ? " " : "") + "Skipped " + other + " without a usable phone.";
+      }
+      return text;
+    }
+
     function renderLeads() {
       while (leadBox.firstChild) {
         leadBox.removeChild(leadBox.firstChild);
       }
       var usable = 0;
+      var missing = 0;
+      var leftCounts = { opted_out: 0, broker: 0, lost: 0 };
       leads.forEach(function (row) {
-        if (row.phone_ok) {
+        var reason = leadAiBox.checked ? leftOutReason(row) : "";
+        if (reason) {
+          leftCounts[reason] += 1;
+        } else if (row.phone_ok) {
           usable += 1;
+        } else {
+          missing += 1;
         }
       });
       var shown = leads.slice(0, 8);
       shown.forEach(function (row) {
         var name = row.name || "Untitled";
-        var line = el("div", { className: "a7-lwa-lead" + (row.phone_ok ? "" : " is-bad") }, [
+        var reason = leadAiBox.checked ? leftOutReason(row) : "";
+        var line = el("div", { className: "a7-lwa-lead" + (row.phone_ok && !reason ? "" : " is-bad") }, [
           el("b", { text: name, title: name }),
           el("span", {
-            text: row.phone_ok ? "…" + (row.phone_tail || "") : "No phone"
+            text: reason
+              ? leftOutLabel(reason)
+              : (row.phone_ok ? "…" + (row.phone_tail || "") : "No phone")
           })
         ]);
         leadBox.appendChild(line);
@@ -1142,11 +1247,24 @@
           el("div", { className: "a7-lwa-lead", text: leadIds.length + " selected" })
         );
       }
-      var skipped = leads.filter(function (row) { return !row.phone_ok; }).length;
-      sub.textContent =
-        leadIds.length + " selected · " +
-        (usable || leadIds.length) + " can be messaged" +
-        (skipped ? " · " + skipped + " missing a phone" : "");
+      var messaged = usable;
+      if (!leads.length) {
+        messaged = leadIds.length;
+      } else if (!leadAiBox.checked && !usable) {
+        messaged = leadIds.length;
+      }
+      var bits = [
+        leadIds.length + " selected",
+        messaged + " can be messaged"
+      ];
+      if (missing) {
+        bits.push(missing + " missing a phone");
+      }
+      var left = leadAiBox.checked ? leftOutSentence(leftCounts) : "";
+      if (left) {
+        bits.push(left);
+      }
+      sub.textContent = bits.join(" · ");
     }
 
     function renderNote() {
@@ -1416,11 +1534,11 @@
           if (!res.ok || data.ok === false) {
             throw new Error(data.error || data.detail || "Send failed.");
           }
-          var skipped = Number(data.skipped_count || 0);
           var queued = Number(data.queued || 0);
           var msg = "Queued " + queued + " WhatsApp message" + (queued === 1 ? "" : "s") + ".";
-          if (skipped) {
-            msg += " Skipped " + skipped + " without a usable phone.";
+          var skippedNote = skipSentence(data);
+          if (skippedNote) {
+            msg += " " + skippedNote;
           }
           if (data.lead_ai) {
             msg += " Replies will show in Lead AI.";

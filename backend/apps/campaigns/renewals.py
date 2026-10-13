@@ -24,6 +24,7 @@ from .crm_leads import (
     build_recipients,
     context_for_agent,
     lead_display_name,
+    left_out_sentence,
     mark_lead_ai,
     number_for_agent,
 )
@@ -179,13 +180,20 @@ def public_preview(classified: dict) -> dict:
     }
 
 
-def _fill(template, people: list[dict], extra: dict | None, role: str, field_map: dict | None = None) -> list[dict]:
+def _fill(
+    template,
+    people: list[dict],
+    extra: dict | None,
+    role: str,
+    field_map: dict | None = None,
+    lead_ai: bool = False,
+) -> tuple[list[dict], list[dict]]:
     if not people:
-        return []
+        return [], []
     label = "owner" if role == "owner" else "tenant"
     if template is None:
         raise RenewalSendError(f"Pick a {label} template.")
-    rows, _skipped = build_recipients(
+    rows, skipped = build_recipients(
         template=template,
         leads=[
             {
@@ -193,12 +201,16 @@ def _fill(template, people: list[dict], extra: dict | None, role: str, field_map
                 "phone": person["phone"],
                 "name": person["name"] or "Customer",
                 "details": person.get("details") if isinstance(person.get("details"), dict) else {},
+                "bot_status": person.get("bot_status") or 0,
+                "wa_opt_out": person.get("wa_opt_out") or 0,
             }
             for person in people
         ],
         extra_body=extra or {},
         entity="lead",
         field_map=field_map,
+        lead_ai=lead_ai,
+        allow_empty=True,
     )
     prepared = []
     for row in rows:
@@ -206,7 +218,9 @@ def _fill(template, people: list[dict], extra: dict | None, role: str, field_map
         row["crm_deal_id"] = deal_id
         row["crm_role"] = role
         prepared.append(row)
-    return prepared
+    for item in skipped:
+        item["role"] = role
+    return prepared, skipped
 
 
 def build_renewal_messages(
@@ -218,14 +232,23 @@ def build_renewal_messages(
     owner_extra,
     tenant_field_map=None,
     owner_field_map=None,
+    lead_ai: bool = False,
 ) -> dict:
     if len(list(deals or [])) > MAX_DEALS:
         raise RenewalSendError(f"Select at most {MAX_DEALS} deals.")
     classified = classify_deals(deals)
-    tenant_rows = _fill(tenant_template, classified["tenants"], tenant_extra, "tenant", tenant_field_map)
-    owner_rows = _fill(owner_template, classified["owners"], owner_extra, "owner", owner_field_map)
+    tenant_rows, tenant_skipped = _fill(
+        tenant_template, classified["tenants"], tenant_extra, "tenant", tenant_field_map, lead_ai
+    )
+    owner_rows, owner_skipped = _fill(
+        owner_template, classified["owners"], owner_extra, "owner", owner_field_map, lead_ai
+    )
     total = len(tenant_rows) + len(owner_rows)
+    side_skipped = tenant_skipped + owner_skipped
     if total <= 0:
+        sentence = left_out_sentence(side_skipped)
+        if sentence:
+            raise RenewalSendError(sentence)
         raise RenewalSendError("None of the selected deals have a usable phone number.")
     if total > PER_NUMBER_CAP:
         raise RenewalSendError(
@@ -235,7 +258,7 @@ def build_renewal_messages(
     return {
         "tenant": tenant_rows,
         "owner": owner_rows,
-        "skipped": classified["skipped"],
+        "skipped": classified["skipped"] + side_skipped,
         "total": total,
         "cap": PER_NUMBER_CAP,
     }
@@ -313,6 +336,7 @@ def send_renewals(
         owner_extra=owner_variables,
         tenant_field_map=tenant_field_map,
         owner_field_map=owner_field_map,
+        lead_ai=lead_ai,
     )
 
     queued = []

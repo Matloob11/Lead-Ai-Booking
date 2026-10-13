@@ -16,15 +16,19 @@ import inspect
 import logging
 import re
 import time
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django.utils import timezone
 
 from apps.catalog.models import WaTemplate, WaTemplateHide
 from apps.catalog.views import serialize_template
 from apps.inbox.transfer import official_number_for
 from apps.inbox.serializers import serialize_number
 
+from .models import CampaignRecipient
 from .services import CampaignError, create_campaign
 from .tasks import run_campaign
 
@@ -32,6 +36,19 @@ logger = logging.getLogger(__name__)
 
 MAX_LEADS = 500
 MAX_SKEW_SEC = 300
+# Live Bitrix enums (C3). Lead AI must not message these.
+BOT_STATUS_BROKER = 2479
+BOT_STATUS_LOST = 2480
+BOT_STATUS_OPTED_OUT = 2481
+WA_OPT_OUT_YES = 2482
+TEMPLATE_REPEAT_DAYS = 30
+# Stable skip reasons. The popup counts the same words.
+_LEFT_OUT = (
+    ("Opted out.", "opted out"),
+    ("Broker.", "broker"),
+    ("Lost.", "lost"),
+    ("Sent this template in the last 30 days.", "already sent"),
+)
 
 
 class CrmLeadSendError(CampaignError):
@@ -295,6 +312,96 @@ def _item_id(raw: dict) -> int:
     return 0
 
 
+def _enum_id(value) -> int:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else 0
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _digits(value) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def lead_ai_skip_reason(raw: dict) -> str:
+    """Why Lead AI must not message this lead, or "" when it may."""
+    opt = _enum_id(raw.get("wa_opt_out"))
+    bot = _enum_id(raw.get("bot_status"))
+    if opt == WA_OPT_OUT_YES or bot == BOT_STATUS_OPTED_OUT:
+        return "Opted out."
+    if bot == BOT_STATUS_BROKER:
+        return "Broker."
+    if bot == BOT_STATUS_LOST:
+        return "Lost."
+    return ""
+
+
+def left_out_sentence(skipped: list[dict]) -> str:
+    """``3 left out: opted out 1, broker 1, lost 1``. Empty when none of these reasons."""
+    counts = {reason: 0 for reason, _label in _LEFT_OUT}
+    for row in skipped or []:
+        reason = str((row or {}).get("reason") or "")
+        if reason in counts:
+            counts[reason] += 1
+    parts = []
+    total = 0
+    for reason, label in _LEFT_OUT:
+        count = counts[reason]
+        if count:
+            total += count
+            parts.append(f"{label} {count}")
+    if not total:
+        return ""
+    return f"{total} left out: {', '.join(parts)}"
+
+
+def phones_blocked_by_registry(phones: set[str]) -> set[str]:
+    """Phones the global WhatsApp opt-out registry refuses.
+
+    T60 adds ``apps.leadai.optout.phones_blocked``. Until that module exists,
+    this returns an empty set and campaigns are unchanged.
+    """
+    if not phones:
+        return set()
+    try:
+        from apps.leadai import optout as registry
+    except ImportError:
+        return set()
+    blocked = getattr(registry, "phones_blocked", None)
+    if not callable(blocked):
+        return set()
+    found = blocked(phones)
+    out: set[str] = set()
+    for raw in found or []:
+        digits = _digits(raw)
+        if digits:
+            out.add(digits)
+    return out
+
+
+def phones_sent_same_template(template: WaTemplate, phones: set[str]) -> set[str]:
+    """Phones this template already reached in the last 30 days."""
+    if not phones:
+        return set()
+    name = str(getattr(template, "name", "") or "").strip()
+    language = str(getattr(template, "language", "") or "")
+    pk = getattr(template, "pk", None)
+    if not name and not pk:
+        return set()
+    since = timezone.now() - timedelta(days=TEMPLATE_REPEAT_DAYS)
+    sent = CampaignRecipient.objects.filter(
+        phone__in=phones,
+        status=CampaignRecipient.Status.SENT,
+    ).filter(Q(sent_at__gte=since) | Q(sent_at__isnull=True, created_at__gte=since))
+    if name:
+        sent = sent.filter(campaign__template__name=name, campaign__template__language=language)
+    else:
+        sent = sent.filter(campaign__template_id=pk)
+    return set(sent.values_list("phone", flat=True))
+
+
 def build_recipients(
     *,
     template: WaTemplate,
@@ -302,6 +409,8 @@ def build_recipients(
     extra_body: dict,
     entity: str = "lead",
     field_map: dict | None = None,
+    lead_ai: bool = False,
+    allow_empty: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     kind = crm_entity(entity)
     extra = _meta_body_vars(extra_body)
@@ -311,18 +420,39 @@ def build_recipients(
     seen: set[str] = set()
     skipped: list[dict] = []
     noun, plural, _label = ENTITY_NOUNS[kind]
+    recent: set[str] = set()
+    blocked: set[str] = set()
+    if lead_ai:
+        phones = {
+            _digits(raw.get("phone"))
+            for raw in (leads or [])
+            if isinstance(raw, dict) and len(_digits(raw.get("phone"))) >= 8
+        }
+        recent = phones_sent_same_template(template, phones)
+        blocked = phones_blocked_by_registry(phones)
 
     for raw in leads or []:
         if not isinstance(raw, dict):
             continue
         item_id = _item_id(raw)
-        phone = "".join(ch for ch in str(raw.get("phone") or "") if ch.isdigit())
+        phone = _digits(raw.get("phone"))
         name = lead_display_name(raw) or _GREETING_FALLBACK
         if item_id <= 0:
             skipped.append({"id": item_id, "reason": f"Invalid {noun}."})
             continue
+        if lead_ai:
+            reason = lead_ai_skip_reason(raw)
+            if reason:
+                skipped.append({"id": item_id, "reason": reason})
+                continue
         if len(phone) < 8:
             skipped.append({"id": item_id, "reason": f"No phone number on this {noun}."})
+            continue
+        if lead_ai and phone in blocked:
+            skipped.append({"id": item_id, "reason": "Opted out."})
+            continue
+        if lead_ai and phone in recent:
+            skipped.append({"id": item_id, "reason": "Sent this template in the last 30 days."})
             continue
         if phone in seen:
             skipped.append({"id": item_id, "reason": "Duplicate phone."})
@@ -374,7 +504,10 @@ def build_recipients(
             entry["variables"] = {str(i): body[str(i)] for i in range(1, needed + 1)}
         rows.append(entry)
 
-    if not rows:
+    if not rows and not allow_empty:
+        sentence = left_out_sentence(skipped)
+        if sentence:
+            raise CrmLeadSendError(sentence)
         raise CrmLeadSendError(f"None of the selected {plural} have a usable phone number.")
     if len(rows) > MAX_LEADS:
         raise CrmLeadSendError(f"Select at most {MAX_LEADS} {plural}.")
@@ -472,6 +605,7 @@ def send_from_leads(
         extra_body=extra_body or {},
         entity=kind,
         field_map=field_map,
+        lead_ai=lead_ai,
     )
     label = ENTITY_NOUNS[kind][2]
     campaign = create_campaign(

@@ -351,3 +351,119 @@ class TimelineCommentTests(SimpleTestCase):
         self.assertIn("Hi Sara, see you in Dubai.", text)
         self.assertIn("Template: hello", text)
         self.assertIn("+971509998887", text)
+
+
+class LeadAiLeaveOutTests(SimpleTestCase):
+    def _rows(self, leads, *, lead_ai=True):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_sent_same_template",
+            return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        ):
+            return build_recipients(
+                template=FakeTemplate(0),
+                leads=leads,
+                extra_body={},
+                lead_ai=lead_ai,
+            )
+
+    def test_broker_lost_and_opted_out_are_left_out(self):
+        rows, skipped = self._rows([
+            {"id": 1, "phone": "971501111111", "name": "Sara", "bot_status": 2479},
+            {"id": 2, "phone": "971502222222", "name": "Ali", "bot_status": "2480"},
+            {"id": 3, "phone": "971503333333", "name": "Noor", "bot_status": 2481},
+            {"id": 4, "phone": "971504444444", "name": "Hana", "wa_opt_out": 2482},
+            {"id": 5, "phone": "971505555555", "name": "Omar", "bot_status": 2475, "wa_opt_out": 2483},
+        ])
+        self.assertEqual([row["phone"] for row in rows], ["971505555555"])
+        reasons = [item["reason"] for item in skipped]
+        self.assertEqual(reasons, ["Broker.", "Lost.", "Opted out.", "Opted out."])
+
+    def test_opt_out_wins_when_the_lead_is_also_a_broker(self):
+        with self.assertRaises(CrmLeadSendError) as caught:
+            self._rows([
+                {
+                    "id": 1,
+                    "phone": "971501111111",
+                    "name": "Sara",
+                    "bot_status": 2479,
+                    "wa_opt_out": 2482,
+                },
+            ])
+        self.assertEqual(str(caught.exception), "1 left out: opted out 1")
+
+    def test_a_normal_campaign_still_messages_a_broker(self):
+        rows, skipped = self._rows(
+            [{"id": 1, "phone": "971501111111", "name": "Sara", "bot_status": 2479}],
+            lead_ai=False,
+        )
+        self.assertEqual(skipped, [])
+        self.assertEqual(rows[0]["phone"], "971501111111")
+
+    def test_same_template_in_thirty_days_is_left_out(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_sent_same_template",
+            return_value={"971501111111"},
+        ), patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        ):
+            rows, skipped = build_recipients(
+                template=FakeTemplate(0),
+                leads=[
+                    {"id": 1, "phone": "971501111111", "name": "Sara"},
+                    {"id": 2, "phone": "971502222222", "name": "Ali"},
+                ],
+                extra_body={},
+                lead_ai=True,
+            )
+        self.assertEqual([row["phone"] for row in rows], ["971502222222"])
+        self.assertEqual(skipped[0]["reason"], "Sent this template in the last 30 days.")
+
+    def test_the_opt_out_registry_hook_is_honoured(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_sent_same_template",
+            return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value={"971501111111"},
+        ):
+            with self.assertRaises(CrmLeadSendError) as caught:
+                build_recipients(
+                    template=FakeTemplate(0),
+                    leads=[{"id": 1, "phone": "+971 50 111 1111", "name": "Sara"}],
+                    extra_body={},
+                    lead_ai=True,
+                )
+        self.assertEqual(str(caught.exception), "1 left out: opted out 1")
+
+    def test_registry_is_empty_until_it_exists(self):
+        from apps.campaigns.crm_leads import phones_blocked_by_registry
+
+        self.assertEqual(phones_blocked_by_registry({"971501111111"}), set())
+
+    def test_everyone_left_out_names_the_reasons(self):
+        with self.assertRaises(CrmLeadSendError) as caught:
+            self._rows([
+                {"id": 1, "phone": "971501111111", "name": "A", "bot_status": 2479},
+                {"id": 2, "phone": "971502222222", "name": "B", "wa_opt_out": 2482},
+                {"id": 3, "phone": "971503333333", "name": "C", "bot_status": 2480},
+            ])
+        self.assertEqual(str(caught.exception), "3 left out: opted out 1, broker 1, lost 1")
+
+    def test_a_duplicate_phone_is_still_skipped(self):
+        rows, skipped = self._rows([
+            {"id": 1, "phone": "971501111111", "name": "A"},
+            {"id": 2, "phone": "971501111111", "name": "B"},
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(skipped[0]["reason"], "Duplicate phone.")
+
