@@ -5,8 +5,10 @@ from django.test import SimpleTestCase, override_settings
 from apps.campaigns.crm_leads import (
     CrmLeadSendError,
     build_recipients,
+    campaign_playbook,
     crm_entity,
     lead_display_name,
+    mark_lead_ai,
     verify_signed_request,
 )
 from apps.campaigns.services import _lead_timeline_comment, _meta_body_vars
@@ -41,7 +43,7 @@ class LeadDisplayNameTests(SimpleTestCase):
                 "name": "Bayut WhatsApp | Mohammed Ali",
                 "title": "Bayut WhatsApp | Mohammed Ali",
             }),
-            "Mohammed",
+            "Ali",
         )
 
     def test_portal_title_uses_the_part_after_the_last_pipe(self):
@@ -50,12 +52,20 @@ class LeadDisplayNameTests(SimpleTestCase):
                 "name": "Bayut WhatsApp | Md Sumon",
                 "title": "Bayut WhatsApp | Md Sumon",
             }),
-            "Md Sumon",
+            "Sumon",
         )
         self.assertEqual(
             lead_display_name({"title": "Portal | Bayut WhatsApp | Aisha Noor"}),
             "Aisha Noor",
         )
+
+    def test_honorific_is_skipped_when_a_name_follows(self):
+        self.assertEqual(lead_display_name({"first_name": "Md Sumon"}), "Sumon")
+        self.assertEqual(lead_display_name({"first_name": "Mr. Ali Hassan"}), "Ali")
+        self.assertEqual(lead_display_name({"first_name": "Engr. Ahmed"}), "Ahmed")
+        self.assertEqual(lead_display_name({"name": "Dr. Aisha Noor"}), "Aisha")
+        self.assertEqual(lead_display_name({"first_name": "Mohammed"}), "Mohammed")
+        self.assertEqual(lead_display_name({"first_name": "Miss"}), "Miss")
 
     def test_phone_in_the_name_field_falls_through_to_the_title(self):
         self.assertEqual(
@@ -111,8 +121,8 @@ class BuildRecipientsTests(SimpleTestCase):
             extra_body={},
         )
         self.assertEqual(skipped, [])
-        self.assertEqual(rows[0]["name"], "Md Sumon")
-        self.assertEqual(rows[0]["variables"]["1"], "Md Sumon")
+        self.assertEqual(rows[0]["name"], "Sumon")
+        self.assertEqual(rows[0]["variables"]["1"], "Sumon")
 
     def test_mapped_name_uses_the_first_word_not_the_portal_title(self):
         rows, _skipped = build_recipients(
@@ -128,8 +138,8 @@ class BuildRecipientsTests(SimpleTestCase):
             extra_body={},
             field_map={"1": "name"},
         )
-        self.assertEqual(rows[0]["name"], "Md")
-        self.assertEqual(rows[0]["variables"]["1"], "Md")
+        self.assertEqual(rows[0]["name"], "Sumon")
+        self.assertEqual(rows[0]["variables"]["1"], "Sumon")
 
     def test_skips_no_phone_and_duplicates(self):
         rows, skipped = build_recipients(
@@ -282,6 +292,42 @@ class HmacTests(SimpleTestCase):
     def test_empty_secret_refuses(self):
         with self.assertRaises(CrmLeadSendError):
             verify_signed_request(timestamp="1", signature="ab", body=b"{}")
+
+
+class PlaybookTests(SimpleTestCase):
+    def test_only_the_two_scripts(self):
+        self.assertEqual(campaign_playbook("ic_shops"), "ic_shops")
+        self.assertEqual(campaign_playbook(" General "), "general")
+        self.assertEqual(campaign_playbook("IC_SHOPS"), "ic_shops")
+        self.assertEqual(campaign_playbook("shops"), "general")
+        self.assertEqual(campaign_playbook(None), "general")
+
+    def test_forwards_the_script_when_the_lane_accepts_it(self):
+        seen = {}
+
+        def fake(campaign, playbook="general"):
+            seen["playbook"] = playbook
+            return campaign
+
+        with self._patch(fake):
+            self.assertEqual(mark_lead_ai("camp", "ic_shops"), "ic_shops")
+        self.assertEqual(seen["playbook"], "ic_shops")
+
+    def test_older_lane_still_marks_the_campaign(self):
+        seen = {}
+
+        def fake(campaign):
+            seen["campaign"] = campaign
+            return campaign
+
+        with self._patch(fake):
+            self.assertEqual(mark_lead_ai("camp", "nope"), "general")
+        self.assertEqual(seen["campaign"], "camp")
+
+    def _patch(self, fake):
+        from unittest.mock import patch
+
+        return patch("apps.leadai.lane.mark_campaign", fake)
 
 
 class TimelineCommentTests(SimpleTestCase):

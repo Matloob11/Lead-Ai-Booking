@@ -1,3 +1,11 @@
+## 2026-10-13 — Honorifics are not the greeting name (Cursor)
+
+`{{1}}` skips a leading Md, Mohd, Muhammad, Mohammad, Mohammed, Muhammed, Mohamed, Dr, Mr, Mrs, Ms, Miss, Engr or Eng (with or without a dot) when another word follows. "Md Sumon" and "Mr. Ali Hassan" greet as Sumon and Ali. A prefix with no following word stays as it is. Same rule in `a7_lead_wa_display` and `lead_display_name`.
+
+**Live:** no queued campaign. `build app` + `up app`. web, worker, worker-leadai and beat `crm_leads.py` `cd4ec0e5`. Bitrix `a7_lead_wa.php` `f16450ca`, anonymous GET 401. `test_crm_leads` 29 OK, `test_renewals` 11 OK. Lead AI sweep `2026-10-13 09:55:50 UTC`. No WhatsApp message sent. `views.py` was not deployed, so the Script choice still waits on T20a.
+
+---
+
 ## 2026-10-13 — Phone-mask and 3CX secrets out of the tracked source (Cursor)
 
 The phone-mask unlock password on the Bitrix box was changed. `a7_tl_phone_mask.config.php` is removed from the git index (`git rm --cached`); `.gitignore` already ignored `*.config.php`, and `a7_tl_phone_mask.config.example.php` is the tracked shape. The mask PHP no longer falls back to a built-in password, and the JS comment no longer prints one. Live: config `9287e2da`, PHP `0a329665` (anonymous GET 401), JS `72bd994f` (GET 200). A length check on the box showed the new password is not the old one.

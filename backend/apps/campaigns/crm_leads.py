@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import logging
 import re
 import time
@@ -189,6 +190,10 @@ def parse_field_map(raw) -> dict[str, str]:
 _BAD_GREETING = re.compile(r"^(untitled|unentitled|none|field is empty)$", re.IGNORECASE)
 _MISSED_CALL = re.compile(r"^missed\s+call\b", re.IGNORECASE)
 _GREETING_FALLBACK = "there"
+_HONORIFICS = frozenset({
+    "md", "mohd", "muhammad", "mohammad", "mohammed", "muhammed", "mohamed",
+    "dr", "mr", "mrs", "ms", "miss", "engr", "eng",
+})
 
 
 def _squash(value) -> str:
@@ -208,6 +213,18 @@ def _after_pipe(text: str) -> str:
     if "|" not in text:
         return text
     return _squash(text.rsplit("|", 1)[-1])
+
+
+def _honorific(word: str) -> bool:
+    return word.casefold().rstrip(".") in _HONORIFICS
+
+
+def _skip_honorific(text: str) -> str:
+    """Md / Mr / Dr and the rest, with or without a dot, are not the given name."""
+    parts = text.split()
+    if len(parts) >= 2 and _honorific(parts[0]) and not _bad_greeting(parts[1]):
+        return parts[1]
+    return text
 
 
 def detail_value(row: dict, key: str) -> str:
@@ -232,7 +249,8 @@ def lead_display_name(row: dict) -> str:
     """First name for {{1}} and ``CampaignRecipient.name``.
 
     Use the Bitrix NAME field's first word when that word is a real name.
-    Otherwise use the part of TITLE after the last "|". A phone number,
+    A leading Md, Mr, Dr and the other honorifics are skipped when another
+    word follows. Otherwise use the part of TITLE after the last "|". A phone number,
     "Missed Call…", or "untitled" becomes "there". A completely blank row
     is "" so a caller can apply its own fallback. A deal
     whose contact name is already separate from the deal title keeps that
@@ -249,14 +267,18 @@ def lead_display_name(row: dict) -> str:
     if not first and not title and not name:
         return ""
     if first:
-        word = first.split()[0]
+        parts = first.split()
+        word = parts[0]
         if not _bad_greeting(first) and not _bad_greeting(word):
-            return word[:200]
+            if len(parts) >= 2 and _honorific(word) and not _bad_greeting(parts[1]):
+                return parts[1][:200]
+            if not _honorific(word) or len(parts) == 1:
+                return word[:200]
     if name and title and name.casefold() != title.casefold() and not _bad_greeting(name):
-        picked = _after_pipe(name)
+        picked = _skip_honorific(_after_pipe(name))
         if picked and not _bad_greeting(picked):
             return picked[:200]
-    source = _after_pipe(title or name)
+    source = _skip_honorific(_after_pipe(title or name))
     if source and not _bad_greeting(source):
         return source[:200]
     return _GREETING_FALLBACK
@@ -385,6 +407,32 @@ def context_for_agent(agent) -> dict:
     }
 
 
+PLAYBOOKS = frozenset({"general", "ic_shops"})
+
+
+def campaign_playbook(raw) -> str:
+    """The popup's Script choice. Anything else is general."""
+    value = str(raw or "").strip().lower()
+    return value if value in PLAYBOOKS else "general"
+
+
+def mark_lead_ai(campaign, playbook: str) -> str:
+    """Mark a Lead AI campaign and pass the script when the lane accepts it.
+
+    T20a adds ``playbook`` to ``mark_campaign``. Until that code is what the
+    process imported, the older function is called with no script so a send
+    still reaches the Lead AI screen.
+    """
+    from apps.leadai.lane import mark_campaign
+
+    chosen = campaign_playbook(playbook)
+    if "playbook" in inspect.signature(mark_campaign).parameters:
+        mark_campaign(campaign, playbook=chosen)
+    else:
+        mark_campaign(campaign)
+    return chosen
+
+
 def send_from_leads(
     *,
     agent,
@@ -397,6 +445,7 @@ def send_from_leads(
     entity: str = "lead",
     header_media_token: str = "",
     lead_ai: bool = False,
+    lead_ai_playbook: str = "",
     field_map: dict | None = None,
 ) -> dict:
     number = number_for_agent(agent, number_id)
@@ -436,12 +485,11 @@ def send_from_leads(
         button_variables=button_variables or {},
         header_media_id=header_media_id,
     )
+    playbook = ""
     if lead_ai:
         # The popup's "Lead AI" box: these chats go to the Lead AI screen, not
         # the main inbox. Marked before the send task can pick the campaign up.
-        from apps.leadai.lane import mark_campaign
-
-        mark_campaign(campaign)
+        playbook = mark_lead_ai(campaign, lead_ai_playbook)
     run_campaign.delay(campaign.pk)
     return {
         "campaign_id": campaign.pk,
@@ -453,4 +501,5 @@ def send_from_leads(
         "from_label": number.title,
         "template": template.name,
         "lead_ai": bool(lead_ai),
+        "playbook": playbook,
     }

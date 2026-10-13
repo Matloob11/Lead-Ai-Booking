@@ -95,6 +95,28 @@ function a7_lead_wa_bad_greeting(string $text): bool
     return $digits !== false && $digits >= 8;
 }
 
+function a7_lead_wa_honorific(string $word): bool
+{
+    $bare = strtolower(rtrim($word, '.'));
+    return in_array($bare, [
+        'md', 'mohd', 'muhammad', 'mohammad', 'mohammed', 'muhammed', 'mohamed',
+        'dr', 'mr', 'mrs', 'ms', 'miss', 'engr', 'eng',
+    ], true);
+}
+
+function a7_lead_wa_skip_honorific(string $text): string
+{
+    $parts = preg_split('/\s+/u', $text);
+    if (!is_array($parts) || count($parts) < 2) {
+        return $text;
+    }
+    $next = (string)$parts[1];
+    if (a7_lead_wa_honorific((string)$parts[0]) && !a7_lead_wa_bad_greeting($next)) {
+        return $next;
+    }
+    return $text;
+}
+
 function a7_lead_wa_display(array $row): string
 {
     // {{1}} and the popup name: NAME's first word when it is a real name,
@@ -106,22 +128,33 @@ function a7_lead_wa_display(array $row): string
         $parts = preg_split('/\s+/u', $first);
         $word = is_array($parts) ? (string)($parts[0] ?? '') : '';
         if ($word !== '' && !a7_lead_wa_bad_greeting($first) && !a7_lead_wa_bad_greeting($word)) {
-            return $word;
+            if (count($parts) >= 2 && a7_lead_wa_honorific($word) && !a7_lead_wa_bad_greeting((string)$parts[1])) {
+                return (string)$parts[1];
+            }
+            if (!a7_lead_wa_honorific($word) || count($parts) === 1) {
+                return $word;
+            }
         }
     }
     $title = a7_lead_wa_squash((string)($row['title'] ?? ''));
     $name = a7_lead_wa_squash((string)($row['name'] ?? ''));
     if ($name !== '' && $title !== '' && strcasecmp($name, $title) !== 0 && !a7_lead_wa_bad_greeting($name)) {
-        $picked = a7_lead_wa_after_pipe($name);
+        $picked = a7_lead_wa_skip_honorific(a7_lead_wa_after_pipe($name));
         if ($picked !== '' && !a7_lead_wa_bad_greeting($picked)) {
             return $picked;
         }
     }
-    $source = a7_lead_wa_after_pipe($title !== '' ? $title : $name);
+    $source = a7_lead_wa_skip_honorific(a7_lead_wa_after_pipe($title !== '' ? $title : $name));
     if ($source !== '' && !a7_lead_wa_bad_greeting($source)) {
         return $source;
     }
     return 'there';
+}
+
+function a7_lead_wa_playbook($raw): string
+{
+    $value = strtolower(trim((string)$raw));
+    return in_array($value, ['general', 'ic_shops'], true) ? $value : 'general';
 }
 
 function a7_lead_wa_requested_ids(): array
@@ -1072,7 +1105,11 @@ if ($action === 'send') {
         // this user, this number and this template's header kind.
         'header_media_token' => (string)($input['header_media_token'] ?? ''),
         // The popup's "Lead AI" box: the chats go to the Lead AI screen.
+        // Script is only forwarded for that box, and only as one of the two names.
         'lead_ai' => !empty($input['lead_ai']),
+        'lead_ai_playbook' => !empty($input['lead_ai'])
+            ? a7_lead_wa_playbook($input['lead_ai_playbook'] ?? '')
+            : '',
     ];
     $reply = a7_lead_wa_inbox('/api/campaigns/crm-leads/send/', $payload, $cfg);
     if ($reply['http'] < 200 || $reply['http'] >= 300) {
