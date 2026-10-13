@@ -227,7 +227,7 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | C1 | **`{{1}}` = the person's first name** (T14). Today "Name" resolves to the lead TITLE, so customers get "Hi Bayut WhatsApp \| Md Sumon". Use NAME (first word) when it is a real name; otherwise the part of TITLE after the last `\|`. Reject phone numbers, "Missed Call…", "untitled" and empty values, and fall back to "there". `CampaignRecipient.name` must carry the same clean name, because the assistant greets with it. The deal path already strips the prefix (`a7_lead_wa.php:565`). Add cases to `campaigns/tests/test_crm_leads.py` | `ops/bitrix-aws/a7_lead_wa.php` (`a7_lead_wa_display`, :63-68, :264-269), `backend/apps/campaigns/crm_leads.py` (`detail_value`, `lead_display_name` :187-211; `renewals.py` imports it) | Done (2026-10-13) — live: portal title after the last \|, NAME's first word, else "there". Tests 25+11 OK. Containers `d53a6a89`, PHP `e64b7660` (401). |
 | C2 | **"Script" choice beside the Lead AI box** (T20b), shown only while the box is ticked: `General` / `International City shops`. Payload field `lead_ai_playbook` = `general` \| `ic_shops`; the PHP forwards it after checking it is one of the two; `campaigns/views.py` (:228, :282) passes it to `send_from_leads` / `send_renewals`, which call `mark_campaign(campaign, playbook=…)`. Deploy the Django part only after Claude's T20a is live | `ops/bitrix-aws/a7_lead_wa.js` (:766-786, :1385), `a7_lead_wa.php` (:1016), `a7_renewals_wa.js/.php`, `backend/apps/campaigns/views.py`, `crm_leads.py` (:348-404), `renewals.py` (:277-369) | Doing (Cursor, 2026-10-13) |
 | C3 | **Bitrix field map** (T50, Q10). Reuse: SOURCE_ID, Purpose `UF_CRM_LEAD_1737031634747` (for Broker), business activity, `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` (add DED / Trakhees / New licence), Meeting Date & Time. Create on leads: **Shop Type Wanted** (Type 1 / Type 2 / Type 3 / Not sure), **Trade License File** (file), **Bot Status** (New / Qualifying / Viewing booked / Handed to agent / Broker / Lost / Opted out), **WhatsApp Opt-out** (Yes/No). Put them on the lead form. Write every UF id and enum id here under "Bitrix field map". Also list the STATUS_ID and stage-required fields of JUNK, Reject and "Not interested" (UC_RYQD1Z), so Matloob can pick the lost stage | Bitrix (`ops/bitrix-aws/`), this board | Done (2026-10-13) — fields 2665–2668 live; licence 2455–2457; Broker 2467; section `a7_shops_bot` on the common form and layouts 1, 2 and 6. |
-| C4 | **Field-only lead updates** (needed by T51). Check what BP 235 and the lead-shift timer do when a lead already in stage 10, or held by user 1, gets a `crm.lead.update` that changes fields only. If that plans another to-do or moves the lead, say how to avoid it. Write the answer here | Bitrix robots/BP, `a7_lead_shift.php` | Open |
+| C4 | **Field-only lead updates** (needed by T51). Check what BP 235 and the lead-shift timer do when a lead already in stage 10, or held by user 1, gets a `crm.lead.update` that changes fields only. If that plans another to-do or moves the lead, say how to avoid it. Write the answer here | Bitrix robots/BP, `a7_lead_shift.php` | Done (2026-10-13) — stage 10 REST update clears the meeting time and plans another to-do; write fields with bizproc disabled. |
 | C5 | **Secrets out of the source** (low priority). `ops/bitrix-aws/a7_tl_phone_mask.config.php`: change the phone-mask password on the box, then `git rm --cached` the file and commit a `.example`. The 3CX tools (`a7_3cx_click_to_call*.php`, `a7_3cx_ai_recording_analyzer.php`) hard-code an OpenAI key, Bitrix webhook tokens and 3CX secrets: move them into an ignored config file. Both are already in `.gitignore` | `ops/bitrix-aws/` | Open |
 
 ### Bitrix field map (Cursor fills in, C3)
@@ -254,6 +254,23 @@ Lost stages (Q10), read live from `b_crm_status` (`ENTITY_ID='STATUS'`) and `b_c
 | Not interested | `UC_RYQD1Z` | empty (still an open stage) | none |
 
 There is no stage named exactly "Reject". The failed one with a required field is **Lead Reject (`9`)**. `UC_RYQD1Z` is a different "Not interested" and is not a lost stage.
+
+## Field-only lead updates (C4)
+
+Checked live BP **235 Lead Automation** (`AUTO_EXECUTE=3`, active: runs on create and on every edit) and `a7_lead_shift.php`. There are no CRM automation-robot rows for leads. A field-only `crm.lead.update` does not by itself change the stage or the owner. It does start BP 235, and the template looks at the stage the lead is **already** in.
+
+**Already in stage 10.** The "Viewing/Meeting" branch matches `STATUS_ID = 10`, then:
+- clears Meeting Date & Time (`UF_CRM_1731838813769`)
+- plans another to-do, subject "Viewing/Meeting", responsible = the current assignee, deadline = that same field (just emptied, so it is due now)
+- adds a timeline comment and starts another workflow
+
+The first step of the template, before any stage check, also rewrites `TITLE` to `{SOURCE_ID} | {NAME} {LAST_NAME}` on every edit. That is where "Bayut WhatsApp | Md Sumon" keeps coming back.
+
+**Held by user 1.** BP 235 never reads `ASSIGNED_BY_ID`. User 1 does not turn the template off. A lead in stage 10 gets the to-do above whoever owns it. A lead still in `NEW` gets the "New Lead" bell. A lead in `UC_MJDO60` gets the "Assigned" bell.
+
+**Lead-shift timer.** It is a poll, not a handler on the update. Intake is `STATUS_ID='NEW'` and the owner is on the intake roster. The other pass is only `NEW`, `UC_MJDO60` and `12`. Stage 10 is in neither query, so the timer will not move a stage-10 lead because a field changed. `a7_lead_shift_assign` is the place that takes a `NEW` lead off user 1 and sets stage `UC_MJDO60`. A field write does not call it. A shops lead that is still `NEW` and still on user 1 can still be handed off on a later timer run, because that is what the timer is for.
+
+**How T51 should write fields.** Use the CRM factory update with `disableBizProc()` and `disableAutomation()`, the same two calls `a7_lead_shift_assign` already makes, and do not send `STATUS_ID` or `ASSIGNED_BY_ID`. REST `crm.lead.update` cannot switch the template off. On a lead in stage 10 it will wipe the meeting time and plan another to-do.
 
 ## Requests (one side asking the other)
 

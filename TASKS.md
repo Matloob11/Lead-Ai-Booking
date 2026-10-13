@@ -1,3 +1,13 @@
+## 2026-10-13 — Field-only lead update vs BP 235 and the shift timer (Cursor)
+
+A field-only `crm.lead.update` does not change the stage or the owner, but it starts BP 235 (Lead Automation, template 235, `AUTO_EXECUTE=3`, active). The template branches on the stage the lead is already in. On stage 10 it clears Meeting Date & Time (`UF_CRM_1731838813769`), plans another "Viewing/Meeting" to-do due now, comments, and starts a workflow. Before any stage check it rewrites `TITLE` to `{SOURCE_ID} | {NAME} {LAST_NAME}`. It never looks at the assignee, so user 1 does not stop it. No CRM automation-robot rows exist for leads.
+
+The lead-shift timer is a poll. It selects `NEW` (intake) and `NEW` / `UC_MJDO60` / `12` only, so a stage-10 lead is not moved because a field changed. `a7_lead_shift_assign` is what takes a `NEW` lead off user 1 and sets `UC_MJDO60`; a field write does not call it.
+
+**For T51:** write fields with the CRM factory update, `disableBizProc()` and `disableAutomation()`, and omit `STATUS_ID` and `ASSIGNED_BY_ID`. REST cannot turn the template off. Probe: `ops/bitrix-aws/a7_probe_bp235.php`. No lead was updated.
+
+---
+
 ## 2026-10-13 — Shops Bitrix fields and the lost-stage list (Cursor)
 
 Created the four missing lead fields and the missing licence / Broker values, and added a "Shops bot" section to the common lead form plus editor layouts 1, 2 and 6. Nothing already on the form was removed. Script: `ops/bitrix-aws/a7_shops_lead_fields.php` (also left at `/home/bitrix/www/local/php_interface/include/`). Backup: `/home/bitrix/a7_shops_form_bak_20261013_092046`.
