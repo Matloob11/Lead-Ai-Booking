@@ -27,7 +27,7 @@ ops/bitrix-aws/live/secrets/
 ops/bitrix-aws/live/www/bitrix/php_interface/a7_call_intelligence.env
 ops/bitrix-aws/live/www/upload/
 # Bitrix-side configs hold live passwords and the HMAC secret shared with
-# Django. a7_tl_phone_mask.config.php predates this rule and is still tracked.
+# Live passwords and API secrets. Examples (*.config.example.php) stay in git.
 ops/bitrix-aws/*.config.php
 ops/bitrix-aws/*.env
 ops/bitrix-aws/live/www/bitrix/php_interface/*.config.php

@@ -2,7 +2,7 @@
  * A7 phone mask — last 4 digits hidden.
  * Loads for Team Leads (config list) + Admin & Finance dept members (auto),
  * except exempt users. Gate is in init.php OnProlog (all portal pages).
- * Eye + password admin222007 reveals for 30s.
+ * Eye + the password from the phone-mask config reveals for 30s.
  *
  * Deep leak seal: strips/masks title, aria-label, data-hint, tel/callto href,
  * copy payloads, and other tooltip attributes so hover cannot reveal the number.

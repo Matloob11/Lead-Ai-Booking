@@ -1,3 +1,13 @@
+## 2026-10-13 — Phone-mask and 3CX secrets out of the tracked source (Cursor)
+
+The phone-mask unlock password on the Bitrix box was changed. `a7_tl_phone_mask.config.php` is removed from the git index (`git rm --cached`); `.gitignore` already ignored `*.config.php`, and `a7_tl_phone_mask.config.example.php` is the tracked shape. The mask PHP no longer falls back to a built-in password, and the JS comment no longer prints one. Live: config `9287e2da`, PHP `0a329665` (anonymous GET 401), JS `72bd994f` (GET 200). A length check on the box showed the new password is not the old one.
+
+The 3CX bridge and the recording analyzer no longer contain the client secrets, the Bitrix webhook, or the OpenAI key. They read `a7_3cx.config.php` (gitignored; example committed). Those PHP files stay gitignored. Live tools `a2b87a5d` and `9ce00bca`. The bridge answers `200` / 70 bytes ("handler is online"). Config key lengths were checked without printing the values. The old password and the 3CX secrets remain in local git history and in any copy made before this.
+
+The new phone-mask password was given to Matloob in chat, not written here.
+
+---
+
 ## 2026-10-13 — Field-only lead update vs BP 235 and the shift timer (Cursor)
 
 A field-only `crm.lead.update` does not change the stage or the owner, but it starts BP 235 (Lead Automation, template 235, `AUTO_EXECUTE=3`, active). The template branches on the stage the lead is already in. On stage 10 it clears Meeting Date & Time (`UF_CRM_1731838813769`), plans another "Viewing/Meeting" to-do due now, comments, and starts a workflow. Before any stage check it rewrites `TITLE` to `{SOURCE_ID} | {NAME} {LAST_NAME}`. It never looks at the assignee, so user 1 does not stop it. No CRM automation-robot rows exist for leads.

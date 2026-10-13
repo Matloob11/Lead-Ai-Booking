@@ -59,8 +59,8 @@ if ($action === 'unlock') {
         a7_tl_mask_json(['ok' => false, 'error' => 'Invalid session'], 403);
     }
     $password = (string)($_REQUEST['password'] ?? '');
-    $expected = (string)($cfg['password'] ?? 'admin222007');
-    if (!hash_equals($expected, $password)) {
+    $expected = (string)($cfg['password'] ?? '');
+    if ($expected === '' || !hash_equals($expected, $password)) {
         a7_tl_mask_json(['ok' => false, 'error' => 'Wrong password'], 403);
     }
     if (!isset($_SESSION['A7_TL_PHONE_UNLOCK'])) {
