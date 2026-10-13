@@ -189,16 +189,16 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | T52 | Bot Status set in Bitrix (Handed to agent / Broker / Opted out) silences the bot | Claude + Cursor | T50 | Open |
 | T53 | mark_lost: Not Interested (`1`) or Junk (`JUNK`) per Q10, with the reason in the client's words | Claude (+ Cursor tool, T51) | T51 | Open |
 | T54 | Each campaign reply (Yes / Not now / Stop) written to the lead | Claude | T50 | Open |
-| T55 | **Booking CRM write through the C6 `booking` action** instead of REST `crm.lead.update`, because BP 235 wipes the meeting time (C7). Keep the per-event comment; drop the old to-do mover once C9 owns the to-do | Claude | C9 | Open |
+| T55 | **Booking CRM write through the C6 `booking` action** instead of REST `crm.lead.update`, because BP 235 wipes the meeting time (C7). Keep the per-event comment; drop the old to-do mover once C9 owns the to-do | Claude | — | Open — C9 is live (`cef5a977`); next Claude batch |
 
 ### P6 — Sending
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T60 | Global opt-out by phone; every campaign path skips it; import the 279 past Unsubscribe/Stop | Claude (+ Cursor: popup shows who was skipped) | Q8 | Blocked Q8 |
-| T61 | Create and submit `intl_city_shops_reconnect` (video header), `intl_city_shops_followup`, reminder v2 on the sending WABAs | Claude | D4, D5 | Blocked D4 |
-| T62 | Drip: ~100 a day, 11:00–18:00 Dubai, Mon–Sat, rolls over, visible queue and cancel | Claude | Q7 | Blocked Q7 |
-| T63 | Template B once, 72 h after A, only to non-repliers; never a third | Claude | Q7, T61 | Blocked Q7 |
+| T60 | Global opt-out by phone; every campaign path skips it; import the 279 past Unsubscribe/Stop | Claude (+ Cursor C10: the popup shows who was skipped) | — | Open |
+| T61 | Create and submit `intl_city_shops_reconnect` (video header), `intl_city_shops_followup`, reminder v2 on the sending WABAs | Claude | D1, D5 | Blocked D1/D5 (final rents, Type 1 video) |
+| T62 | Drip: ~100 a day, 11:00–18:00 Dubai, Mon–Sat, rolls over, visible queue and cancel | Claude | — | Open |
+| T63 | Template B once, 72 h after A, only to non-repliers; never a third | Claude | T61 | Open |
 | T64 | Skip brokers and duplicates across campaigns before sending | Claude + Cursor | T50 | Open |
 | T65 | First video-header send end to end on Matloob's own number with the Lead AI box | Matloob + Claude | T61 | Open |
 
@@ -221,7 +221,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 ---
 
-## Cursor's list (C1–C9)
+## Cursor's list (C1–C10)
 
 Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md for deploys (Bitrix files: `ops/bitrix.sh put`; Django: `ops/wa.sh build app` → `up app`, after checking that no campaign is running), and write a TASKS.md entry when done.
 
@@ -236,6 +236,7 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | C7 | **Today's booking write vs BP 235** (before go-live). On a confirmed booking, `backend/apps/leadai/assistant/crm.py` sends one REST `crm.lead.update`: `STATUS_ID=10`, Meeting Date & Time, Mode Offline, a few empty-only fields. It then moves or closes the to-do the assistant caused. Per C4, BP 235 at stage 10 clears the meeting time and plans a to-do. Replay exactly that payload on a **test lead** and report: is the meeting time kept, how many to-dos exist after, what the title becomes. If BP 235 breaks it, propose the fix here: either the booking goes through the C6 tool with a separate stage move, or BP 235 skips leads whose Bot Status is "Viewing booked" | Bitrix BP 235, read `crm.py` | Done (2026-10-13) — lead 79545: meeting wiped, one to-do due now, title became "Personal \| Sumon Khan". Lead and viewing item deleted. |
 | C8 | **Honorifics in `{{1}}`** (C1 follow-up). When the chosen first word is a prefix and another word follows, use the next word: "Md Sumon" → "Sumon". The prefixes are Md, Mohd, Muhammad, Mohammad, Mohammed, Muhammed, Mohamed, Dr, Mr, Mrs, Ms, Miss, Engr and Eng, with or without a dot. Same rule in PHP and Django, with tests. The assistant's own greeting gets the same rule on Claude's side | `a7_lead_wa.php`, `crm_leads.py`, `tests/test_crm_leads.py` | Done (2026-10-13) — "Md Sumon" greets as Sumon. Tests 29+11 OK. PHP `f16450ca` (401). Containers `cd4ec0e5`. |
 | C9 | **Booking through the C6 tool** (fixes C7, before any shop campaign). Add a `booking` action to `a7_leadai_fields.php`, with the same signature and bizproc/automation off: `{"lead_id": …, "booking": {"meeting_at": "2026-11-02T16:30:00+04:00", "mode": 42, "event": "confirmed" \| "rescheduled" \| "cancelled"}, "fields": {…}}`. `confirmed` / `rescheduled` set `STATUS_ID=10` + Meeting Date & Time + Mode, Bot Status = Viewing booked (2477), and create or move **one** "Viewing/Meeting" to-do for the lead's responsible at the meeting time (not "now"). Return its id. `cancelled` closes that to-do and leaves the stage. The title is never touched. BP 235 stays as it is. Prove it on a test lead: time kept, exactly one to-do at the meeting time, title unchanged. Then Claude switches `crm.py` to it (T55) | `a7_leadai_fields.php` | Done (2026-10-13) — lead 79557: time 16:30 kept, one to-do at that time, title unchanged; reschedule moved the same to-do; cancel closed it and left stage 10. Lead deleted. |
+| C10 | **Skip the leads the bot must not message** (T60, T64; before the first shop campaign). In every CRM popup with the Lead AI box, leave out leads whose Bot Status is Broker (2479), Lost (2480) or Opted out (2481), or whose WhatsApp Opt-out is Yes (2482). Also leave out a phone already in the same campaign (exists today) or reached by the same template in the last 30 days. Show the count beside the existing "missing a phone" note ("3 left out: opted out 1, broker 1, lost 1"), so the agent sees why 100 selected became 97. Do it where you already build the recipient list (PHP and/or `crm_leads.py`), with tests. Claude's global opt-out registry (T60) adds the phones that opted out in WhatsApp later; leave a hook for it | `a7_lead_wa.php/.js`, `crm_leads.py`, `tests/test_crm_leads.py` | Open |
 
 ### Lead fields tool contract (C6)
 
