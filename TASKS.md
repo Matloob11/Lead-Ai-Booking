@@ -1,3 +1,11 @@
+## 2026-10-13 — A person's Bot Status change notifies Lead AI (Cursor)
+
+A lead-update handler in the Bitrix includes POSTs to `https://wa.srv1802669.hstgr.cloud/api/leadai/bitrix/bot-status/` when a person sets Bot Status to Handed to agent (2478), Broker (2479), Lost (2480) or Opted out (2481), or WhatsApp Opt-out to Yes (2482). The body is signed `leadai-botstatus.` with the shared secret. The call waits at most 3 seconds and a failure, including the current 404, is one log line. The C6 tool sets `$GLOBALS['A7_LEADAI_FIELDS_SAVE']` so its own saves are skipped.
+
+**Test lead 79571** (deleted): Qualifying (2476) sent nothing. A person's change to Handed to agent logged `http=404` once. The C6 tool then set Broker and WhatsApp Opt-out Yes (HTTP 200) and logged nothing more. Handler `cf8fbefc`, fields tool `09d7e791`, both `php -l` clean. `init.php` on the box loads the handler. No Django image was built. No WhatsApp message was sent.
+
+---
+
 ## 2026-10-13 — Opt-out holds on every campaign (Cursor)
 
 WhatsApp Opt-out Yes (2482) and Bot Status Opted out (2481) are left out of every send, Lead AI box on or off: Leads, Owner Data, Deals, Contacts, Renewals, the Excel bulk screen, and a pasted list. The same line is shown: `1 left out: opted out 1`. Broker and Lost stay Lead AI only. `phones_blocked_by_registry` sits on that shared phone check, with the Bitrix lead lookup beside it, so a later registry blocks every path too.

@@ -103,6 +103,9 @@ $leadId = (int)($in['lead_id'] ?? 0);
 if ($leadId <= 0) {
     a7_leadai_fields_json(['ok' => false, 'error' => 'No lead.'], 400);
 }
+// This request is the C6 tool. The lead-update handler must not tell the bot
+// about a status the assistant just wrote itself.
+$GLOBALS['A7_LEADAI_FIELDS_SAVE'] = $leadId;
 $allow = a7_leadai_fields_allow();
 $fieldsIn = $in['fields'] ?? [];
 if ($fieldsIn === null) {
