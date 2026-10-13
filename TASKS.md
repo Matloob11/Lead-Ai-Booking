@@ -1,3 +1,53 @@
+## 2026-10-13 — Lead AI batch 1 live: the first chat's fixes, playbook, alerts to 2311, Broker label, CRM mirror on commit (Claude Code)
+
+Board tasks T05, T10–T17, T20a and part of T24 (SHOPS-BOT-BOARD.md), from conversation 35283's defects and Matloob's 2026-10-13 decisions.
+
+**What changed:**
+- **Address:** the address, Maps link or pin goes once per chat. It is sent again only when the customer asks, or after 24 h, and the model's own retyped address is cut.
+- **Deferrals:** "I will message you" (and typos like "massage", "I'll let u know") gets a code rule with no model call. It records a tentative office visit with a fixed line, and the tentative alert goes out.
+- **Plain yes:** after an invitation, a plain yes is never counted or cut as one.
+- **English gloss:** `reply_en` is generated after `reply` and kept only for non-English replies.
+- **Names:** portal titles ("Bayut WhatsApp | Md Sumon") give a clean first name. Md/Mohd are skipped; Arabic particles are kept.
+- **Playbook:** `LeadAiCampaign.playbook` (general / ic_shops; migration `leadai.0003`, with `db_default`) is ready for Cursor's C2. The panel shows an "IC shops" chip.
+- **Alert recipients:** new `LeadAiSettings.alert_bitrix_user_ids` (AI settings dialog, and NEW verb `ops/wa.sh leadai-alert-ids`), set to **2311**. Booking, handover, broker and stale alerts reach those users too.
+- **Broker:** a broker chat gets the Broker label and stays paused until Resume. The screen has a Brokers filter, and an ic_shops chat gets the build pack's exact line.
+- **CRM mirror:** `crmlink/signals.py` queues inbound mirrors on commit (inbox-wide).
+- **Reminder template:** the submit command now covers every active number.
+
+**Deployed (2026-10-13 ~10:34 UTC):**
+1. `sync` `apps/leadai` and `apps/crmlink` (drift-checked first: the build context equalled HEAD).
+2. `leadai-eval-draft --repeat 2` **105/108 (97.2%)**.
+3. `build app`.
+4. `leadai-tests` **318 OK** (1 skipped) on Postgres; `test apps/crmlink/tests/test_signals.py` **4 OK**.
+5. `migrate-new-image` (0003 OK).
+6. `up app`, with no campaign sending (#406 retrying, 0 in flight).
+7. Panel `lead-ai/{api,screen,thread}.js` and `lead-ai.css` pushed: server md5 == local, public 200 with equal sizes.
+8. `leadai-alert-ids 2311`.
+9. `submit-leadai-reminder-template`: **43 submitted PENDING**, all 8 sending numbers included. 4 refused: 971556829046 restricted, 971507563104 and 971527514497 "Invalid WhatsApp configuration", 447723356623 HTTP 500.
+   - The verb was mistakenly run a second time without `--dry-run`. It skipped the 43 and only retried the 4 failures; no duplicate template rows exist.
+
+**Verified LIVE:**
+- **Services:** all four app services Up together; `last_sweep_at` fresh; `django-check` No changes, 0003 applied.
+- **Code:** `probe-backend-md5` shows engine/rules/models/crmlink == local.
+- **Eval:** `leadai-eval --repeat 2` on the deployed image **103/108 (95.4%)**.
+  - `location-again` 0/2: "How do I reach there?" gets no pointer, or a paraphrase of the address. Revisit with the Maps link/pin.
+  - Plus single flakes: shop-no-licence, shop-photo, who-is-this.
+- **Probe:** `probe-leadai-turn` 19/19 twice. One earlier run was 16/19: an exact time the customer proposed came back tentative, so no reminder and no confirmed meeting. Board T18 adds a code guard.
+- **CRM mirror:** after the deploy 8 of 9 inbound messages mirrored, against 8 of 106 in the hour before.
+- **Logs:** worker-leadai, web and beat logs clean; worker only the known media-download retries.
+
+**Not verified:**
+- a real customer chat that hits a deferral, a broker or a booking;
+- the panel in a real browser (implementer's DOM-stub smoke 10/10 only);
+- an alert actually reaching 2311 (no event yet);
+- Meta's approval of the 43 templates.
+
+**Found:** Cursor's C7 shows the booking CRM write (REST `STATUS_ID=10` + Meeting Date, live since 2026-10-10) is wiped by BP 235. The meeting time is cleared, the to-do is due "now" and the title is rewritten. No real booking has happened yet. Board C9 + T55 move the booking write into the C6 tool before any shop campaign.
+
+**Shared/touched:** `backend/apps/crmlink/signals.py` (+ NEW `crmlink/tests/`), `backend/apps/leadai/**`, `bitrix/public/assets/modules/lead-ai/**`, `ops/wa.sh` (+ `leadai-alert-ids`), `SHOPS-BOT-BOARD.md`.
+
+---
+
 ## 2026-10-13 — Booking update vs BP 235, on a test lead (Cursor)
 
 Replayed the confirmed-booking REST update from `crm.py` `booking_fields()` on lead 79545: `STATUS_ID=10`, Meeting Date `2026-11-02T16:30:00+04:00`, Mode 42. REST ok. The meeting column was empty afterwards. One to-do, subject Viewing/Meeting, deadline 13/10/2026 10:11:42 am (the run time, not 16:30). Title changed from `ZZ C7 booking test delete` to `Personal | Sumon Khan`. Stage became 10. Mode 42 stayed. Viewing item 639 was created and then deleted with the lead and the to-do.

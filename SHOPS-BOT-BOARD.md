@@ -122,7 +122,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | T02 | Record the 2026-10-12 switch-on, campaign #395 and this check in TASKS.md | Claude | — | Done (2026-10-13) |
 | T03 | Md Sumon (conv 35283) said Yes, then "I will message you"; no booking, no alert. An agent writes to him by hand before the window closes at 2026-10-13 11:02 UTC (only a template after that), and `invites` is reset | Matloob | — | Open |
 | T04 | Set the assistant to test numbers only, or keep it on | Matloob | Q14 | Open |
-| T05 | Get `a7_leadai_meeting_reminder` approved on the 8 sending WABAs (D4); the submit command takes only numbers with an agent, so it also takes the sending numbers | Claude | — | Open |
+| T05 | Get `a7_leadai_meeting_reminder` approved on the 8 sending WABAs (D4); the submit command takes only numbers with an agent, so it also takes the sending numbers | Claude | — | Done (2026-10-13) — submitted to 43 WABAs, all 8 sending numbers included, PENDING at Meta. 4 refused: 971556829046 (restricted), 971507563104 and 971527514497 ("Invalid WhatsApp configuration"), 447723356623 (HTTP 500) |
 | T06 | Paste the Maps link and coordinates in Lead AI → AI settings | Matloob | D2 | Blocked D2 |
 | T07 | One test message from a phone to each of 971581058719, -720, -721, -722, -723, -724, -726, to prove replies reach the panel (only -725 is proven) | Matloob | — | Open |
 
@@ -130,25 +130,27 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T10 | Office address / link once per chat (engine.py:1235 checks only the current reply); record `share_office_location` and `invited_to_meeting` in `LeadAiTurn.actions` | Claude | — | Open |
-| T11 | `reply_en`: store only for non-English replies; move it after `reply` in the schema so it is a translation, not a plan | Claude | — | Open |
-| T12 | Deferrals ("I will message you", typos like "massage", "later") → tentative visit + one fixed line, no new invitation; rules.py set + settle() backstop + eval | Claude | — | Open |
-| T13 | `invites` counts refusals, not invitations; never strip a time offer after the customer said Yes | Claude | — | Open |
-| T14 | `{{1}}` and CUSTOMER NAME = the person's first name, not the lead title ("Bayut WhatsApp \| Md Sumon"); fallback when empty. Cursor: C1. Claude: the engine strips a leftover prefix too | Cursor (C1) + Claude | — | Open |
-| T15 | Customer messages never reach the Bitrix timeline: queue `mirror_message` on commit (`crmlink/signals.py:36`; affects the whole inbox) | Claude (shared) | — | Open |
-| T16 | Booking, broker and handover alerts reach Matloob (Bitrix 2311) as well as the chat owner; stop belling a CRM responsible who cannot open the chat | Claude | — | Open |
-| T17 | Eval cases from chat 35283: location request, deferral, bare Yes, repeated address; replay the address append in `outgoing()` | Claude | — | Open |
+| T10 | Office address / link once per chat (engine.py:1235 checks only the current reply); record `share_office_location` and `invited_to_meeting` in `LeadAiTurn.actions` | Claude | — | Done (2026-10-13) — once per chat; sent again only when asked or after 24 h; a retyped address is cut. Eval location-request 2/2; location-again 0/2 ("how do I reach there?" gets no pointer or a paraphrase); revisit with the Maps link/pin (D2) |
+| T11 | `reply_en`: store only for non-English replies; move it after `reply` in the schema so it is a translation, not a plan | Claude | — | Done (2026-10-13) — reply_en after reply, kept only for non-English replies |
+| T12 | Deferrals ("I will message you", typos like "massage", "later") → tentative visit + one fixed line, no new invitation; rules.py set + settle() backstop + eval | Claude | — | Done (2026-10-13) — code rule, no model call; eval defer-message 2/2, defer-massage 2/2 |
+| T13 | `invites` counts refusals, not invitations; never strip a time offer after the customer said Yes | Claude | — | Done (2026-10-13) — eval yes-to-invite 2/2, yes-to-slot 2/2 |
+| T14 | `{{1}}` and CUSTOMER NAME = the person's first name, not the lead title ("Bayut WhatsApp \| Md Sumon"); fallback when empty. Cursor: C1. Claude: the engine strips a leftover prefix too | Cursor (C1) + Claude | — | Done (2026-10-13) — Cursor C1 + C8; the engine also cleans portal titles and Md/Mohd |
+| T15 | Customer messages never reach the Bitrix timeline: queue `mirror_message` on commit (`crmlink/signals.py:36`; affects the whole inbox) | Claude (shared) | — | Done (2026-10-13) — after the deploy 8 of 9 inbound messages mirrored, against 8 of 106 the hour before |
+| T16 | Booking, broker and handover alerts reach Matloob (Bitrix 2311) as well as the chat owner; stop belling a CRM responsible who cannot open the chat | Claude | — | Done (2026-10-13) — `alert_bitrix_user_ids` = 2311 (`ops/wa.sh leadai-alert-ids`) |
+| T17 | Eval cases from chat 35283: location request, deferral, bare Yes, repeated address; replay the address append in `outgoing()` | Claude | — | Done (2026-10-13) — 54 scenarios; 97.2% on the draft, 95.4% on the deployed image |
+
+| T18 | Code guard: a customer's own exact time inside office hours ("Can I come Wednesday at 5 pm?") is confirmed even when the model answers tentative. `probe-leadai-turn` came back tentative in 1 of 3 runs on 2026-10-13 | Claude | — | Open |
 
 ### P2 — The shops conversation (Bot 2)
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T20a | `LeadAiCampaign.playbook` (`general` / `ic_shops`, default `general`) + migration; `lane.mark_campaign(campaign, playbook="general")`; a retry inherits the playbook. Ship first, backward compatible | Claude | — | Open |
+| T20a | `LeadAiCampaign.playbook` (`general` / `ic_shops`, default `general`) + migration; `lane.mark_campaign(campaign, playbook="general")`; a retry inherits the playbook. Ship first, backward compatible | Claude | — | Done (2026-10-13) — live (e184492, migration 0003). **Cursor: C2's Django part can go now** |
 | T20b | The popup "Script" choice and its pass-through to `mark_campaign` (C2) | Cursor | T20a | Open |
 | T21 | Shop facts, brand, persona and agent name editable in AI settings, fed into the context; allow-list the PDF amounts in `clean_reply` | Claude | D1, D3 | Blocked D1 |
-| T22 | Shops prompt: old-lead mode, react first, honesty line with brand, real urgency only, the PDF objection answers, unknowns → "our agent will confirm at the viewing" + note, no sentence twice (code guard) | Claude | Q4 | Blocked Q4 |
-| T23 | First reply after Template A is the fixed "Is the shop for yourself, or are you checking for a client?" (code-written) | Claude | Q4 | Blocked Q4 |
-| T24 | Broker: the exact hand-off line; a **Broker** label on the chat, shown in the Lead AI list and thread (filterable); bot silent until Resume; alert to Matloob with the number and the campaign; Bitrix marker once C3 gives the field | Claude (+ Cursor field) | — | Open |
+| T22 | Shops prompt: old-lead mode, react first, honesty line with brand, real urgency only, the PDF objection answers, unknowns → "our agent will confirm at the viewing" + note, no sentence twice (code guard) | Claude | Q4 | Open |
+| T23 | First reply after Template A is the fixed "Is the shop for yourself, or are you checking for a client?" (code-written) | Claude | Q4 | Open |
+| T24 | Broker: the exact hand-off line; a **Broker** label on the chat, shown in the Lead AI list and thread (filterable); bot silent until Resume; alert to Matloob with the number and the campaign; Bitrix marker once C3 gives the field | Claude (+ Cursor field) | — | Partly done (2026-10-13) — label, paused until Resume, Brokers filter, alert to 2311, the ic_shops line. Next: Purpose = Broker (2467) through the C6 tool (T51) |
 | T25 | "Not now" → "Should I check back with you in a month?" → 30-day Template B or lost | Claude | Q9, Q10 | Blocked Q9 |
 | T26 | "Stop messages" (button or text) → "Done, you won't receive more messages from us." + global opt-out (T60) | Claude | Q8 | Blocked Q8 |
 | T27 | Already rented → congratulate, ask about a second shop or a referral → lost "already rented" | Claude | Q10 | Blocked Q10 |
@@ -187,6 +189,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | T52 | Bot Status set in Bitrix (Handed to agent / Broker / Opted out) silences the bot | Claude + Cursor | T50 | Open |
 | T53 | mark_lost: Not Interested (`1`) or Junk (`JUNK`) per Q10, with the reason in the client's words | Claude (+ Cursor tool, T51) | T51 | Open |
 | T54 | Each campaign reply (Yes / Not now / Stop) written to the lead | Claude | T50 | Open |
+| T55 | **Booking CRM write through the C6 `booking` action** instead of REST `crm.lead.update`, because BP 235 wipes the meeting time (C7). Keep the per-event comment; drop the old to-do mover once C9 owns the to-do | Claude | C9 | Open |
 
 ### P6 — Sending
 
@@ -218,7 +221,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 ---
 
-## Cursor's list (C1–C8)
+## Cursor's list (C1–C9)
 
 Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md for deploys (Bitrix files: `ops/bitrix.sh put`; Django: `ops/wa.sh build app` → `up app`, after checking that no campaign is running), and write a TASKS.md entry when done.
 
@@ -232,6 +235,7 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | C6 | **Lead fields tool for the assistant** (T51, T52, T53). See *Lead fields tool contract* below; write the final URL and anything you changed there | NEW `ops/bitrix-aws/a7_leadai_fields.php` → `/home/bitrix/www/bitrix/tools/` | Done (2026-10-13) — GET 405, bad signatures 401, unknown field 400. Test lead 79544: shop+bot, title/stage/meeting unchanged, to-dos 0, lost to 1 with the comment, PDF stored, lead deleted. |
 | C7 | **Today's booking write vs BP 235** (before go-live). On a confirmed booking, `backend/apps/leadai/assistant/crm.py` sends one REST `crm.lead.update`: `STATUS_ID=10`, Meeting Date & Time, Mode Offline, a few empty-only fields. It then moves or closes the to-do the assistant caused. Per C4, BP 235 at stage 10 clears the meeting time and plans a to-do. Replay exactly that payload on a **test lead** and report: is the meeting time kept, how many to-dos exist after, what the title becomes. If BP 235 breaks it, propose the fix here: either the booking goes through the C6 tool with a separate stage move, or BP 235 skips leads whose Bot Status is "Viewing booked" | Bitrix BP 235, read `crm.py` | Done (2026-10-13) — lead 79545: meeting wiped, one to-do due now, title became "Personal \| Sumon Khan". Lead and viewing item deleted. |
 | C8 | **Honorifics in `{{1}}`** (C1 follow-up). When the chosen first word is a prefix and another word follows, use the next word: "Md Sumon" → "Sumon". The prefixes are Md, Mohd, Muhammad, Mohammad, Mohammed, Muhammed, Mohamed, Dr, Mr, Mrs, Ms, Miss, Engr and Eng, with or without a dot. Same rule in PHP and Django, with tests. The assistant's own greeting gets the same rule on Claude's side | `a7_lead_wa.php`, `crm_leads.py`, `tests/test_crm_leads.py` | Done (2026-10-13) — "Md Sumon" greets as Sumon. Tests 29+11 OK. PHP `f16450ca` (401). Containers `cd4ec0e5`. |
+| C9 | **Booking through the C6 tool** (fixes C7, before any shop campaign). Add a `booking` action to `a7_leadai_fields.php`, with the same signature and bizproc/automation off: `{"lead_id": …, "booking": {"meeting_at": "2026-11-02T16:30:00+04:00", "mode": 42, "event": "confirmed" \| "rescheduled" \| "cancelled"}, "fields": {…}}`. `confirmed` / `rescheduled` set `STATUS_ID=10` + Meeting Date & Time + Mode, Bot Status = Viewing booked (2477), and create or move **one** "Viewing/Meeting" to-do for the lead's responsible at the meeting time (not "now"). Return its id. `cancelled` closes that to-do and leaves the stage. The title is never touched. BP 235 stays as it is. Prove it on a test lead: time kept, exactly one to-do at the meeting time, title unchanged. Then Claude switches `crm.py` to it (T55) | `a7_leadai_fields.php` | Open |
 
 ### Lead fields tool contract (C6)
 
