@@ -1,3 +1,13 @@
+## 2026-10-13 — Five CRM popups checked in a browser, every send blocked (Cursor)
+
+Playwright opened the live CRM as admin. Each list loaded before the guard: an in-page fetch/XHR wrapper plus `page.route` on the two popup tools and `/api/campaigns/`. The queue click was caught in the page, so no send request left.
+
+On Leads, Owner Data, Deals, Contacts and Renewals the Script dropdown was hidden until the Lead AI box was ticked, then it showed General. The intercepted body had `lead_ai_playbook` `general`. The greeting preview was `Hi Sumon`, not the portal title. On the two test leads together the line was `2 selected · 0 can be messaged · 2 left out: opted out 1, broker 1`.
+
+**Campaigns 397 before and 397 after.** Broker lead 79574 and opt-out lead 79575, plus the contact, deal, renewal and owner card used for the other popups, were deleted. Screenshots: `files/temp/c13-popups/shots/` (`leads.png`, `owner.png`, `deals.png`, `contacts.png`, `renewals.png`). No WhatsApp message was sent.
+
+---
+
 ## 2026-10-13 — A person's Bot Status change notifies Lead AI (Cursor)
 
 A lead-update handler in the Bitrix includes POSTs to `https://wa.srv1802669.hstgr.cloud/api/leadai/bitrix/bot-status/` when a person sets Bot Status to Handed to agent (2478), Broker (2479), Lost (2480) or Opted out (2481), or WhatsApp Opt-out to Yes (2482). The body is signed `leadai-botstatus.` with the shared secret. The call waits at most 3 seconds and a failure, including the current 404, is one log line. The C6 tool sets `$GLOBALS['A7_LEADAI_FIELDS_SAVE']` so its own saves are skipped.
