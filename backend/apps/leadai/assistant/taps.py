@@ -1,0 +1,151 @@
+"""Taps on the meeting reminder's buttons, handled by code (owner's rules 54-56).
+
+A tap needs no model: it sets the appointment's state, alerts the agents and
+sends the owner's own words back ("Perfect. See you shortly."), in the
+customer's language. It works even after "Move to inbox" (the meeting still
+stands), and its alert goes out even when the assistant is switched off; only
+the reply then stays unsent. A tap that is not on our reminder for a meeting
+around now (reminders.tap_on_reminder) is left to the assistant's normal
+turn, like any message. A customer who then types their new arrival time or a
+new day is answered by the assistant's normal turn (on the Lead AI screen) or
+by the agent.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import logging
+
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from apps.inbox.models import Message
+
+from ..models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
+from . import alerts, filters, hours, reminders, rules, transcript
+
+logger = logging.getLogger(__name__)
+
+SOURCE = transcript.TAP_REPLY
+
+STATES = {
+    "on_my_way": LeadAiAppointment.CustomerState.ON_MY_WAY,
+    "running_late": LeadAiAppointment.CustomerState.RUNNING_LATE,
+    "reschedule": LeadAiAppointment.CustomerState.RESCHEDULE,
+}
+
+
+def reply_line(action: str, language: str) -> str:
+    """The owner's words for a tap (rules 54-56), in the customer's language."""
+    if action == "on_my_way":
+        return filters.on_my_way(language)
+    return rules.line("ask_eta" if action == "running_late" else "ask_new_time", language)
+
+
+def handle(message_id: int) -> str:
+    """Apply one tap. Returns what happened (for the turn log and tests)."""
+    message = (
+        Message.objects.select_related("conversation__contact", "conversation__assigned_agent", "reply_to")
+        .filter(pk=message_id)
+        .first()
+    )
+    if message is None or message.direction != Message.Direction.INBOUND:
+        return "not an inbound message"
+    # Checked before anything is claimed: a tap outside the meeting's window, or
+    # on a reminder for another time, is answered by the assistant instead.
+    appointment, action = reminders.tap_on_reminder(message)
+    if appointment is None:
+        return "not a tap on our reminder"
+    try:
+        with transaction.atomic():
+            turn = LeadAiTurn.objects.create(conversation_id=message.conversation_id, inbound=message)
+    except IntegrityError:
+        return "already handled"
+
+    conversation = message.conversation
+    now = timezone.now()
+    outcome = LeadAiTurn.Status.SKIPPED
+    reply_id = None
+    with transaction.atomic():
+        current = LeadAiAppointment.objects.select_for_update().get(pk=appointment.pk)
+        current.customer_state = STATES[action]
+        current.log("tap", action=action, message=message.pk)
+        current.save(update_fields=["customer_state", "history", "updated_at"])
+        _alert(conversation, current, action)
+        from ..tasks import sync_appointment_crm
+
+        event = {"on_my_way": "on_my_way", "running_late": "running_late_tap", "reschedule": "reschedule_requested"}[action]
+        transaction.on_commit(lambda pk=current.pk, e=event: sync_appointment_crm.delay(pk, e, False))
+    from . import live
+
+    live.appointment_changed(conversation.pk)
+    reason = f"tap: {action}"
+    if LeadAiSettings.load().answers(conversation.contact.wa_id) and _window_open(conversation, now):
+        language = LeadAiChatState.objects.filter(conversation=conversation).values_list("language", flat=True).first() or "en"
+        try:
+            from apps.inbox import services as inbox_services
+
+            sent = inbox_services.send_text(
+                conversation, None, reply_line(action, language), payload={"source": SOURCE, "turn": turn.pk}
+            )
+            reply_id = sent.pk
+            outcome = LeadAiTurn.Status.REPLIED
+        except Exception as exc:  # noqa: BLE001 - the state and the alert already stand
+            logger.warning("Lead AI tap reply failed on conversation %s: %s", conversation.pk, exc)
+            outcome = LeadAiTurn.Status.FAILED
+            reason = f"tap reply failed: {type(exc).__name__}"
+    else:
+        reason += " (no reply: assistant off or window closed)"
+
+    LeadAiTurn.objects.filter(pk=turn.pk).update(
+        status=outcome, reason=reason[:255], reply_message_id=reply_id, actions={"tap": action}, finished_at=timezone.now()
+    )
+    return reason
+
+
+def _window_open(conversation, now) -> bool:
+    conversation.refresh_from_db(fields=["session_expires_at"])
+    return bool(conversation.session_expires_at and conversation.session_expires_at > now + dt.timedelta(minutes=1))
+
+
+def _alert(conversation, appointment, action: str) -> None:
+    name = appointment.customer_name or conversation.contact.display_name or "The customer"
+    at = hours.time_label(appointment.starts_at) if appointment.starts_at else ""
+    stamp = f"{appointment.starts_at:%Y%m%d%H%M}" if appointment.starts_at else "none"
+    chat = LeadAiChat.objects.filter(conversation=conversation).first()
+    crm_url = alerts.crm_path(
+        appointment.crm_entity or (chat.crm_entity if chat else ""), appointment.crm_id or (chat.crm_id if chat else None)
+    )
+    phone = f"WhatsApp +{conversation.contact.wa_id}"
+    if action == "on_my_way":
+        alerts.raise_alert(
+            kind="on_my_way",
+            conversation=conversation,
+            appointment=appointment,
+            priority="high",
+            title=f"{name} is on the way",
+            text=f"{name} is on the way for the {at} meeting ({phone}).",
+            dedupe_key=f"on_my_way:{appointment.pk}:{stamp}",
+            crm_url=crm_url,
+        )
+    elif action == "running_late":
+        alerts.raise_alert(
+            kind="running_late",
+            conversation=conversation,
+            appointment=appointment,
+            priority="high",
+            title=f"{name} is running late",
+            text=f"{name} tapped Running Late for the {at} meeting ({phone}). We asked for their arrival time.",
+            dedupe_key=f"running_late_tap:{appointment.pk}:{stamp}",
+            crm_url=crm_url,
+        )
+    else:
+        alerts.raise_alert(
+            kind="reschedule_requested",
+            conversation=conversation,
+            appointment=appointment,
+            title=f"{name} wants to reschedule",
+            text=f"{name} tapped Need to Reschedule for the {at} meeting ({phone}). We asked for a new day and time.",
+            dedupe_key=f"reschedule_requested:{appointment.pk}:{stamp}",
+            crm_url=crm_url,
+        )

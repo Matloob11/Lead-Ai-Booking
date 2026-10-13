@@ -1,0 +1,1649 @@
+/* Lead AI screen — its own file and its own lai- prefix (modules/lead-ai/).
+   Nothing here styles the main inbox, and nothing in inbox.css styles this
+   screen, so either can change without touching the other. Shared message
+   pieces (media, voice notes, template buttons) keep the classes their core
+   modules give them. */
+
+.lai-screen {
+  position: absolute;
+  inset: 0;
+  /* Above the inbox (its layers stop at 30), below dialogs (.modal 40),
+     the lightbox (60) and toasts (80), which open on top of this screen. */
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  background: #0a1020;
+  color: #eef3f9;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.lai-screen__glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 85% 0%, rgb(200 163 74 / 22%), transparent 70%),
+    radial-gradient(55% 60% at 0% 100%, rgb(37 99 235 / 22%), transparent 70%),
+    radial-gradient(45% 45% at 40% 40%, rgb(18 140 126 / 18%), transparent 70%);
+}
+
+.lai-screen > :not(.lai-screen__glow) {
+  position: relative;
+}
+
+/* ---------------------------------------------------------------- bar */
+
+.lai-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 12px 0;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 14px;
+  background: rgb(18 30 50 / 72%);
+  backdrop-filter: blur(10px);
+}
+
+.lai-bar__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.lai-bar__note {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #9fb0c4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- body */
+
+.lai-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.lai-side,
+.lai-main {
+  min-height: 0;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 14px;
+  background: rgb(10 18 32 / 62%);
+  backdrop-filter: blur(8px);
+}
+
+.lai-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.lai-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lai-main__empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: #8fa1b6;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+
+/* --------------------------------------------------------------- tabs */
+
+.lai-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.lai-tab {
+  flex: 1;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: transparent;
+  color: #c9d6e6;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.lai-tab:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.lai-tab.is-on {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.lai-search {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 6%);
+  color: inherit;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.lai-search::placeholder {
+  color: #8696aa;
+}
+
+/* --------------------------------------------------------------- list */
+
+.lai-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lai-list__status {
+  color: #8fa1b6;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 2px 4px;
+}
+
+.lai-list__status:empty {
+  display: none;
+}
+
+.lai-list__more {
+  border: 1px dashed rgb(255 255 255 / 18%);
+  background: transparent;
+  color: #c9d6e6;
+  border-radius: 10px;
+  padding: 7px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lai-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  border-radius: 12px;
+  padding: 9px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lai-row:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.lai-row.is-on {
+  background: rgb(124 58 237 / 18%);
+  border-color: rgb(124 58 237 / 45%);
+}
+
+.lai-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.lai-row__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.lai-row__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lai-row__name {
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-row.is-unread .lai-row__name {
+  color: #fff;
+}
+
+.lai-row__time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #8fa1b6;
+}
+
+.lai-row__preview {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #b3c1d1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-row__meta {
+  margin-top: 3px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  color: #8fa1b6;
+}
+
+.lai-row__campaign {
+  color: #c4b5fd;
+}
+
+.lai-row__error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #f0a8a8;
+}
+
+/* The time, and a clock before it when the assistant booked a meeting. */
+.lai-row__side {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lai-row__appt {
+  position: relative;
+  display: inline-flex;
+  color: #86efac;
+}
+
+/* The assistant is not answering this chat. */
+.lai-row__ai {
+  font-size: 10px;
+  font-weight: 750;
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 16px;
+}
+
+.lai-row__ai--paused {
+  background: rgb(234 179 8 / 18%);
+  color: #fde68a;
+}
+
+.lai-row__ai--stopped {
+  background: rgb(220 38 38 / 26%);
+  color: #fecaca;
+}
+
+.lai-row__ai--handed_over {
+  background: rgb(37 99 235 / 28%);
+  color: #bfdbfe;
+}
+
+/* Read by screen readers, not drawn. */
+.lai-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lai-badge {
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #25d366;
+  color: #062a17;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+}
+
+.lai-avatar {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lai-avatar--sara {
+  background: linear-gradient(135deg, #0f766e, #155e75);
+}
+
+.lai-state {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgb(255 255 255 / 10%);
+  color: #dbe5f1;
+}
+
+.lai-state--active,
+.lai-state--awaiting {
+  background: rgb(124 58 237 / 30%);
+  color: #ddd6fe;
+}
+
+.lai-state--qualified {
+  background: rgb(22 163 74 / 30%);
+  color: #bbf7d0;
+}
+
+.lai-state--failed,
+.lai-state--junk {
+  background: rgb(220 38 38 / 28%);
+  color: #fecaca;
+}
+
+/* ------------------------------------------------------------- thread */
+
+.lai-thread {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lai-thread__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+}
+
+.lai-thread__who {
+  flex: 1;
+  /* The AI pill and its buttons wrap before the name is squeezed away. */
+  min-width: 140px;
+}
+
+.lai-thread__name {
+  font-weight: 700;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-thread__meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #9fb0c4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-thread__meta--source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #c4b5fd;
+}
+
+/* Why the assistant is not answering although its pill says on. Wraps:
+   the reason is the point of the line. */
+.lai-thread__meta--ai {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11.5px;
+  color: #8fa1b6;
+  white-space: normal;
+}
+
+.lai-thread__meta--ai .icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.lai-thread__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The assistant's state in this chat, beside its Pause / Resume buttons. */
+.lai-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 240px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.lai-ai .icon {
+  flex: 0 0 auto;
+}
+
+.lai-ai__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-ai--on {
+  background: rgb(124 58 237 / 30%);
+  color: #ddd6fe;
+}
+
+.lai-ai--test {
+  background: rgb(124 58 237 / 16%);
+  color: #ddd6fe;
+  box-shadow: inset 0 0 0 1px rgb(196 181 253 / 45%);
+}
+
+.lai-ai--off {
+  background: rgb(255 255 255 / 9%);
+  color: #b3c1d1;
+}
+
+.lai-ai--paused {
+  background: rgb(234 179 8 / 18%);
+  color: #fde68a;
+}
+
+.lai-ai--stopped {
+  background: rgb(220 38 38 / 26%);
+  color: #fecaca;
+}
+
+.lai-ai--handed {
+  background: rgb(37 99 235 / 28%);
+  color: #bfdbfe;
+}
+
+/* ------------------------------------------------------- meeting card */
+
+.lai-appt-host {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgb(255 255 255 / 6%);
+}
+
+.lai-appt-host[hidden],
+.lai-thinking[hidden] {
+  display: none;
+}
+
+.lai-appt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(134 239 172 / 30%);
+  background: rgb(22 163 74 / 13%);
+}
+
+.lai-appt--tentative {
+  border-color: rgb(253 230 138 / 28%);
+  background: rgb(234 179 8 / 10%);
+}
+
+.lai-appt__icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgb(22 163 74 / 26%);
+  color: #bbf7d0;
+}
+
+.lai-appt--tentative .lai-appt__icon {
+  background: rgb(234 179 8 / 20%);
+  color: #fde68a;
+}
+
+.lai-appt__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.lai-appt__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.lai-appt__status {
+  font-size: 13px;
+  font-weight: 750;
+  color: #bbf7d0;
+}
+
+.lai-appt--tentative .lai-appt__status {
+  color: #fde68a;
+}
+
+.lai-appt__when {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #eef3f9;
+  overflow-wrap: anywhere;
+}
+
+.lai-appt__lines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #c9d6e6;
+}
+
+.lai-appt__line {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.lai-appt__line .icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.lai-appt__line--muted {
+  color: #9fb0c4;
+}
+
+/* A reminder or CRM step that did not happen: someone has to act. */
+.lai-appt__line--warn {
+  color: #fcd34d;
+}
+
+.lai-appt__state {
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #86efac;
+  color: #052e16;
+}
+
+.lai-appt__state--running_late,
+.lai-appt__state--reschedule {
+  background: #fde68a;
+  color: #422006;
+}
+
+.lai-appt__cancel {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+.lai-window {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.lai-window.is-open {
+  background: rgb(22 163 74 / 22%);
+  color: #bbf7d0;
+}
+
+.lai-window.is-closed {
+  background: rgb(234 179 8 / 18%);
+  color: #fde68a;
+}
+
+.lai-thread__messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lai-thread__messages.is-dropping {
+  outline: 2px dashed rgb(124 58 237 / 70%);
+  outline-offset: -6px;
+}
+
+.lai-thread__hint {
+  margin: auto;
+  color: #8fa1b6;
+  font-size: 13px;
+}
+
+.lai-thread__hint--error {
+  color: #f0a8a8;
+}
+
+.lai-thread__older {
+  align-self: center;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: transparent;
+  color: #c9d6e6;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lai-day {
+  align-self: center;
+  margin: 8px 0 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  color: #b3c1d1;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+/* ----------------------------------------------------------- messages */
+
+.lai-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: min(72%, 560px);
+}
+
+.lai-msg--in {
+  align-self: flex-start;
+}
+
+.lai-msg--out {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.lai-msg--system {
+  align-self: center;
+  max-width: 80%;
+  font-size: 12px;
+  color: #9fb0c4;
+  text-align: center;
+}
+
+.lai-msg--flash .lai-msg__bubble {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+.lai-msg__bubble {
+  border-radius: 12px;
+  padding: 7px 10px 5px;
+  background: rgb(255 255 255 / 9%);
+  border: 1px solid rgb(255 255 255 / 8%);
+  overflow-wrap: anywhere;
+}
+
+.lai-msg--out .lai-msg__bubble {
+  background: rgb(18 140 126 / 42%);
+  border-color: rgb(37 211 102 / 24%);
+}
+
+.lai-msg__text {
+  white-space: pre-wrap;
+  line-height: 1.42;
+}
+
+.lai-msg__tpl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.lai-msg__tpl-badge {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgb(255 255 255 / 14%);
+}
+
+.lai-msg__empty {
+  font-size: 12px;
+  font-style: italic;
+  color: #b3c1d1;
+}
+
+.lai-msg__error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #fecaca;
+}
+
+.lai-msg__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: #a9b8c9;
+}
+
+.lai-msg__author {
+  font-weight: 650;
+}
+
+.lai-tick {
+  display: inline-flex;
+}
+
+.lai-tick--read {
+  color: #53bdeb;
+}
+
+.lai-tick--failed {
+  color: #f87171;
+}
+
+/* What the assistant sent: its own tint and a badge, since it has no sender. */
+.lai-msg--ai .lai-msg__bubble {
+  background: rgb(124 58 237 / 26%);
+  border-color: rgb(196 181 253 / 28%);
+}
+
+.lai-msg--reminder .lai-msg__bubble {
+  border-color: rgb(253 230 138 / 32%);
+}
+
+.lai-msg__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 15px;
+}
+
+.lai-msg__badge--ai {
+  background: rgb(124 58 237 / 55%);
+  color: #f5f3ff;
+}
+
+.lai-msg__badge--reminder {
+  background: rgb(234 179 8 / 26%);
+  color: #fde68a;
+}
+
+/* The English meaning of a reply the assistant wrote in another language. */
+.lai-msg__gloss {
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px dashed rgb(255 255 255 / 14%);
+  font-size: 12px;
+  line-height: 1.4;
+  color: #b3c1d1;
+  white-space: pre-wrap;
+}
+
+.lai-msg__gloss-label {
+  font-weight: 700;
+  color: #c9d6e6;
+}
+
+/* The reminder's reply buttons: shown as they went out, not pressable. */
+.lai-msg__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.lai-msg__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 5%);
+  color: #c9d6e6;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: default;
+  user-select: none;
+}
+
+/* ----------------------------------------------------------- composer */
+
+/* "The AI is writing a reply…": one quiet line above the reply box. */
+.lai-thinking {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 16px;
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  font-size: 12px;
+  color: #9fb0c4;
+}
+
+.lai-thinking .icon {
+  flex: 0 0 auto;
+  color: #c4b5fd;
+  animation: lai-pulse 1.4s ease-in-out infinite;
+}
+
+.lai-thinking__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes lai-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.lai-thread__composer {
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  padding: 10px 12px;
+}
+
+.lai-composer {
+  /* The shared attach menu (attach.js) is placed against this box. */
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.lai-input {
+  flex: 1;
+  min-height: 38px;
+  max-height: 140px;
+  resize: none;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 7%);
+  color: inherit;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font: inherit;
+  line-height: 1.35;
+}
+
+.lai-input::placeholder {
+  color: #8696aa;
+}
+
+.lai-locked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lai-locked__text {
+  flex: 1;
+  font-size: 12px;
+  color: #fde68a;
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------------------ buttons */
+
+.lai-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 6%);
+  color: #eef3f9;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lai-btn:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.lai-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lai-btn--icon {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.lai-btn--primary {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.lai-btn--primary:hover {
+  background: #6d28d9;
+}
+
+.lai-btn--send {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  flex: 0 0 auto;
+  background: #25d366;
+  border-color: #25d366;
+  color: #062a17;
+}
+
+.lai-btn--ghost {
+  background: transparent;
+}
+
+.lai-btn--sm {
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.lai-btn--danger {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+.lai-btn--danger:hover {
+  background: #991b1b;
+}
+
+.lai-bar__close {
+  flex: 0 0 auto;
+}
+
+.lai-bar__settings {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  font-size: 12px;
+}
+
+/* ----------------------------------------------------- confirm dialog */
+
+.lai-confirm {
+  padding: 4px 18px 18px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.lai-confirm__actions {
+  display: flex;
+  /* Two nowrap buttons; on a phone the second goes under the first. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.lai-confirm__note {
+  margin-top: 0;
+  font-size: 13px;
+  color: #9fb0c4;
+}
+
+/* Dialogs opened from this screen are dark in every theme, like the screen
+   itself, so its light-on-dark buttons stay readable. The theme sheets style
+   .modal__box with !important and load after this file, hence the longer
+   selectors here. */
+.modal > .modal__box.lai-modal {
+  background: #0f1a2c !important;
+  color: #eef3f9 !important;
+  border: 1px solid rgb(255 255 255 / 12%) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 60px rgb(3 8 20 / 60%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal > .modal__box.lai-modal .modal__head {
+  background: transparent !important;
+  border-bottom: 1px solid rgb(255 255 255 / 10%) !important;
+  color: #eef3f9 !important;
+}
+
+.modal > .modal__box.lai-modal .modal__title {
+  color: #eef3f9 !important;
+}
+
+.modal > .modal__box.lai-modal .modal__x {
+  color: #9fb0c4 !important;
+}
+
+.modal > .modal__box.lai-modal--settings {
+  width: min(100%, 640px) !important;
+  max-width: min(100%, 640px) !important;
+}
+
+/* -------------------------------------------------------- AI settings */
+
+.lai-set {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 18px 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #eef3f9;
+}
+
+.lai-set__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lai-set__h {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+
+.lai-set__grid {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.lai-set__grid dt {
+  color: #9fb0c4;
+}
+
+.lai-set__grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lai-set__on {
+  color: #86efac;
+  font-weight: 700;
+}
+
+.lai-set__warn {
+  color: #fcd34d;
+}
+
+.lai-set__link {
+  color: #c4b5fd;
+  overflow-wrap: anywhere;
+}
+
+.lai-set__p {
+  margin: 0;
+}
+
+.lai-set__p[hidden],
+.lai-set__err[hidden] {
+  display: none;
+}
+
+.lai-set__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+.lai-set__stat {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 4%);
+}
+
+.lai-set__stat--warn {
+  border-color: rgb(252 211 77 / 45%);
+}
+
+.lai-set__stat-n {
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.lai-set__stat-l {
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-set__stat-sub {
+  font-size: 11px;
+  color: #8fa1b6;
+}
+
+.lai-set__details summary {
+  cursor: pointer;
+  color: #c9d6e6;
+  font-weight: 650;
+}
+
+.lai-set__numbers {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  columns: 2;
+  column-gap: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lai-set__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lai-set__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lai-set__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dbe5f1;
+}
+
+.lai-set__input {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 7%);
+  color: inherit;
+  color-scheme: dark;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.lai-set__input::placeholder {
+  color: #6f8197;
+}
+
+/* The test numbers: one per line. */
+textarea.lai-set__input {
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.lai-set__input:focus-visible {
+  outline: none;
+  border-color: rgb(196 181 253 / 75%);
+  box-shadow: 0 0 0 3px rgb(124 58 237 / 28%);
+}
+
+.lai-set__input[aria-invalid="true"] {
+  border-color: #f87171;
+}
+
+.lai-set__hint {
+  font-size: 11.5px;
+  color: #8fa1b6;
+}
+
+.lai-set__err {
+  font-size: 12px;
+  color: #fca5a5;
+}
+
+.lai-set__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.lai-set__note {
+  margin: 0;
+  font-size: 12px;
+  color: #9fb0c4;
+}
+
+.lai-set__note:empty {
+  display: none;
+}
+
+.lai-set__note--err {
+  color: #fca5a5;
+}
+
+.lai-set__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lai-set__actions--start {
+  justify-content: flex-start;
+}
+
+/* The assistant's on/off switch: a real checkbox (role="switch") under a drawn track. */
+.lai-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lai-toggle__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.lai-toggle__track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 16%);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.lai-toggle__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.lai-toggle__input:checked + .lai-toggle__track {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.lai-toggle__input:checked + .lai-toggle__track::after {
+  transform: translateX(16px);
+}
+
+.lai-toggle__input:focus-visible + .lai-toggle__track {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------- alerts */
+
+/* The assistant's alerts, top right over whatever screen is open. lead-ai.js
+   puts the stack on the top layer (popover="manual") where the browser has
+   one; these rules replace the popover defaults, and z-index places it above
+   the panel's dialogs (80) where it has not. */
+.lai-alerts {
+  position: fixed;
+  inset: 12px 12px auto auto;
+  z-index: 90;
+  width: min(360px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #eef3f9;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.lai-alerts:empty {
+  display: none;
+}
+
+.lai-alert {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(16 26 44 / 97%);
+  box-shadow: 0 14px 34px rgb(3 8 20 / 50%);
+  font-size: 13px;
+  animation: lai-alert-in 0.22s ease-out;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* A hot lead, "on my way", "running late", a request for a person. */
+.lai-alert--high {
+  border-color: rgb(248 113 113 / 75%);
+  background: linear-gradient(135deg, rgb(127 29 29 / 96%), rgb(16 26 44 / 97%) 70%);
+  box-shadow: 0 0 0 1px rgb(248 113 113 / 30%), 0 16px 40px rgb(127 29 29 / 45%);
+}
+
+.lai-alert.is-leaving {
+  opacity: 0;
+  transform: translateX(14px);
+}
+
+.lai-alert__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 6px 11px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lai-alert__main:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.lai-alert__main:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: -2px;
+}
+
+.lai-alert__icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgb(124 58 237 / 30%);
+  color: #ddd6fe;
+}
+
+.lai-alert--high .lai-alert__icon {
+  background: rgb(248 113 113 / 28%);
+  color: #fecaca;
+}
+
+.lai-alert__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lai-alert__kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+
+.lai-alert--high .lai-alert__kicker {
+  color: #fca5a5;
+}
+
+.lai-alert__title {
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.lai-alert__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #c9d6e6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.lai-alert__open {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #c4b5fd;
+}
+
+.lai-alert__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: 6px 6px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #9fb0c4;
+  cursor: pointer;
+}
+
+.lai-alert__close:hover {
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+@keyframes lai-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lai-alert {
+    animation: none;
+    transition: none;
+  }
+
+  .lai-thinking .icon {
+    animation: none;
+  }
+
+  .lai-toggle__track,
+  .lai-toggle__track::after {
+    transition: none;
+  }
+}
+
+
+/* ------------------------------------------------------------ menu bits */
+
+.lai-menu-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #25d366;
+  color: #062a17;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.lai-menu-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #25d366;
+  box-shadow: 0 0 0 2px rgb(10 16 32 / 85%);
+  pointer-events: none;
+}
+
+.sidebar__menu-btn:has(.lai-menu-dot) {
+  position: relative;
+}
+
+.lai-menu-badge[hidden],
+.lai-menu-dot[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------- narrow */
+
+@media (max-width: 760px) {
+  .lai-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 38%) minmax(0, 1fr);
+  }
+
+  .lai-bar__note {
+    display: none;
+  }
+
+  /* The note is gone; the buttons stay at the right end of the bar. */
+  .lai-bar__settings {
+    margin-left: auto;
+  }
+
+  .lai-msg {
+    max-width: 88%;
+  }
+
+  /* Cut to one line, it lost its second half: "if you send first, it drops its reply". */
+  .lai-thinking__text {
+    white-space: normal;
+  }
+
+  .lai-thread__head {
+    flex-wrap: wrap;
+  }
+
+  .lai-thread__tools {
+    justify-content: flex-start;
+  }
+
+  .lai-appt {
+    flex-wrap: wrap;
+  }
+
+  /* Too short for the header, the meeting card, the messages and the reply
+     box at once (a phone): the chat scrolls as a whole and the messages keep
+     some room, instead of the reply box being cut off below. */
+  .lai-thread {
+    overflow-y: auto;
+  }
+
+  .lai-thread__messages {
+    flex: 1 0 200px;
+  }
+
+  .lai-set__pair,
+  .lai-set__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lai-set__grid dd {
+    margin-bottom: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* "Cancel meeting" goes under the meeting, not beside a time squeezed to three lines. */
+  .lai-appt__body {
+    flex: 1 1 calc(100% - 40px);
+  }
+
+  .lai-appt__cancel {
+    margin-left: 40px;
+  }
+}
