@@ -44,7 +44,7 @@ def answer(reply="Great. What business activity will the shop be used for?", act
         "opt_out": extra.pop("opt_out", "none"),
         "hot_lead": extra.pop("hot_lead", False),
         "invited_to_meeting": extra.pop("invited", False),
-        "share_office_location": False,
+        "share_office_location": extra.pop("share_location", False),
         "send": extra.pop("send", True),
         "reply_en": extra.pop("reply_en", ""),
         "reply": reply,
@@ -81,6 +81,13 @@ RIGHT = {
     "shop-outside-now": booked("2026-10-12", "14:00", hot_lead=True),
     "shop-injection": answer("Our office is closed on Sunday, so we cannot book that. Would Monday at 5 PM work for you?"),
     "shop-closed-day": answer("Our office is closed tomorrow. Would Wednesday at 5 PM work for you?"),
+    "location-request": answer("Our office is in International City, here is the location.", share_location=True),
+    "location-again": answer("You can find our office at the location above.", share_location=True),
+    "yes-to-invite": answer("Great. Would 11 AM, 2 PM or 5 PM tomorrow work for you?", invited=True),
+    "yes-to-slot": booked("2026-10-13", "17:00"),
+    # Settled by code before the model (the deferral rule): never asked.
+    "defer-message": answer("", send=False),
+    "defer-massage": answer("", send=False),
     "shop-rent": answer(
         "Our specialist will confirm the rent with you. Would you like to visit our office to go through the options?",
         invited=True,
@@ -274,9 +281,12 @@ class EvalCommandTests(TestCase):
                 text = self.call("--min-pass", "0")
         total = len(leadai_eval.SCENARIOS)
         # As live, what code settles (an opt-out, an automatic reply, a plain
-        # acknowledgement) never reaches the model.
+        # acknowledgement, a deferral) never reaches the model.
         settled = [s.id for s in leadai_eval.SCENARIOS if leadai_eval.code_first(s) is not None]
-        self.assertEqual(sorted(settled), ["away-message", "booked-emoji", "booked-ok-thanks", "stop-all", "wrong-number"])
+        self.assertEqual(
+            sorted(settled),
+            ["away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "stop-all", "wrong-number"],
+        )
         self.assertEqual(model.call_count, total - len(settled))
         system, context = model.call_args_list[0].args[0][:2]
         self.assertEqual(system, {"role": "system", "content": prompt.system_prompt()})

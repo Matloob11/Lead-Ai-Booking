@@ -148,6 +148,78 @@ def drop_invitations(text: str) -> tuple[str, bool]:
     return out, out != (text or "").strip()
 
 
+def is_invitation(text: str) -> bool:
+    """The message asks them to visit or meet us (any of our messages: ours, a colleague's, a campaign's)."""
+    return bool(_INVITATION.search(text or ""))
+
+
+# An exact time of day ("11 AM", "5:30", "kal 5 baje", "الساعة 5"): a slot offered.
+_CLOCK_TIME = re.compile(
+    r"\b\d{1,2}(:[0-5]\d)?\s*(am|pm|a\.m\.|p\.m\.)(?!\w)|\b\d{1,2}:[0-5]\d\b|\b\d{1,2}\s*(baje|bajay|bje)\b"
+    r"|\d{1,2}\s*(بجے|बजे|صباحاً|صباحا|مساءً|مساء)|الساعة\s*\d",
+    re.IGNORECASE,
+)
+
+
+def offers_time(text: str) -> bool:
+    """The message names an exact time ("Would 11 AM or 5 PM work?"), with or without a word of a visit."""
+    return bool(_CLOCK_TIME.search(text or ""))
+
+
+def _plain(text: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", str(text or "").lower()).split())
+
+
+# Words any address has, or that the model writes its own way ("Bldg" for
+# "Building"): they tell no address apart, so they are not looked for.
+_ADDRESS_WORDS = {
+    "building", "bldg", "bld", "shop", "office", "no", "number", "unit", "floor", "flat", "the", "at", "in", "of",
+    "near", "street", "st", "road", "rd", "cluster", "city", "dubai", "uae",
+}
+
+
+def carries_location(text: str, office_address: str, maps_url: str = "") -> bool:
+    """The text holds the office's Maps link or its address: every word that tells the
+    address apart (the cluster's name, the building code, the shop number), in any
+    order, case or punctuation, so "Russia Cluster, Bldg V02/V03, Shop 20" counts.
+    Of an address in three parts or more the last (the city, which the model
+    shortens or moves: "International City, Dubai") is not needed."""
+    if maps_url and maps_url in (text or ""):
+        return True
+    parts = [part for part in (_plain(piece) for piece in str(office_address or "").split(",")) if part]
+    if len(parts) >= 3:
+        parts = parts[:-1]
+    needed = {word for part in parts for word in part.split()} - _ADDRESS_WORDS
+    plain = _plain(text)
+    if needed and all(word.isdigit() for word in needed):
+        # Only numbers tell it apart ("Shop 5, Building 3"): "3 PM or 5 PM" must not count, so each part whole.
+        return all(f" {part} " in f" {plain} " for part in parts)
+    return bool(needed) and needed <= set(plain.split())
+
+
+def drop_location(text: str, office_address: str, maps_url: str = "") -> tuple[str, bool]:
+    """The reply without its sentences that give the office's address again (it went
+    out already); a reply that is nothing else stays whole: a repeat beats no answer."""
+    sentences = [s.strip() for s in _SENTENCE.split(text or "") if s.strip()]
+    kept = [s for s in sentences if not carries_location(s, office_address, maps_url)]
+    if not kept or len(kept) == len(sentences):
+        return (text or "").strip(), False
+    return " ".join(kept), True
+
+
+# The customer asks for the location itself ("send the location", "your address?",
+# "google map"): it goes again, however recently it went. Not "how do I reach
+# there?", which the location already sent answers, nor "pata" (also "know").
+_LOCATION_ASK = re.compile(
+    r"\b(location|locations|address|map|maps|pin|directions?)\b|موقع|عنوان|لوكيشن|لوکیشن|ایڈریس|लोकेशन|एड्रेस",
+    re.IGNORECASE,
+)
+
+
+def asks_for_location(text: str) -> bool:
+    return bool(_LOCATION_ASK.search(text or ""))
+
+
 # Booking texts ------------------------------------------------------------------
 
 CONFIRM = {
@@ -198,24 +270,57 @@ def _lang(language: str, table: dict) -> str:
 
 _NOT_A_NAME = re.compile(r"[\[\]<>{}=/\\@:|*_~`#]")
 _HONORIFICS = {"mr", "mrs", "ms", "miss", "mx", "dr", "sir", "madam", "maam", "mam", "eng", "engr", "prof", "capt"}
+# "Md Sumon" goes by Sumon: these open a name, and the next word is the one used,
+# unless it is a particle: "Mohammed Al Mansouri" is Mohammed, never "Al".
+_NAME_PREFIXES = {"md", "mohd", "muhd", "mhd", "muhammad", "muhammed", "mohammad", "mohammed"}
+_NAME_PARTICLES = {"al", "el", "bin", "ibn", "bint", "abu", "abd", "abdul", "abdel"}
 # What a CRM card or a WhatsApp profile holds when it holds no name.
 _NOT_NAMES = {
     "lead", "client", "customer", "owner", "tenant", "buyer", "landlord", "test", "unknown", "new",
     "shop", "office", "flat", "na", "none", "null", "user", "contact", "whatsapp",
+    # A portal lead's title with no name after it ("Bayut WhatsApp").
+    "bayut", "property", "propertyfinder", "dubizzle", "portal",
+    # The campaign's greeting for a lead with no usable name (crm_leads.lead_display_name).
+    "there",
+    # Alone, an abbreviation or a particle is nobody's name to greet ("Hi Md", "Hi Al").
+    "md", "mohd", "muhd", "mhd", "al", "el", "bin", "ibn", "bint",
 }
+_PHONE_ONLY = re.compile(r"[+\d\s().-]+")
+_A_CALL = re.compile(r"(missed\s+)?call\b", re.IGNORECASE)
+
+
+def person_name(raw: str) -> str:
+    """The person a CRM title names, or ''.
+
+    Portal leads are titled "<source> <channel> | <name>": "Bayut WhatsApp |
+    Md Sumon" is "Md Sumon". What follows the last "|" is the name; nothing,
+    a phone number, a "Missed Call..." or a placeholder ("there", the
+    campaign's greeting for a lead with no name) there names nobody.
+    """
+    text = " ".join(str(raw or "").split())
+    if "|" in text:
+        text = text.rsplit("|", 1)[1].strip()
+    if not text or _A_CALL.match(text) or text.strip(".").casefold() in _NOT_NAMES:
+        return ""
+    if _PHONE_ONLY.fullmatch(text) and sum(ch.isdigit() for ch in text) >= 7:
+        return ""
+    return text
 
 
 def first_name(name: str) -> str:
     """A safe first name: letters only, at most 20 characters, else ''.
 
-    "Mr. Ahmed Khan" gives "Ahmed" and "AHMED KHAN" gives "Ahmed". A word
+    "Mr. Ahmed Khan" gives "Ahmed" and "AHMED KHAN" gives "Ahmed"; "Bayut
+    WhatsApp | Md Sumon" (a portal lead's title) gives "Sumon". A word
     carrying markup or digits is not a name ("[URL=x]Click", a phone number),
     so it is dropped rather than cleaned into something that reads like one;
     so is a placeholder such as "Lead" or "Customer". Emoji and dots are only
     trimmed off.
     """
-    parts = (name or "").split()
+    parts = person_name(name).split()
     while parts and parts[0].strip(".").lower() in _HONORIFICS:
+        parts.pop(0)
+    if len(parts) > 1 and parts[0].strip(".").lower() in _NAME_PREFIXES and parts[1].strip(".").lower() not in _NAME_PARTICLES:
         parts.pop(0)
     first = parts[0] if parts else ""
     if _NOT_A_NAME.search(first):

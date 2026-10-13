@@ -9,7 +9,8 @@ ever holds one-line calls into this module:
 - ``is_lead_ai(conversation)``: Sara and the inbox AI desk stay silent.
 - ``mark_campaign`` / ``before_campaign_send`` / ``recipient_saved``: a
   campaign sent with the popup checkbox puts each chat it reaches here,
-  before its first message is broadcast.
+  before its first message is broadcast; ``mark_campaign`` also takes the
+  script (playbook) the popup chose, which ``playbook_for`` reads per chat.
 - ``move_to_inbox``: the one way back to the main inbox.
 """
 
@@ -25,6 +26,8 @@ from .models import LeadAiCampaign, LeadAiChat
 logger = logging.getLogger(__name__)
 
 EVENT_PREFIX = "leadai."
+GENERAL = LeadAiCampaign.Playbook.GENERAL
+IC_SHOPS = LeadAiCampaign.Playbook.IC_SHOPS
 
 
 def _digits(raw) -> str:
@@ -121,26 +124,83 @@ def event_name(conversation, event: str) -> str:
 # Campaigns -----------------------------------------------------------------
 
 
-def mark_campaign(campaign) -> LeadAiCampaign:
-    row, _ = LeadAiCampaign.objects.get_or_create(campaign=campaign)
+def playbook_value(value) -> str:
+    """A playbook the assistant knows; anything else is general."""
+    return value if value in LeadAiCampaign.Playbook.values else GENERAL
+
+
+def mark_campaign(campaign, playbook: str | None = None) -> LeadAiCampaign:
+    """Make a campaign a Lead AI campaign whose chats follow ``playbook``.
+
+    Not given, it is general (as is an unknown value). A campaign marked
+    already keeps its playbook unless one is passed.
+    """
+    chosen = playbook_value(playbook)
+    row, created = LeadAiCampaign.objects.get_or_create(campaign=campaign, defaults={"playbook": chosen})
+    if not created and playbook is not None and row.playbook != chosen:
+        row.playbook = chosen
+        row.save(update_fields=["playbook"])
     return row
 
 
-def is_lead_ai_campaign(campaign) -> bool:
+def _campaign_row(campaign) -> LeadAiCampaign | None:
     if campaign is None or not getattr(campaign, "pk", None):
-        return False
+        return None
     try:
         with transaction.atomic():
-            return LeadAiCampaign.objects.filter(campaign_id=campaign.pk).exists()
+            return LeadAiCampaign.objects.filter(campaign_id=campaign.pk).first()
     except DatabaseError:
         logger.exception("Lead AI campaign lookup failed for campaign %s", campaign.pk)
-        return False
+        return None
+
+
+def is_lead_ai_campaign(campaign) -> bool:
+    return _campaign_row(campaign) is not None
 
 
 def inherit_campaign(source, target) -> None:
-    """A retry of a Lead AI campaign ("resend skipped") is a Lead AI campaign too."""
-    if is_lead_ai_campaign(source):
-        mark_campaign(target)
+    """A retry of a Lead AI campaign ("resend skipped") is a Lead AI campaign too, with its playbook."""
+    row = _campaign_row(source)
+    if row is not None:
+        mark_campaign(target, playbook=row.playbook)
+
+
+def playbooks(conversation_ids) -> dict:
+    """{conversation id: playbook} for those of these chats that are on the Lead AI
+    screen: two queries for a whole page of the list.
+
+    The newest Lead AI campaign that reached the chat decides, so a shop
+    campaign sent to a chat an older campaign put here switches it to the shop
+    script; a chat with no such send on record follows the campaign that put
+    it here.
+    """
+    from apps.campaigns.models import CampaignRecipient
+
+    ids = [int(pk) for pk in conversation_ids if pk]
+    if not ids:
+        return {}
+    out = {
+        conversation_id: playbook_value(value)
+        for conversation_id, value in LeadAiChat.objects.filter(conversation_id__in=ids, active=True).values_list(
+            "conversation_id", "campaign__lead_ai__playbook"
+        )
+    }
+    if out:
+        sends = (
+            CampaignRecipient.objects.filter(conversation_id__in=list(out), campaign__lead_ai__isnull=False)
+            .order_by("pk")
+            .values_list("conversation_id", "campaign__lead_ai__playbook")
+        )
+        for conversation_id, value in sends:  # oldest first: the newest is the one kept
+            out[conversation_id] = playbook_value(value)
+    return out
+
+
+def playbook_for(conversation) -> str:
+    """The script the assistant follows in this chat; general when it is not a Lead AI chat."""
+    if conversation is None or not getattr(conversation, "pk", None):
+        return GENERAL
+    return playbooks([conversation.pk]).get(conversation.pk, GENERAL)
 
 
 def _owner_data_chosen(campaign) -> bool:

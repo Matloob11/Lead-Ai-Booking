@@ -156,6 +156,44 @@
   color: #8696aa;
 }
 
+/* "Brokers": only the chats the assistant labelled Broker. */
+.lai-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lai-filters[hidden] {
+  display: none;
+}
+
+.lai-filter {
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: transparent;
+  color: #c9d6e6;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.lai-filter:hover {
+  background: rgb(255 255 255 / 6%);
+}
+
+.lai-filter.is-on {
+  background: rgb(217 119 6 / 28%);
+  border-color: rgb(217 119 6 / 70%);
+  color: #fde68a;
+}
+
+.lai-filter:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
 /* --------------------------------------------------------------- list */
 
 .lai-list {
@@ -313,6 +351,44 @@
 .lai-row__ai--handed_over {
   background: rgb(37 99 235 / 28%);
   color: #bfdbfe;
+}
+
+/* A chat's inbox labels (a broker's chat carries "Broker") and, for a shops
+   campaign, its script. --lai-chip is the label's own colour when it has one. */
+.lai-row__chips,
+.lai-thread__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.lai-chip {
+  --lai-chip: #94a3b8;
+  display: inline-block;
+  max-width: 140px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgb(148 163 184 / 45%);
+  border-color: color-mix(in srgb, var(--lai-chip) 60%, transparent);
+  background: rgb(148 163 184 / 18%);
+  background: color-mix(in srgb, var(--lai-chip) 24%, transparent);
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-chip--playbook {
+  --lai-chip: #c8a34a;
+  color: #fde68a;
+}
+
+.lai-chip--more {
+  color: #9fb0c4;
 }
 
 /* Read by screen readers, not drawn. */

@@ -12,7 +12,9 @@ start (status 2) when LEADAI_OPENAI_API_KEY is not set.
 
 Each scenario is a chat as this account has them: the International City shop
 offer, an owner asked when "my client" can view their unit, an owner listing
-follow-up, a renewal notice, a job-interview invitation. It becomes the very
+follow-up, a renewal notice, a job-interview invitation, and what the first
+real chat (conversation 35283) got wrong: the address, a deferral, a bare
+"Yes". It becomes the very
 user message a live turn builds (prompt.context_message, with conversation
 lines written the way transcript.line writes them) and goes through
 engine.ask_model, so the booking check and its one corrective retry run
@@ -450,6 +452,48 @@ def offers_seven() -> Check:
     return _check("reply", test)
 
 
+def offers_choice(minimum: int = 2) -> Check:
+    """Exact times to pick from (two or three), not an open "when would you like to come?"."""
+
+    def test(run):
+        if not run.reply:
+            return None
+        found = len(set(offered_times(run.reply)))
+        return None if found >= minimum else f"offers {found} exact time(s), expected at least {minimum}"
+
+    return _check("reply", test)
+
+
+def sends_line(kind: str) -> Check:
+    """What goes out is code's fixed line ``kind`` (rules.LINES), in the answer's language."""
+
+    def test(run):
+        expected = rules.line(kind, run.answer["language"])
+        return None if run.out == expected else f'sends "{_short(run.out, 60)}", expected the {kind} line'
+
+    return _check("send", test)
+
+
+def sends_location() -> Check:
+    """Asked where we are: what goes out carries the office address, typed or added by code."""
+
+    def test(run):
+        return None if filters.carries_location(run.out, ADDRESS) else "does not give the office's location"
+
+    return _check("location", test)
+
+
+def address_once() -> Check:
+    """The office address goes out once per chat: never again once one of our lines gave it."""
+
+    def test(run):
+        if run.out_by == MODEL and run.location_sent and filters.carries_location(run.out, ADDRESS):
+            return "repeats the office address the chat already has"
+        return None
+
+    return _check("reply", test)
+
+
 # Urdu letters that Arabic does not use, by their Unicode names after "ARABIC LETTER ".
 URDU_ONLY = ("TTEH", "DDAL", "RREH", "NOON GHUNNA", "YEH BARREE", "HEH GOAL", "HEH DOACHASHMEE")
 
@@ -486,6 +530,17 @@ def gloss() -> Check:
         if not run.reply or run.answer["reply_en"].strip():
             return None
         return "reply_en is empty, so the agents cannot read the reply"
+
+    return _check("reply", test)
+
+
+def no_gloss() -> Check:
+    """An English reply needs no English gloss: reply_en stays empty (it showed under every English reply)."""
+
+    def test(run):
+        if not run.reply or run.answer["language"] != "en" or not run.answer["reply_en"].strip():
+            return None
+        return f'reply_en is set for an English reply: "{_short(run.answer["reply_en"], 60)}"'
 
     return _check("reply", test)
 
@@ -583,7 +638,10 @@ def no_stock_phrase() -> Check:
     return _check("reply", test)
 
 
-REPLY_CHECKS = (untouched(), safe(), one_question(), short_enough(), no_emoji(), no_stock_phrase())
+REPLY_CHECKS = (untouched(), safe(), one_question(), short_enough(), no_emoji(), no_stock_phrase(), address_once())
+# Reported, never counted against the pass rate: the engine already holds them
+# (it stores no reply_en for an English reply), so nothing wrong would go out.
+REPLY_NOTES = (no_gloss(),)
 
 OPEN_DAYS = r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|tomorrow)\b|another day|other day"
 INVITE_WORDS = r"\b(?:visit|come (?:to|by|over|in)|meet (?:our|with|the)|stop by|drop by)\b"
@@ -669,6 +727,21 @@ def tapped_on_reminder(label: str, start: dt.datetime) -> str:
 
 BOOKED_TUESDAY = SHOP_INVITED + [("customer", "Tomorrow 5pm"), ("assistant", confirmed(at(13, 17)))]
 TUESDAY_5PM = {"status": "confirmed", "starts_at": at(13, 17)}
+# The first real chat (conversation 35283): invited, "International city." and "Yes", then times offered.
+AGREED_TIMES = SHOP_INVITED + [
+    ("customer", "International city."),
+    ("customer", "Yes"),
+    ("assistant", "Great. Would 11 AM, 2 PM or 5 PM tomorrow work for you?"),
+]
+# The address already went out, with the invitation the customer now answers.
+LOCATION_SENT = [
+    TAPPED_INTERESTED,
+    ASK_ACTIVITY,
+    ACTIVITY,
+    ASK_LICENCE,
+    ("customer", "Yes licence is ready. I need around 400 sq ft. Where is your office?"),
+    ("assistant", f"Our office is here:\n{ADDRESS}\nWould you like to visit us to go through the shop options?"),
+]
 
 SCENARIOS = [
     # A commercial tenant answers the International City shop offer ----------------------------
@@ -799,6 +872,64 @@ SCENARIOS = [
         closed=("2026-10-13",),
         new=["Tomorrow 5pm"],
         expect=[no_booking(), first_try(), says(r"closed|holiday|not open", "say tomorrow is closed")],
+    ),
+    # What the first real chat (conversation 35283, 2026-10-12) got wrong ---------------------------
+    Scenario(
+        "location-request",
+        "'where is your office?': the office's address goes out",
+        chat=SHOP_INVITED,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["Where is your office exactly? Please send the location"],
+        expect=[sends_location()],
+    ),
+    Scenario(
+        "location-again",
+        "the address went out already: it is not sent again, the reply points to it",
+        chat=SHOP_INVITED + [("customer", "Where is your office?"), ("assistant", f"Our office is here:\n{ADDRESS}")],
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["How do I reach there?"],
+        expect=[says(r"\b(above|earlier|already|shared|sent)\b", "point to the location already sent")],
+    ),
+    Scenario(
+        "yes-to-invite",
+        "a bare 'Yes' to the invitation: two or three exact times, no new invitation, no address again",
+        chat=LOCATION_SENT,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["Yes"],
+        expect=[no_booking(), first_try(), invited(False), offers_choice(2)],
+    ),
+    Scenario(
+        "yes-to-slot",
+        "a bare 'Yes' to the one exact slot we proposed is a booking, not a reason to offer times again",
+        chat=SHOP_INVITED + [("customer", "Tomorrow"), ("assistant", "Would tomorrow at 5 PM work for you to visit our office?")],
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["Yes"],
+        expect=[books("2026-10-13", "17:00")],
+        words=CODE,
+    ),
+    Scenario(
+        "defer-message",
+        "'I will message you' after the times offered: tentative, the fixed line, no times again",
+        chat=AGREED_TIMES,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["I will message you"],
+        expect=[action("tentative"), place("office"), invited(False), sends_line("let_me_know")],
+        words=CODE,
+    ),
+    Scenario(
+        "defer-massage",
+        "'I will massage you' (the first real chat's typo for message) is the same deferral",
+        chat=AGREED_TIMES,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["I will massage you"],
+        expect=[action("tentative"), place("office"), invited(False), sends_line("let_me_know")],
+        words=CODE,
     ),
     # Questions a shop enquiry asks ------------------------------------------------------------------
     Scenario(
@@ -1228,6 +1359,50 @@ class Built:
     context: str
     appointment: LeadAiAppointment | None
     context_words: str  # what engine passes filters.clean_reply as the chat's own words
+    location_sent: bool = False  # as engine.location_sent: one of our lines gave the address
+
+
+def our_last(scenario: Scenario) -> str:
+    """Our side's newest line, as engine._last_outbound reads it: the campaign's when none followed."""
+    ours = [item[1] for item in scenario.chat if item[0] in ("assistant", "agent", "campaign", "reminder")]
+    if ours:
+        return ours[-1]
+    body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
+    return body + (f" [buttons: {' | '.join(scenario.campaign.buttons)}]" if scenario.campaign.buttons else "")
+
+
+def location_already_sent(scenario: Scenario) -> bool:
+    """As engine._run_claimed: one of our own lines (a reply, a booking, a reminder) gave
+    the address within engine.LOCATION_FRESH, and the customer does not ask for it."""
+    if filters.asks_for_location(" ".join(scenario.new)):
+        return False
+    since = scenario.now - engine.LOCATION_FRESH
+    return any(
+        item[0] in ("assistant", "reminder") and moment >= since and filters.carries_location(item[1], ADDRESS)
+        for item, moment in zip(scenario.chat, chat_times(scenario))
+    )
+
+
+def agreed(scenario: Scenario) -> bool:
+    """As engine._run_claimed: a visit is open, or the burst is a plain yes to our invitation."""
+    return engine.agreed_to_come(
+        visit_open=(scenario.appointment or {}).get("status") in ("tentative", "confirmed"),
+        our_last=our_last(scenario),
+        texts=[text for text in scenario.new if text != "[sticker]"],
+    )
+
+
+def open_appointment(scenario: Scenario) -> LeadAiAppointment | None:
+    """The scenario's open appointment, built and never saved."""
+    if scenario.appointment is None:
+        return None
+    return LeadAiAppointment(**{"place": LeadAiAppointment.Place.OFFICE, **scenario.appointment})
+
+
+def visit_offered(scenario: Scenario) -> bool:
+    """As engine._run_claimed: our side's last three lines (ours or a colleague's) invited them or offered times."""
+    ours = [item[1] for item in scenario.chat if item[0] in ("assistant", "agent")]
+    return engine.visit_offered(" ".join(ours[-3:]))
 
 
 def line(who: str, moment: dt.datetime, text: str) -> str:
@@ -1260,12 +1435,11 @@ def build(scenario: Scenario) -> Built:
     new_lines = [
         line("customer", scenario.now - dt.timedelta(seconds=60 - 10 * index), text) for index, text in enumerate(scenario.new)
     ]
-    appointment = None
-    if scenario.appointment is not None:
-        appointment = LeadAiAppointment(**{"place": LeadAiAppointment.Place.OFFICE, **scenario.appointment})  # never saved
+    appointment = open_appointment(scenario)
     events = []
     if appointment is not None and appointment.customer_state:
         events.append(f"The customer told us: {appointment.get_customer_state_display().lower()}.")
+    location = location_already_sent(scenario)
     context = prompt.context_message(
         now=scenario.now,
         closed_dates=list(scenario.closed),
@@ -1283,11 +1457,12 @@ def build(scenario: Scenario) -> Built:
         # A live turn's conversation already holds the new messages, and so does this one.
         conversation=conversation + new_lines,
         new_lines=new_lines,
+        location_sent=location,
     )
     # As engine._context_words: what the customer, the campaign and colleagues wrote, never the assistant.
     colleagues = [item[1] for item in scenario.chat if item[0] in ("customer", "agent")]
     context_words = " ".join([body, *colleagues, *scenario.new, json.dumps(scenario.facts, ensure_ascii=False)])
-    return Built(context, appointment, context_words)
+    return Built(context, appointment, context_words, location)
 
 
 _TAP = re.compile(r"^\[tapped: (.+)\]$")
@@ -1297,7 +1472,8 @@ def code_first(scenario: Scenario) -> dict | None:
     """The answer when engine._run_claimed settles the turn without the model, else None.
 
     As live: an opt-out as the last thing the customer said, an automatic reply,
-    or only acknowledgements with no question of ours pending never reach OpenAI.
+    only acknowledgements with no question of ours pending, or a deferral of a
+    visit we offered ("I will message you") never reach OpenAI.
     """
     texts = list(scenario.new)
     said = [text for text in texts if not rules.is_acknowledgement(text)]
@@ -1323,6 +1499,16 @@ def code_first(scenario: Scenario) -> dict | None:
         pending = bool(scenario.campaign.buttons) or rules.asks_question(scenario.campaign.body)
     if not said and (all(text == "[sticker]" for text in texts) or not pending):
         return silent
+    appointment = open_appointment(scenario)
+    words = engine.deferral(
+        said,
+        appointment=appointment,
+        offered=visit_offered(scenario),
+        invites=scenario.invites,
+        quiet=scenario.handed_over != "no" or scenario.not_interested,
+    )
+    if words:
+        return engine.deferral_answer(words, rules.guess_language(words), appointment)
     return None
 
 
@@ -1344,9 +1530,11 @@ class Run:
     out: str = ""  # what the customer would receive
     out_by: str = ""  # MODEL, CODE, or "" when nothing would go out
     context_words: str = ""
+    location_sent: bool = False  # the chat already had the office's address from us
     error: str = ""
     openai_failed: bool = False
     failures: list = field(default_factory=list)
+    notes: list = field(default_factory=list)  # REPLY_NOTES that did not hold: shown, not failed
     calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -1388,19 +1576,25 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     if scenario.handed_over != "no":
         return CODE, rules.line("holding", lang)  # live: at most one holding line every two hours
     if answer.get("converted"):
-        return CODE, rules.line(answer["converted"], lang)  # engine._shape: never the model's "confirmed"
+        # engine._shape (never the model's "confirmed"), a deferral, a shops broker: a fixed line.
+        return CODE, rules.line(answer["converted"], lang)
+    by, text = "", ""
     if answer["send"]:
         run.reply, run.removed = filters.clean_reply(answer["reply"], built.context_words)
         if run.reply:
-            return MODEL, run.reply
-        if "amount" in run.removed:
-            return CODE, rules.line("deflect", lang)
-    fallback = {"reschedule_requested": "ask_new_time", "running_late": "ask_eta"}.get(action)
-    if fallback:
-        return CODE, rules.line(fallback, lang)
-    if answer["handover"]["needed"]:
-        return CODE, rules.line("holding", lang)
-    return "", ""
+            by, text = MODEL, run.reply
+        elif "amount" in run.removed:
+            by, text = CODE, rules.line("deflect", lang)
+    if not text:
+        fallback = {"reschedule_requested": "ask_new_time", "running_late": "ask_eta"}.get(action)
+        if fallback:
+            by, text = CODE, rules.line(fallback, lang)
+        elif answer["handover"]["needed"]:
+            by, text = CODE, rules.line("holding", lang)
+    if text and answer["share_office_location"] and not built.location_sent and not filters.carries_location(text, ADDRESS):
+        # As engine._run_claimed: the address (the eval sets no Maps link) once per chat.
+        text = f"{text}\n{ADDRESS}"
+    return by, text
 
 
 def checks_for(scenario: Scenario) -> list:
@@ -1428,6 +1622,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
     try:
         built = build(scenario)
         run.context_words = built.context_words
+        run.location_sent = built.location_sent
         settled = code_first(scenario)
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
@@ -1436,9 +1631,18 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 prompt.system_prompt(), built.context, built.appointment, scenario.now, list(scenario.closed), user=SAFETY_ID,
                 codes=run.codes,
             )
+        if settled is None or settled.get("converted"):
+            # As live, code settles the model's answer, and the deferral rule's (its other rules end the turn).
             body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
             earlier = [("campaign", body)] + [(item[0], item[1]) for item in scenario.chat]
-            engine.settle(answer, earlier, list(scenario.new), scenario.invites)
+            engine.settle(
+                answer,
+                earlier,
+                list(scenario.new),
+                scenario.invites,
+                agreed=agreed(scenario),
+                address_sent=ADDRESS if built.location_sent else "",
+            )
         run.calls = len(completions)
         run.prompt_tokens = sum(c.prompt_tokens for c in completions)
         run.completion_tokens = sum(c.completion_tokens for c in completions)
@@ -1447,6 +1651,8 @@ def run_once(scenario: Scenario, label: str) -> Run:
         run.action = engine.effective_action(answer["appointment"]["action"], built.appointment)
         run.out_by, run.out = outgoing(run, built)
         run.failures = [reason for check in checks_for(scenario) if (reason := check(run))]
+        if scenario.words in (MODEL, EITHER):
+            run.notes = [reason for check in REPLY_NOTES if (reason := check(run))]
     except openai_client.AssistantError as exc:
         run.openai_failed = True
         run.error = f"OpenAI error {exc.code}" + (f" ({exc.detail})" if exc.detail else "")
@@ -1580,6 +1786,8 @@ class Command(BaseCommand):
             self.stdout.write(f"     filtered:  {', '.join(run.removed)}")
         if run.rejected:
             self.stdout.write(f"     corrected: {run.rejected}")
+        if run.notes:
+            self.stdout.write(f"     note:      {'; '.join(run.notes)} (not counted)")
 
     def _summary(self, runs: list, repeat: int, seconds: float, min_pass: float) -> None:
         total = len(runs)
@@ -1594,6 +1802,11 @@ class Command(BaseCommand):
             unsteady = [f"{key} {sum(v)}/{len(v)}" for key, v in by_id.items() if 0 < sum(v) < len(v)]
             if unsteady:
                 self.stdout.write("passed only some repeats: " + ", ".join(unsteady))
+        noted = [run for run in runs if run.notes]
+        if noted:
+            self.stdout.write(
+                f"noted, not counted (the engine holds these): {len(noted)} run(s), e.g. {noted[0].label}: {noted[0].notes[0]}"
+            )
         calls = sum(run.calls for run in runs)
         tokens_in = sum(run.prompt_tokens for run in runs)
         tokens_out = sum(run.completion_tokens for run in runs)

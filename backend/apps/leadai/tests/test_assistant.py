@@ -273,7 +273,9 @@ class SchemaTests(TestCase):
                 self.assertIn(None, node["enum"])
 
         walk(schema.SCHEMA)
-        self.assertEqual(list(schema.SCHEMA["properties"])[-1], "reply")
+        # Every decision before the words, and the English gloss after the reply it translates.
+        self.assertEqual(list(schema.SCHEMA["properties"])[-2:], ["reply", "reply_en"])
+        self.assertEqual(schema.SCHEMA["required"][-2:], ["reply", "reply_en"])
 
     def test_normalize_cleans_and_bounds(self):
         out = schema.normalize(

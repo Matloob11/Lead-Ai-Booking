@@ -3,7 +3,10 @@ appointment, the assistant's settings, and the way back to the main inbox.
 
 Messages, sending, media and read receipts reuse the inbox endpoints
 (/api/inbox/conversations/<id>/...): those check visibility by thread, not by
-list, so a Lead AI chat opens and answers there like any other.
+list, so a Lead AI chat opens and answers there like any other. A row carries
+the chat's labels (the inbox's own field) and its playbook, and the list
+filters by label (?label=Broker: the chats the assistant handed over as a
+broker's).
 
 Permissions: anyone who can open a chat may pause, resume or cancel its
 meeting. Settings: every agent may read them (the test numbers, which are
@@ -32,8 +35,8 @@ from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
 from .assistant import hours, openai_client
-from .lane import move_to_inbox, only_lead_ai
-from .models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
+from .lane import GENERAL, move_to_inbox, only_lead_ai, playbooks
+from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
 OPEN_STATUSES = LeadAiAppointment.OPEN
 # Google Maps links only: a share link, or Google's own host with a /maps path.
@@ -42,6 +45,9 @@ MAPS_PATH_ONLY = ("goo.gl", "google.com", "www.google.com", "google.ae", "www.go
 MAPS_URL_MAX = 500
 # A turn this recent and still running: the assistant is writing in that chat.
 THINKING_FOR = dt.timedelta(minutes=3)
+# Bitrix users the settings may name for the alerts (alert_bitrix_user_ids).
+ALERT_USERS_MAX = 10
+LABEL_MAX = 64
 
 
 def _visible(user):
@@ -199,7 +205,7 @@ def serialize_ai(conversation, settings_row=None, *, thinking=None, note=None) -
     }
 
 
-def _lead_ai_part(chat: LeadAiChat) -> dict:
+def _lead_ai_part(chat: LeadAiChat, playbook: str = GENERAL) -> dict:
     added_by = chat.added_by
     return {
         "campaign_id": chat.campaign_id,
@@ -209,15 +215,23 @@ def _lead_ai_part(chat: LeadAiChat) -> dict:
         "added_by": (added_by.display_name or added_by.get_username()) if added_by else "",
         "added_at": chat.created_at.isoformat() if chat.created_at else "",
         "confirmed": chat.confirmed,
+        # The script the assistant follows here (lane.playbook_for).
+        "playbook": playbook,
+        "playbook_label": LeadAiCampaign.Playbook(playbook).label,
     }
 
 
-def serialize_lead_ai_conversation(conversation, settings_row=None, *, thinking=None, note=None) -> dict:
-    """The inbox's own shape (with its lead_ai flag), plus where the chat came from,
-    the assistant's state and the open appointment."""
+def serialize_lead_ai_conversation(conversation, settings_row=None, *, thinking=None, note=None, playbook=None) -> dict:
+    """The inbox's own shape (with its lead_ai flag and labels), plus where the chat
+    came from and its playbook, the assistant's state and the open appointment.
+
+    ``playbook`` may be worked out once for a whole list (lane.playbooks).
+    """
     row = serialize_conversation(conversation)
     chat = getattr(conversation, "lead_ai_chat", None)
-    row["lead_ai_info"] = _lead_ai_part(chat) if chat is not None else None
+    if playbook is None:
+        playbook = playbooks([conversation.pk]).get(conversation.pk, GENERAL)
+    row["lead_ai_info"] = _lead_ai_part(chat, playbook) if chat is not None else None
     row["lead_ai_ai"] = serialize_ai(conversation, settings_row, thinking=thinking, note=note)
     row["lead_ai_appointment"] = serialize_appointment(_open_appointment(conversation))
     return row
@@ -251,6 +265,13 @@ def chat_list(request):
     if request.GET.get("unread") == "1":
         queryset = queryset.filter(unread_count__gt=0)
 
+    # ?label=Broker: only the chats carrying that label (the panel's "Brokers"), in any case.
+    label = request.GET.get("label", "").strip()
+    if label:
+        if len(label) > LABEL_MAX:
+            return Response({"detail": f"label is at most {LABEL_MAX} characters."}, status=status.HTTP_400_BAD_REQUEST)
+        queryset = queryset.filter(labels__name__iexact=label)
+
     queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
     try:
         limit = min(max(int(request.GET.get("limit", 50)), 1), 200)
@@ -263,12 +284,16 @@ def chat_list(request):
     page = list(queryset[offset : offset + limit])
     thinking = _thinking(c.pk for c in page)
     note = _silent_note(settings_row) if page else ""
+    scripts = playbooks(c.pk for c in page)
     return Response(
         {
             "count": total,
             "unread_chats": unread,
             "results": [
-                serialize_lead_ai_conversation(c, settings_row, thinking=c.pk in thinking, note=note) for c in page
+                serialize_lead_ai_conversation(
+                    c, settings_row, thinking=c.pk in thinking, note=note, playbook=scripts.get(c.pk, GENERAL)
+                )
+                for c in page
             ],
         }
     )
@@ -365,8 +390,12 @@ def _can_disable(user) -> bool:
 
 
 def _missing_templates() -> list[str]:
-    """Active assigned numbers whose WABA has no approved reminder template yet."""
-    from apps.catalog.models import NumberAssignment, WaTemplate
+    """Active numbers, with an agent or not, whose WABA has no approved reminder template yet.
+
+    Every active number, as the template is submitted (submit_leadai_reminder_template):
+    the Lead AI campaigns go out from numbers nobody is assigned to.
+    """
+    from apps.catalog.models import WabaNumber, WaTemplate
 
     from .assistant.reminders import TEMPLATE_NAME
 
@@ -376,12 +405,27 @@ def _missing_templates() -> list[str]:
         )
     )
     missing = set()
-    for phone, waba in NumberAssignment.objects.filter(is_active=True, number__is_active=True).values_list(
-        "number__phone_number", "number__waba_business_id"
-    ):
+    for phone, waba in WabaNumber.objects.filter(is_active=True).values_list("phone_number", "waba_business_id"):
         if waba and waba not in approved:
             missing.add(phone)
     return sorted(missing)
+
+
+def _alert_recipients(row: LeadAiSettings) -> list[dict]:
+    """The listed Bitrix users with the agent each one is, so a typo shows (no agent: no alert)."""
+    from django.contrib.auth import get_user_model
+
+    ids = row.alert_user_ids()
+    if not ids:
+        return []
+    agents = {agent.bitrix_user_id: agent for agent in get_user_model().objects.filter(is_active=True, bitrix_user_id__in=ids)}
+    return [
+        {
+            "bitrix_user_id": value,
+            "name": (agents[value].display_name or agents[value].get_username()) if value in agents else "",
+        }
+        for value in ids
+    ]
 
 
 def serialize_settings(row: LeadAiSettings, user) -> dict:
@@ -397,6 +441,8 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "office_longitude": str(row.office_longitude) if row.office_longitude is not None else "",
         "hours": hours.HOURS_TEXT,
         "daily_call_limit": row.daily_call_limit,
+        "alert_bitrix_user_ids": row.alert_user_ids(),
+        "alert_recipients": _alert_recipients(row),
         "paused_until": _iso(row.paused_until),
         "last_sweep_at": _iso(row.last_sweep_at),
         "updated_at": _iso(row.updated_at),
@@ -487,6 +533,24 @@ def _numbers(value) -> tuple[list[str], str]:
             if number not in out:
                 out.append(number)
     return out[:50], ""
+
+
+def _bitrix_ids(value) -> tuple[list[str], str]:
+    """Bitrix user ids (digits only, at most ALERT_USERS_MAX) from a list or from
+    text separated by commas, semicolons, spaces or lines, or ([], why not)."""
+    raw = value if isinstance(value, list) else re.split(r"[\s,;]+", str(value or ""))
+    out = []
+    for item in raw:
+        text = str(item).strip()
+        if not text:
+            continue
+        if not re.fullmatch(r"[0-9]{1,16}", text):
+            return [], f"'{text[:40]}' is not a Bitrix user id: use digits only, e.g. 2311."
+        if text not in out:
+            out.append(text)
+    if len(out) > ALERT_USERS_MAX:
+        return [], f"Give at most {ALERT_USERS_MAX} Bitrix user ids."
+    return out, ""
 
 
 def _maps_url_error(url: str) -> str:
@@ -602,6 +666,12 @@ def assistant_settings(request):
             errors["daily_call_limit"] = "Give a number from 0 to 20000."
         else:
             change("daily_call_limit", limit)
+    if "alert_bitrix_user_ids" in data:
+        ids, error = _bitrix_ids(data.get("alert_bitrix_user_ids"))
+        if error:
+            errors["alert_bitrix_user_ids"] = error
+        else:
+            change("alert_bitrix_user_ids", ids)
     if errors:
         return Response({"detail": "Some values are not valid.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
     if changes:

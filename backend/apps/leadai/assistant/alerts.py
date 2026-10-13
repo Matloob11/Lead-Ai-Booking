@@ -1,8 +1,11 @@
 """Heads-ups for the agents who own a Lead AI customer (owner's rules 54-56, 60).
 
 Who: the chat's owner (who sent the campaign and can open the chat) AND the
-CRM record's responsible person (owner's choice), each once. System alerts
-(OpenAI down, no credit, daily ceiling) go to the panel admins.
+CRM record's responsible person (owner's choice), each once. Bookings and
+the other appointment events, handovers (a broker among them) and messages
+nobody answered also reach every active agent whose Bitrix id the Lead AI
+settings list (owner's choice 2026-10-13: Matloob). System alerts (OpenAI
+down, no credit, daily ceiling) go to the panel admins.
 
 How (owner's choice): the WhatsApp panel, as a live ``leadai.alert`` to an
 agent who can open the chat, and Bitrix, as a notification with mobile push
@@ -39,6 +42,14 @@ PANEL_PATH = "/marketplace/app/76/"
 # they never get a Bitrix notification (an agent linked to one still gets the
 # panel toast).
 HOLD_USERS = {"", "0", "1"}
+# The alerts the listed Bitrix users get as well (LeadAiSettings.alert_bitrix_user_ids).
+# The rest (a fault, a cap, a failed send) stay with the chat's own people.
+LISTED_KINDS = frozenset(
+    {
+        "booked", "hot_lead", "tentative", "rescheduled", "cancelled", "on_my_way", "running_late",
+        "reschedule_requested", "handover", "stale",
+    }
+)
 
 CRM_PATHS = {
     "lead": "/crm/lead/details/{id}/",
@@ -63,8 +74,9 @@ def _bitrix_target(bitrix_user_id) -> str:
     return "" if bitrix_id in HOLD_USERS else bitrix_id
 
 
-def recipients(conversation) -> list:
-    """[(agent or None, bitrix_user_id)]: the chat owner, then the CRM responsible if different."""
+def recipients(conversation, *, listed: bool = False) -> list:
+    """[(agent or None, bitrix_user_id)]: the chat owner, then the CRM responsible if
+    different, then (``listed``) each agent the settings list who is neither."""
     out = []
     owner = conversation.assigned_agent
     if owner is not None:
@@ -77,7 +89,26 @@ def recipients(conversation) -> list:
             known = {a.pk for a, _ in out if a is not None} | {b for _, b in out if b}
             if (agent is None or agent.pk not in known) and bitrix_id not in known:
                 out.append((agent, bitrix_id))
+    if listed:
+        for agent in listed_agents():
+            target = _bitrix_target(agent.bitrix_user_id)
+            # One row per person: the owner or the responsible already has it.
+            if any(a is not None and a.pk == agent.pk for a, _ in out) or (target and target in {b for _, b in out}):
+                continue
+            out.append((agent, target))
     return out
+
+
+def listed_agents() -> list:
+    """The active agents whose Bitrix ids the Lead AI settings list (an id with no agent is nobody)."""
+    from django.contrib.auth import get_user_model
+
+    from ..models import LeadAiSettings
+
+    ids = LeadAiSettings.load().alert_user_ids()
+    if not ids:
+        return []
+    return list(get_user_model().objects.filter(is_active=True, bitrix_user_id__in=ids).order_by("pk"))
 
 
 def admin_recipients() -> list:
@@ -106,7 +137,7 @@ def raise_alert(
     from ..tasks import deliver_alert
 
     base = (dedupe_key or f"{kind}:{conversation.pk}:{timezone.now():%Y%m%d%H%M%S%f}")[:180]
-    targets = admin_recipients() if admins else recipients(conversation)
+    targets = admin_recipients() if admins else recipients(conversation, listed=kind in LISTED_KINDS)
     created = []
     for agent, bitrix_id in targets:
         who = f"a{agent.pk}" if agent is not None else f"b{bitrix_id}"

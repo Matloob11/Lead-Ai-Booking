@@ -322,6 +322,21 @@ class SettingsApiTests(Base):
             call_command("leadai_switch", "test-numbers", "0501234567", stdout=StringIO())
         self.assertEqual(LeadAiSettings.load().test_numbers, ["971501234567"])
 
+    def test_the_server_switch_sets_the_alert_ids_like_the_dialog(self):
+        out = StringIO()
+        call_command("leadai_switch", "alert-ids", "2311", "2311", "4242", stdout=out)
+        row = LeadAiSettings.load()
+        self.assertEqual(row.alert_bitrix_user_ids, ["2311", "4242"])
+        self.assertIn("alert_ids=2311,4242", out.getvalue())
+        self.assertEqual(row.history[-1]["changes"]["alert_bitrix_user_ids"][1], "['2311', '4242']")
+        for bad in (["23a1"], ["-1"], [str(n) for n in range(11)]):
+            with self.subTest(bad):
+                with self.assertRaises(CommandError):
+                    call_command("leadai_switch", "alert-ids", *bad, stdout=StringIO())
+        self.assertEqual(LeadAiSettings.load().alert_bitrix_user_ids, ["2311", "4242"])
+        call_command("leadai_switch", "alert-ids", stdout=StringIO())
+        self.assertEqual(LeadAiSettings.load().alert_bitrix_user_ids, [])
+
     def test_a_coordinate_that_is_not_a_number_is_a_400(self):
         self.client.force_login(self.admin)
         self.client.raise_request_exception = False

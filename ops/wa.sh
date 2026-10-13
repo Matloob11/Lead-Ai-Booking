@@ -84,6 +84,7 @@
 #   ops/wa.sh submit-leadai-reminder-template [--dry-run]  Lead AI meeting reminder to every active assigned WABA
 #   ops/wa.sh leadai-switch on|off|status   the Lead AI assistant's switch
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
+#   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh qr-disable                  stop OpenWA + wa-qr; keep files; no autostart
 #   ops/wa.sh qr-status                   OpenWA + wa-qr: state, restart policy, data on disk
 #   ops/wa.sh load                        host load, RAM, disk, top containers
@@ -1405,6 +1406,15 @@ case "$cmd" in
       [[ "$n" =~ ^[0-9]{8,15}$ ]] || die "'$n' is not a phone number with country code (digits only)"
     done
     remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch test-numbers $*"
+    ;;
+
+  leadai-alert-ids)
+    # Bitrix user ids that also get the assistant's booking, broker, handover
+    # and unanswered-message alerts. No argument clears the list.
+    for n in "$@"; do
+      [[ "$n" =~ ^[0-9]{1,10}$ ]] || die "'$n' is not a Bitrix user id (digits only)"
+    done
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch alert-ids $*"
     ;;
 
   ""|-h|--help|help) usage ;;

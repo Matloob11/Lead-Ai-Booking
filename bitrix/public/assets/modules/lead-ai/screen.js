@@ -3,8 +3,10 @@
  *
  * "Chats" are the conversations a CRM campaign sent here with the popup's
  * "Lead AI" box ticked; they are not in the main inbox, and the Lead AI
- * assistant answers them. "Sara leads" is the list this screen always had
- * (apps/leadbot): those chats live in the main inbox, and their rows open there.
+ * assistant answers them. "Brokers" narrows them to the chats the assistant
+ * labelled Broker (it stays silent there until someone presses Resume AI).
+ * "Sara leads" is the list this screen always had (apps/leadbot): those chats
+ * live in the main inbox, and their rows open there.
  *
  * The screen lies over the inbox, which keeps running underneath. While it is
  * open the inbox's panes are made inert: the inbox refocuses its own reply
@@ -19,7 +21,7 @@
 import { el, clear, debounce, initials, stamp, toast } from "../../core/dom.js";
 import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
-import { aiStateView, contactName, momentLabel, mountThread, screenModal } from "./thread.js";
+import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
 const PAGE = 40;
 
@@ -67,6 +69,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     offset: 0,
     exhausted: false,
     q: "",
+    brokers: false, // only the chats labelled Broker
     activeId: conversationId ? Number(conversationId) : null,
     pendingHighlight: highlightMessageId || null,
     thread: null,
@@ -93,6 +96,18 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   });
   const tabChats = el("button.lai-tab", { type: "button", onclick: () => setTab("chats") }, ["Chats"]);
   const tabSara = el("button.lai-tab", { type: "button", onclick: () => setTab("sara") }, ["Sara leads"]);
+  const brokersButton = el("button.lai-filter", {
+    type: "button",
+    "aria-pressed": "false",
+    title: "Only the chats the AI labelled Broker",
+    onclick: () => {
+      state.brokers = !state.brokers;
+      brokersButton.setAttribute("aria-pressed", String(state.brokers));
+      brokersButton.classList.toggle("is-on", state.brokers);
+      loadChats();
+    },
+  }, ["Brokers"]);
+  const filters = el("div.lai-filters", {}, [brokersButton]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -115,6 +130,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       el("aside.lai-side", {}, [
         el("div.lai-tabs", {}, [tabChats, tabSara]),
         search,
+        filters,
         listNode,
         statusNode,
         moreButton,
@@ -197,6 +213,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     tabChats.classList.toggle("is-on", tab === "chats");
     tabSara.classList.toggle("is-on", tab === "sara");
     search.hidden = tab !== "chats";
+    filters.hidden = tab !== "chats";
     if (tab === "chats") loadChats({ keep: true });
     else loadSara();
   }
@@ -215,7 +232,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     if (!append && !keep) clear(listNode);
     statusNode.textContent = "Loading…";
     try {
-      const payload = await leadAiApi.chats({ q: state.q, limit: PAGE, offset });
+      const payload = await leadAiApi.chats({ q: state.q, label: state.brokers ? BROKER_LABEL : "", limit: PAGE, offset });
       // A newer load, another tab, or a closed screen wins over this answer.
       if (seq !== state.loadSeq || screen !== self || state.tab !== "chats") return;
       const page = asList(payload, "results");
@@ -223,7 +240,9 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.offset = offset + page.length;
       state.exhausted = page.length < PAGE;
       // Only an unfiltered first page counts every unread Lead AI chat.
-      if (!append && !state.q && typeof payload?.unread_chats === "number") onUnreadChanged?.(payload.unread_chats);
+      if (!append && !state.q && !state.brokers && typeof payload?.unread_chats === "number") {
+        onUnreadChanged?.(payload.unread_chats);
+      }
       renderRows();
       if (state.activeId && !state.thread) openThread(state.activeId);
     } catch (error) {
@@ -249,19 +268,24 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     if (state.tab !== "chats") return;
     sortRows();
     clear(listNode);
-    for (const row of state.rows) listNode.append(chatRow(row));
-    statusNode.textContent = state.rows.length
+    // A row that lost its Broker label meanwhile leaves the Brokers list.
+    const shown = state.brokers ? state.rows.filter(isBrokerChat) : state.rows;
+    for (const row of shown) listNode.append(chatRow(row));
+    statusNode.textContent = shown.length
       ? ""
       : state.q
         ? "No Lead AI chat matches that search."
-        : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
-    moreButton.hidden = state.exhausted || !state.rows.length;
+        : state.brokers
+          ? "No broker chats. The AI labels a chat Broker when the customer is a broker or asks for a client."
+          : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
+    moreButton.hidden = state.exhausted || !shown.length;
   }
 
   function chatRow(row) {
     const name = contactName(row);
     const unread = Number(row.unread_count || 0);
     const info = row.lead_ai_info || {};
+    const chips = chatChips(row);
     return el("button.lai-row", {
       type: "button",
       class: [String(row.id) === String(state.activeId) ? "is-on" : "", unread ? "is-unread" : ""].filter(Boolean).join(" "),
@@ -279,6 +303,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
           row.number?.title || row.number?.phone_number ? el("span", {}, [row.number.title || `+${row.number.phone_number}`]) : null,
           info.campaign_name ? el("span.lai-row__campaign", {}, [info.campaign_name]) : null,
         ]),
+        chips.length ? el("div.lai-row__chips", {}, chips) : null,
       ]),
       unread ? el("span.lai-badge", {}, [String(unread)]) : null,
     ]);
@@ -402,8 +427,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       return;
     }
 
-    // A search narrows the list; a chat that does not match it stays out.
-    if (state.q && !state.rows.some((row) => String(row.id) === String(id))) return;
+    // A search or the Brokers filter narrows the list; a chat that does not match it stays out.
+    if ((state.q || state.brokers) && !state.rows.some((row) => String(row.id) === String(id))) return;
 
     if (event === "leadai.message.new" && conversation) {
       const reading = String(state.activeId) === String(id) && document.visibilityState === "visible";
@@ -612,6 +637,22 @@ function templateSection(numbers) {
   );
 }
 
+/**
+ * Who else gets the booking, handover and unanswered-message alerts:
+ * "2311 (Matloob)", and an id no active agent has, so a typo shows.
+ */
+function alertRecipientsText(data) {
+  const rows = Array.isArray(data.alert_recipients) ? data.alert_recipients : [];
+  if (!rows.length) return "Nobody else";
+  return rows
+    .map((row) => {
+      const id = String(row?.bitrix_user_id ?? "").trim();
+      const name = String(row?.name ?? "").trim();
+      return name ? `${id} (${name})` : `${id} (no active agent has this Bitrix id, so nobody is alerted)`;
+    })
+    .join(", ");
+}
+
 /** What the settings are, for an agent who cannot change them. */
 function valuesSection(data) {
   const closed = data.closed_dates || [];
@@ -626,6 +667,7 @@ function valuesSection(data) {
       ["Closed dates", closed.length ? closed.join(", ") : "None"],
       ["Test numbers", tests ? String(tests) : "None"],
       ["Daily call limit", count(data.daily_call_limit)],
+      ["Also alerted", alertRecipientsText(data)],
     ])
   );
 }
@@ -789,6 +831,10 @@ function formSection(data, { onSaved, onClose }) {
 
     const limit = fields.daily_call_limit.input.value.trim();
     if (limit !== String(data.daily_call_limit ?? "")) out.daily_call_limit = limit;
+
+    // Sent as typed: the server takes digits only, at most 10, and says which entry is wrong.
+    const alertIds = splitList(fields.alert_bitrix_user_ids.input.value, /[\s,;]+/);
+    if (!sameList(alertIds, (data.alert_bitrix_user_ids || []).map(String))) out.alert_bitrix_user_ids = alertIds;
     return out;
   }
 
@@ -875,6 +921,15 @@ function formSection(data, { onSaved, onClose }) {
       "The most model calls the assistant may make in 24 hours, across all chats (0 to 20000).",
       { type: "number", value: String(data.daily_call_limit ?? ""), min: 0, max: 20000, inputmode: "numeric" }
     ),
+    field(
+      "alert_bitrix_user_ids",
+      "Also alert (Bitrix user ids)",
+      "Bitrix user ids separated by commas, at most 10. Besides the chat's owner and the CRM responsible, they get " +
+        "every booking, handover (a broker too) and unanswered-message alert, as a Bitrix notification and, when they " +
+        "can open the chat, in this panel.",
+      { value: (data.alert_bitrix_user_ids || []).join(", "), placeholder: "2311" }
+    ),
+    el("div.lai-set__hint", {}, [`Now: ${alertRecipientsText(data)}.`]),
     note,
     el("div.lai-set__actions", {}, [
       el("button.lai-btn.lai-btn--ghost", { type: "button", onclick: () => onClose() }, ["Close"]),

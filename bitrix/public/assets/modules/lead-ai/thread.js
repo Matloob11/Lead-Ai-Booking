@@ -32,8 +32,17 @@ import { asList, inbox, leadAiApi } from "./api.js";
 const PAGE_SIZE = 40;
 const HIGHLIGHT_PAGES = 5;
 
-/** The keys of a chat row that belong to Lead AI; a re-read takes only these. */
-const LEAD_KEYS = ["lead_ai_info", "lead_ai_ai", "lead_ai_appointment"];
+/**
+ * The keys of a chat row a re-read takes: the Lead AI ones, and the labels
+ * (the assistant labels a broker's chat as it pauses itself).
+ */
+const LEAD_KEYS = ["lead_ai_info", "lead_ai_ai", "lead_ai_appointment", "labels"];
+
+/** The inbox label the assistant puts on a broker's chat (engine.BROKER_LABEL), in any case. */
+export const BROKER_LABEL = "Broker";
+const BROKER_REASON = "broker_or_for_client";
+const HEX_COLOUR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const CHIP_LABELS_MAX = 3;
 
 /** message.source of what the assistant itself sent. */
 const AI_SOURCES = new Set(["leadai_ai", "leadai_tap"]);
@@ -123,6 +132,43 @@ export function contactName(conversation) {
   return name || (waId ? `+${waId}` : "Customer");
 }
 
+/** The chat carries the Broker label. */
+export function isBrokerChat(conversation) {
+  const wanted = BROKER_LABEL.toLowerCase();
+  return (Array.isArray(conversation?.labels) ? conversation.labels : []).some(
+    (label) => String(label?.name || "").trim().toLowerCase() === wanted
+  );
+}
+
+/**
+ * Small chips for a chat: "IC shops" when the assistant follows the shops
+ * script there, then its inbox labels (the first few). A label's own colour
+ * tints its chip only when it is a plain hex colour.
+ */
+export function chatChips(conversation) {
+  const chips = [];
+  if (conversation?.lead_ai_info?.playbook === "ic_shops") {
+    chips.push(
+      el("span.lai-chip.lai-chip--playbook", { title: "The assistant follows the International City shops script in this chat" }, [
+        "IC shops",
+      ])
+    );
+  }
+  const labels = (Array.isArray(conversation?.labels) ? conversation.labels : []).filter((label) => String(label?.name || "").trim());
+  for (const label of labels.slice(0, CHIP_LABELS_MAX)) {
+    const name = String(label.name).trim();
+    const chip = el("span.lai-chip.lai-chip--label", { title: `Label: ${name}` }, [name]);
+    const colour = String(label.colour || "").trim();
+    if (HEX_COLOUR.test(colour)) chip.style.setProperty("--lai-chip", colour);
+    chips.push(chip);
+  }
+  if (labels.length > CHIP_LABELS_MAX) {
+    const rest = labels.slice(CHIP_LABELS_MAX).map((label) => String(label.name).trim());
+    chips.push(el("span.lai-chip.lai-chip--more", { title: `Labels: ${rest.join(", ")}` }, [`+${rest.length}`]));
+  }
+  return chips;
+}
+
 /** Why the chat was handed over: the server's label (handover_label), else this screen's own map. */
 function handoverText(ai) {
   // engine.HANDOVER_TEXT is written to follow a name ("asked for a call").
@@ -174,6 +220,16 @@ function modeView(ai, conversation) {
       : { label: "AI on", tone: "on", title: `The Lead AI assistant answers this chat.${closed}` };
   }
   if (mode === "paused") {
+    // Paused by nobody: the assistant stopped itself for a broker.
+    if (!ai.paused_by && ai.handover_reason === BROKER_REASON) {
+      return {
+        label: "AI paused: broker",
+        tone: "paused",
+        title:
+          `The customer is a broker or asks for a client, so the AI handed the chat to the team${since(ai.paused_at)}. ` +
+          "It does not answer until someone presses Resume AI.",
+      };
+    }
     return {
       label: ai.paused_by ? `AI paused by ${ai.paused_by}` : "AI paused",
       tone: "paused",
@@ -505,12 +561,14 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       conversation.number ? `on ${numberNameWithDial(conversation.number)}` : "",
       conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
     ].filter(Boolean);
+    const chips = chatChips(conversation);
 
     clear(header).append(
       el("div.lai-avatar", {}, [initials(name)]),
       el("div.lai-thread__who", {}, [
         el("div.lai-thread__name", {}, [name]),
         el("div.lai-thread__meta", {}, [meta.join(" · ")]),
+        chips.length ? el("div.lai-thread__chips", {}, chips) : null,
         lead.campaign_name || crm
           ? el("div.lai-thread__meta.lai-thread__meta--source", {}, [
               icon("send", { size: 12 }),

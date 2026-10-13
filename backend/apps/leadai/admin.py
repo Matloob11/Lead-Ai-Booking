@@ -26,10 +26,13 @@ class LeadAiCampaignAdmin(admin.ModelAdmin):
 
 @admin.register(LeadAiSettings)
 class LeadAiSettingsAdmin(admin.ModelAdmin):
-    """The emergency switch also lives here, besides the Lead AI screen."""
+    """The emergency switch also lives here, besides the Lead AI screen. The alert
+    recipients are set in the screen's AI settings, which check them."""
 
     list_display = ("assistant_enabled", "office_address", "daily_call_limit", "paused_until", "last_sweep_at", "updated_at")
-    readonly_fields = ("paused_until", "consecutive_failures", "last_sweep_at", "history", "updated_at")
+    readonly_fields = (
+        "paused_until", "consecutive_failures", "last_sweep_at", "history", "updated_at", "alert_bitrix_user_ids",
+    )
 
 
 @admin.register(LeadAiChatState)

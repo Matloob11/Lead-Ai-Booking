@@ -6,6 +6,8 @@
   most-tapped template button on this account; one sales-style reply after
   it invites a block, which lowers the agent's number's quality rating.
 - Acknowledgements ("ok", "thanks", an emoji) that need no answer.
+- Deferrals ("I will message you") that put a visit off, and plain yeses
+  ("yes", "ji") that accept one.
 - Automatic replies from the customer's own WhatsApp Business bot.
 - The fixed lines sent in those cases, in the customer's language.
 """
@@ -124,6 +126,9 @@ STOP_ANYWHERE = tuple(
 )
 
 
+FILLERS = ("please", "pls", "plz", "bro", "sir", "thanks", "thank you", "plz", "bhai", "yaar")
+
+
 def opt_out_from_text(text: str) -> str | None:
     """Only a whole short message counts: "stop sending 1BR, I need 2BR" is not an opt-out
     (except a request for no messages at all, which counts in any length)."""
@@ -139,11 +144,67 @@ def opt_out_from_text(text: str) -> str | None:
         if words.startswith(phrase + " "):
             return WRONG_NUMBER
     # "please stop", "stop please", "no thanks bro": one extra polite word either side.
-    for filler in ("please", "pls", "plz", "bro", "sir", "thanks", "thank you", "plz", "bhai", "yaar"):
+    for filler in FILLERS:
         for candidate in (words.removeprefix(filler + " "), words.removesuffix(" " + filler)):
             if candidate != words and candidate in PHRASE_INDEX:
                 return PHRASE_INDEX[candidate]
     return None
+
+
+def _whole_short_message(text: str, index, fillers) -> bool:
+    """The message is one of ``index`` with at most one extra word from ``fillers`` at each end."""
+    words = normalize_text(text)
+    if not words or len(words.split()) > 8:
+        return False
+    heads = {words} | {words.removeprefix(filler + " ") for filler in fillers}
+    candidates = heads | {head.removesuffix(" " + filler) for head in heads for filler in fillers}
+    return bool(candidates & index)
+
+
+# The visit put off, not refused ("I will massage you" was "message" in the
+# first real chat): the visit stays tentative, and nobody offers times again.
+_LATER = (
+    "message you", "text you", "call you", "contact you", "inform you", "let you know", "tell you", "update you",
+    "get back to you",
+)
+_BATAUNGA = ("batata hoon", "bata dunga", "bataunga")
+DEFERRALS = {
+    normalize_text(p)
+    for p in (
+        *(f"{who} {what}" for who in ("i will", "will", "i") for what in _LATER),
+        "i will massage you", "will message you later", "let you know", "later", "i will confirm", "will confirm",
+        *(f"{when} {what}".strip() for when in ("baad mein", "baad me", "baad main", "main", "") for what in _BATAUNGA),
+        *(f"{what} kar dunga" for what in ("inform", "message", "call", "contact")),
+    )
+}
+DEFERRAL_FILLERS = FILLERS + ("ok", "okay", "ji", "sure", "later", "soon", "inshallah")
+# How people type them: normalize_text makes "I'll" "ill" (it drops the
+# apostrophe), and "u", "msg", "hun" stand for "you", "message", "hoon".
+_TYPED = {
+    "ill": "i will", "ll": "will", "wil": "will", "u": "you", "msg": "message", "txt": "text",
+    "hun": "hoon", "hu": "hoon", "doonga": "dunga", "dungi": "dunga", "batati": "batata", "bataungi": "bataunga",
+}
+
+
+def is_deferral(text: str) -> bool:
+    """A whole short message that puts the visit off ("ok, I'll message u later")."""
+    words = " ".join(_TYPED.get(word, word) for word in normalize_text(text).split())
+    return _whole_short_message(words, DEFERRALS, DEFERRAL_FILLERS)
+
+
+# A plain yes, which right after our invitation means they will come.
+ACCEPTANCES = {
+    normalize_text(p)
+    for p in (
+        "yes", "yeah", "yep", "yes please", "yes sure", "ok", "okay", "ok sure", "sure", "of course",
+        "haan", "han", "haan ji", "ji haan", "ji", "jee", "g",
+        "نعم", "أكيد", "اكيد", "ہاں", "جی", "جی ہاں", "हाँ", "हां", "जी", "जी हाँ",
+    )
+}
+
+
+def is_acceptance(text: str) -> bool:
+    return _whole_short_message(text, ACCEPTANCES, FILLERS)
 
 
 ACK_INDEX = {normalize_text(a) for a in ACKS}
@@ -201,6 +262,7 @@ _ARABIC_SCRIPT = re.compile(r"[؀-ۿ]")
 _ROMAN_URDU = {
     "mat", "bhejo", "karo", "karein", "nahi", "nahin", "chahiye", "hai", "hain", "kya", "aap", "mujhe",
     "zaroorat", "zarurat", "theek", "thik", "acha", "achha", "band", "galat", "ghalat", "shukriya", "kal",
+    "baad", "batata", "bataunga", "hoon", "dunga",
 }
 
 
@@ -304,6 +366,24 @@ LINES = {
         "ur": "ہمارے اسپیشلسٹ یہیں آپ کو اس کی تصدیق کر دیں گے۔",
         "hi_latin": "Hamare specialist yahin aapko iski pushti kar denge.",
         "hi": "हमारे स्पेशलिस्ट यहीं आपको इसकी पुष्टि कर देंगे।",
+    },
+    # The visit put off ("I will message you"): kept tentative, no times offered again.
+    "let_me_know": {
+        "en": "Sure. Once you know the time, let me know and I'll reserve a slot for you.",
+        "ar": "بالتأكيد. عندما تعرف الوقت المناسب، أخبرنا وسنحجز لك موعداً.",
+        "ur_latin": "Zaroor. Jab aap ko waqt pata ho, hamein bata dein, hum aap ke liye slot reserve kar denge.",
+        "ur": "ضرور۔ جب آپ کو وقت معلوم ہو، ہمیں بتا دیں، ہم آپ کے لیے سلاٹ ریزرو کر دیں گے۔",
+        "hi_latin": "Zaroor. Jab aapko time pata ho, humein bata dijiye, hum aapke liye slot reserve kar denge.",
+        "hi": "ज़रूर। जब आपको समय पता हो, हमें बता दीजिए, हम आपके लिए स्लॉट रिज़र्व कर देंगे।",
+    },
+    # A broker in a shops campaign (the build pack's own hand-off line); the assistant then stays silent.
+    "broker": {
+        "en": "Thank you for your interest. Let me pass your details to the concerned agent and he will come back to you.",
+        "ar": "شكراً لاهتمامك. سأحوّل بياناتك إلى الوكيل المختص وسيتواصل معك.",
+        "ur_latin": "Aap ki dilchaspi ka shukriya. Main aap ki details mutalliqa agent ko de raha hoon, woh aap se rabta karenge.",
+        "ur": "آپ کی دلچسپی کا شکریہ۔ میں آپ کی تفصیلات متعلقہ ایجنٹ کو دے رہا ہوں، وہ آپ سے رابطہ کریں گے۔",
+        "hi_latin": "Aapki dilchaspi ke liye shukriya. Main aapki details sambandhit agent ko de raha hoon, woh aapse sampark karenge.",
+        "hi": "आपकी दिलचस्पी के लिए शुक्रिया। मैं आपकी जानकारी संबंधित एजेंट को दे रहा हूँ, वो आपसे संपर्क करेंगे।",
     },
 }
 

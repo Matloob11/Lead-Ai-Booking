@@ -26,8 +26,20 @@ DEFAULT_OFFICE_ADDRESS = "Russia Cluster, Building V02/V03, Shop 20, Dubai Inter
 class LeadAiCampaign(models.Model):
     """A campaign whose chats belong to the Lead AI screen (the popup checkbox)."""
 
+    class Playbook(models.TextChoices):
+        GENERAL = "general", "General"
+        IC_SHOPS = "ic_shops", "International City shops"
+
     campaign = models.OneToOneField(
         "campaigns.Campaign", on_delete=models.CASCADE, related_name="lead_ai"
+    )
+    # The script the assistant follows in this campaign's chats, chosen in the
+    # Bitrix popup (owner's choice 2026-10-13: shop campaigns get their own).
+    # A database default as well: the popup's send inserts these rows, and the
+    # old code still running in the minutes after the migration knows nothing
+    # of this column.
+    playbook = models.CharField(
+        max_length=24, choices=Playbook.choices, default=Playbook.GENERAL, db_default=Playbook.GENERAL
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -99,7 +111,8 @@ class LeadAiChatState(models.Model):
     # The customer asked to stop, or the other side is a bot: silent until resumed.
     stopped_at = models.DateTimeField(null=True, blank=True)
     stop_reason = models.CharField(max_length=24, choices=StopReason.choices, blank=True)
-    # An agent pressed "Pause AI" in this chat: silent until they press Resume.
+    # An agent pressed "Pause AI" in this chat (or, with no paused_by, the
+    # assistant met a broker there): silent until someone presses Resume.
     paused_at = models.DateTimeField(null=True, blank=True)
     paused_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
@@ -134,12 +147,13 @@ class LeadAiChatState(models.Model):
         if self.stopped_at is not None:
             return self.get_stop_reason_display() or "stopped"
         if self.paused_at is not None:
-            return "paused by an agent"
+            return "paused by an agent" if self.paused_by_id else "paused until an agent presses Resume"
         return ""
 
 
 class LeadAiSettings(models.Model):
-    """One row (pk=1): the assistant's switch, its test numbers and the office.
+    """One row (pk=1): the assistant's switch, its test numbers, the office and
+    who else hears of its alerts.
 
     Kept in the database, not the environment, so an admin can turn the
     assistant on or off, add test numbers or paste the office's Maps link from
@@ -159,6 +173,10 @@ class LeadAiSettings(models.Model):
     office_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # A ceiling on model calls across all chats per day (spend guard).
     daily_call_limit = models.PositiveIntegerField(default=1500)
+    # Bitrix users (digit strings) who hear of every booking, handover and
+    # unanswered message besides the chat's owner and the CRM responsible
+    # (owner's choice 2026-10-13: Matloob).
+    alert_bitrix_user_ids = models.JSONField(default=list, blank=True)
     # Circuit breaker: after repeated OpenAI failures the assistant pauses itself.
     paused_until = models.DateTimeField(null=True, blank=True)
     consecutive_failures = models.PositiveSmallIntegerField(default=0)
@@ -183,6 +201,15 @@ class LeadAiSettings(models.Model):
     @property
     def has_pin(self) -> bool:
         return self.office_latitude is not None and self.office_longitude is not None
+
+    def alert_user_ids(self) -> list[str]:
+        """alert_bitrix_user_ids as digit strings. Only the panel checks what it saves,
+        so anything else here (a bare number or a string typed in the Django admin)
+        is nobody, never a crash in the middle of a booking."""
+        value = self.alert_bitrix_user_ids
+        if not isinstance(value, list):
+            return []
+        return [text for text in (str(item).strip() for item in value if item is not None) if text.isdigit()]
 
     def answers(self, wa_id: str) -> bool:
         """May the assistant talk to this customer number right now?"""

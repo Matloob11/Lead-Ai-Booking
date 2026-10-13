@@ -1,11 +1,13 @@
 """The answer the model must give on every turn (OpenAI structured outputs, strict).
 
 Keys are generated in schema order, so every decision comes before the words:
-language, segment, facts, appointment, handover, opt_out, flags, send, and
-the reply last. Strict mode wants every property in ``required`` and
-``additionalProperties: false``; "unknown" is null through a type list, and a
-nullable enum lists null in both its type and its values. ``normalize`` then
-cleans whatever came back: the schema shapes the answer, code is the gate.
+language, segment, facts, appointment, handover, opt_out, flags, send, the
+reply, and last its English translation for our agents (written after the
+reply, so it translates the reply instead of planning it). Strict mode wants
+every property in ``required`` and ``additionalProperties: false``;
+"unknown" is null through a type list, and a nullable enum lists null in both
+its type and its values. ``normalize`` then cleans whatever came back: the
+schema shapes the answer, code is the gate.
 """
 
 from __future__ import annotations
@@ -177,8 +179,11 @@ SCHEMA = {
         "invited_to_meeting": {"type": "boolean"},
         "share_office_location": {"type": "boolean"},
         "send": {"type": "boolean"},
-        "reply_en": {"type": "string", "description": "English meaning of reply for our agents; empty when reply is English."},
         "reply": {"type": "string", "description": "The WhatsApp message to send; empty when send is false."},
+        "reply_en": {
+            "type": "string",
+            "description": 'A faithful sentence-by-sentence English translation of reply, for our agents; "" when language is en.',
+        },
     },
     "required": [
         "language",
@@ -191,8 +196,8 @@ SCHEMA = {
         "invited_to_meeting",
         "share_office_location",
         "send",
-        "reply_en",
         "reply",
+        "reply_en",
     ],
 }
 

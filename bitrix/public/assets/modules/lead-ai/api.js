@@ -7,17 +7,20 @@
  * per thread, so a Lead AI chat opens and sends there like any other.
  *
  * A chat row (list, detail, and every POST below) carries lead_ai_info (the
- * campaign), lead_ai_ai (the assistant's mode in that chat) and
- * lead_ai_appointment (the open meeting, or null).
+ * campaign, and its playbook: "general" or "ic_shops"), lead_ai_ai (the
+ * assistant's mode in that chat), lead_ai_appointment (the open meeting, or
+ * null) and the inbox's own labels ([{id, name, colour}]).
  */
 
 import { apiFetch } from "../../core/bitrix-sso.js";
 import { asList, inbox, leadbot } from "../../api/api.js";
 
 export const leadAiApi = {
-  chats({ q = "", limit = 40, offset = 0 } = {}) {
+  /** `label` keeps only the chats carrying that label ("Broker"). */
+  chats({ q = "", label = "", limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit, offset });
     if (q) query.set("q", q);
+    if (label) query.set("label", label);
     return apiFetch(`/api/leadai/chats/?${query}`);
   },
 

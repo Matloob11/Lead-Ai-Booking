@@ -47,6 +47,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
+from .. import lane
 from ..models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 from . import alerts, filters, hours, live, openai_client, prompt, reminders, rules, schema, transcribe, transcript
 
@@ -62,6 +63,8 @@ WINDOW_MARGIN = dt.timedelta(minutes=2)
 AUDIO_WAITS = (15, 30, 60, 90)
 HANDOVER_QUIET = dt.timedelta(hours=12)
 HOLDING_EVERY = dt.timedelta(hours=2)
+# The office's address or Maps link goes out once in this long, unless the customer asks for it.
+LOCATION_FRESH = dt.timedelta(hours=24)
 BREAKER_FAILURES = 3
 BREAKER_PAUSE = dt.timedelta(minutes=5)
 # Seconds of OpenAI time one turn may use, inside the task's 180 s soft limit;
@@ -70,6 +73,12 @@ TURN_BUDGET = 140
 CORRECTION_NEEDS = 35
 SKIP_KINDS = ("reaction", "system")
 HIGH_HANDOVER = ("customer_asked_human", "call_requested", "complaint_or_upset", "owner_viewing_slot")
+# A broker, or someone asking for a client (owner's choice 2026-10-13): the chat
+# gets the inbox label BROKER_LABEL, and the assistant stays silent in it until
+# an agent presses Resume.
+BROKER = "broker_or_for_client"
+BROKER_LABEL = "Broker"
+BROKER_COLOUR = "#d97706"
 # A slot refused for the office's hours: only a colleague can agree one.
 HOURS_CODES = ("sunday", "closed", "before_open", "after_latest")
 NO_TIME = {"action": "none", "place": None, "date": None, "time": None, "customer_words": None}
@@ -292,18 +301,38 @@ def _open_appointment(conversation) -> LeadAiAppointment | None:
 
 
 def _customer_name(conversation, facts: dict) -> str:
-    if facts.get("customer_name"):
-        return str(facts["customer_name"])
+    """The customer's name: the first of the facts, the campaign's recipient and the
+    contact that names someone to greet, never a portal lead's title ("Bayut
+    WhatsApp | Md Sumon" is "Md Sumon", filters.person_name), the campaign's
+    "there" for a lead with no name, or a lone "Md" (filters.first_name)."""
+    name = filters.person_name(facts.get("customer_name"))
+    if filters.first_name(name):
+        return name
     from apps.campaigns.models import CampaignRecipient
 
-    name = (
+    recipient = (
         CampaignRecipient.objects.filter(conversation=conversation)
         .exclude(name="")
         .order_by("-pk")
         .values_list("name", flat=True)
         .first()
     )
-    return (name or conversation.contact.display_name or "").strip()
+    for candidate in (recipient, conversation.contact.display_name):
+        name = filters.person_name(candidate)
+        if filters.first_name(name):
+            return name
+    return ""
+
+
+def _last_segment(conversation) -> str:
+    """The segment the model judged last in this chat ('' before its first answer)."""
+    actions = (
+        LeadAiTurn.objects.filter(conversation=conversation, calls__gt=0)
+        .order_by("-pk")
+        .values_list("actions", flat=True)
+        .first()
+    )
+    return str(actions.get("segment") or "") if isinstance(actions, dict) else ""
 
 
 def _segment_hint(conversation, chat, campaign_msg) -> str:
@@ -356,6 +385,21 @@ def _pending_question(last) -> bool:
     if last.kind == Message.Kind.INTERACTIVE:
         return True
     return last.kind == Message.Kind.TEMPLATE and last.template_id is not None and bool(last.template.buttons)
+
+
+def location_sent(conversation, office_address: str, maps_url: str, since=None) -> bool:
+    """One of our own messages here (a reply, a booking, a reminder, the pin), since
+    ``since`` when given, already gave the office's address or Maps link: it is not
+    sent again unasked (the first real chat got the address three times)."""
+    rows = Message.objects.filter(conversation=conversation, direction=Message.Direction.OUTBOUND).only("kind", "body", "payload")
+    if since is not None:
+        rows = rows.filter(created_at__gte=since)
+    for row in rows.order_by("-pk")[:200]:
+        if transcript.is_ours(row) and (
+            row.kind == Message.Kind.LOCATION or filters.carries_location(row.body, office_address, maps_url)
+        ):
+            return True
+    return False
 
 
 def _seconds_after_ours(conversation, message) -> float | None:
@@ -527,20 +571,123 @@ def settle_handover(answer: dict, earlier: list, new_texts: list | None = None) 
     return answer
 
 
-def settle(answer: dict, earlier: list, new_texts: list, invites: int) -> dict:
-    """Everything code corrects in the model's answer before it is used (live and in the eval)."""
+def agreed_to_come(*, visit_open: bool, our_last: str, texts: list) -> bool:
+    """The customer has agreed to come: a visit is open (tentative or confirmed), or
+    right after our last message invited them or offered times, the last thing
+    they said (acknowledgements aside) is a plain yes: "No, I am travelling" and
+    then "ok" is no yes. ``texts``: the burst, a message that is not text as ''."""
+    if visit_open:
+        return True
+    if not (filters.is_invitation(our_last) or filters.offers_time(our_last)):
+        return False
+    said = [text for text in texts if not rules.is_acknowledgement(text)]
+    return rules.is_acceptance(said[-1]) if said else any(rules.is_acceptance(text) for text in texts)
+
+
+def visit_offered(ours: str) -> bool:
+    """Our side's recent words (ours or a colleague's, never the campaign's) invited
+    them or offered exact times: a visit is on the table, whatever the model flagged."""
+    return filters.is_invitation(ours) or filters.offers_time(ours)
+
+
+def deferral(said: list, *, appointment=None, offered: bool = False, invites: int = 0, quiet: bool = False) -> str:
+    """The customer's words when all they said (acknowledgements aside) puts off a
+    visit we put on the table, else ''.
+
+    ``said`` is the burst without its acknowledgements, a message that is not
+    text as '': a question sent with the deferral is the model's to answer.
+    On the table: ``offered`` (visit_offered), an invitation counted
+    (``invites``), or ``appointment``, the open one, being an office visit
+    still tentative. Any other open one stays the model's, which sees it: a
+    confirmed meeting, an owner's viewing at their property, a call. ``quiet``:
+    a person has the chat, they declined, or they are no customer of ours (a
+    job applicant): nothing to book.
+    """
+    words = (said[0] if len(said) == 1 else "").strip()
+    if quiet or not words or not rules.is_deferral(words):
+        return ""
+    if appointment is not None:
+        office = (appointment.place or LeadAiAppointment.Place.OFFICE) == LeadAiAppointment.Place.OFFICE
+        return words if appointment.status == LeadAiAppointment.Status.TENTATIVE and office else ""
+    return words if offered or invites > 0 else ""
+
+
+def deferral_answer(words: str, language: str, appointment=None, segment: str = "other") -> dict:
+    """What code answers to a deferral, shaped like a model's answer: the visit is
+    tentative in the customer's words, and the reply is the fixed line. An open
+    office visit keeps its day and time; only their words change."""
+    date = time = None
+    if appointment is not None and appointment.starts_at:
+        local = appointment.starts_at.astimezone(hours.DUBAI)
+        date, time = f"{local:%Y-%m-%d}", f"{local:%H:%M}"
+    answer = schema.normalize(
+        {
+            "language": language,
+            "segment": segment,
+            "appointment": {"action": "tentative", "place": "office", "date": date, "time": time, "customer_words": words},
+            "send": True,
+            "reply": rules.line("let_me_know", language),
+        }
+    )
+    answer["converted"] = "let_me_know"
+    return answer
+
+
+def settle(
+    answer: dict,
+    earlier: list,
+    new_texts: list,
+    invites: int,
+    *,
+    agreed: bool = False,
+    playbook: str = lane.GENERAL,
+    broker_labelled: bool = False,
+    address_sent: str = "",
+) -> dict:
+    """Everything code corrects in the model's answer before it is used (live and in the eval).
+
+    ``agreed``: the customer has agreed to come (agreed_to_come); ``playbook``:
+    the chat's script (lane.playbook_for); ``broker_labelled``: the chat carries
+    the Broker label already, so an agent pressed Resume on it (or labelled it):
+    a broker is then an ordinary handover; ``address_sent``: the office
+    address, when one of our messages gave the location already. What is cut
+    from the reply is listed in ``answer["trimmed"]``, so its English gloss no
+    longer holds; ``answer["broker"]`` asks _apply to label and pause the chat.
+    """
     settle_handover(answer, earlier, new_texts)
     # language names the script the reply is written in (Urdu script is ur, never ur_latin).
     script = rules.guess_language(answer["reply"]) if answer["reply"] else ""
     if script in ("ar", "ur", "hi") and answer["language"] != script:
         answer["language"] = script
-    if invites >= 2:
+    trimmed = []
+    if agreed:
+        # They said yes to coming: the times offered now are no new invitation,
+        # so they are neither counted nor cut (the first real chat lost its
+        # time offer to the cap below after a plain "Yes").
+        answer["invited_to_meeting"] = False
+    elif invites >= 2:
         # Invited twice and refused: no third invitation, in any words.
         answer["invited_to_meeting"] = False
         if answer["reply"]:
             answer["reply"], dropped = filters.drop_invitations(answer["reply"])
-            if dropped and not answer["reply"]:
-                answer["send"] = False
+            if dropped:
+                trimmed.append("invitation")
+    if address_sent and answer["reply"]:
+        # The model typing the address again from its OFFICE line (two of the
+        # three copies in the first real chat): the location went out already.
+        answer["reply"], repeated = filters.drop_location(answer["reply"], address_sent)
+        if repeated:
+            trimmed.append("location")
+    if trimmed:
+        answer["trimmed"] = trimmed
+        if not answer["reply"]:
+            answer["send"] = False
+    handover = answer["handover"]
+    if handover["needed"] and handover["reason"] == BROKER and not broker_labelled:
+        answer["broker"] = True
+        if playbook == lane.IC_SHOPS:
+            # The shops build pack's own hand-off line, never the model's words.
+            answer["converted"] = "broker"
     return answer
 
 
@@ -589,6 +736,10 @@ def ask_model(
         codes.append(exc.code)
         answer["appointment"] = dict(NO_TIME)
         return answer, None, completions, f"{reason} / {exc.message}", True
+
+
+def _same_words(left: str, right: str) -> bool:
+    return " ".join(str(left or "").split()).casefold() == " ".join(str(right or "").split()).casefold()
 
 
 def _merge_facts(old: dict, new: dict) -> dict:
@@ -666,7 +817,8 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "") ->
     if state.stopped_at is not None:
         return _skip(f"stopped: {state.stop_reason}")
     if state.paused_at is not None:
-        return _skip("paused by an agent")
+        # No agent behind it: the assistant paused itself for a broker (_apply).
+        return _skip("paused by an agent" if state.paused_by_id else "paused until an agent presses Resume")
     if now - message.created_at > STALE_AFTER:
         if Message.objects.filter(conversation=conversation, direction=Message.Direction.OUTBOUND, pk__gt=message.pk).exists():
             return _skip("the message is too old to answer")
@@ -1077,49 +1229,79 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
 
     # The model -----------------------------------------------------------------------------
     appointment = _open_appointment(conversation)
+    confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
     events = []
     if appointment is not None and appointment.customer_state:
         events.append(f"The customer told us: {appointment.get_customer_state_display().lower()}.")
     rows = transcript.conversation_rows(conversation, revoked=revoked)
-    conversation_lines = [transcript.line(row, campaign_templates, transcript.transcript_text(row)) for row in rows]
-    new_lines = [transcript.line(item, campaign_templates, heard.get(item.pk)) for item in burst]
     campaign_msg = transcript.campaign_message(conversation, campaign_templates)
     facts = state.facts or {}
-    context = prompt.context_message(
-        now=now,
-        closed_dates=settings_row.closed_dates,
-        office_address=settings_row.office_address,
-        segment_hint=_segment_hint(conversation, chat, campaign_msg),
-        campaign_line=_campaign_line(campaign_msg),
-        customer_name=_customer_name(conversation, facts),
-        facts=facts,
-        language=language,
-        handed_over=f"yes ({state.handover_reason})" if state.handed_over_at else "no",
-        not_interested=state.not_interested_at is not None,
-        invites=state.invites,
-        appointment=appointment,
-        events=events,
-        conversation=conversation_lines,
-        new_lines=new_lines,
-        map_link=bool(settings_row.office_maps_url),
+    last_ours = _last_outbound(conversation)
+    our_last = transcript.outbound_text(last_ours) if last_ours is not None else ""
+    ours = _our_words(rows, campaign_templates)
+    # The location went out already: not again unasked, and not for a day. Asked
+    # for, it goes again (a booked customer on the way, whatever the
+    # confirmation carried).
+    asked = " ".join(transcript.inbound_text(item, heard.get(item.pk)) for item in burst if item.kind in ("text", "audio"))
+    location = not filters.asks_for_location(asked) and location_sent(
+        conversation, settings_row.office_address, settings_row.office_maps_url, since=now - LOCATION_FRESH
     )
     codes: list = []
-    answer, when, completions, rejected, still_invalid = ask_model(
-        prompt.system_prompt(),
-        context,
-        appointment,
-        now,
-        settings_row.closed_dates,
-        openai_client.safety_id(conversation.pk),
-        deadline=deadline,
-        grounding=(_customer_words(rows, heard, burst), _our_words(rows, campaign_templates)),
-        codes=codes,
+    segment = _last_segment(conversation)
+    deferred = deferral(
+        [(item.body or "") if item.kind == "text" else "" for item in said],
+        appointment=appointment,
+        offered=visit_offered(ours),
+        invites=state.invites,
+        # A person has the chat, they declined, or they are no customer of ours.
+        quiet=state.handed_over_at is not None or state.not_interested_at is not None or segment == "other",
     )
-    turn.model = completions[-1].model[:64]
-    turn.calls = len(completions)
-    turn.prompt_tokens = sum(c.prompt_tokens for c in completions)
-    turn.completion_tokens = sum(c.completion_tokens for c in completions)
-    turn.latency_ms = sum(c.latency_ms for c in completions)
+    if deferred:
+        # A deferral of a visit we offered is settled here, before the model, not
+        # by a settle() backstop: the words are fixed and the decision needs
+        # nothing the model knows, so there is no call to pay for or to get wrong
+        # (the first real chat was asked "When would you like to come?" again).
+        # The answer is shaped like the model's and goes the same way from here
+        # (still ours, the send, _apply), so the tentative visit, its alert and
+        # its CRM comment are exactly those of a tentative the model proposed.
+        answer = deferral_answer(deferred, rules.guess_language(deferred), appointment, segment or "other")
+        when, completions, rejected, still_invalid = None, [], "", False
+    else:
+        context = prompt.context_message(
+            now=now,
+            closed_dates=settings_row.closed_dates,
+            office_address=settings_row.office_address,
+            segment_hint=_segment_hint(conversation, chat, campaign_msg),
+            campaign_line=_campaign_line(campaign_msg),
+            customer_name=_customer_name(conversation, facts),
+            facts=facts,
+            language=language,
+            handed_over=f"yes ({state.handover_reason})" if state.handed_over_at else "no",
+            not_interested=state.not_interested_at is not None,
+            invites=state.invites,
+            appointment=appointment,
+            events=events,
+            conversation=[transcript.line(row, campaign_templates, transcript.transcript_text(row)) for row in rows],
+            new_lines=[transcript.line(item, campaign_templates, heard.get(item.pk)) for item in burst],
+            map_link=bool(settings_row.office_maps_url),
+            location_sent=location,
+        )
+        answer, when, completions, rejected, still_invalid = ask_model(
+            prompt.system_prompt(),
+            context,
+            appointment,
+            now,
+            settings_row.closed_dates,
+            openai_client.safety_id(conversation.pk),
+            deadline=deadline,
+            grounding=(_customer_words(rows, heard, burst), ours),
+            codes=codes,
+        )
+        turn.model = completions[-1].model[:64]
+        turn.calls = len(completions)
+        turn.prompt_tokens = sum(c.prompt_tokens for c in completions)
+        turn.completion_tokens = sum(c.completion_tokens for c in completions)
+        turn.latency_ms = sum(c.latency_ms for c in completions)
     in_hand = {item.pk for item in burst}
     earlier = [
         (
@@ -1129,8 +1311,40 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         for row in rows
         if row.pk not in in_hand
     ]
-    settle(answer, earlier, [transcript.inbound_text(item, heard.get(item.pk)) for item in burst], state.invites)
-    plan = {"segment": answer["segment"], "action": answer["appointment"]["action"], "send": answer["send"]}
+    agreed = agreed_to_come(
+        visit_open=appointment is not None,
+        our_last=our_last,
+        texts=[(item.body or "").strip() if item.kind == "text" else "" for item in burst if item.kind != "sticker"],
+    )
+    playbook = lane.playbook_for(conversation)
+    settle(
+        answer,
+        earlier,
+        [transcript.inbound_text(item, heard.get(item.pk)) for item in burst],
+        state.invites,
+        agreed=agreed,
+        playbook=playbook,
+        # Only a broker's turn asks (settle_handover never makes one).
+        broker_labelled=answer["handover"]["reason"] == BROKER and conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
+        address_sent=settings_row.office_address if location else "",
+    )
+    # What the model (or the rule) decided, so the turn can be traced afterwards.
+    plan = {
+        "segment": answer["segment"],
+        "action": answer["appointment"]["action"],
+        "send": answer["send"],
+        "language": answer["language"],
+        "invited_to_meeting": answer["invited_to_meeting"],
+        "share_office_location": answer["share_office_location"],
+    }
+    if deferred:
+        plan["rule"] = "deferral"
+    if agreed:
+        plan["agreed"] = True
+    if answer.get("trimmed"):
+        plan["trimmed"] = answer["trimmed"]
+    if playbook != lane.GENERAL:
+        plan["playbook"] = playbook
     if rejected:
         plan["rejected"] = rejected[:300]
         plan["codes"] = codes
@@ -1163,7 +1377,6 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
     # What happens, and the words ---------------------------------------------------------
     language = answer["language"]
     action = effective_action(answer["appointment"]["action"], appointment)
-    confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
     if action == "reschedule" and when is not None and confirmed and appointment.starts_at == when:
         action = "reconfirm"  # the time already booked: said again, nothing moves
     elif action == "reschedule" and when is None and not still_invalid:
@@ -1179,7 +1392,8 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
     holding = False
     booking = None
     filtered = []
-    gloss = False  # the model's own words go out, so its English meaning (reply_en) holds
+    gloss = False  # the model's own words go out whole, so its English translation (reply_en) holds
+    appended = ""  # the Maps link or the address code added to the reply
     if still_invalid:
         if "no_appointment_otw" in codes:
             text = filters.on_my_way(language)
@@ -1209,14 +1423,14 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
             text = rules.line("holding", language)
             holding = True
     elif answer.get("converted"):
-        # A confirmation the office could not take (_shape): a fixed line, never
-        # the model's words, which were written as a confirmation.
+        # A fixed line, never the model's words: a confirmation the office could
+        # not take (_shape, written as a confirmation), a deferral, a shops broker.
         text = rules.line(answer["converted"], language)
         holding = answer["converted"] == "holding"
     else:
         if answer["send"]:
             text, filtered = filters.clean_reply(answer["reply"], rows_context)
-            gloss = bool(text) and not filtered
+            gloss = bool(text) and not filtered and not answer.get("trimmed")
             if filtered:
                 plan["filtered"] = filtered
             if not text and "amount" in filtered:
@@ -1230,10 +1444,16 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
                 # Handed to a person and nothing usable to say: they still hear it.
                 text = rules.line("holding", language)
                 holding = True
-        if text and answer["share_office_location"] and maps and maps not in text:
-            text = f"{text}\n{maps}"
-        elif text and answer["share_office_location"] and not maps and settings_row.office_address not in text:
-            text = f"{text}\n{settings_row.office_address}"
+        if text and answer["share_office_location"] and not location:
+            # Once per chat: not when one of our messages gave it already
+            # (location_sent), nor when the reply itself carries it.
+            if maps and maps not in text:
+                appended = maps
+            elif not maps and not filters.carries_location(text, settings_row.office_address):
+                appended = settings_row.office_address
+        if appended:
+            text = f"{text}\n{appended}"
+            plan["location_appended"] = True
 
     if not text:
         done = _apply(conversation, chat, state, answer, action, when, appointment, now, sent=False, holding=False)
@@ -1242,8 +1462,11 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
 
     try:
         extra = {}
-        if gloss and answer["reply_en"]:
-            extra["reply_en"] = answer["reply_en"][:600]
+        reply_en = answer["reply_en"].strip()
+        if gloss and answer["language"] != "en" and reply_en and not _same_words(reply_en, answer["reply"]):
+            # For the agents, what the customer reads in English: only for a reply
+            # in another language, sent whole, with the line code added to it.
+            extra["reply_en"] = (f"{reply_en}\n{appended}" if appended else reply_en)[:600]
         if booking:
             extra["booking"] = booking
         sent = _send(conversation, text, turn, extra or None)
@@ -1370,6 +1593,16 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
             fresh.handover_reason = handover["reason"] or "unclear"
             fields += ["handed_over_at", "handover_reason"]
             done["handover"] = fresh.handover_reason
+        if answer.get("broker") and fresh.paused_at is None:
+            # A broker: labelled for the team, and silent until an agent presses
+            # Resume. A pause, not only a handover, so neither the 12-hour clear
+            # nor a colleague's message lets the assistant back in. Once (settle):
+            # after Resume, the label stays and a broker is an ordinary handover.
+            fresh.paused_at = now
+            fields.append("paused_at")
+            conversation.labels.add(broker_label())
+            done["handover"] = BROKER
+            done["broker"] = True
         if sent and action in ("confirm", "reschedule") and when is not None and fresh.not_interested_at is not None:
             fresh.not_interested_at = None  # they declined once, and have now booked
             fields.append("not_interested_at")
@@ -1520,7 +1753,8 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
             if not (crm_event == "tentative" and done.get("appointment", {}).get("new") and done.get("handover")):
                 appointment_alert(conversation, chat, current, crm_event, hot, name, revision)
         if done.get("handover"):
-            _handover_alert(conversation, chat, current, done["handover"], name, facts, fresh.handed_over_at)
+            moment = fresh.paused_at if done.get("broker") else fresh.handed_over_at
+            _handover_alert(conversation, chat, current, done["handover"], name, facts, moment, broker=bool(done.get("broker")))
         if crm_event or done.get("handover"):
             transaction.on_commit(lambda pk=conversation.pk: live.appointment_changed(pk))
     return done
@@ -1687,7 +1921,18 @@ HANDOVER_TEXT = {
 }
 
 
-def _handover_alert(conversation, chat, appointment, reason: str, name: str, facts: dict, handed_over_at) -> None:
+def broker_label():
+    """The inbox label of a broker's chat: one named "Broker" in any case, made the way the inbox makes labels."""
+    from apps.inbox.models import Label
+
+    label = Label.objects.filter(name__iexact=BROKER_LABEL).order_by("pk").first()
+    if label is None:
+        label, _ = Label.objects.get_or_create(name=BROKER_LABEL, defaults={"colour": BROKER_COLOUR})
+    return label
+
+
+def _handover_alert(conversation, chat, appointment, reason: str, name: str, facts: dict, handed_over_at, *, broker: bool = False) -> None:
+    """``broker``: the chat was labelled and paused for a broker just now (_apply)."""
     who = name or "A Lead AI customer"
     lines = [f"{who} (WhatsApp +{conversation.contact.wa_id}) {HANDOVER_TEXT.get(reason, 'needs a person')}."]
     if reason == "owner_viewing_slot" and appointment is not None:
@@ -1696,7 +1941,15 @@ def _handover_alert(conversation, chat, appointment, reason: str, name: str, fac
         if appointment.customer_words:
             lines.append(f"Their words: {appointment.customer_words}")
     lines += _detail_lines(facts)
-    lines.append("The assistant is now quiet in this chat until someone from the team writes.")
+    if broker:
+        campaign = chat.campaign if chat is not None and chat.campaign_id else None
+        if campaign is not None:
+            lines.append(f"Campaign: {campaign.name}")
+        lines.append(
+            f'The chat is labelled "{BROKER_LABEL}", and the assistant stays silent in it until someone presses Resume AI.'
+        )
+    else:
+        lines.append("The assistant is now quiet in this chat until someone from the team writes.")
     # One alert per handover (the moment it began), not one per reason and day:
     # a second request for a person later the same day is alerted again.
     moment = f"{handed_over_at:%Y%m%d%H%M%S}" if handed_over_at else f"{timezone.now():%Y%m%d%H%M%S}"
