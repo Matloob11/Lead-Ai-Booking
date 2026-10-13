@@ -49,7 +49,11 @@ def person_name(raw) -> str:
     text = str(raw or "").strip()
     if not text or _GENERIC_NAME.match(text):
         return ""
-    return lead_display_name({"name": text})
+    cleaned = lead_display_name({"name": text})
+    # "there" is the CRM greeting for a rejected title, not a renewals name.
+    if not cleaned or cleaned == "there":
+        return ""
+    return cleaned
 
 
 def _phone(raw) -> str:
@@ -186,7 +190,7 @@ def _fill(template, people: list[dict], extra: dict | None, role: str, field_map
             {
                 "id": person["id"],
                 "phone": person["phone"],
-                "name": person["name"],
+                "name": person["name"] or "Customer",
                 "details": person.get("details") if isinstance(person.get("details"), dict) else {},
             }
             for person in people

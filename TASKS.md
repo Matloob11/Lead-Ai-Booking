@@ -1,3 +1,13 @@
+## 2026-10-13 — Campaign {{1}} is the person's name, not the lead title (Cursor)
+
+`{{1}}` and `CampaignRecipient.name` no longer send the Bitrix lead TITLE ("Hi Bayut WhatsApp | Md Sumon"). NAME's first word is used when it is a real name; otherwise the part of TITLE after the last `|`. A phone, "Missed Call…", "untitled", or a rejected value becomes "there". A deal whose contact name is already separate from the deal title keeps that contact name. Renewals still send "Customer" for "Untitled" and "Deal #39079". A mapped dropdown wins over a typed value on the same slot (the popup never sends both; the existing test required it).
+
+**Live:** `ops/wa.sh build app` + `up app` (no queued/running/retrying campaign). web, worker, worker-leadai, and beat all `crm_leads.py` `d53a6a89` and `renewals.py` `7a1fed8c`. Bitrix `a7_lead_wa.php` `e64b7660` (local == box); anonymous GET 401, 47 bytes ("Sign in to Bitrix first"), so the file parses. `manage.py test` on the new image: `test_crm_leads` 25 OK, `test_renewals` 11 OK. `makemigrations --check` no changes. Lead AI sweep `2026-10-13 09:09:50 UTC`. No WhatsApp message was sent.
+
+**Shared:** `ops/wa.sh` `test` now uses Django's runner in a one-off `settings_livetest` container. Files: `campaigns/crm_leads.py`, `campaigns/renewals.py`, `campaigns/tests/test_crm_leads.py`, `ops/bitrix-aws/a7_lead_wa.php`, `ops/wa.sh`.
+
+---
+
 ## 2026-10-13 — Lead AI reality check, Bot 2 plan board, repo pushed to GitHub Lead-Ai-Booking (Claude Code)
 
 Matloob asked for four things:

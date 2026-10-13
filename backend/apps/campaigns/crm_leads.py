@@ -184,15 +184,44 @@ def parse_field_map(raw) -> dict[str, str]:
     return out
 
 
+# A portal title ("Bayut WhatsApp | Md Sumon") is not a greeting. Neither is a
+# phone, a missed-call row, or an empty Bitrix name.
+_BAD_GREETING = re.compile(r"^(untitled|unentitled|none|field is empty)$", re.IGNORECASE)
+_MISSED_CALL = re.compile(r"^missed\s+call\b", re.IGNORECASE)
+_GREETING_FALLBACK = "there"
+
+
+def _squash(value) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _bad_greeting(text: str) -> bool:
+    if not text or _BAD_GREETING.match(text) or _MISSED_CALL.match(text):
+        return True
+    letters = sum(ch.isalpha() for ch in text)
+    digits = sum(ch.isdigit() for ch in text)
+    # No letters at all, or a full phone hiding in the field.
+    return letters == 0 or digits >= 8
+
+
+def _after_pipe(text: str) -> str:
+    if "|" not in text:
+        return text
+    return _squash(text.rsplit("|", 1)[-1])
+
+
 def detail_value(row: dict, key: str) -> str:
-    """One lead's value for a mapped variable. Blank, untitled, or missing → ``?``."""
+    """One lead's value for a mapped variable.
+
+    Name is the greeting from ``lead_display_name`` (never "?"). Every other
+    blank, untitled, or missing detail is "?".
+    """
+    if key == "name":
+        return lead_display_name(row)
     details = row.get("details") if isinstance(row.get("details"), dict) else {}
     raw = details.get(key)
-    if raw is None or not str(raw).strip():
-        if key == "name":
-            raw = lead_display_name(row)
-        elif key == "phone":
-            raw = "".join(ch for ch in str(row.get("phone") or "") if ch.isdigit())
+    if (raw is None or not str(raw).strip()) and key == "phone":
+        raw = "".join(ch for ch in str(row.get("phone") or "") if ch.isdigit())
     text = " ".join(str(raw or "").split())
     if not text or text.lower() in {"untitled", "unentitled", "none", "field is empty"}:
         return "?"
@@ -200,15 +229,37 @@ def detail_value(row: dict, key: str) -> str:
 
 
 def lead_display_name(row: dict) -> str:
-    title = str(row.get("name") or row.get("title") or "").strip()
-    if title and title.lower() not in {"untitled", "unentitled"}:
-        return title[:200]
-    first = str(row.get("first_name") or "").strip()
-    last = str(row.get("last_name") or "").strip()
-    joined = " ".join(part for part in (first, last) if part)
-    if joined:
-        return joined[:200]
-    return ""
+    """First name for {{1}} and ``CampaignRecipient.name``.
+
+    Use the Bitrix NAME field's first word when that word is a real name.
+    Otherwise use the part of TITLE after the last "|". A phone number,
+    "Missed Call…", or "untitled" becomes "there". A completely blank row
+    is "" so a caller can apply its own fallback. A deal
+    whose contact name is already separate from the deal title keeps that
+    contact name when NAME itself is empty.
+    """
+    if not isinstance(row, dict):
+        return _GREETING_FALLBACK
+    first = _squash(row.get("first_name"))
+    title = _squash(row.get("title"))
+    name = _squash(row.get("name"))
+    # Nothing was supplied. Callers that already rejected a generic title
+    # (renewals "Untitled" / "Deal #39079") pass a blank and keep their own
+    # "Customer" fallback. A value that was supplied and rejected is "there".
+    if not first and not title and not name:
+        return ""
+    if first:
+        word = first.split()[0]
+        if not _bad_greeting(first) and not _bad_greeting(word):
+            return word[:200]
+    if name and title and name.casefold() != title.casefold() and not _bad_greeting(name):
+        picked = _after_pipe(name)
+        if picked and not _bad_greeting(picked):
+            return picked[:200]
+    source = _after_pipe(title or name)
+    if source and not _bad_greeting(source):
+        return source[:200]
+    return _GREETING_FALLBACK
 
 
 def _item_id(raw: dict) -> int:
@@ -244,7 +295,7 @@ def build_recipients(
             continue
         item_id = _item_id(raw)
         phone = "".join(ch for ch in str(raw.get("phone") or "") if ch.isdigit())
-        name = lead_display_name(raw)
+        name = lead_display_name(raw) or _GREETING_FALLBACK
         if item_id <= 0:
             skipped.append({"id": item_id, "reason": f"Invalid {noun}."})
             continue
@@ -257,13 +308,13 @@ def build_recipients(
         seen.add(phone)
         body = dict(extra)
         if mapped:
-            # A mapped {{n}} is that lead's detail (blank → "?").
-            # A typed value in extra wins for that slot and is the same for everyone.
+            # A mapped {{n}} is that lead's own detail (blank → "?").
+            # A typed value is used only for a slot that has no field picked.
             for slot in range(1, needed + 1):
                 key = str(slot)
                 field = mapped.get(key) or ""
                 written = str(body.get(key) or "").strip()
-                if field and not written:
+                if field:
                     body[key] = detail_value(raw, field)
                 elif written:
                     body[key] = written
@@ -275,9 +326,9 @@ def build_recipients(
                     )
         else:
             if needed >= 1:
-                # Agent may override {{1}} with one value for everyone. Empty → each card/lead name.
+                # Agent may override {{1}} with one value for everyone. Empty → each person's name.
                 override_one = str(body.get("1") or "").strip()
-                body["1"] = override_one or (name or "Customer")
+                body["1"] = override_one or name
             if needed > 1:
                 missing = [str(i) for i in range(2, needed + 1) if str(i) not in body]
                 if missing:
@@ -286,7 +337,7 @@ def build_recipients(
                     )
         entry = {
             "phone": phone,
-            "name": name or f"{noun[0].upper()}{noun[1:]} {item_id}",
+            "name": name,
         }
         # Link the recipient to the record it came from, so the reply mirror and
         # the Owner Data card logic address the right CRM object. A contact has

@@ -60,16 +60,68 @@ function a7_lead_wa_phone(int $leadId): string
     return '';
 }
 
+function a7_lead_wa_squash(string $text): string
+{
+    $text = trim((string)(preg_replace('/\s+/u', ' ', $text) ?? ''));
+    return $text;
+}
+
+function a7_lead_wa_after_pipe(string $text): string
+{
+    $pos = function_exists('mb_strrpos') ? mb_strrpos($text, '|') : strrpos($text, '|');
+    if ($pos === false) {
+        return $text;
+    }
+    $rest = function_exists('mb_substr') ? mb_substr($text, $pos + 1) : substr($text, $pos + 1);
+    return a7_lead_wa_squash((string)$rest);
+}
+
+function a7_lead_wa_bad_greeting(string $text): bool
+{
+    if ($text === '') {
+        return true;
+    }
+    if (preg_match('/^(untitled|unentitled|none|field is empty)$/iu', $text)) {
+        return true;
+    }
+    if (preg_match('/^missed\s+call\b/iu', $text)) {
+        return true;
+    }
+    $letters = preg_match_all('/\p{L}/u', $text);
+    $digits = preg_match_all('/\d/u', $text);
+    if ($letters === false || $letters === 0) {
+        return true;
+    }
+    return $digits !== false && $digits >= 8;
+}
+
 function a7_lead_wa_display(array $row): string
 {
-    $title = trim((string)($row['name'] ?? $row['title'] ?? ''));
-    if ($title !== '' && !preg_match('/^(untitled|unentitled)$/i', $title)) {
-        return $title;
+    // {{1}} and the popup name: NAME's first word when it is a real name,
+    // otherwise the part of TITLE after the last "|". Phones, missed calls,
+    // untitled and empty become "there". A deal contact name that is not the
+    // deal title is kept when NAME itself is empty.
+    $first = a7_lead_wa_squash((string)($row['first_name'] ?? ''));
+    if ($first !== '') {
+        $parts = preg_split('/\s+/u', $first);
+        $word = is_array($parts) ? (string)($parts[0] ?? '') : '';
+        if ($word !== '' && !a7_lead_wa_bad_greeting($first) && !a7_lead_wa_bad_greeting($word)) {
+            return $word;
+        }
     }
-    $joined = trim(
-        trim((string)($row['first_name'] ?? '')) . ' ' . trim((string)($row['last_name'] ?? ''))
-    );
-    return $joined !== '' ? $joined : 'Untitled';
+    $title = a7_lead_wa_squash((string)($row['title'] ?? ''));
+    $name = a7_lead_wa_squash((string)($row['name'] ?? ''));
+    if ($name !== '' && $title !== '' && strcasecmp($name, $title) !== 0 && !a7_lead_wa_bad_greeting($name)) {
+        $picked = a7_lead_wa_after_pipe($name);
+        if ($picked !== '' && !a7_lead_wa_bad_greeting($picked)) {
+            return $picked;
+        }
+    }
+    $source = a7_lead_wa_after_pipe($title !== '' ? $title : $name);
+    if ($source !== '' && !a7_lead_wa_bad_greeting($source)) {
+        return $source;
+    }
+    return 'there';
 }
 
 function a7_lead_wa_requested_ids(): array
@@ -266,7 +318,8 @@ function a7_lead_wa_row(int $leadId): ?array
         'first_name' => (string)($lead['NAME'] ?? ''),
         'last_name' => (string)($lead['LAST_NAME'] ?? ''),
     ];
-    $row['details'] = a7_lead_wa_lead_details($lead, (string)$row['phone'], a7_lead_wa_display($row));
+    $row['name'] = a7_lead_wa_display($row);
+    $row['details'] = a7_lead_wa_lead_details($lead, (string)$row['phone'], $row['name']);
     return $row;
 }
 
@@ -442,7 +495,7 @@ function a7_lead_wa_owner_row(int $itemId): ?array
         $title = trim((string)($data['TITLE'] ?? $data['title'] ?? ''));
     }
     $phone = a7_lead_wa_owner_phone($item, $data);
-    return [
+    $row = [
         'id' => $itemId,
         'owner_data_id' => $itemId,
         'phone' => $phone,
@@ -450,8 +503,10 @@ function a7_lead_wa_owner_row(int $itemId): ?array
         'title' => $title,
         'first_name' => '',
         'last_name' => '',
-        'details' => a7_lead_wa_detail_pack($title, $phone),
     ];
+    $row['name'] = a7_lead_wa_display($row);
+    $row['details'] = a7_lead_wa_detail_pack($row['name'], $phone);
+    return $row;
 }
 
 function a7_lead_wa_company_phone(int $companyId): string
@@ -494,7 +549,7 @@ function a7_lead_wa_contact_row(int $contactId): ?array
         $full = trim($first . ' ' . $last);
     }
     $phone = a7_lead_wa_contact_phone($contactId);
-    return [
+    $row = [
         'id' => $contactId,
         'crm_contact_id' => $contactId,
         'phone' => $phone,
@@ -502,8 +557,10 @@ function a7_lead_wa_contact_row(int $contactId): ?array
         'title' => $full,
         'first_name' => $first,
         'last_name' => $last,
-        'details' => a7_lead_wa_detail_pack($full, $phone),
     ];
+    $row['name'] = a7_lead_wa_display($row);
+    $row['details'] = a7_lead_wa_detail_pack($row['name'], $phone);
+    return $row;
 }
 
 function a7_lead_wa_deal_contact_ids(int $dealId, array $deal): array
@@ -563,7 +620,7 @@ function a7_lead_wa_deal_row(int $dealId): ?array
     }
     $person = trim($first . ' ' . $last);
     $name = $person !== '' ? $person : $title;
-    return [
+    $row = [
         'id' => $dealId,
         'crm_deal_id' => $dealId,
         'phone' => $phone,
@@ -571,10 +628,12 @@ function a7_lead_wa_deal_row(int $dealId): ?array
         'title' => $title,
         'first_name' => $first,
         'last_name' => $last,
-        'details' => a7_lead_wa_detail_pack($name, $phone, [
-            'stage' => a7_lead_wa_status_name('DEAL_STAGE', (string)($deal['STAGE_ID'] ?? '')),
-        ]),
     ];
+    $row['name'] = a7_lead_wa_display($row);
+    $row['details'] = a7_lead_wa_detail_pack($row['name'], $phone, [
+        'stage' => a7_lead_wa_status_name('DEAL_STAGE', (string)($deal['STAGE_ID'] ?? '')),
+    ]);
+    return $row;
 }
 
 function a7_lead_wa_resolve_row(int $id, string $entity): ?array

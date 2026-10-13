@@ -18,14 +18,60 @@ class FakeTemplate:
 
 
 class LeadDisplayNameTests(SimpleTestCase):
-    def test_skips_untitled(self):
-        self.assertEqual(lead_display_name({"name": "Untitled"}), "")
-        self.assertEqual(lead_display_name({"title": "Unentitled"}), "")
+    def test_untitled_phone_and_missed_call_become_there(self):
+        self.assertEqual(lead_display_name({"name": "Untitled"}), "there")
+        self.assertEqual(lead_display_name({"title": "Unentitled"}), "there")
+        self.assertEqual(lead_display_name({}), "")
+        self.assertEqual(lead_display_name({"name": "971501234567"}), "there")
+        self.assertEqual(lead_display_name({"name": "+971 50 123 4567"}), "there")
+        self.assertEqual(lead_display_name({"name": "Missed Call from 0501234567"}), "there")
+        self.assertEqual(lead_display_name({"title": "Missed Call | 971501112233"}), "there")
 
-    def test_prefers_title_then_first_last(self):
+    def test_plain_name_stays_whole(self):
         self.assertEqual(lead_display_name({"name": "Sara Khan"}), "Sara Khan")
+
+    def test_name_field_is_the_first_word(self):
         self.assertEqual(
             lead_display_name({"first_name": "Ali", "last_name": "Hassan"}),
+            "Ali",
+        )
+        self.assertEqual(
+            lead_display_name({
+                "first_name": "Mohammed Ali",
+                "name": "Bayut WhatsApp | Mohammed Ali",
+                "title": "Bayut WhatsApp | Mohammed Ali",
+            }),
+            "Mohammed",
+        )
+
+    def test_portal_title_uses_the_part_after_the_last_pipe(self):
+        self.assertEqual(
+            lead_display_name({
+                "name": "Bayut WhatsApp | Md Sumon",
+                "title": "Bayut WhatsApp | Md Sumon",
+            }),
+            "Md Sumon",
+        )
+        self.assertEqual(
+            lead_display_name({"title": "Portal | Bayut WhatsApp | Aisha Noor"}),
+            "Aisha Noor",
+        )
+
+    def test_phone_in_the_name_field_falls_through_to_the_title(self):
+        self.assertEqual(
+            lead_display_name({
+                "first_name": "971501234567",
+                "title": "Property Finder | Sara Khan",
+            }),
+            "Sara Khan",
+        )
+
+    def test_deal_contact_name_is_kept_when_it_is_not_the_title(self):
+        self.assertEqual(
+            lead_display_name({
+                "name": "Ali Hassan",
+                "title": "Apartment in Marina",
+            }),
             "Ali Hassan",
         )
 
@@ -44,13 +90,46 @@ class BuildRecipientsTests(SimpleTestCase):
         self.assertEqual(rows[0]["variables"]["2"], "Dubai")
         self.assertNotIn("crm_lead_id", rows[0]["variables"])
 
-    def test_untitled_becomes_customer(self):
+    def test_untitled_becomes_there(self):
         rows, _skipped = build_recipients(
             template=FakeTemplate(1),
             leads=[{"id": 4, "phone": "971509998887", "name": "Untitled"}],
             extra_body={},
         )
-        self.assertEqual(rows[0]["variables"]["1"], "Customer")
+        self.assertEqual(rows[0]["variables"]["1"], "there")
+        self.assertEqual(rows[0]["name"], "there")
+
+    def test_portal_title_is_the_greeting_on_the_recipient(self):
+        rows, skipped = build_recipients(
+            template=FakeTemplate(1),
+            leads=[{
+                "id": 17,
+                "phone": "971509998887",
+                "name": "Bayut WhatsApp | Md Sumon",
+                "title": "Bayut WhatsApp | Md Sumon",
+            }],
+            extra_body={},
+        )
+        self.assertEqual(skipped, [])
+        self.assertEqual(rows[0]["name"], "Md Sumon")
+        self.assertEqual(rows[0]["variables"]["1"], "Md Sumon")
+
+    def test_mapped_name_uses_the_first_word_not_the_portal_title(self):
+        rows, _skipped = build_recipients(
+            template=FakeTemplate(1),
+            leads=[{
+                "id": 11,
+                "phone": "971501111111",
+                "name": "Bayut WhatsApp | Md Sumon",
+                "title": "Bayut WhatsApp | Md Sumon",
+                "first_name": "Md Sumon",
+                "details": {"name": "Bayut WhatsApp | Md Sumon"},
+            }],
+            extra_body={},
+            field_map={"1": "name"},
+        )
+        self.assertEqual(rows[0]["name"], "Md")
+        self.assertEqual(rows[0]["variables"]["1"], "Md")
 
     def test_skips_no_phone_and_duplicates(self):
         rows, skipped = build_recipients(
@@ -111,7 +190,7 @@ class BuildRecipientsTests(SimpleTestCase):
             entity="contact",
         )
         self.assertEqual(skipped, [])
-        self.assertEqual(rows[0]["name"], "Sara Khan")
+        self.assertEqual(rows[0]["name"], "Sara")
         self.assertNotIn("crm_lead_id", rows[0])
         self.assertNotIn("crm_deal_id", rows[0])
         self.assertNotIn("owner_data_id", rows[0])

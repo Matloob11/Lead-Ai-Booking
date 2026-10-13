@@ -1179,13 +1179,22 @@ case "$cmd" in
     ;;
 
   test)
-    # Unit tests inside the live web image. Fixed runner and one path under
-    # apps/ — not a manage.py or pytest passthrough. Tests run against the
-    # image, so build first if the test file is new.
+    # Unit tests in a one-off container of the live web image, on Django's
+    # throwaway test database. The image has no pytest, so this is manage.py
+    # test with the label fixed from the path — not a passthrough. Same locks
+    # as leadai-tests: the broker, Redis, Bitrix and OpenAI stay pointed away
+    # from production. Build first if the test file is new in the image.
     target="${1:-apps}"
     [[ "$target" =~ ^apps(/[a-z_]+(/tests(/test_[a-z0-9_]+\.py)?)?)?$ ]] ||
       die "test takes a path like apps/catalog/tests/test_templates.py"
-    remote "cd $APP_DIR && docker compose exec -T web python -m pytest -q -p no:cacheprovider '$target' 2>&1 | tail -40"
+    module="${target%.py}"
+    module="${module//\//.}"
+    [[ "$module" =~ ^apps(\.[a-z_]+(\.tests(\.test_[a-z0-9_]+)?)?)?$ ]] ||
+      die "refusing test module '$module'"
+    remote "cd $APP_DIR && docker compose run --rm --no-deps -T \
+      -e CELERY_BROKER_URL=memory:// -e CELERY_RESULT_BACKEND=cache+memory:// -e REDIS_URL=redis://127.0.0.1:1/0 \
+      -e OPENAI_API_KEY= -e LEADAI_OPENAI_API_KEY= -e BITRIX_WEBHOOK_URL= -e ALOTS_API_KEY=test-key \
+      web python manage.py test '$module' --settings=a7wa.settings_livetest --noinput -v 1"
     ;;
 
   agent-reports-deploy)
