@@ -1,3 +1,11 @@
+## 2026-10-13 — Booking update vs BP 235, on a test lead (Cursor)
+
+Replayed the confirmed-booking REST update from `crm.py` `booking_fields()` on lead 79545: `STATUS_ID=10`, Meeting Date `2026-11-02T16:30:00+04:00`, Mode 42. REST ok. The meeting column was empty afterwards. One to-do, subject Viewing/Meeting, deadline 13/10/2026 10:11:42 am (the run time, not 16:30). Title changed from `ZZ C7 booking test delete` to `Personal | Sumon Khan`. Stage became 10. Mode 42 stayed. Viewing item 639 was created and then deleted with the lead and the to-do.
+
+A stage move by that same REST call still runs the wipe, so C6 for the time plus a REST move to stage 10 does not keep the time. Moving the stage inside C6 with bizproc off keeps the time and plans no to-do, which is what `move_todo` looks for. Proposed fix is on the board: BP 235's stage-10 branch should skip the clear and the new to-do when Bot Status is Viewing booked (2477). BP 235 was not edited.
+
+---
+
 ## 2026-10-13 — Lead AI field writer on Bitrix (Cursor)
 
 The assistant can write the shops fields without starting BP 235. Tool: `POST https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_fields.php`, signed like the notify tool with the prefix `leadai-fields.`. File: `ops/bitrix-aws/a7_leadai_fields.php` (`2a22361e`). `php -l` clean.
