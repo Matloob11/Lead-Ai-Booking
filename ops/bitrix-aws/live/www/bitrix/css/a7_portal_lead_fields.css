@@ -1,0 +1,26 @@
+/* A7 Portal Lead Fields — bottom "Other fields" section on portal lead details */
+.a7-plf-other {
+	margin-top: 12px;
+}
+
+.a7-plf-other-header {
+	padding: 10px 14px 6px;
+}
+
+.a7-plf-other-header .ui-entity-editor-header-title-text {
+	font-weight: 600;
+	opacity: 0.85;
+}
+
+.a7-plf-other-content {
+	padding: 4px 8px 12px;
+}
+
+.a7-plf-other .ui-entity-editor-content-block[data-a7-plf-moved="1"] {
+	display: block !important;
+}
+
+/* Stage-change popup: keep the required-field section open so the inputs stay visible. */
+.popup-window .ui-entity-editor-section-content {
+	display: block !important;
+}

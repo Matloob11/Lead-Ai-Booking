@@ -1,0 +1,61 @@
+.a7-hr-cv-stage {
+	margin: 0 0 16px;
+	padding: 16px 16px 14px;
+	border: 1px solid #e6e8eb;
+	border-radius: 12px;
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.a7-hr-cv-stage__title {
+	margin: 0 0 10px;
+	color: #525c69;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+.a7-hr-cv-stage__row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.a7-hr-cv-stage__input {
+	flex: 1;
+	min-width: 0;
+	height: 38px;
+	padding: 0 12px;
+	border: 1px solid #c6cdd3;
+	border-radius: 8px;
+	background: #fff;
+	color: #333;
+	font-size: 14px;
+}
+
+.a7-hr-cv-stage__save {
+	height: 38px;
+	padding: 0 16px;
+	border: 0;
+	border-radius: 8px;
+	background: #00a2e0;
+	color: #fff;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.a7-hr-cv-stage__save:hover:not(:disabled) {
+	background: #008fc7;
+}
+
+.a7-hr-cv-stage__save:disabled {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+.a7-hr-cv-stage__hint {
+	margin: 8px 0 0;
+	color: #a8adb4;
+	font-size: 12px;
+}

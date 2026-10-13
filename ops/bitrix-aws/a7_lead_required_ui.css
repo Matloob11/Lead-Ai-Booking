@@ -1,0 +1,105 @@
+.a7-lead-required {
+	margin: 0 0 14px;
+	border: 1px solid #d5dde6;
+	border-left: 3px solid #2fc6f6;
+	border-radius: 8px;
+	background: #f7f9fb;
+	overflow: hidden;
+}
+
+.a7-lead-required > .ui-entity-editor-section-header,
+.a7-lead-required > .ui-entity-editor-section-title,
+.a7-lead-required .a7-req-head {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+	margin: 0;
+	padding: 12px 16px 10px;
+	border-bottom: 1px solid #e4ebf1;
+	background: #ffffff;
+}
+
+.a7-lead-required .ui-entity-editor-header-title-text,
+.a7-lead-required .ui-entity-editor-section-title-text,
+.a7-lead-required .a7-req-title {
+	font-size: 14px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: #1f2a37;
+	text-transform: none;
+}
+
+.a7-lead-required .a7-req-sub {
+	display: none;
+}
+
+.a7-lead-required .a7-req-edit {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 2px;
+	color: #6b7a90;
+	font-size: 13px;
+	line-height: 1;
+}
+
+.a7-lead-required .a7-req-edit a,
+.a7-lead-required .a7-req-edit span,
+.a7-lead-required .a7-req-edit button {
+	color: #6b7a90;
+	cursor: pointer;
+}
+
+.a7-lead-required .ui-entity-editor-section-content,
+.a7-lead-required .ui-entity-editor-content {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 10px 16px;
+	padding: 14px 16px 16px;
+	box-sizing: border-box;
+}
+
+.a7-lead-required .ui-entity-editor-content-block,
+.a7-lead-required .ui-entity-editor-field {
+	margin: 0;
+	min-width: 0;
+}
+
+.a7-lead-required .a7-req-name,
+.a7-lead-required .a7-req-budget,
+.a7-lead-required .a7-req-wide {
+	grid-column: 1 / -1;
+}
+
+.a7-lead-required .ui-entity-editor-block-title,
+.a7-lead-required .ui-entity-editor-field-title {
+	margin-bottom: 4px;
+	font-size: 12px;
+	font-weight: 600;
+	color: #526072;
+}
+
+.a7-lead-required input[type="text"],
+.a7-lead-required input[type="tel"],
+.a7-lead-required textarea,
+.a7-lead-required .ui-ctl,
+.a7-lead-required .ui-ctl-textbox,
+.a7-lead-required .ui-ctl-element {
+	width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+	.a7-lead-required .ui-entity-editor-section-content,
+	.a7-lead-required .ui-entity-editor-content {
+		grid-template-columns: 1fr;
+	}
+
+	.a7-lead-required .a7-req-name,
+	.a7-lead-required .a7-req-budget,
+	.a7-lead-required .a7-req-wide {
+		grid-column: auto;
+	}
+}

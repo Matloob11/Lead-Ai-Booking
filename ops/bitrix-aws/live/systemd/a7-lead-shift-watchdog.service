@@ -1,0 +1,11 @@
+[Unit]
+Description=A7 lead-shift watchdog (restart timer if it dies)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/bin/bash /opt/a7-lead-shift/current/deploy/a7-lead-shift-watchdog.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=A7 Recordings Ops API (read-only aggregates, timer pause/resume)
+Documentation=file:/opt/a7-recordings-ops-api/current/KNOWN-LIMITS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bitrix
+Group=bitrix
+WorkingDirectory=/opt/a7-recordings-ops-api/current
+Environment=A7_OPS_DB=/var/lib/a7-3cx-worker/worker.sqlite3
+Environment=A7_OPS_HMAC_SECRET_FILE=/etc/a7-recordings-ops-api/hmac.secret
+Environment=A7_OPS_KNOWN_LIMITS=/opt/a7-recordings-ops-api/current/KNOWN-LIMITS.md
+Environment=A7_OPS_SYSTEMCTL=1
+ExecStart=/opt/a7-recordings-ops-api/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8788
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/a7-3cx-worker
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the A7 recording AI worker at a controlled interval
+Documentation=file:///opt/a7-3cx-worker/current/README.md
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=false
+Unit=a7-3cx-ai-worker.service
+
+[Install]
+WantedBy=timers.target

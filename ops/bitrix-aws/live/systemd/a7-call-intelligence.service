@@ -1,0 +1,18 @@
+[Unit]
+Description=A7 Call Intelligence queue
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/home/bitrix/www/bitrix/php_interface/include/a7_call_intelligence_cron.php
+
+[Service]
+Type=oneshot
+User=bitrix
+Group=bitrix
+WorkingDirectory=/home/bitrix/www
+Environment=HOME=/home/bitrix
+Environment=TZ=Asia/Dubai
+ExecStart=/usr/bin/php /home/bitrix/www/bitrix/php_interface/include/a7_call_intelligence_cron.php
+TimeoutStartSec=180
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

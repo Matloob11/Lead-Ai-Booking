@@ -1,0 +1,23 @@
+[Unit]
+Description=A7 Org & Security API (privileged Bitrix org/role mutations)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bitrix
+Group=bitrix
+WorkingDirectory=/opt/a7-org-api/current
+Environment=A7_ORG_HMAC_SECRET_FILE=/etc/a7-org-api/hmac.secret
+Environment=A7_ORG_PHP_BIN=/usr/bin/php
+Environment=A7_ORG_PHP_DIR=/opt/a7-org-api/current/php
+Environment=A7_ORG_PHP_TIMEOUT=120
+ExecStart=/opt/a7-org-api/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8789
+Restart=on-failure
+RestartSec=5
+# The engine must write Bitrix caches and managed-cache dirs, so this unit is not
+# sandboxed as tightly as the read-only recordings API.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

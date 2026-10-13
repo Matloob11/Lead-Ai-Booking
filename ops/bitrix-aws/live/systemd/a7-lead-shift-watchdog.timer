@@ -1,0 +1,11 @@
+[Unit]
+Description=A7 lead-shift watchdog every 2 minutes
+
+[Timer]
+OnCalendar=*:0/2
+AccuracySec=15s
+Persistent=true
+Unit=a7-lead-shift-watchdog.service
+
+[Install]
+WantedBy=timers.target

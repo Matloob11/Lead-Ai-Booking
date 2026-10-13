@@ -1,0 +1,12 @@
+[Unit]
+Description=A7 CRM lead auto-shift every 5 minutes
+Requires=a7-lead-shift.service
+
+[Timer]
+OnCalendar=*:0/5:00
+AccuracySec=15s
+Persistent=false
+Unit=a7-lead-shift.service
+
+[Install]
+WantedBy=timers.target

@@ -1,15 +1,17 @@
 /**
- * A7 Team Lead phone mask — CRM leads + Owner Data (SPA 1042) + Telephony.
- * Only loads for listed mask users (gated in init.php). Masks last 4 digits.
- * Eye + admin password reveals for 30s.
+ * A7 phone mask — last 4 digits hidden.
+ * Loads for Team Leads (config list) + Admin & Finance dept members (auto),
+ * except exempt users. Gate is in init.php OnProlog (all portal pages).
+ * Eye + password admin222007 reveals for 30s.
  *
  * Deep leak seal: strips/masks title, aria-label, data-hint, tel/callto href,
  * copy payloads, and other tooltip attributes so hover cannot reveal the number.
  */
 (function () {
-  if (window.A7_TL_PHONE_MASK_LOADED) {
+  if (window.A7_TL_PHONE_MASK_V2) {
     return;
   }
+  window.A7_TL_PHONE_MASK_V2 = true;
   window.A7_TL_PHONE_MASK_LOADED = true;
 
   var ENDPOINT = "/bitrix/tools/a7_tl_phone_mask.php";
@@ -23,6 +25,13 @@
   var unlockedUntil = 0;
   var scanTimer = 0;
   var busy = false;
+  // A7_MASK_FREE_ZONE (2026-09-30): Messenger (chat window, side panel, desktop) and the file viewer / Disk files
+  // are never masked or blocked, so shared files (Excel etc.) open and download with full numbers.
+  var FREE_ZONE = "[class*='bx-im'], [class*='bx-messenger'], [class*='bx-desktop'], [class*='im-dialog'], " +
+    "[class*='im-message'], [class*='im-chat'], .ui-viewer, [class*='ui-viewer'], [class*='disk-file'], [class*='bx-disk']";
+  function inFreeZone(el) {
+    try { return !!(el && el.closest && el.closest(FREE_ZONE)); } catch (e) { return false; }
+  }
 
   var LEAK_ATTRS = [
     "title",
@@ -83,6 +92,10 @@
   function looksLikePhoneText(text) {
     var t = String(text || "").trim();
     if (!t || t.length > 40) {
+      return false;
+    }
+    // Dates are not phones (29.09.2026, 2026-09-29, 29/09/2026) - 2026-09-29 fix.
+    if (/^\d{1,4}[.\/-]\d{1,2}[.\/-]\d{1,4}$/.test(t)) {
       return false;
     }
     if (t.indexOf("*") !== -1 && /\d/.test(t)) {
@@ -220,7 +233,10 @@
       ".a7-tl-mask-ok{background:#0f766e;color:#fff;}" +
       ".a7-tl-mask-err{color:#b91c1c;font-size:12px;margin:-4px 0 10px;}" +
       /* Native title tooltips still possible on unsealed nodes — neutralize pointer hint on sealed links */
-      "a[" + ATTR_SEALED + "]{cursor:default;}";
+      "a[" + ATTR_SEALED + "]{cursor:default;}" +
+      /* Profile / side panel close must stay above the dim overlay and receive clicks. */
+      ".popup-window-close-icon,.side-panel-labels,.side-panel-label,.side-panel-close,.ui-sidepanel-close{" +
+      "pointer-events:auto!important;z-index:13000!important;}";
     document.head.appendChild(css);
   }
 
@@ -241,6 +257,10 @@
 
   function askPassword() {
     return new Promise(function (resolve) {
+      if (document.querySelector(".a7-tl-mask-modal")) {
+        resolve(false);
+        return;
+      }
       ensureStyle();
       var modal = document.createElement("div");
       modal.className = "a7-tl-mask-modal";
@@ -536,6 +556,7 @@
     for (var j = 0; j < sealed.length; j++) {
       sealTree(sealed[j], sealed[j].getAttribute(ATTR_FULL) || "");
     }
+    maskProfilePhones(document);
     maskPickerPhones(document);
     maskFormInputs(document);
     sealOrphanTitleLeaks(document);
@@ -551,7 +572,7 @@
     );
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
-      if (el.closest && el.closest(".a7-tl-mask-modal, .a7-tl-mask-eye")) {
+      if (el.closest && (el.closest(".a7-tl-mask-modal, .a7-tl-mask-eye") || inFreeZone(el))) {
         continue;
       }
       var full = el.getAttribute(ATTR_FULL) || "";
@@ -592,8 +613,8 @@
     );
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
-      if (!el || el.closest(".a7-tl-mask-modal")) {
-        continue;
+      if (!el || el.closest(".a7-tl-mask-modal, [class*='tasks'], [class*='task-']") || inFreeZone(el)) {
+        continue; // never touch task forms (2026-09-29 fix)
       }
       var name = String(el.name || el.id || el.getAttribute("data-name") || "").toLowerCase();
       var val = String(el.value || "").trim();
@@ -658,7 +679,11 @@
           return NodeFilter.FILTER_REJECT;
         }
         var p = node.parentElement;
-        if (p.closest(".a7-tl-mask-wrap, .a7-tl-mask-modal, script, style, textarea, input, .a7-od-call-btn")) {
+        if (p.closest(".a7-tl-mask-wrap, .a7-tl-mask-modal, script, style, textarea, input, .a7-od-call-btn, [class*='tasks'], [class*='task-']") || inFreeZone(p)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        // Profile card is Vue-owned. Replacing the text node makes it paint the full number again.
+        if (p.closest(".intranet-user-mini-profile, .intranet-user-mini-profile-popup, .ui-entity-editor-content-block-field-phone")) {
           return NodeFilter.FILTER_REJECT;
         }
         if (!looksLikePhoneText(node.nodeValue)) {
@@ -676,6 +701,115 @@
     }
   }
 
+  var PROFILE_PHONE_SEL = ".intranet-user-mini-profile, .intranet-user-mini-profile-popup, .ui-entity-editor-content-block-field-phone";
+
+  function maskProfilePhones(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var boxes = scope.querySelectorAll(PROFILE_PHONE_SEL);
+    for (var i = 0; i < boxes.length; i++) {
+      if (!inFreeZone(boxes[i])) {
+        rewriteProfileBox(boxes[i]);
+      }
+    }
+  }
+
+  function rewriteProfileBox(box) {
+    var walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (!node || !node.parentElement) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        var p = node.parentElement;
+        if (p.closest("script, style, textarea, input, .a7-tl-mask-modal, .a7-tl-mask-eye")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) {
+      nodes.push(walker.currentNode);
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      rewriteProfileText(nodes[i]);
+    }
+  }
+
+  function rewriteProfileText(node) {
+    var raw = String(node.nodeValue || "");
+    var parent = node.parentElement;
+    if (!parent) {
+      return;
+    }
+    var stored = parent.getAttribute(ATTR_FULL) || "";
+    if (raw.indexOf("*") !== -1) {
+      if (isUnlocked() && stored) {
+        var maskedNow = maskPhoneDisplay(stored);
+        if (raw.indexOf(maskedNow) !== -1 && raw.indexOf(stored) === -1) {
+          node.nodeValue = raw.replace(maskedNow, stored);
+        }
+      }
+      return;
+    }
+    var found = "";
+    var match = raw.match(/\+?\d[\d\s\u00a0\-().]{6,}\d/);
+    if (match) {
+      var candidate = match[0].replace(/\u00a0/g, " ").trim();
+      if (looksLikePhoneText(candidate)) {
+        found = match[0];
+      }
+    }
+    if (!stored && found) {
+      stored = found.replace(/\u00a0/g, " ").trim();
+      parent.setAttribute(ATTR_FULL, stored);
+    }
+    if (!stored || !found) {
+      return;
+    }
+    var show = isUnlocked() ? stored : maskPhoneDisplay(stored);
+    if (raw.indexOf(found) !== -1 && raw.indexOf(show) === -1) {
+      node.nodeValue = raw.replace(found, show);
+    }
+    sealTree(parent, stored);
+  }
+
+  function profilePhoneTarget(t) {
+    if (!t || !t.closest) {
+      return null;
+    }
+    return t.closest(
+      "a.intranet-user-mini-profile__detailed-info__contact-item-value, " +
+      ".ui-entity-editor-content-block-field-phone .ui-entity-editor-content-block-text, " +
+      ".intranet-user-profile-phone-icon"
+    );
+  }
+
+  function blockProfilePhone(e) {
+    if (isUnlocked()) {
+      return;
+    }
+    var t = e.target;
+    if (!t || !t.closest) {
+      return;
+    }
+    if (t.closest(
+      ".popup-window-close-icon, .popup-window-overlay, .side-panel-labels, .side-panel-label, " +
+      ".side-panel-close, .ui-sidepanel-close, .ui-side-panel-close, .a7-tl-mask-eye"
+    )) {
+      return;
+    }
+    var hit = profilePhoneTarget(t);
+    if (!hit || inFreeZone(hit)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    unlockThen(function () {
+      remaskAll();
+      notify("Numbers visible for 30 seconds.", true);
+    });
+  }
+
   function scan() {
     if (busy) {
       return;
@@ -691,9 +825,12 @@
         'a[href^="tel:"], a[href^="callto:"], a[href^="sms:"], .crm-entity-phone-number, .crm-client-contacts-block-text a, .crm-entity-widget-content-block-inner a'
       );
       for (var i = 0; i < anchors.length; i++) {
-        maskAnchor(anchors[i]);
+        if (!inFreeZone(anchors[i])) {
+          maskAnchor(anchors[i]);
+        }
       }
       walkTextPhones(root);
+      maskProfilePhones(root);
       maskPickerPhones(root);
       maskFormInputs(root);
       sealOrphanTitleLeaks(root);
@@ -720,6 +857,9 @@
         );
         if (!btn) {
           return;
+        }
+        if (inFreeZone(btn)) {
+          return; // Messenger / file viewer: downloads allowed
         }
         var label = (
           (btn.getAttribute("title") || "") +
@@ -790,8 +930,21 @@
         if (!t || !t.closest) {
           return;
         }
+        if (t.closest(
+          ".popup-window-close-icon, .popup-window-overlay, .side-panel-labels, .side-panel-label, " +
+          ".side-panel-close, .ui-sidepanel-close, .ui-side-panel-close"
+        )) {
+          return;
+        }
+        if (profilePhoneTarget(t)) {
+          blockProfilePhone(e);
+          return;
+        }
         var a = t.closest("a[href^='tel:'], a[href^='callto:'], a[href^='sms:'], a[" + ATTR_FULL + "]");
-        if (!a) {
+        if (!a || inFreeZone(a)) {
+          return;
+        }
+        if (a.closest(".side-panel, .popup-window")) {
           return;
         }
         if (t.closest(".a7-tl-mask-eye")) {
@@ -820,6 +973,9 @@
         return;
       }
       var el = start.nodeType === 3 ? start.parentElement : start;
+      if (inFreeZone(el)) {
+        return;
+      }
       var hops = 0;
       while (el && el.nodeType === 1 && hops < 8 && el !== document.documentElement) {
         var full = el.getAttribute(ATTR_FULL) || "";
@@ -838,15 +994,17 @@
     }
 
     function hidePhoneHintPopups() {
-      var pops = document.querySelectorAll(
-        ".ui-hint, .ui-hint-popup, .bx-ui-hint, .popup-window, [id^='bx-hint']"
-      );
+      // Hint bubbles only. Never .popup-window or .side-panel: those are the
+      // account card and kanban slider. Removing them left the dim overlay up
+      // and the close icon visible but not clickable.
+      var pops = document.querySelectorAll(".ui-hint, .ui-hint-popup, .bx-ui-hint, [id^='bx-hint']");
       for (var i = 0; i < pops.length; i++) {
         var p = pops[i];
+        if (p.closest && p.closest(".side-panel, .popup-window")) {
+          continue;
+        }
         var txt = (p.textContent || "").trim();
         if (looksLikePhoneText(txt) || (phoneDigits(txt).length >= 8 && phoneDigits(txt).length <= 15 && txt.indexOf("*") === -1)) {
-          p.style.display = "none";
-          p.style.visibility = "hidden";
           if (p.parentNode) {
             try {
               p.parentNode.removeChild(p);
@@ -854,7 +1012,38 @@
           }
         }
       }
+      releaseStuckOverlays();
     }
+
+    function releaseStuckOverlays() {
+      var overlays = document.querySelectorAll(".popup-window-overlay");
+      for (var i = 0; i < overlays.length; i++) {
+        var overlay = overlays[i];
+        var next = overlay.nextElementSibling;
+        var hasPopup = false;
+        var node = overlay.parentElement ? overlay.parentElement.firstElementChild : null;
+        while (node) {
+          if (node.classList && node.classList.contains("popup-window") && node.offsetParent !== null) {
+            hasPopup = true;
+            break;
+          }
+          node = node.nextElementSibling;
+        }
+        if (!hasPopup && (!next || !next.classList || !next.classList.contains("popup-window"))) {
+          try {
+            overlay.parentNode.removeChild(overlay);
+          } catch (err) {}
+        }
+      }
+    }
+
+    document.addEventListener("mouseup", function (e) {
+      var t = e.target;
+      if (!t || !t.closest || !t.closest(".intranet-user-profile-phone-icon")) {
+        return;
+      }
+      blockProfilePhone(e);
+    }, true);
 
     document.addEventListener("mouseover", function (e) {
       nukeHoverLeaks(e.target);
@@ -892,6 +1081,12 @@
               needs = true;
               break;
             }
+          } else if (m.type === "characterData") {
+            var pn = m.target && m.target.parentElement;
+            if (pn && pn.closest && pn.closest(PROFILE_PHONE_SEL + ", .popup-window, .side-panel")) {
+              needs = true;
+              break;
+            }
           } else {
             needs = true;
             break;
@@ -904,6 +1099,7 @@
       obs.observe(document.documentElement, {
         childList: true,
         subtree: true,
+        characterData: true,
         attributes: true,
         attributeFilter: [
           "title",
@@ -917,6 +1113,12 @@
         ]
       });
     }
+    window.setInterval(function () {
+      if (isUnlocked() || !document.querySelector(PROFILE_PHONE_SEL)) {
+        return;
+      }
+      maskProfilePhones(document);
+    }, 500);
     window.A7TlPhoneMask = {
       scan: scan,
       isUnlocked: isUnlocked,

@@ -1,0 +1,26 @@
+[Unit]
+Description=A7 CRM lead auto-shift (roster idle)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/opt/a7-lead-shift/current/bin/a7_lead_shift.php
+ConditionPathExists=/opt/a7-lead-shift/current/bin/a7_activity_fields.php
+ConditionPathExists=/opt/a7-lead-shift/current/roster.json
+
+[Service]
+Type=oneshot
+User=bitrix
+Group=bitrix
+WorkingDirectory=/opt/a7-lead-shift/current
+Environment=HOME=/home/bitrix
+Environment=TZ=Asia/Karachi
+# Lower limits + niceness so a run cannot monopolise the 4 CPUs while CRM is busy.
+ExecStart=/usr/bin/php /opt/a7-lead-shift/current/bin/a7_lead_shift.php --apply --limit=150
+ExecStart=/usr/bin/php /opt/a7-lead-shift/current/bin/a7_activity_fields.php --apply --limit=2000
+TimeoutStartSec=300
+UMask=0027
+Nice=15
+CPUQuota=50%
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=append:/var/lib/a7-lead-shift/job.log
+StandardError=append:/var/lib/a7-lead-shift/job.log

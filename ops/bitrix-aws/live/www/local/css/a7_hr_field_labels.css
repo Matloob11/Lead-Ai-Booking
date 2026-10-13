@@ -1,0 +1,18 @@
+/* HR Applicant / SPA details: field labels a bit bolder and less faded. */
+.ui-entity-editor-block-title,
+.ui-entity-editor-block-title-text,
+.ui-entity-editor-content-block-title,
+.ui-entity-editor-content-block-title-text,
+.crm-entity-widget-content-block-title,
+.crm-entity-widget-content-block-title-text,
+.ui-entity-editor-block-title label,
+.ui-entity-editor-content-block-title label {
+	font-weight: 600 !important;
+	color: #333 !important;
+	opacity: 1 !important;
+}
+
+.a7-hr-applied-badge__label {
+	font-weight: 700;
+	color: #525c69;
+}

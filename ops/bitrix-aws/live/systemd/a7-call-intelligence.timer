@@ -1,0 +1,11 @@
+[Unit]
+Description=A7 Call Intelligence every minute
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=10s
+Persistent=true
+Unit=a7-call-intelligence.service
+
+[Install]
+WantedBy=timers.target
