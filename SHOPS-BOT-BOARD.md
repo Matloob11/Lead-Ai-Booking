@@ -225,8 +225,8 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | ID | Task | Files | Status |
 |---|---|---|---|
 | C1 | **`{{1}}` = the person's first name** (T14). Today "Name" resolves to the lead TITLE, so customers get "Hi Bayut WhatsApp \| Md Sumon". Use NAME (first word) when it is a real name; otherwise the part of TITLE after the last `\|`. Reject phone numbers, "Missed Call…", "untitled" and empty values, and fall back to "there". `CampaignRecipient.name` must carry the same clean name, because the assistant greets with it. The deal path already strips the prefix (`a7_lead_wa.php:565`). Add cases to `campaigns/tests/test_crm_leads.py` | `ops/bitrix-aws/a7_lead_wa.php` (`a7_lead_wa_display`, :63-68, :264-269), `backend/apps/campaigns/crm_leads.py` (`detail_value`, `lead_display_name` :187-211; `renewals.py` imports it) | Done (2026-10-13) — live: portal title after the last \|, NAME's first word, else "there". Tests 25+11 OK. Containers `d53a6a89`, PHP `e64b7660` (401). |
-| C2 | **"Script" choice beside the Lead AI box** (T20b), shown only while the box is ticked: `General` / `International City shops`. Payload field `lead_ai_playbook` = `general` \| `ic_shops`; the PHP forwards it after checking it is one of the two; `campaigns/views.py` (:228, :282) passes it to `send_from_leads` / `send_renewals`, which call `mark_campaign(campaign, playbook=…)`. Deploy the Django part only after Claude's T20a is live | `ops/bitrix-aws/a7_lead_wa.js` (:766-786, :1385), `a7_lead_wa.php` (:1016), `a7_renewals_wa.js/.php`, `backend/apps/campaigns/views.py`, `crm_leads.py` (:348-404), `renewals.py` (:277-369) | Open |
-| C3 | **Bitrix field map** (T50, Q10). Reuse: SOURCE_ID, Purpose `UF_CRM_LEAD_1737031634747` (for Broker), business activity, `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` (add DED / Trakhees / New licence), Meeting Date & Time. Create on leads: **Shop Type Wanted** (Type 1 / Type 2 / Type 3 / Not sure), **Trade License File** (file), **Bot Status** (New / Qualifying / Viewing booked / Handed to agent / Broker / Lost / Opted out), **WhatsApp Opt-out** (Yes/No). Put them on the lead form. Write every UF id and enum id here under "Bitrix field map". Also list the STATUS_ID and stage-required fields of JUNK, Reject and "Not interested" (UC_RYQD1Z), so Matloob can pick the lost stage | Bitrix (`ops/bitrix-aws/`), this board | Open |
+| C2 | **"Script" choice beside the Lead AI box** (T20b), shown only while the box is ticked: `General` / `International City shops`. Payload field `lead_ai_playbook` = `general` \| `ic_shops`; the PHP forwards it after checking it is one of the two; `campaigns/views.py` (:228, :282) passes it to `send_from_leads` / `send_renewals`, which call `mark_campaign(campaign, playbook=…)`. Deploy the Django part only after Claude's T20a is live | `ops/bitrix-aws/a7_lead_wa.js` (:766-786, :1385), `a7_lead_wa.php` (:1016), `a7_renewals_wa.js/.php`, `backend/apps/campaigns/views.py`, `crm_leads.py` (:348-404), `renewals.py` (:277-369) | Doing (Cursor, 2026-10-13) |
+| C3 | **Bitrix field map** (T50, Q10). Reuse: SOURCE_ID, Purpose `UF_CRM_LEAD_1737031634747` (for Broker), business activity, `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` (add DED / Trakhees / New licence), Meeting Date & Time. Create on leads: **Shop Type Wanted** (Type 1 / Type 2 / Type 3 / Not sure), **Trade License File** (file), **Bot Status** (New / Qualifying / Viewing booked / Handed to agent / Broker / Lost / Opted out), **WhatsApp Opt-out** (Yes/No). Put them on the lead form. Write every UF id and enum id here under "Bitrix field map". Also list the STATUS_ID and stage-required fields of JUNK, Reject and "Not interested" (UC_RYQD1Z), so Matloob can pick the lost stage | Bitrix (`ops/bitrix-aws/`), this board | Done (2026-10-13) — fields 2665–2668 live; licence 2455–2457; Broker 2467; section `a7_shops_bot` on the common form and layouts 1, 2 and 6. |
 | C4 | **Field-only lead updates** (needed by T51). Check what BP 235 and the lead-shift timer do when a lead already in stage 10, or held by user 1, gets a `crm.lead.update` that changes fields only. If that plans another to-do or moves the lead, say how to avoid it. Write the answer here | Bitrix robots/BP, `a7_lead_shift.php` | Open |
 | C5 | **Secrets out of the source** (low priority). `ops/bitrix-aws/a7_tl_phone_mask.config.php`: change the phone-mask password on the box, then `git rm --cached` the file and commit a `.example`. The 3CX tools (`a7_3cx_click_to_call*.php`, `a7_3cx_ai_recording_analyzer.php`) hard-code an OpenAI key, Bitrix webhook tokens and 3CX secrets: move them into an ignored config file. Both are already in `.gitignore` | `ops/bitrix-aws/` | Open |
 
@@ -234,7 +234,26 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 
 | Field | UF id | Enum ids |
 |---|---|---|
-| — | — | — |
+| SOURCE_ID | system field, no UF | lead source statuses, not a UF enum |
+| Purpose (Broker goes here) | `UF_CRM_LEAD_1737031634747` id 1351 | 804 I'm Investor, 805 I want for myself, 806 I'm Agent, **2467 Broker** (added) |
+| Business activity | `UF_CRM_A7_AI_BUSINESS_ACTIVITY` id 2399 | text, no enums |
+| Trade license status | `UF_CRM_A7_AI_TRADE_LICENSE_STATUS` id 2400 | 2159 Yes, 2160 No, **2455 DED**, **2456 Trakhees**, **2457 New licence** (added) |
+| Meeting Date & Time | `UF_CRM_1731838813769` id 122 | datetime, no enums. Required on stage 10 |
+| Shop Type Wanted | `UF_CRM_A7_SHOP_TYPE` id 2665 | 2471 Type 1, 2472 Type 2, 2473 Type 3, 2474 Not sure |
+| Trade License File | `UF_CRM_A7_TRADE_LICENSE_FILE` id 2666 | file, no enums |
+| Bot Status | `UF_CRM_A7_BOT_STATUS` id 2667 | 2475 New, 2476 Qualifying, 2477 Viewing booked, 2478 Handed to agent, 2479 Broker, 2480 Lost, 2481 Opted out |
+| WhatsApp Opt-out | `UF_CRM_A7_WA_OPT_OUT` id 2668 | 2482 Yes, 2483 No |
+
+Lost stages (Q10), read live from `b_crm_status` (`ENTITY_ID='STATUS'`) and `b_crm_field_attr` (lead = entity type 1, every row is type 3):
+
+| Stage | STATUS_ID | Semantics | Required fields |
+|---|---|---|---|
+| Junk Lead | `JUNK` | F (lost) | none |
+| Not Interested | `1` | F (lost) | none |
+| Lead Reject | `9` | F (lost) | `UF_CRM_1734162646510` Reason of Reject (phase 9 only) |
+| Not interested | `UC_RYQD1Z` | empty (still an open stage) | none |
+
+There is no stage named exactly "Reject". The failed one with a required field is **Lead Reject (`9`)**. `UC_RYQD1Z` is a different "Not interested" and is not a lost stage.
 
 ## Requests (one side asking the other)
 

@@ -90,6 +90,15 @@ $cfg = [[
 		section('a7_portal_details', 'Portal details', $portalFields),
 		section('a7_responsible', 'Responsible', ['ASSIGNED_BY_ID', 'OBSERVER']),
 		section('a7_other_fields', 'Other fields', $otherFields),
+		section('a7_shops_bot', 'Shops bot', [
+			'UF_CRM_LEAD_1737031634747',
+			'UF_CRM_A7_AI_BUSINESS_ACTIVITY',
+			'UF_CRM_A7_AI_TRADE_LICENSE_STATUS',
+			'UF_CRM_A7_TRADE_LICENSE_FILE',
+			'UF_CRM_A7_SHOP_TYPE',
+			'UF_CRM_A7_BOT_STATUS',
+			'UF_CRM_A7_WA_OPT_OUT',
+		]),
 	],
 ]];
 

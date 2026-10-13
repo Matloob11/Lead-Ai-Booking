@@ -1,3 +1,15 @@
+## 2026-10-13 — Shops Bitrix fields and the lost-stage list (Cursor)
+
+Created the four missing lead fields and the missing licence / Broker values, and added a "Shops bot" section to the common lead form plus editor layouts 1, 2 and 6. Nothing already on the form was removed. Script: `ops/bitrix-aws/a7_shops_lead_fields.php` (also left at `/home/bitrix/www/local/php_interface/include/`). Backup: `/home/bitrix/a7_shops_form_bak_20261013_092046`.
+
+**Live ids:** Shop Type `UF_CRM_A7_SHOP_TYPE` 2665 (2471 Type 1, 2472 Type 2, 2473 Type 3, 2474 Not sure). Trade license file `UF_CRM_A7_TRADE_LICENSE_FILE` 2666. Bot Status `UF_CRM_A7_BOT_STATUS` 2667 (2475–2481). WhatsApp Opt-out `UF_CRM_A7_WA_OPT_OUT` 2668 (2482 Yes, 2483 No). Licence status 2400 gained 2455 DED, 2456 Trakhees, 2457 New licence (2159 Yes and 2160 No kept). Purpose 1351 gained 2467 Broker (804–806 kept). Business activity 2399 is text. Meeting Date & Time is `UF_CRM_1731838813769` id 122.
+
+**Lost stages:** Junk Lead `JUNK` (semantics F) and Not Interested `1` (F) have no required fields. Lead Reject `9` (F) requires `UF_CRM_1734162646510` Reason of Reject. `UC_RYQD1Z` "Not interested" has empty semantics and no required fields — it is still an open stage. No stage is named exactly "Reject". Full table is on `SHOPS-BOT-BOARD.md`.
+
+**Not done:** no browser click on a lead card. `LOCATE` proved the section is in the saved form configs.
+
+---
+
 ## 2026-10-13 — Campaign {{1}} is the person's name, not the lead title (Cursor)
 
 `{{1}}` and `CampaignRecipient.name` no longer send the Bitrix lead TITLE ("Hi Bayut WhatsApp | Md Sumon"). NAME's first word is used when it is a real name; otherwise the part of TITLE after the last `|`. A phone, "Missed Call…", "untitled", or a rejected value becomes "there". A deal whose contact name is already separate from the deal title keeps that contact name. Renewals still send "Customer" for "Untitled" and "Deal #39079". A mapped dropdown wins over a typed value on the same slot (the popup never sends both; the existing test required it).
