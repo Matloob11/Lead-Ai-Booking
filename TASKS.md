@@ -1,3 +1,9 @@
+## 2026-10-14 — IC shops filter preset on the Leads list (Cursor)
+
+Shared preset **IC shops — ready for Lead AI** on `CRM_LEAD_LIST_V12`. Shop interest is **Unit Type = Shop** (`UF_CRM_1731838348693`, enum 384): it is the only field whose value is Shop. Client Type is mostly Tenant and is not a shop marker. The preset also requires Community = International City, Bot Status empty / New / Qualifying, WhatsApp Opt-out not Yes, and a phone. Bot Status, Shop Type Wanted and WhatsApp Opt-out are columns on all 12 administrators' saved Leads grids. Preset count 34 equals the SQL count 34.
+
+---
+
 ## 2026-10-14 — Lead AI batch 2a live: the International City shops conversation (Claude Code)
 
 Board tasks T18, T21–T27, T40–T44, T51, T53, T54 (statuses on SHOPS-BOT-BOARD.md). The ic_shops playbook applies only to chats whose campaign was sent with the popup's Script = "International City shops" (Cursor's C2). General chats are unchanged except the capacity rule and T18. The general prompt, correction and schema are pinned by hash; for eval `lang-urdu` the full model input is byte-identical to batch 1.
