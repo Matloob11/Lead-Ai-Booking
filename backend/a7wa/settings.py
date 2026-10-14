@@ -176,6 +176,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.gateway.tasks.panel_keepalive",
         "schedule": 10 * 60,
     },
+    # Gateway wallet. Below GATEWAY_CREDIT_WARN_BELOW, sends wait and the panel warns.
+    "poll-gateway-credit": {
+        "task": "apps.gateway.tasks.poll_gateway_credit",
+        "schedule": 60 * 60,
+    },
     # Lead AI: the customer's WhatsApp reminder 30 minutes before a booked
     # office visit. Checked every minute so it goes out on time.
     "leadai-due-reminders": {
@@ -216,6 +221,8 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 ALOTS_BASE_URL = env("ALOTS_BASE_URL", "https://alots.io").rstrip("/")
 ALOTS_API_KEY = env("ALOTS_API_KEY", "")
+# Hold sends and warn when the gateway wallet is under this many credits.
+GATEWAY_CREDIT_WARN_BELOW = int(env("GATEWAY_CREDIT_WARN_BELOW", "50"))
 ALOTS_VERSION = env("ALOTS_VERSION", "v23.0")
 ALOTS_TIMEOUT = float(env("ALOTS_TIMEOUT", "30"))
 

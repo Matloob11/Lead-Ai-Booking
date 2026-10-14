@@ -1,0 +1,13 @@
+.crb-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4000;
+  margin: 0;
+  padding: 10px 16px;
+  background: #b42318;
+  color: #fff;
+  text-align: center;
+  font: 600 14px/1.4 "Segoe UI", system-ui, sans-serif;
+}

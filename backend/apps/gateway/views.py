@@ -229,3 +229,12 @@ def inspector_webhook_events(request):
         "channels": channels,
     })
 
+
+@api_view(["GET"])
+def credit_status(request):
+    """Whether WhatsApp sends are held. The balance itself stays on the server."""
+    from .models import CreditState
+
+    row = CreditState.objects.filter(pk=1).first()
+    return Response({"out": bool(row and row.out)})
+

@@ -543,6 +543,7 @@ def campaign_has_work_left(campaign: Campaign) -> bool:
         | Q(error_detail__icontains="undeliverable")
         | Q(error_detail__icontains="RECIPIENT_MISMATCH")
         | Q(error_detail__icontains="Gateway resolved")
+        | Q(error_detail__istartswith="no credit:")
     ).exists()
 
 
@@ -558,6 +559,21 @@ def process_recipient(recipient_id: int) -> None:
             .first()
         )
         if not recipient:
+            return
+
+        from apps.gateway.credit import credit_is_out, is_no_credit, park_recipient
+
+        # A credit hold is not a failed number. Wait, and do not burn a try.
+        if is_no_credit(recipient.error_detail or ""):
+            if credit_is_out():
+                park_recipient(recipient, recipient.error_detail)
+                refresh_campaign_counts(recipient.campaign)
+                return
+            recipient.error_detail = ""
+            recipient.attempt_count = 0
+        elif credit_is_out():
+            park_recipient(recipient, "waiting for gateway credit")
+            refresh_campaign_counts(recipient.campaign)
             return
 
         # Heal rows that were re-queued after a permanent Meta failure (old bug).
@@ -704,6 +720,13 @@ def _error_code_from_exc(exc: Exception) -> str:
 
 
 def _mark_send_failed(recipient: CampaignRecipient, detail: str, *, error_code: str = "") -> None:
+    from apps.gateway.credit import is_no_credit, mark_credit_out, park_recipient
+
+    if is_no_credit(detail):
+        park_recipient(recipient, detail, undo_attempt=True)
+        mark_credit_out()
+        return
+
     permanent, label = is_permanent_send_failure(error_code, detail)
     if permanent:
         recipient.status = CampaignRecipient.Status.EXHAUSTED
@@ -804,6 +827,11 @@ def requeue_due_retries(*, limit: int = 200) -> list[int]:
     Flip due FAILED rows back to PENDING and return campaign ids that need a runner.
     Beat calls this, then enqueues run_campaign for each id.
     """
+    from apps.gateway.credit import credit_is_out
+
+    if credit_is_out():
+        return []
+
     now = timezone.now()
     due = list(
         CampaignRecipient.objects.filter(

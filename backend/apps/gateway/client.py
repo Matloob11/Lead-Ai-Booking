@@ -191,6 +191,13 @@ class AlotsClient:
                     "The WhatsApp provider was briefly unreachable. "
                     "Send the message again."
                 )
+            from .credit import is_no_credit, mark_credit_out
+
+            if is_no_credit(sentence) or is_no_credit(text):
+                try:
+                    mark_credit_out()
+                except Exception:
+                    logger.exception("could not record a credit hold")
             raise AlotsError(
                 sentence,
                 status_code=response.status_code,

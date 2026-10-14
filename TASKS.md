@@ -1,3 +1,9 @@
+## 2026-10-14 — Gateway credit hold, panel banner and hourly poll (Cursor)
+
+When a send fails with "Insufficient credits", the recipient waits as `no credit:` (attempt not counted, never exhausted), remaining PENDING rows are parked, and a Bitrix bell goes to the Lead AI alert users at most once an hour. `CreditState` + `GATEWAY_CREDIT_WARN_BELOW` (default 50); hourly `poll_gateway_credit` via `wallet_balance`. Official panel red banner module; `GET /api/gateway/credit/` returns only `{out}`. Tests 4+5 OK. Migrated `gateway.0003`. Live: poll ok, anon 401 / auth 200, banner JS/CSS 200, four services up. Reclaimed 55 prior exhausted credit rows on campaign 408 into the retry path once credit returned.
+
+---
+
 ## 2026-10-14 — IC shops filter preset on the Leads list (Cursor)
 
 Shared preset **IC shops — ready for Lead AI** on `CRM_LEAD_LIST_V12`. Shop interest is **Unit Type = Shop** (`UF_CRM_1731838348693`, enum 384): it is the only field whose value is Shop. Client Type is mostly Tenant and is not a shop marker. The preset also requires Community = International City, Bot Status empty / New / Qualifying, WhatsApp Opt-out not Yes, and a phone. Bot Status, Shop Type Wanted and WhatsApp Opt-out are columns on all 12 administrators' saved Leads grids. Preset count 34 equals the SQL count 34.

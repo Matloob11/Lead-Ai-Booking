@@ -1180,6 +1180,17 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
+  probe-c16-credit)
+    # C16: poll the gateway wallet, reclaim exhausted credit rows, hit /api/gateway/credit/.
+    # Prints only out/counts — never the balance figure.
+    [[ $# -eq 0 ]] || die "probe-c16-credit takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-c16-credit.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-c16-credit.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
   test)
     # Unit tests in a one-off container of the live web image, on Django's
     # throwaway test database. The image has no pytest, so this is manage.py

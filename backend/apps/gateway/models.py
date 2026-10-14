@@ -76,3 +76,22 @@ class ApiCall(models.Model):
 
     def __str__(self):
         return f"{self.method} {self.path} -> {self.status_code}"
+
+
+class CreditState(models.Model):
+    """One row: whether the WhatsApp gateway wallet is too low to send.
+
+    Workers and the panel do not share a cache, so the hold lives here.
+    The balance is kept for the hourly check; the panel only reads ``out``.
+    """
+
+    out = models.BooleanField(default=False)
+    balance = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    warned_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "credit state"
+
+    def __str__(self):
+        return "out" if self.out else "ok"

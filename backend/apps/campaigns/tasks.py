@@ -37,6 +37,15 @@ def _run_campaign_locked(campaign_id: int) -> None:
         return
     if campaign.status == Campaign.Status.CANCELLED:
         return
+    from apps.gateway.credit import credit_is_out, park_pending
+
+    if credit_is_out():
+        park_pending()
+        refresh_campaign_counts(campaign)
+        campaign.status = Campaign.Status.DONE
+        campaign.finished_at = timezone.now()
+        campaign.save(update_fields=["status", "finished_at", "sent", "failed", "skipped"])
+        return
     if campaign.status == Campaign.Status.DONE and not campaign_has_work_left(campaign):
         return
 

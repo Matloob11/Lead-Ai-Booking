@@ -30,6 +30,14 @@ def panel_keepalive():
     return keepalive_session()
 
 
+@shared_task(ignore_result=True)
+def poll_gateway_credit():
+    """Hourly wallet check. Below the threshold, hold sends and warn once."""
+    from .credit import poll_gateway_credit as poll
+
+    return poll()
+
+
 def _resolve_waba_number(value):
     """Match catalog row by Meta phone_number_id, or by our MSISDN on ``from``.
 
