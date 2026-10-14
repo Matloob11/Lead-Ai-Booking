@@ -17,34 +17,21 @@
 # would have been an accident waiting to be made.
 #
 # Usage:
-#   ops/wa.sh ps                          both stacks, container states
-#   ops/wa.sh logs qr app [200]           container logs
-#   ops/wa.sh sql qr "SELECT 1"           read-only query (writes are refused)
+#   ops/wa.sh ps                          app stack container states
+#   ops/wa.sh logs app web [200]          container logs
+#   ops/wa.sh sql app "SELECT 1"          read-only query (writes are refused)
 #   ops/wa.sh sum /opt/a7-wa/panel/x.js   checksum of a deployed file
 #   ops/wa.sh get /app/assets/x.js        fetch from the public site
 #   ops/wa.sh push local remote           copy one file to the server
-#   ops/wa.sh sync src /opt/a7-wa/wa-qr   copy a directory to the server
-#   ops/wa.sh build openwa                rebuild the OpenWA trial stack
+#   ops/wa.sh sync src /opt/a7-wa/panel   copy a directory to the server
 #   ops/wa.sh panel [stale…]              publish bitrix/public to /opt/a7-wa/panel
 #   ops/wa.sh agent-reports-deploy        publish agent-reports stack + nginx location
 #   ops/wa.sh agent-reports-check         compose + public /agent-reports/ health
 #   ops/wa.sh agent-reports-fix-nginx    move/refresh /agent-reports/ into :443 server
 #   ops/wa.sh agent-reports-sync-owner-phones [--dry-run] [--limit N] [--all]
-#   ops/wa.sh build qr app                rebuild an image
-#   ops/wa.sh restart qr app              restart services
-#   ops/wa.sh up app [service]            recreate the app stack, or one service (after a build)
-#   ops/wa.sh openwa-state                image, compose, health, and disk state
-#   ops/wa.sh openwa-cold-backup          stop API and archive fixed data volume
-#   ops/wa.sh openwa-inspect-asma-backup  inspect fixed pre-delete backup read-only
-#   ops/wa.sh openwa-restore-asma         cold-backup then guarded Asma-only restore
-#   ops/wa.sh openwa-verify-asma-restore  prove stored chats + agent-10 scope
-#   ops/wa.sh openwa-browser-verify-asma  open restored chat in live headless dashboard
-#   ops/wa.sh openwa-stop-restored-asma    stop restored Asma engine; keep row/history
-#   ops/wa.sh openwa-arm-restored-asma     prevent boot auto-start before profile-reset deploy
-#   ops/wa.sh openwa-reset-restored-asma   invoke guarded profile reset after deploy
-#   ops/wa.sh openwa-delete-javeria-one-chat  one-off: drop one javeria-bibi thread
-#   ops/wa.sh openwa-force-recreate       force-recreate OpenWA API after build
-#   ops/wa.sh unlock                      clear stale Chromium profile locks
+#   ops/wa.sh build app                   rebuild every app image (no service arg)
+#   ops/wa.sh restart app [service]       restart services
+#   ops/wa.sh up app                      recreate web/worker/worker-leadai/beat
 #   ops/wa.sh migrate                     apply pending Django migrations (app stack)
 #   ops/wa.sh migrate-new-image           the same, from the image just built, before `up`
 #   ops/wa.sh leadai-tests                Lead AI tests in the new image, throwaway test DB, nothing leaves
@@ -67,9 +54,12 @@
 #   ops/wa.sh probe-crm-entities           live image understands deal/contact campaign rows (no send)
 #   ops/wa.sh probe-media-template-path    can the stack mint a media-template sample handle? yes/no + session state
 #   ops/wa.sh probe-gateway-upload         gateway brokers Meta resumable upload with our API key? (1 tiny PNG, no template)
-#   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN from FILE's first line, recreate web/worker/beat
-#   ops/wa.sh set-alots-ui-cookie FILE     store the alots panel session (Cookie header in FILE), recreate web/worker/beat
-#   ops/wa.sh raise-upload-limit            Official + OpenWA nginx body size → 1024m
+#   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN; up -d all app services; then probe-media-template-path
+#   ops/wa.sh set-alots-ui-cookie FILE     store alots Cookie; up -d all app services; then probe-media-template-path
+#   ops/wa.sh credit-status               read-only gateway credit poll + panel flags (never the balance)
+#   ops/wa.sh credit-release              reclaim parked credit rows and start their campaigns (writer)
+#   ops/wa.sh probe-backend-md5           md5 of every source file in the running web image
+#   ops/wa.sh raise-upload-limit            Official nginx body size → 1024m
 #   ops/wa.sh ensure-crm-lead-secret HEX    set CRM_LEAD_WA_SECRET if empty (64 hex)
 #   ops/wa.sh submit-leadbot-template       submit a7_lead_enquiry_confirm to agent 971 WABAs
 #   ops/wa.sh submit-leadai-reminder-template [--dry-run]  Lead AI meeting reminder to every active assigned WABA
@@ -81,8 +71,6 @@
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
 #   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
-#   ops/wa.sh qr-disable                  stop OpenWA + wa-qr; keep files; no autostart
-#   ops/wa.sh qr-status                   OpenWA + wa-qr: state, restart policy, data on disk
 #   ops/wa.sh load                        host load, RAM, disk, top containers
 
 set -euo pipefail
@@ -132,13 +120,11 @@ SSH_OPTS=(
 )
 
 # The only places anything is allowed to happen.
-QR_DIR="/opt/a7-wa/wa-qr"
 APP_DIR="/opt/a7-wa/deploy"
 # OpenWA is a separate trial stack with its own compose file and its own root.
 # Added deliberately rather than by loosening the check to /opt: this is a second
 # named directory, not a wildcard, and everything below still refuses anything
 # that is not provably inside one of them.
-OPENWA_DIR="/opt/openwa-trial/OpenWA"
 
 die() { echo "wa.sh: $*" >&2; exit 2; }
 
@@ -147,10 +133,8 @@ remote() { ssh.exe -i "$KEY" "${SSH_OPTS[@]}" "$HOST" "$@"; }
 # The compose directory for a stack name, refusing anything else outright.
 stack_dir() {
   case "${1:-}" in
-    qr)     echo "$QR_DIR" ;;
-    app)    echo "$APP_DIR" ;;
-    openwa) echo "$OPENWA_DIR" ;;
-    *)      die "unknown stack '${1:-}' — it is 'qr', 'app' or 'openwa'" ;;
+    app) echo "$APP_DIR" ;;
+    *)   die "unknown stack '${1:-}' — it is 'app'" ;;
   esac
 }
 
@@ -174,8 +158,8 @@ check_count() {
 check_remote_path() {
   local p="${1:-}"
   [[ "$p" != *..* ]] || die "refusing a path containing '..': '$p'"
-  [[ "$p" == /opt/a7-wa/* || "$p" == /opt/openwa-trial/* ]] ||
-    die "refusing a path outside /opt/a7-wa and /opt/openwa-trial: '$p'"
+  [[ "$p" == /opt/a7-wa/* ]] ||
+    die "refusing a path outside /opt/a7-wa: '$p'"
   [[ "$p" =~ ^[A-Za-z0-9._/@-]+$ ]] || die "refusing unusual characters in: '$p'"
 }
 
@@ -187,11 +171,7 @@ shift || true
 case "$cmd" in
 
   ps)
-    remote "cd $QR_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
-            echo '---'; \
-            cd $APP_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
-            echo '--- openwa'; \
-            cd $OPENWA_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'"
+    remote "cd $APP_DIR && docker compose ps --format '{{.Service}}	{{.State}}	{{.Status}}'"
     ;;
 
   logs)
@@ -203,26 +183,6 @@ case "$cmd" in
     dir=$(stack_dir "${1:-}")
     query="${2:-}"
     [[ -n "$query" ]] || die "sql needs a query"
-
-    # OpenWA keeps its data in SQLite, not Postgres, so the same verb reaches a
-    # different database there. Read-only is still the database's own answer and
-    # not a regex's: `readonly: true` opens the file with SQLITE_OPEN_READONLY, so
-    # sqlite itself refuses every write — including one smuggled in after a
-    # semicolon — rather than a pattern deciding the query looked harmless.
-    if [[ "${1:-}" == openwa ]]; then
-      printf '%s' "$query" | remote "cd $dir && docker compose exec -T openwa-api sh -c '\
-        exec node -e \"
-          const Database = require(\\\"better-sqlite3\\\");
-          const fs = require(\\\"fs\\\");
-          const candidates = [process.env.DATABASE_NAME, \\\"/app/data/openwa.sqlite\\\", \\\"./data/openwa.sqlite\\\", \\\"/data/openwa.sqlite\\\"].filter(Boolean);
-          const file = candidates.find(p => fs.existsSync(p));
-          if (!file) { console.error(\\\"no sqlite file found in: \\\" + candidates.join(\\\", \\\")); process.exit(1); }
-          const db = new Database(file, { readonly: true, fileMustExist: true });
-          const sql = fs.readFileSync(0, \\\"utf8\\\");
-          for (const row of db.prepare(sql).all()) console.log(Object.values(row).join(\\\"\t\\\"));
-        \"'"
-      exit 0
-    fi
 
     # Read-only because the database says so, not because the query looked
     # harmless. --single-transaction puts both -c options in one transaction,
@@ -325,7 +285,7 @@ case "$cmd" in
     # `web`, `worker`, `worker-leadai` and `beat` are separate containers, and
     # one left out keeps running the old code. worker-leadai, the only
     # consumer of the Lead AI queue, is the one nobody would notice. The QR
-    # stacks are stopped on purpose (qr-disable), so they still need a service.
+    # Always recreate every app service so worker-leadai is never left behind.
     dir=$(stack_dir "${1:-}")
     if [[ -n "${2:-}" ]]; then
       check_service "$2"
@@ -337,229 +297,18 @@ case "$cmd" in
     fi
     ;;
 
-  openwa-state)
-    [[ $# -eq 0 ]] || die "openwa-state takes no arguments"
-    remote "set -eu; cd $OPENWA_DIR; \
-      cid=\$(docker compose ps -q openwa-api); test -n \"\$cid\"; \
-      image=\$(docker inspect -f '{{.Image}}' \"\$cid\"); \
-      docker inspect -f 'container-image={{.Image}} state={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"\$cid\"; \
-      docker image inspect -f 'image-id={{.Id}} image-digests={{json .RepoDigests}} created={{.Created}}' \"\$image\"; \
-      readiness=\$(docker exec \"\$cid\" node -e 'const http=require(\"http\");const request=http.get(\"http://localhost:2785/api/health/ready\",response=>{console.log(response.statusCode);response.resume()});request.on(\"error\",()=>process.exit(1))'); \
-      echo readiness-http=\$readiness; \
-      sync=\$(docker exec \"\$cid\" sh -c 'if [ \"\${DATABASE_SYNCHRONIZE:-}\" = true ] || grep -qx \"DATABASE_SYNCHRONIZE=true\" /app/data/.env.generated 2>/dev/null; then echo true; else echo false; fi'); \
-      echo database-synchronize=\$sync; \
-      docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'; \
-      df -h /opt/openwa-trial /var/lib/docker/volumes/openwa_openwa-data/_data | tail -n +2"
-    ;;
 
-  openwa-cold-backup)
-    [[ $# -eq 0 ]] || die "openwa-cold-backup takes no arguments"
-    remote "set -eu; cd $OPENWA_DIR; \
-      docker compose stop openwa-api; \
-      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
-      test -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite; \
-      mkdir -p /opt/openwa-trial/backups; \
-      stamp=\$(date -u +%Y%m%dT%H%M%SZ); \
-      archive=/opt/openwa-trial/backups/openwa-data-\$stamp.tar.gz; \
-      tar -C /var/lib/docker/volumes/openwa_openwa-data/_data -czf \"\$archive\" .; \
-      echo backup=\$(basename \"\$archive\"); \
-      md5sum \"\$archive\"; \
-      sqlite_count=\$(tar -tzf \"\$archive\" | grep -Ec '(^|/)openwa.sqlite$' || true); \
-      test \"\$sqlite_count\" -eq 1; echo sqlite=present"
-    ;;
 
-  openwa-inspect-asma-backup)
-    [[ $# -eq 0 ]] || die "openwa-inspect-asma-backup takes no arguments"
-    remote "set -eu; cd $OPENWA_DIR; \
-      archive=/opt/openwa-trial/backups/openwa-data-20260808T074558Z.tar.gz; \
-      tool=$OPENWA_DIR/restore-asma.js; \
-      test -f \"\$archive\"; test -f \"\$tool\"; \
-      tmp=\$(mktemp -d /opt/openwa-trial/asma-inspect.XXXXXX); \
-      trap 'rm -rf \"\$tmp\"' EXIT; \
-      tar -xzf \"\$archive\" -C \"\$tmp\"; test -f \"\$tmp/openwa.sqlite\"; \
-      image=\$(docker compose images -q openwa-api | head -1); test -n \"\$image\"; \
-      docker run --rm --network none --read-only \
-        -v \"\$tmp/openwa.sqlite:/restore/openwa.sqlite:ro\" \
-        -v \"\$tool:/app/restore-asma.js:ro\" \
-        -w /app --entrypoint node \"\$image\" \
-        /app/restore-asma.js inspect /restore/openwa.sqlite"
-    ;;
 
-  openwa-restore-asma)
-    [[ $# -eq 0 ]] || die "openwa-restore-asma takes no arguments"
-    remote "set -eu; cd $OPENWA_DIR; \
-      archive=/opt/openwa-trial/backups/openwa-data-20260808T074558Z.tar.gz; \
-      tool=$OPENWA_DIR/restore-asma.js; \
-      volume=/var/lib/docker/volumes/openwa_openwa-data/_data; \
-      test -f \"\$archive\"; test -f \"\$tool\"; test -f \"\$volume/openwa.sqlite\"; \
-      image=\$(docker compose images -q openwa-api | head -1); test -n \"\$image\"; \
-      tmp=\$(mktemp -d /opt/openwa-trial/asma-restore.XXXXXX); \
-      started=0; \
-      cleanup() { rm -rf \"\$tmp\"; if [ \"\$started\" -eq 0 ]; then docker compose start openwa-api >/dev/null; fi; }; \
-      trap cleanup EXIT; \
-      tar -xzf \"\$archive\" -C \"\$tmp\"; test -f \"\$tmp/openwa.sqlite\"; \
-      docker compose stop openwa-api; \
-      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
-      mkdir -p /opt/openwa-trial/backups; \
-      stamp=\$(date -u +%Y%m%dT%H%M%SZ); \
-      cold=/opt/openwa-trial/backups/openwa-data-\$stamp.tar.gz; \
-      tar -C \"\$volume\" -czf \"\$cold\" .; \
-      echo backup=\$(basename \"\$cold\"); md5sum \"\$cold\"; \
-      sqlite_count=\$(tar -tzf \"\$cold\" | grep -Ec '(^|/)openwa.sqlite\$' || true); \
-      test \"\$sqlite_count\" -eq 1; echo sqlite=present; \
-      docker run --rm --network none --read-only \
-        -v \"\$volume:/live:rw\" \
-        -v \"\$tmp/openwa.sqlite:/restore/openwa.sqlite:ro\" \
-        -v \"\$tool:/app/restore-asma.js:ro\" \
-        -w /app --entrypoint node \"\$image\" \
-        /app/restore-asma.js restore /live/openwa.sqlite /restore/openwa.sqlite; \
-      docker compose start openwa-api >/dev/null; started=1; \
-      for n in 1 2 3 4 5 6; do \
-        cid=\$(docker compose ps -q openwa-api); \
-        health=\$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"\$cid\"); \
-        [ \"\$health\" = healthy ] && break; sleep 5; \
-      done; \
-      echo api-health=\$health; test \"\$health\" = healthy"
-    ;;
 
-  openwa-verify-asma-restore)
-    [[ $# -eq 0 ]] || die "openwa-verify-asma-restore takes no arguments"
-    verify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/verify-asma-restore.py"
-    [[ -f "$verify_script" ]] || die "missing ops/openwa/verify-asma-restore.py"
-    encoded=$(base64 -w0 < "$verify_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  openwa-browser-verify-asma)
-    [[ $# -eq 0 ]] || die "openwa-browser-verify-asma takes no arguments"
-    verify_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/verify-asma-dashboard.js"
-    [[ -f "$verify_script" ]] || die "missing ops/openwa/verify-asma-dashboard.js"
-    encoded=$(base64 -w0 < "$verify_script")
-    printf '%s' "$encoded" | remote "cd $OPENWA_DIR && base64 -d | docker compose exec -T openwa-api node -"
-    ;;
 
-  openwa-stop-restored-asma)
-    [[ $# -eq 0 ]] || die "openwa-stop-restored-asma takes no arguments"
-    remote "cd $OPENWA_DIR && docker compose exec -T openwa-api node -e '
-      const id = \"e209881a-0aa3-4463-849f-ff0ed37144b5\";
-      const key = process.env.API_MASTER_KEY || process.env.API_KEY;
-      if (!key) throw new Error(\"master API key is unavailable\");
-      fetch(\"http://127.0.0.1:2785/api/sessions/\" + id + \"/stop\", {
-        method: \"POST\", headers: { \"X-API-Key\": key }
-      }).then(async response => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(\"stop returned HTTP \" + response.status);
-        if (body.id !== id || body.name !== \"asma\" || body.status !== \"disconnected\") {
-          throw new Error(\"stop response identity/status assertion failed\");
-        }
-        console.log(\"restored-asma-stop=PASS\");
-        console.log(\"restored-status=disconnected\");
-      }).catch(error => { console.error(error.message); process.exit(1); });
-    '"
-    ;;
 
-  openwa-arm-restored-asma)
-    [[ $# -eq 0 ]] || die "openwa-arm-restored-asma takes no arguments"
-    remote "set -eu; cd $OPENWA_DIR; \
-      running=\$(docker compose ps --status running -q openwa-api); test -z \"\$running\"; \
-      volume=/var/lib/docker/volumes/openwa_openwa-data/_data; \
-      tool=$OPENWA_DIR/arm-asma-manual-start.js; \
-      test -f \"\$volume/openwa.sqlite\"; test -f \"\$tool\"; \
-      image=openwa-openwa-api; docker image inspect \"\$image\" >/dev/null; \
-      docker run --rm --network none --read-only \
-        -v \"\$volume:/live:rw\" -v \"\$tool:/app/arm-asma-manual-start.js:ro\" \
-        -w /app --entrypoint node \"\$image\" \
-        /app/arm-asma-manual-start.js /live/openwa.sqlite"
-    ;;
 
-  openwa-delete-javeria-one-chat)
-    [[ $# -eq 0 ]] || die "openwa-delete-javeria-one-chat takes no arguments"
-    delete_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/openwa/delete-javeria-one-chat.js"
-    [[ -f "$delete_script" ]] || die "missing ops/openwa/delete-javeria-one-chat.js"
-    encoded=$(base64 -w0 < "$delete_script")
-    printf '%s' "$encoded" | remote "cd $OPENWA_DIR && base64 -d | docker compose exec -T openwa-api node -"
-    ;;
 
-  openwa-reset-restored-asma)
-    [[ $# -eq 0 ]] || die "openwa-reset-restored-asma takes no arguments"
-    remote "cd $OPENWA_DIR && docker compose exec -T openwa-api node -e '
-      const id = \"e209881a-0aa3-4463-849f-ff0ed37144b5\";
-      const key = process.env.API_MASTER_KEY || process.env.API_KEY;
-      if (!key) throw new Error(\"master API key is unavailable\");
-      fetch(\"http://127.0.0.1:2785/api/sessions/\" + id + \"/reset-profile\", {
-        method: \"POST\", headers: { \"X-API-Key\": key }
-      }).then(async response => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(\"reset returned HTTP \" + response.status);
-        if (body.id !== id || body.name !== \"asma\" || body.status !== \"disconnected\" || body.engineLoaded !== false) {
-          throw new Error(\"reset response identity/status assertion failed\");
-        }
-        console.log(\"restored-asma-profile-reset=PASS\");
-        console.log(\"restored-status=disconnected\");
-        console.log(\"restored-engine-loaded=false\");
-      }).catch(error => { console.error(error.message); process.exit(1); });
-    '"
-    ;;
 
-  openwa-force-recreate)
-    [[ $# -eq 0 ]] || die "openwa-force-recreate takes no arguments"
-    # Keep the redis profile up: Conversation Health + BullMQ need openwa-redis on the network.
-    remote "cd $OPENWA_DIR && docker compose --profile redis up -d redis && docker compose --profile redis up -d --force-recreate openwa-api 2>&1 | tail -8"
-    ;;
 
-  qr-disable)
-    # Stop Linked QR (OpenWA) and Official wa-qr. Volumes and bind-mount data
-    # stay on disk. restart=no so a reboot does not bring Chromium back.
-    # Chromium often ignores SIGTERM; compose stop then kill if it hangs.
-    [[ $# -eq 0 ]] || die "qr-disable takes no arguments"
-    remote "set -eu
-      halt() {
-        dir=\$1
-        extra=\$2
-        cd \"\$dir\"
-        cids=\$(docker compose \$extra ps -aq || true)
-        if [ -n \"\$cids\" ]; then docker update --restart=no \$cids >/dev/null || true; fi
-        docker compose \$extra stop || true
-        running=\$(docker compose \$extra ps --status running -q || true)
-        if [ -n \"\$running\" ]; then docker compose \$extra kill || true; fi
-        running=\$(docker compose \$extra ps --status running -q || true)
-        if [ -n \"\$running\" ]; then docker kill \$running || true; fi
-        leftover=\$(docker compose \$extra ps --status running -q || true)
-        test -z \"\$leftover\"
-      }
-      halt $OPENWA_DIR '--profile redis'
-      test -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite
-      echo openwa=stopped data=kept
-      cd $OPENWA_DIR && docker compose --profile redis ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'
-      halt $QR_DIR ''
-      test -d $QR_DIR/data
-      echo wa-qr=stopped data=kept
-      cd $QR_DIR && docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Status}}'
-    "
-    ;;
 
-  qr-status)
-    [[ $# -eq 0 ]] || die "qr-status takes no arguments"
-    remote "set -eu
-      echo '=== openwa ==='
-      cd $OPENWA_DIR
-      docker compose --profile redis ps -a --format '{{.Service}}\t{{.State}}\t{{.Status}}'
-      for c in \$(docker compose --profile redis ps -aq); do
-        docker inspect -f '{{.Name}} {{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}' \"\$c\"
-      done
-      if [ -f /var/lib/docker/volumes/openwa_openwa-data/_data/openwa.sqlite ]; then echo sqlite=kept; else echo sqlite=MISSING; fi
-      echo '=== wa-qr ==='
-      cd $QR_DIR
-      docker compose ps -a --format '{{.Service}}\t{{.State}}\t{{.Status}}'
-      for c in \$(docker compose ps -aq); do
-        docker inspect -f '{{.Name}} {{.State.Status}} restart={{.HostConfig.RestartPolicy.Name}}' \"\$c\"
-      done
-      if [ -d $QR_DIR/data ]; then echo wa-qr-data=kept; else echo wa-qr-data=MISSING; fi
-      echo '=== load ==='
-      uptime
-    "
-    ;;
 
   load)
     [[ $# -eq 0 ]] || die "load takes no arguments"
@@ -574,16 +323,6 @@ case "$cmd" in
     "
     ;;
 
-  unlock)
-    # Chromium leaves a SingletonLock behind when its container is killed rather
-    # than stopped, and the next start refuses the profile: "already in use by
-    # another Chromium process on another computer". Only the three lock files
-    # go — the session data beside them is what stops every linked phone having
-    # to scan again.
-    remote "cd $QR_DIR && docker compose stop app >/dev/null 2>&1; \
-            find data -maxdepth 4 -name 'Singleton*' -print -delete; \
-            docker compose up -d app 2>&1 | tail -2"
-    ;;
 
   restart)
     dir=$(stack_dir "${1:-}")
@@ -1044,15 +783,30 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  probe-c16-credit)
-    # C16: poll the gateway wallet, reclaim exhausted credit rows, hit /api/gateway/credit/.
-    # Prints only out/counts — never the balance figure.
-    [[ $# -eq 0 ]] || die "probe-c16-credit takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-c16-credit.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-c16-credit.py"
+  credit-status)
+    # Read-only (C29): poll the wallet and show out/low/waiting. Never parks,
+    # releases or starts a campaign. Never prints the balance figure.
+    [[ $# -eq 0 ]] || die "credit-status takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/credit-status.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/credit-status.py"
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  credit-release)
+    # Writer (C29): reclaim parked credit rows and start their campaigns.
+    # Deliberate — the old probe-c16-credit did this while named like a probe.
+    [[ $# -eq 0 ]] || die "credit-release takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/credit-release.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/credit-release.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-c16-credit)
+    die "probe-c16-credit was a writer named as a probe; use credit-status or credit-release"
     ;;
 
   test)
@@ -1173,10 +927,10 @@ case "$cmd" in
 
   set-meta-graph-token)
     # Writes META_GRAPH_ACCESS_TOKEN on the Official host from a local file
-    # (first line), recreates web/worker/beat so the new env is read, then
-    # runs the read-only probe. The token travels on stdin — never on a
-    # command line, never printed here. Shape-checked so this cannot become
-    # an arbitrary .env edit.
+    # (first line), then ``docker compose up -d`` with no service list so
+    # worker-leadai gets the new env too. After this, run
+    # ``ops/wa.sh probe-media-template-path``. The token travels on stdin —
+    # never on a command line, never printed here.
     token_file="${1:-}"
     [[ -f "$token_file" ]] || die "set-meta-graph-token wants a file whose first line is the token"
     token="$(head -n1 "$token_file" | tr -d '\r\n[:space:]')"
@@ -1190,14 +944,15 @@ case "$cmd" in
       chmod --reference="$f" "$f.tmp" 2>/dev/null || true
       mv "$f.tmp" "$f"
       echo token=written
-      cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
+      cd /opt/a7-wa/deploy && docker compose up -d 2>&1 | tail -5'
     ;;
 
   set-alots-ui-cookie)
     # Stores a signed-in alots *panel* session on the Official host, from a
     # local file whose first line is the Cookie header string, as base64 in
-    # ALOTS_UI_COOKIE_B64. Travels on stdin, never printed. Recreates
-    # web/worker/beat, then proves the session with one tiny upload.
+    # ALOTS_UI_COOKIE_B64. Travels on stdin, never printed. Then
+    # ``docker compose up -d`` with no service list so worker-leadai gets the
+    # new env too. After this, run ``ops/wa.sh probe-media-template-path``.
     cookie_file="${1:-}"
     [[ -f "$cookie_file" ]] || die "set-alots-ui-cookie wants a file whose first line is the Cookie header"
     cookie="$(head -n1 "$cookie_file" | tr -d '\r\n')"
@@ -1213,7 +968,7 @@ case "$cmd" in
       chmod --reference="$f" "$f.tmp" 2>/dev/null || true
       mv "$f.tmp" "$f"
       echo cookie=written
-      cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
+      cd /opt/a7-wa/deploy && docker compose up -d 2>&1 | tail -5'
     ;;
 
 

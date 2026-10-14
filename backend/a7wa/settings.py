@@ -135,6 +135,9 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TIMEZONE = "Asia/Dubai"
+# C35: long Bitrix-heavy campaigns can run past the default 3600 s; keep the
+# unacked run_campaign invisible longer. The Redis run lock is the real guard.
+CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 7200}
 # The Lead AI assistant's tasks run on their own queue and worker
 # (worker-leadai in deploy/docker-compose.yml): a busy assistant must never
 # slow the main inbox's webhooks or campaign sends, and a campaign day must

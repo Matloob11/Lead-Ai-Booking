@@ -1,3 +1,11 @@
+## 2026-10-14 — C22–C25+C31 Django deploy; C29; C35 (Cursor)
+
+One Django deploy after 2b: gateway.0004, campaigns C22/C23/C25, credit hold C24, C31 test patches; panel credit-banner. Proofs: four services Up, sweep fresh, django-check clean; campaigns/credit tests OK; C22 live leave-out on active chat 971589763936; beat `poll-gateway-credit`; CreditState polled. C25 live STOP-while-waiting not exercised. **C29:** `credit-status` / `credit-release`; OpenWA/QR verbs and `run-probe-alots-channels.sh` gone; `ps` clean. **C35:** Redis run lock + visibility_timeout 7200; 2 tests OK; second build/up. C28 video waits APPROVED.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/wa.sh`, `ops/catalog/credit-*.py`, `backend/apps/campaigns/{run_lock,tasks}.py`, `backend/a7wa/settings.py`, gateway/campaigns from C22–C25, `bitrix/public/assets/modules/credit-banner.*`.
+
+---
+
 ## 2026-10-14 — Lead AI batch 2b live, with the gate-guard fixes and T57 (Claude Code)
 
 Up at 13:55 UTC. The build is the 2b `apps/leadai` tree and T57's `apps/crmlink` on top of the deployed code. Campaigns, gateway and settings are unchanged; Cursor's C22–C25 are not in this build. Migrations leadai 0005 + 0006 ran with `migrate-new-image` before `up`.
@@ -28,6 +36,30 @@ Then 206/208 (99.0%) on the build context and 206/208 (99.0%) on the deployed im
 - the Shop media dialog in a browser.
 
 **Next (2c):** bookings send Location / Budget / Size and `crm_todo_id` (C32/C33 are live); the opt-out log masks phones; reminders and turns wait during a credit hold.
+
+---
+
+## 2026-10-14 — Two WhatsApp chats exported to PDF (Cursor)
+
+Read-only export of inbox threads 29860 (0564685692, Fozia razzaq, 40 messages) and 35346 (0588308876, Alisha ali, 12 messages) into `WhatsApp-Chats.pdf`. 4 pages. Transcript file deleted after the PDF was written. Not deployed.
+
+**Shared:** `TASKS.md`, `WhatsApp-Chats.pdf`.
+
+---
+
+## 2026-10-14 — Active Bitrix users PDF, large type (Cursor)
+
+Replaced `Bitrix-Users.pdf`. Active people only: 90 with an email. Left out 2,408 `imconnector` accounts, open-lines widgets, call/calendar clones and bots, which were still `ACTIVE=Y`. Portrait, 13pt names, black on white, no grey rows, so a phone-width render stays readable. 9 pages. Checked page 1 at 1080px wide. Raw export deleted. Not deployed.
+
+**Shared:** `TASKS.md`, `ops/catalog/build_bitrix_users_pdf.py`, `Bitrix-Users.pdf`.
+
+---
+
+## 2026-10-14 — Bitrix users PDF (Cursor)
+
+Read-only export of all `b_user` rows (2680) plus department names from iblock 3. PDF `Bitrix-Users.pdf` at the repo root: name, department, email, last active, active/inactive. 184 users have a department; 88 landscape pages. Not deployed. Raw TSV deleted after the PDF was written.
+
+**Shared:** `TASKS.md`, `ops/catalog/build_bitrix_users_pdf.py`, `Bitrix-Users.pdf`.
 
 ---
 

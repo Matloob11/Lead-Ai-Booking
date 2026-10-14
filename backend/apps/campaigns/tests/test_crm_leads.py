@@ -232,7 +232,8 @@ class BuildRecipientsTests(SimpleTestCase):
         self.assertEqual(rows[0]["crm_deal_id"], 501)
         self.assertNotIn("crm_lead_id", rows[0])
         self.assertNotIn("owner_data_id", rows[0])
-        self.assertEqual(rows[0]["variables"]["1"], "Ali Hassan")
+        # C23/C8: NAME greeting is the first usable word, not the full string.
+        self.assertEqual(rows[0]["variables"]["1"], "Ali")
 
     def test_contact_links_no_crm_id(self):
         rows, skipped = build_recipients(

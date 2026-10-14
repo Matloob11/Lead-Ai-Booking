@@ -6,29 +6,29 @@ import logging
 import time
 
 from celery import shared_task
-from django.core.cache import cache
 from django.utils import timezone
 
+from . import run_lock
 from .models import Campaign, CampaignRecipient
 from .services import campaign_has_work_left, process_recipient, refresh_campaign_counts, requeue_due_retries
 
 logger = logging.getLogger(__name__)
 
 SEND_GAP_SEC = 1.5
-RUN_LOCK_TTL = 60 * 60  # one hour — longer than a 500-recipient paced run
 
 
 @shared_task(ignore_result=True)
 def run_campaign(campaign_id: int) -> None:
-    lock_key = f"campaign:run:{campaign_id}"
-    if not cache.add(lock_key, "1", timeout=RUN_LOCK_TTL):
+    # C35: Redis SET NX — LocMem cache.add cannot stop a second worker after
+    # kombu's visibility timeout redelivers a long run.
+    if not run_lock.acquire(campaign_id):
         logger.info("Campaign %s already running — skip duplicate worker", campaign_id)
         return
 
     try:
         _run_campaign_locked(campaign_id)
     finally:
-        cache.delete(lock_key)
+        run_lock.release(campaign_id)
 
 
 def _run_campaign_locked(campaign_id: int) -> None:
@@ -88,6 +88,7 @@ def _run_campaign_locked(campaign_id: int) -> None:
                 process_recipient(rid)
             except Exception:  # noqa: BLE001
                 logger.exception("Campaign %s recipient %s crashed", campaign_id, rid)
+            run_lock.refresh(campaign_id)
             if i < len(ids) - 1:
                 time.sleep(SEND_GAP_SEC)
         if stopped:
