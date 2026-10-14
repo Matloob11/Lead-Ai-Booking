@@ -84,7 +84,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | Q4 | PDF rules (prices, licence copy, yourself-or-client first, two slots, broker stops the bot) | default: **shop campaigns only**; other Lead AI campaigns keep today's rules |
 | Q5 | How a campaign is marked "shops" | default: a "Script" choice next to the Lead AI box (C2 + T20a) |
 | Q6 | Slots | default: our own booking table, one client per 30-min slot for the whole office |
-| Q7 | Sending | default: automatic drip ~100/day, 11:00–18:00 Mon–Sat, spread over the sending numbers; Template B once after 72 h to non-repliers |
+| Q7 | Sending | **decided (2026-10-14):** Matloob sends every campaign himself from the CRM popup: picks the leads, ticks Lead AI, chooses Script = International City shops and the template. As many a day as he likes. The system never starts a campaign or drips one. **Automatic follow-ups are wanted:** Template B once after 72 h to non-repliers, the 30-day check-back after "Not now" + yes, and the nudges to a silent customer |
 | Q8 | Opt-out | default: block the phone on every number and campaign (Sara too); import the 279 past Unsubscribe/Stop |
 | Q9 | "Not now" | default: "check back in a month?" → yes: Template B after 30 days; no: lost |
 | Q10 | Which Bitrix stage is "lost" | **decided** (2026-10-13): not interested, already rented, or "Not now" then no → **Not Interested (`1`)**; wrong number or spam → **Junk Lead (`JUNK`)**. Neither needs a stage field |
@@ -198,8 +198,8 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
 | T60 | Global opt-out by phone; every campaign path skips it; import the 279 past Unsubscribe/Stop | Claude (+ Cursor C10: the popup shows who was skipped) | — | Open |
-| T61 | Create and submit `intl_city_shops_reconnect` (video header), `intl_city_shops_followup`, reminder v2 on the sending WABAs | Claude | D1, D5 | Blocked D1/D5 (final rents, Type 1 video) |
-| T62 | Drip: ~100 a day, 11:00–18:00 Dubai, Mon–Sat, rolls over, visible queue and cancel | Claude | — | Open |
+| T61 | Create and submit on the 8 sending WABAs: `intl_city_shops_followup` (Template B, needed by the automatic follow-ups), and `intl_city_shops_reconnect` (Template A, video header) so Matloob can pick it in the popup if he wants it; reminder v2. Rents from the live shops facts, brand AR Properties, Type 1 video from D5 | Claude | — | Open |
+| T62 | ~~Drip~~ — dropped (Q7, 2026-10-14): Matloob sends campaigns himself, any volume | — | — | Dropped |
 | T63 | Template B once, 72 h after A, only to non-repliers; never a third | Claude | T61 | Open |
 | T64 | Skip brokers and duplicates across campaigns before sending | Claude + Cursor | T50 | Open |
 | T65 | First video-header send end to end on Matloob's own number with the Lead AI box | Matloob + Claude | T61 | Open |
