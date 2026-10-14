@@ -321,18 +321,19 @@ def nearest_free(start: dt.datetime, now: dt.datetime | None = None, closed_date
 
 
 def offer_pair(
-    now: dt.datetime | None = None, closed_dates=(), taken=(), *, day: dt.date | None = None, avoid=()
+    now: dt.datetime | None = None, closed_dates=(), taken=(), *, day: dt.date | None = None, avoid=(), after: dt.time | None = None
 ) -> list[dt.datetime]:
     """The two free starts an invitation names: the first one free, and the first one
     OFFER_GAP after it the same day, else the next open day's first.
 
     ``day``: the day the customer asked for; the pair is that day's, or the first
     open day's after it (Sunday, a closed or a full day). ``avoid``: days they ruled
-    out ("I am busy today"), never offered."""
+    out ("I am busy today"), never offered. ``after``: no start before this hour of
+    the day, on any day ("this evening": from 5 PM; shops.yes_slots)."""
     every = [
         slot
         for slot in free_slots(now, closed_dates, taken, count=_EVERY_SLOT)
-        if slot.date() not in avoid and (day is None or slot.date() >= day)
+        if slot.date() not in avoid and (day is None or slot.date() >= day) and (after is None or slot.time() >= after)
     ]
     if not every:
         return []
@@ -565,6 +566,315 @@ def named_times(text: str) -> set[dt.time]:
         if hour is not None:
             times.add(dt.time(hour, 0))
     return times
+
+
+# Every hour the words name, in whatever form (engine.their_time: a shops confirm stands on the
+# customer's own hour) ------------------------------------------------------------------------------
+# A number word is an hour only beside a word of time ("at five", "five pm", "panch baje", "الساعة
+# الخامسة", "पाँच बजे"): alone, "one" or "do" is no hour. Arabic and Devanagari words are read
+# without \b, which their marks break.
+_EN_HOURS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12,
+}
+_ROMAN_HOURS = {
+    "ek": 1, "do": 2, "teen": 3, "char": 4, "chaar": 4, "panch": 5, "paanch": 5, "chhe": 6, "chhay": 6, "chay": 6, "saat": 7,
+    "aath": 8, "nau": 9, "das": 10, "gyarah": 11, "giyarah": 11, "barah": 12, "baarah": 12,
+}
+_SCRIPT_HOURS = {
+    # Arabic: the hour's ordinal ("الساعة الخامسة"), or the number.
+    "الواحدة": 1, "الثانية عشرة": 12, "الثانية عشر": 12, "الحادية عشرة": 11, "الحادية عشر": 11, "الثانية": 2, "الثالثة": 3,
+    "الرابعة": 4, "الخامسة": 5, "السادسة": 6, "السابعة": 7, "الثامنة": 8, "التاسعة": 9, "العاشرة": 10,
+    "واحدة": 1, "ثنتين": 2, "اثنين": 2, "ثلاثة": 3, "ثلاث": 3, "أربعة": 4, "اربعة": 4, "أربع": 4, "اربع": 4, "خمسة": 5, "خمس": 5,
+    "ستة": 6, "سبعة": 7, "سبع": 7, "ثمانية": 8, "تسعة": 9, "عشرة": 10,
+    # Urdu
+    "ایک": 1, "دو": 2, "تین": 3, "چار": 4, "پانچ": 5, "چھ": 6, "سات": 7, "آٹھ": 8, "نو": 9, "دس": 10, "گیارہ": 11, "بارہ": 12,
+    # Hindi
+    "एक": 1, "दो": 2, "तीन": 3, "चार": 4, "पाँच": 5, "पांच": 5, "छह": 6, "छः": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10,
+    "ग्यारह": 11, "बारह": 12,
+}
+_NUMBER_OF = {**_EN_HOURS, **_ROMAN_HOURS, **_SCRIPT_HOURS}
+
+
+def _alternation(words) -> str:
+    return "|".join(sorted(map(re.escape, words), key=len, reverse=True))
+
+
+_LATIN_WORD = rf"\b(?:{_alternation([*_EN_HOURS, *_ROMAN_HOURS])})\b"
+_SCRIPT_WORD = rf"(?<![\u0621-\u064a\u0671-\u06d3\u0900-\u0963])(?:{_alternation(_SCRIPT_HOURS)})(?![\u0621-\u064a\u0671-\u06d3\u0900-\u0963])"
+# An hour as a number or a word, captured.
+_N = rf"(\d{{1,2}}|{_LATIN_WORD}|{_SCRIPT_WORD})"
+# A word for the part of the day right after an hour: it says AM or PM.
+_PM = r"\s*(p\.?m\.?(?![a-z])|مساء|مساءً|مساءا|عصرا|عصراً|ليلا|ليلاً)"
+_AM = r"\s*(a\.?m\.?(?![a-z])|صباحا|صباحاً|صباح)"
+# A half or a quarter: (pattern, minutes after the hour; -15 is "a quarter to").
+_HALVES = tuple(
+    (re.compile(pattern), minutes)
+    for pattern, minutes in (
+        (rf"\bhalf\s+past\s+{_N}", 30),
+        (rf"\bquarter\s+past\s+{_N}", 15),
+        (rf"\bquarter\s+to\s+{_N}", -15),
+        (rf"{_N}\s+thirty\b", 30),
+        (rf"\b(?:saade|sade|saadhe|sadhe|sarhe|saarhe)\s+{_N}", 30),
+        (rf"\b(?:sawa|sava)\s+{_N}", 15),
+        (rf"\b(?:paune|pone|pauney)\s+{_N}", -15),
+        (rf"{_N}\s*(?:و\s*نص|والنص|و\s*النصف|و\s*نصف)", 30),
+        (rf"{_N}\s*(?:و\s*ربع|والربع)", 15),
+        (rf"{_N}\s*(?:الا|إلا)\s*ربع", -15),
+        (rf"(?:ساڑھے|ساڑے)\s*{_N}", 30),
+        (rf"(?<![\u0621-\u06d3])سوا\s*{_N}", 15),
+        (rf"پونے\s*{_N}", -15),
+        (rf"(?:साढ़े|साढे)\s*{_N}", 30),
+        (rf"सवा\s*{_N}", 15),
+        (rf"पौने\s*{_N}", -15),
+    )
+)
+# One and a half, two and a half ("dedh baje", "ڈھائی بجے"): (pattern, hour, minute).
+_HALF_WORDS = tuple(
+    (re.compile(pattern), hour, minute)
+    for pattern, hour, minute in (
+        (r"\b(?:dedh|derh)\s*(?:baje|bajay|bje)\b|ڈیڑھ\s*بجے|डेढ़\s*बजे", 1, 30),
+        (r"\b(?:dhai|dhaai|arhai|adhai)\s*(?:baje|bajay|bje)\b|ڈھائی\s*بجے|ढाई\s*बजे", 2, 30),
+    )
+)
+# A number word with a word of time beside it.
+_WORD_HOURS = (
+    re.compile(rf"\b(?:at|around|about|by|till|until|from|after|before)\s+({_LATIN_WORD})(?!\s*-?\s*(?:shops?|types?|people|persons?|units?|cheques?|sq|aed)\b)"),
+    re.compile(rf"({_LATIN_WORD})\s*(?:o'?clock|baje|bajay|bje)\b"),
+    re.compile(rf"(?:الساعة|الساعه|ساعة|ساعه)\s*({_SCRIPT_WORD})"),
+    re.compile(rf"({_SCRIPT_WORD})\s*(?:بجے|बजे)"),
+)
+_WORD_MERIDIEM = (re.compile(rf"({_LATIN_WORD}|{_SCRIPT_WORD}){_PM}"), re.compile(rf"({_LATIN_WORD}|{_SCRIPT_WORD}){_AM}"))
+_NOON = re.compile(r"\b(?:noon|midday)\b")
+# A number that may be an hour ("5", "at 5", "17"): one or two digits, not part of a longer number, a
+# date or a range of sizes, not a count of anything ("2 shops", "450 sq ft", "5 minutes away", "1 to 4
+# cheques") and not after the words that number things ("Type 1", "AED 33,000", "Shop 20").
+_UNITS = (
+    r"(?:sq\b|sq\.|sqft|square|ft\b|feet|foot|m2|sqm|met(?:er|re)s?\b|aed|dhs?\b|dirhams?|k\b|lakhs?|lacs?\b|thousand|hazaa?r|million|mn\b"
+    r"|crore|%|percent|years?|yrs?\b|months?|weeks?|wks?\b|days?\b|nights?\b|people|persons?|pax\b|members|kids|children|adults"
+    r"|units?\b|shops?\b|stores?\b|outlets?|branch(?:es)?|cheques?|checks?\b|chqs?\b|installments?|instalments?|types?\b|bhk|br\b"
+    r"|bed(?:room)?s?\b|rooms?\b|cars?\b|employees|staff|workers|times\b|x\b|×|st\b|nd\b|rd\b|th\b|hours?\b|hrs?\b|h\b"
+    r"|minutes?|mins?\b|ghante|ghanta|ghantay|mint\b|minat|seconds?|secs?\b"
+    r"|jan(?:uary)?\b|feb(?:ruary)?\b|march\b|apr(?:il)?\b|june?\b|july?\b|aug(?:ust)?\b|sept?(?:ember)?\b|oct(?:ober)?\b"
+    r"|nov(?:ember)?\b|dec(?:ember)?\b"
+    r"|محل|متر|قدم|درهم|سنة|سنوات|شهر|أشهر|اشهر|يوم|أيام|ايام|شيك|ألف|الف|دقيقة|دقائق|دقايق|ساعات|ساعة|ساعتين"
+    r"|دکان|فٹ|درہم|سال|مہینے|دن|ہزار|لاکھ|منٹ|گھنٹ|दुकान|फ़ीट|फीट|दिरहम|साल|महीने|दिन|हज़ार|हजार|लाख|मिनट|घंट)"
+)
+_DIGIT_HOUR = re.compile(
+    r"(?<![\w:.,/\-+#])(\d{1,2})(?:[:.]([0-5]\d))?(?![\d])(?![:.]\d)(?!,\d{3})(?!\s*[/\-–]\s*\d)(?!\s+\d{3,})"
+    rf"(?!\s*-?\s*{_UNITS})(?!\s*(?:to|-|–|or|and)\s*\d{{1,3}}\s*-?\s*{_UNITS})"
+)
+_NUMBERING = re.compile(
+    r"(?:\b(?:type|aed|dhs?|dh|no\.?|number|num|unit|shop|cluster|building|bldg|block|floor|plot|room|office|villa|flat"
+    r"|apartment|apt|level|phase|street|st\.?|road|rd\.?|gate|plan|option|step|version|ref|id|code|size|cheque)"
+    r"|رقم|نوع|محل|درهم|نمبر|ٹائپ|नंबर|टाइप)\s*$"
+)
+# "In 1 hour", "aadhe ghante mein", "بعد ساعة", "एक घंटे में": a time from now, (pattern, minutes; None
+# when a number in the words says how many hours, or with "min" how many minutes).
+_AHEAD = tuple(
+    (re.compile(pattern), minutes)
+    for pattern, minutes in (
+        (r"\b(?:in|after|within)\s+(?:half\s+an?|a\s+half|1/2)\s+(?:hour|hr)\b", 30),
+        (r"\b(?:in|after|within)\s+(?:an?|one|1)\s+(?:hour|hr)\b(?!\s+and)", 60),
+        (r"\b(?:in|after|within)\s+(?:an?|one|1)\s+(?:hour|hr)\s+and\s+a\s+half\b", 90),
+        (r"\b(?:in|after|within)\s+(\d{1,2}|two|three)\s*(?:hours|hrs|h)\b", None),
+        (r"\b(?:in|after|within)\s+(\d{1,3})\s*(?:minutes?|mins?)\b", -1),
+        (r"\b(?:aadhe|adhe|aadha|adha)\s+(?:ghante|ghanta|ghantay)\s*(?:mein|me|main|mai|tak|baad|bad)\b", 30),
+        (r"\b(?:ek|1)\s+(?:ghante|ghanta|ghantay)\s*(?:mein|me|main|mai|tak|baad|bad)\b", 60),
+        (r"\b(?:dedh|derh)\s+(?:ghante|ghanta|ghantay)\s*(?:mein|me|main|mai|tak|baad|bad)\b", 90),
+        (r"\b(\d{1,2}|do|teen)\s+(?:ghante|ghanta|ghantay)\s*(?:mein|me|main|mai|tak|baad|bad)\b", None),
+        (r"\b(\d{1,3})\s*(?:minute|minutes|mint|minat|min)\s*(?:mein|me|main|mai|tak|baad|bad)\b", -1),
+        (r"(?:بعد|خلال)\s*(?:نص|نصف)\s*(?:ساعة|ساعه)", 30),
+        (r"(?:بعد|خلال)\s*ربع\s*(?:ساعة|ساعه)", 15),
+        (r"(?:بعد|خلال)\s*(?:ساعة|ساعه)(?!\s*(?:\d|و))", 60),
+        (r"(?:بعد|خلال)\s*(?:ساعة|ساعه)\s*(?:و\s*نص|ونص|والنص|و\s*نصف)", 90),
+        (r"(?:بعد|خلال)\s*ساعتين", 120),
+        (r"(?:بعد|خلال)\s*(\d{1,2})\s*(?:ساعات|ساعة)", None),
+        (r"(?:بعد|خلال)\s*(\d{1,3})\s*(?:دقيقة|دقائق|دقايق|دقيقه)", -1),
+        (r"آدھے\s*گھنٹے\s*(?:میں|تک|بعد)|आधे\s*घंटे\s*(?:में|तक|बाद)", 30),
+        (r"(?:ایک|1)\s*گھنٹ(?:ے|ہ)\s*(?:میں|تک|بعد)|(?:एक|1)\s*घंटे\s*(?:में|तक|बाद)", 60),
+        (r"(\d{1,3})\s*(?:منٹ|मिनट)\s*(?:میں|تک|بعد|में|तक|बाद)", -1),
+    )
+)
+# Words only an hour has: when one is there and the hour is not read above ("quarter to six" in a
+# spelling not listed, "8 baje", "at 9"), the customer still named one.
+_HOUR_MARK = re.compile(
+    r"\b(?:o'?clock|oclock|baje|bajay|bje|bajey|bjy|half\s+past|quarter\s+(?:past|to)|saade|sade|sarhe|sawa|paune|noon|midday)\b"
+    r"|\d\s*(?:a\.?m\.?|p\.?m\.?)(?![a-z])|\bat\s+\d{1,2}(?![\d,])|الساعة|الساعه|بجے|बजे|ساڑھے|پونے|साढ़े|पौने|ونص|والنصف"
+)
+
+
+def _hour_of(word: str) -> int | None:
+    word = (word or "").strip()
+    return int(word) if word.isdecimal() else _NUMBER_OF.get(word)
+
+
+def _clock(hour: int, minute: int, after: str = "") -> dt.time | None:
+    """An hour and a minute read as the prompt reads a bare one, or as "pm"/"مساء" (``after``) says."""
+    if after:
+        pm = after[0] in "pمعل"
+        if not 1 <= hour <= 12:
+            return None
+        return dt.time(hour % 12 + (12 if pm else 0), minute)
+    return _bare(hour, minute)
+
+
+def _read_halves(raw: str) -> tuple[set[dt.time], str]:
+    """The halves and quarters the words name ("half past 5", "saade 5 baje", "٥ ونص"), and the
+    words without them."""
+    times: set[dt.time] = set()
+    for pattern, minutes in _HALVES:
+        def take(match, minutes=minutes) -> str:
+            hour = _hour_of(match[1])
+            if hour is not None and 1 <= hour <= 12:
+                if minutes < 0:
+                    hour, minute = (hour - 1) or 12, 60 + minutes
+                else:
+                    minute = minutes
+                tail = raw[match.end() : match.end() + 12]
+                meridiem = re.match(_PM, tail) or re.match(_AM, tail)
+                found = _clock(hour, minute, meridiem[1] if meridiem else "")
+                if found:
+                    times.add(found)
+            return " " * len(match.group(0))
+
+        raw = pattern.sub(take, raw)
+    for pattern, hour, minute in _HALF_WORDS:
+        if pattern.search(raw):
+            times.add(_bare(hour, minute))
+            raw = pattern.sub(lambda match: " " * len(match.group(0)), raw)
+    return times, raw
+
+
+def _read_words(raw: str) -> tuple[set[dt.time], str]:
+    """The number words with a word of time beside them, and the words without them."""
+    times: set[dt.time] = set()
+
+    def blank(match) -> str:
+        return " " * len(match.group(0))
+
+    for pattern, pm in ((_WORD_MERIDIEM[0], "p"), (_WORD_MERIDIEM[1], "a")):
+        for match in pattern.finditer(raw):
+            hour = _hour_of(match[1])
+            found = _clock(hour, 0, "p" if pm == "p" else "a") if hour else None
+            if found:
+                times.add(found)
+        raw = pattern.sub(blank, raw)
+    for pattern in _WORD_HOURS:
+        for match in pattern.finditer(raw):
+            hour = _hour_of(match[1])
+            found = _bare(hour, 0) if hour else None
+            if found:
+                times.add(found)
+        raw = pattern.sub(blank, raw)
+    if _NOON.search(raw):
+        times.add(dt.time(12, 0))
+        raw = _NOON.sub(blank, raw)
+    return times, raw
+
+
+def _blank_named(raw: str) -> str:
+    """The words without what named_times reads ("5 pm", "17:30", "5 baje", "at 5", "tomorrow 5")."""
+    for pattern in (_MERIDIEM_TIME, _WORD_TIME, _CLOCK_TIME, _AT_TIME, _DAY_HOUR):
+        raw = pattern.sub(lambda match: " " * len(match.group(0)), raw)
+    return raw
+
+
+def _digit_hours(raw: str, *, every: bool = False) -> set:
+    """The numbers left in the words that may be an hour, as times (``every``: the hours themselves,
+    8 and 9 too, which a bare number leaves to anyone's guess)."""
+    found = set()
+    for match in _DIGIT_HOUR.finditer(raw):
+        if _NUMBERING.search(raw[: match.start()]):
+            continue
+        hour, minute = int(match[1]), int(match[2] or 0)
+        if every:
+            if 1 <= hour <= 23:
+                found.add(hour)
+            continue
+        at = _bare(hour, minute)
+        if at:
+            found.add(at)
+    return found
+
+
+def _readings(text: str) -> tuple[set[dt.time], str]:
+    """(every hour the words name exactly but their bare numbers, the words left)."""
+    raw = _plain_text(text)
+    times, raw = _read_halves(raw)
+    times |= named_times(raw)
+    raw = _blank_named(raw)
+    words, raw = _read_words(raw)
+    return times | words, raw
+
+
+def spoken_times(text: str) -> set[dt.time]:
+    """The hours the words name in a form that is plainly a time (said_times without its bare
+    numbers: "at five" and "kal saade 5 baje" are hours, a "2" alone may be anything)."""
+    return _readings(text)[0]
+
+
+def said_times(text: str) -> set[dt.time]:
+    """Every hour the customer's words name, in any of the forms they write one: as named_times
+    reads it ("5 pm", "17:30", "kal 5 baje", "الساعة 5"), a half or a quarter ("half past 5",
+    "saade 5 baje", "٥ ونص"), a number word beside a word of time ("at five", "الساعة الخامسة
+    مساءً", "पाँच बजे"), or a number that may be an hour ("5", "Does 5 work?"), read the way the
+    prompt reads a bare one. Never "450 sq ft", "2 shops", "Type 1" or "AED 33,000"."""
+    times, rest = _readings(text)
+    return times | _digit_hours(rest)
+
+
+def hours_ahead(text: str) -> list[dt.timedelta]:
+    """The times from now the words name ("in 1 hour", "in 20 minutes", "aadhe ghante mein", "بعد
+    ساعة", "एक घंटे में")."""
+    raw = _plain_text(text)
+    found = []
+    for pattern, minutes in _AHEAD:
+        for match in pattern.finditer(raw):
+            if minutes is not None and minutes > 0:
+                found.append(dt.timedelta(minutes=minutes))
+                continue
+            count = _hour_of(match[1]) or 0  # "2", "two", "do"
+            if count:
+                found.append(dt.timedelta(minutes=count) if minutes == -1 else dt.timedelta(hours=count))
+    return found
+
+
+def marks_hour(text: str) -> bool:
+    """The words name an hour, read above or not: a word only an hour has ("o'clock", "baje",
+    "الساعة"), or a number that may be one, 8 and 9 too ("8 baje", "at 9")."""
+    raw = _plain_text(text)
+    if _HOUR_MARK.search(raw):
+        return True
+    times, rest = _readings(text)
+    return bool(times) or bool(_digit_hours(rest, every=True))
+
+
+def names_hour(text: str, start: dt.datetime) -> bool:
+    """The words name this start's hour, in any form said_times reads ("5", "17", "4:30", "five
+    pm", "saade 5 baje"). "450 sq ft" names no hour."""
+    return start.astimezone(DUBAI).time() in said_times(text)
+
+
+# "10 AM to 8 PM", "subah 10 se raat 8 baje", "من 10 صباحاً حتى 8 مساءً": the opening hours, not an offer.
+_OPENING_HOURS = re.compile(
+    r"10\s*(?::00)?\s*(?:am\b|a\.m\.|baje\b|صباحاً|صباحا)?\s*(?:to|until|till|se|-|–|حتى|إلى|الى|سے|से)\s*"
+    r"(?:raat\s*|رات\s*|रात\s*)?8(?::00)?\s*(?:pm\b|p\.m\.|baje\b|مساءً|مساء|بجے|बजे)?",
+    re.IGNORECASE,
+)
+
+
+def offered_starts(text: str) -> set[dt.time]:
+    """The exact starts a message of ours offers ("today at 2:30 PM or 4:30 PM — which is
+    better?", "Would tomorrow at 5 PM work?", "هل يناسبك غداً الساعة الخامسة مساءً؟"), within the
+    hours a visit may start, the opening hours ("10 AM to 8 PM") left out; else the one bare hour
+    it names ("Does 5 work for you tomorrow?", "Kal shaam 5 ka slot book kar doon?"), never a
+    count, a size or a price ("I picked 2 Type 1 shops", "only 5 minutes away")."""
+    times, rest = _readings(_OPENING_HOURS.sub(" ", _plain_text(text)))
+    if not times:
+        loose = _digit_hours(rest)
+        times = loose if len(loose) == 1 else set()
+    return {at for at in times if OPEN <= at <= LATEST_START}
 
 
 def hedged(text: str) -> bool:

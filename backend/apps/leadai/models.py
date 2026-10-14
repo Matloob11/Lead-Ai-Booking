@@ -162,6 +162,31 @@ class LeadAiChatState(models.Model):
     followup_asked_at = models.DateTimeField(null=True, blank=True)
     followup_due_at = models.DateTimeField(null=True, blank=True)
     unsupported_notice_at = models.DateTimeField(null=True, blank=True)
+    # Shops chats: the build pack's "Please share a copy of your trade license here"
+    # went out (once per chat, never again: assistant/shop_flow.py), and the ask was
+    # closed, by the copy arriving or by a no. While it is open, a photo or a PDF the
+    # customer sends is the licence (tasks.write_licence_file), not a handover.
+    # Nullable: rows the old code inserts during a deploy leave them empty.
+    licence_asked_at = models.DateTimeField(null=True, blank=True)
+    licence_closed_at = models.DateTimeField(null=True, blank=True)
+    # Shops chats, the automatic follow-ups (followups.py; board T63, T25, T29). Template B
+    # (intl_city_shops_followup) went out once, 72 hours after a shops campaign send the customer
+    # never answered (last at template_b_sent_at; a later send of the campaign has its own); and
+    # once on the day they asked us to check back (followup_due_at is
+    # cleared then). ``nudges``: how many nudges went to a customer who fell silent after our
+    # question (two at most, ever), the last at ``nudged_at``. A database default for the
+    # count: rows the old code inserts during a deploy name none.
+    template_b_sent_at = models.DateTimeField(null=True, blank=True)
+    followup_sent_at = models.DateTimeField(null=True, blank=True)
+    nudges = models.PositiveSmallIntegerField(default=0, db_default=0)
+    nudged_at = models.DateTimeField(null=True, blank=True)
+    # Shops chats, the old lead (board T28): the Bitrix lead's creation date and its comments,
+    # read once (``lead_info_at``) for the model's context as data (assistant/lead_history.py);
+    # ``lead_info_tries`` counts failed reads, three at most. Database defaults, as above.
+    lead_asked_on = models.DateField(null=True, blank=True)
+    lead_notes = models.CharField(max_length=400, blank=True, default="", db_default="")
+    lead_info_at = models.DateTimeField(null=True, blank=True)
+    lead_info_tries = models.PositiveSmallIntegerField(default=0, db_default=0)
     # The CRM record's responsible person, looked up once and cached.
     responsible_bitrix_user_id = models.CharField(max_length=16, blank=True)
     responsible_agent = models.ForeignKey(
@@ -471,6 +496,102 @@ class LeadAiAlert(models.Model):
 
     def __str__(self):
         return f"Alert {self.kind} on conversation {self.conversation_id}"
+
+
+class LeadAiShopMedia(models.Model):
+    """One file of the shops playbook's media library (board T30): a shop type's
+    video or photo, or the office photo.
+
+    The bot sends a type's files when a customer picks the type (shop_media.py):
+    the video first, then the photos in ``order`` (file-name order by default),
+    then the detail card. ``file`` is stored under MEDIA_ROOT; ``file_name`` is
+    the name it was uploaded with, for people (never rendered as HTML). The same
+    content twice in one type is one row (``sha256``). ``asset`` is the inbox
+    attachment the sent messages link to, so the thread shows what went out.
+    """
+
+    class Shop(models.TextChoices):
+        TYPE_1 = "type_1", "Type 1"
+        TYPE_2 = "type_2", "Type 2"
+        TYPE_3 = "type_3", "Type 3"
+        OFFICE = "office", "Office"
+
+    class Kind(models.TextChoices):
+        VIDEO = "video", "Video"
+        PHOTO = "photo", "Photo"
+
+    shop = models.CharField(max_length=16, choices=Shop.choices, db_index=True)
+    kind = models.CharField(max_length=8, choices=Kind.choices)
+    file = models.FileField(upload_to="leadai/shops/%Y/%m/", max_length=255)
+    file_name = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=64)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    sha256 = models.CharField(max_length=64)
+    order = models.PositiveSmallIntegerField(default=0)
+    asset = models.ForeignKey("inbox.MediaAsset", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["shop", "order", "pk"]
+        constraints = [models.UniqueConstraint(fields=["shop", "sha256"], name="leadai_shop_media_once")]
+
+    def __str__(self):
+        return f"{self.get_shop_display()} {self.kind}: {self.file_name}"
+
+
+class LeadAiShopMediaUpload(models.Model):
+    """The gateway's media id for one library file on one of our numbers.
+
+    A media id belongs to the number that uploaded it, and WhatsApp forgets it
+    after about 30 days: shop_media.gateway_media_id uploads again when this one
+    is older than 25 days, or when a send says the id is no good.
+    """
+
+    media = models.ForeignKey(LeadAiShopMedia, on_delete=models.CASCADE, related_name="uploads")
+    number = models.ForeignKey("catalog.WabaNumber", on_delete=models.CASCADE, related_name="+")
+    gateway_id = models.CharField(max_length=128)
+    uploaded_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["media", "number"], name="leadai_shop_media_upload_once")]
+
+    def __str__(self):
+        return f"{self.gateway_id} (library file {self.media_id}, number {self.number_id})"
+
+
+class LeadAiOptOut(models.Model):
+    """One phone that asked us to stop: no campaign on any number messages it (board T60, Q8).
+
+    ``phone`` is digits only, country code first (optout.canonical). Every
+    campaign path asks optout.phones_blocked through the campaigns' own hook
+    (crm_leads.phones_blocked_by_registry). A person may delete a row in the
+    Django admin to undo a mistake; that writes nothing to Bitrix.
+    """
+
+    class Source(models.TextChoices):
+        LEADAI_STOP = "leadai_stop", "Lead AI: asked us to stop"
+        LEADAI_SPAM = "leadai_spam", "Lead AI: spam"
+        WRONG_NUMBER = "wrong_number", "Wrong number"
+        INBOX_TAP = "inbox_tap", "Inbox: Unsubscribe or Stop"
+        BITRIX = "bitrix", "Bitrix: set by a person"
+        IMPORT = "import", "Imported from past messages"
+
+    phone = models.CharField(max_length=20, unique=True)
+    reason = models.CharField(max_length=255, blank=True)
+    source = models.CharField(max_length=16, choices=Source.choices)
+    conversation = models.ForeignKey("inbox.Conversation", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Lead AI opt-out"
+
+    def __str__(self):
+        return f"+{self.phone} ({self.get_source_display()})"
 
 
 class LeadAiTranscript(models.Model):

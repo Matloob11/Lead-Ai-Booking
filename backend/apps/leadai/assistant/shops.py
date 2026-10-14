@@ -309,10 +309,12 @@ class Context:
     taken: list = field(default_factory=list)  # TAKEN SLOTS lines
     agent: str = ""
     objections: list = field(default_factory=list)  # OBJECTION LINES, with SHOP FACTS' own figures
+    history: list = field(default_factory=list)  # the old lead's LEAD FIRST ASKED and CRM NOTES (lead_history.lines)
 
 
-def context(settings_row, known: dict, now, taken=()) -> Context:
-    """The shops block of one turn's context. ``taken``: the other clients' office starts."""
+def context(settings_row, known: dict, now, taken=(), history=()) -> Context:
+    """The shops block of one turn's context. ``taken``: the other clients' office starts;
+    ``history``: the old lead's lines from Bitrix (lead_history.lines), none when unknown."""
     facts = getattr(settings_row, "shops_facts", None) or DEFAULT_SHOPS_FACTS
     closed = getattr(settings_row, "closed_dates", None) or []
     brand = brand_of(settings_row)
@@ -331,6 +333,7 @@ def context(settings_row, known: dict, now, taken=()) -> Context:
         taken=taken_lines,
         agent=agent_of(settings_row) or "our agent",
         objections=objection_lines(facts),
+        history=list(history or ()),
     )
 
 
@@ -363,6 +366,16 @@ _SLOT_OFFER = {
     "ur": "میں آپ کے لیے {slots} کا سلاٹ رکھ سکتا ہوں — کون سا بہتر رہے گا؟",
     "hi_latin": "Main aapke liye {slots} ka slot rakh sakta hoon — kaunsa behtar rahega?",
     "hi": "मैं आपके लिए {slots} का स्लॉट रख सकता हूँ — कौन सा बेहतर रहेगा?",
+}
+# The same two slots asked about again (a plain "Yes" to them picks neither): never the same
+# sentence twice in a chat (the build pack), so the second time in these words.
+_SLOT_AGAIN = {
+    "en": "Which one suits you better: {slots}?",
+    "ar": "أيهما يناسبك أكثر: {slots}؟",
+    "ur_latin": "Aap ke liye kaunsa behtar rahega: {slots}?",
+    "ur": "آپ کے لیے کون سا بہتر رہے گا: {slots}؟",
+    "hi_latin": "Aapke liye kaunsa behtar rahega: {slots}?",
+    "hi": "आपके लिए कौन सा बेहतर रहेगा: {slots}?",
 }
 _SLOT_TAKEN = {
     "en": "Sorry, that time is already booked.",
@@ -435,6 +448,16 @@ def _first_of_each(days: set) -> set:
     return {day for day in days if day - dt.timedelta(days=7) not in days}
 
 
+def _days_said(said: str, now) -> tuple[set, set]:
+    """(the days the customer's words ask for, the days they rule out), a clause at a time:
+    "I am busy today, can I come on Thursday?" asks for Thursday and rules today out."""
+    wanted, ruled_out = set(), set()
+    for clause in _CLAUSE.split(said or ""):
+        days = _first_of_each(hours.named_days(clause, now))
+        (ruled_out if _RULED_OUT.search(hours.without_no_problem(clause)) else wanted).update(days)
+    return wanted - ruled_out, ruled_out
+
+
 def invitation_slots(said: str, asked: list, now, closed_dates=(), taken=()) -> list:
     """The two free slots that replace an open "when would you like to come?", fitted to
     what the customer said: on the day the question names, else the day they asked for
@@ -445,25 +468,56 @@ def invitation_slots(said: str, asked: list, now, closed_dates=(), taken=()) -> 
     said = (said or "").replace("’", "'")
     if any(_VAGUE_WHEN.search(text or "") for text in [said, *asked]):
         return []
-    wanted, ruled_out = set(), set()
-    for clause in _CLAUSE.split(said or ""):
-        days = _first_of_each(hours.named_days(clause, now))
-        (ruled_out if _RULED_OUT.search(hours.without_no_problem(clause)) else wanted).update(days)
+    wanted, ruled_out = _days_said(said, now)
     named = set()
     for sentence in asked:
         named |= _first_of_each(hours.named_days(sentence, now))
     named -= ruled_out
-    wanted -= ruled_out
     day = min(named) if named else (min(wanted) if wanted else None)
     return hours.offer_pair(now, closed_dates, taken, day=day, avoid=ruled_out)
 
 
-def slot_offer(language: str, slots: list, now) -> str:
-    """The invitation's two concrete slots, or '' when there are none to offer."""
+# "This evening": the first nudge's own words in its six languages (nudges._TYPED), and the
+# customer's. Its slots start at 5 PM. Not a bare "مساء": "5 مساءً" is 5 PM.
+EVENING_FROM = dt.time(17, 0)
+_EVENING = re.compile(r"\b(?:evening|tonight|sham|shaam)\b|المساء|مساء اليوم|الليلة|شام|शाम", re.IGNORECASE)
+
+
+def yes_slots(said: str, ours: str, now, closed_dates=(), taken=(), *, at: dt.time | None = None) -> list:
+    """The two free slots for a yes that named no exact time: to a nudge's "Shall I book you
+    for this evening?" or "today or tomorrow?", or a plain yes to two slots we offered
+    (engine.unasked_confirm). On the day they asked for, else the first day our message
+    names, never on a day they ruled out; from 5 PM when they said "this evening", or when
+    our message did and they named no day or part of the day of their own. The earliest
+    free pair of that day when its evening is full. ``said``: their words this burst;
+    ``ours``: our message they answered; ``at``: the hour they named themselves, when the
+    model booked another one: the pair starts from it."""
+    said = (said or "").replace("’", "'")
+    wanted, ruled_out = _days_said(said, now)
+    day = min(wanted) if wanted else None
+    if day is None:
+        named = _first_of_each(hours.named_days(ours or "", now)) - ruled_out
+        day = min(named) if named else None
+    if at is not None:
+        theirs = hours.offer_pair(now, closed_dates, taken, day=day, avoid=ruled_out, after=at)
+        if theirs:
+            return theirs
+    theirs = bool(wanted) or bool(_VAGUE_WHEN.search(said))
+    if _EVENING.search(said) or (not theirs and _EVENING.search(ours or "")):
+        evening = hours.offer_pair(now, closed_dates, taken, day=day, avoid=ruled_out, after=EVENING_FROM)
+        if evening:
+            return evening
+    return hours.offer_pair(now, closed_dates, taken, day=day, avoid=ruled_out)
+
+
+def slot_offer(language: str, slots: list, now, *, again: bool = False) -> str:
+    """The invitation's two concrete slots, or '' when there are none to offer; ``again``: in the
+    words for the same two asked about again (_SLOT_AGAIN)."""
     if not slots:
         return ""
-    lang = _lang(language, _SLOT_OFFER)
-    return _SLOT_OFFER[lang].format(slots=slots_phrase(slots, now, lang))
+    table = _SLOT_AGAIN if again else _SLOT_OFFER
+    lang = _lang(language, table)
+    return table[lang].format(slots=slots_phrase(slots, now, lang))
 
 
 def slot_taken(language: str, slots: list, now) -> str:

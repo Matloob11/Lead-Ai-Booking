@@ -16,11 +16,13 @@
  * "AI settings" in the bar opens the assistant's status and settings
  * (GET/PUT /api/leadai/settings/) for everyone; what may be changed there is
  * decided by the server, the dialog only hides what the agent cannot change.
+ * "Shop media" opens the shops media library (shop-media.js) the same way.
  */
 
 import { el, clear, debounce, initials, stamp, toast } from "../../core/dom.js";
 import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
+import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
 import { shopsForm, shopsValues } from "./shops.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
@@ -118,6 +120,11 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       el("div.lai-bar__note", {}, [
         "Chats from CRM campaigns sent with the Lead AI box. The AI assistant answers them; they stay here until you move one back.",
       ]),
+      el("button.lai-btn.lai-btn--ghost.lai-bar__media", {
+        type: "button",
+        title: "The videos and photos the assistant sends for each shop type",
+        onclick: () => openShopMediaDialog(),
+      }, [icon("image", { size: 15 }), "Shop media"]),
       el("button.lai-btn.lai-btn--ghost.lai-bar__settings", {
         type: "button",
         title: "The Lead AI assistant's status and settings",
@@ -195,6 +202,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     rowTimers.clear();
     // Opened from this screen: it would stay over the inbox an alert opened.
     settingsDialog?.close();
+    closeShopMediaDialog();
     state.thread?.destroy();
     state.thread = null;
     root.remove();

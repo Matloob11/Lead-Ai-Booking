@@ -397,6 +397,12 @@
   color: #bae6fd;
 }
 
+/* Its automatic follow-up waits: Template B is not approved on the chat's number yet. */
+.lai-chip--wait {
+  --lai-chip: #f59e0b;
+  color: #fde68a;
+}
+
 /* Read by screen readers, not drawn. */
 .lai-sr {
   position: absolute;
@@ -919,6 +925,12 @@
   color: #fde68a;
 }
 
+/* Template B, sent by the automatic follow-ups. */
+.lai-msg__badge--followup {
+  background: rgb(56 189 248 / 26%);
+  color: #bae6fd;
+}
+
 /* The English meaning of a reply the assistant wrote in another language. */
 .lai-msg__gloss {
   margin-top: 5px;
@@ -1115,7 +1127,8 @@
   flex: 0 0 auto;
 }
 
-.lai-bar__settings {
+.lai-bar__settings,
+.lai-bar__media {
   flex: 0 0 auto;
   padding: 6px 11px;
   font-size: 12px;
@@ -1736,6 +1749,110 @@ textarea.lai-set__input {
   display: none;
 }
 
+/* ------------------------------------------------------- shop media */
+/* The shops media library (shop-media.js), in a dialog like the AI settings. */
+
+.lai-media__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lai-media__count {
+  font-size: 12px;
+  color: #9fb0c4;
+}
+
+.lai-media__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lai-media__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.lai-media__pos {
+  flex: 0 0 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #c4b5fd;
+}
+
+.lai-media__thumb {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgb(255 255 255 / 6%);
+}
+
+.lai-media__thumb--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #9fb0c4;
+}
+
+.lai-media__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lai-media__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #eef3f9;
+}
+
+a.lai-media__name:hover {
+  text-decoration: underline;
+}
+
+.lai-media__meta {
+  font-size: 12px;
+  color: #9fb0c4;
+}
+
+.lai-media__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.lai-media__delete.is-armed {
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.lai-media__file[hidden],
+.lai-media__empty[hidden] {
+  display: none;
+}
+
+.lai-media__status:empty {
+  display: none;
+}
+
 /* --------------------------------------------------------------- narrow */
 
 @media (max-width: 760px) {
@@ -1749,8 +1866,22 @@ textarea.lai-set__input {
   }
 
   /* The note is gone; the buttons stay at the right end of the bar. */
-  .lai-bar__settings {
+  .lai-bar__settings,
+  .lai-bar__media {
     margin-left: auto;
+  }
+
+  .lai-bar__media + .lai-bar__settings {
+    margin-left: 0;
+  }
+
+  .lai-media__item {
+    flex-wrap: wrap;
+  }
+
+  .lai-media__actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
   }
 
   .lai-msg {

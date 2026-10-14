@@ -268,6 +268,8 @@ POSITIVE_TAPS = {
     normalize_text(p)
     for p in ("yes, show me shops", "yes show me shops", "show me shops", "yes, book a viewing", "book a viewing", "interested", "i am interested", "im interested")
 }
+# Template B's yes: a viewing to book, not shops to look at.
+BOOK_TAPS = {normalize_text(p) for p in ("yes, book a viewing", "book a viewing")}
 NOT_NOW = {
     normalize_text(p)
     for p in (
@@ -300,6 +302,10 @@ def shops_opt_out(label: str) -> str | None:
 
 def is_positive_tap(label: str) -> bool:
     return normalize_text(label) in POSITIVE_TAPS
+
+
+def is_book_tap(label: str) -> bool:
+    return normalize_text(label) in BOOK_TAPS
 
 
 def is_not_now(text: str) -> bool:
@@ -585,6 +591,33 @@ LINES = {
         "ur": "ہمارے آفس کی لوکیشن اوپر والے میسج میں ہے۔",
         "hi_latin": "Hamare office ki location upar wale message mein di gayi hai.",
         "hi": "हमारे ऑफ़िस की लोकेशन ऊपर वाले मैसेज में है।",
+    },
+    # Shops: the build pack's licence request, once the customer has a DED or Trakhees licence (shop_flow).
+    "licence_copy": {
+        "en": "Perfect! Please share a copy of your trade license here (photo or PDF). It helps us show you shops that suit your business activity.",
+        "ar": "ممتاز! يرجى مشاركة نسخة من رخصتك التجارية هنا (صورة أو PDF). يساعدنا ذلك على عرض المحلات التي تناسب نشاطك التجاري.",
+        "ur_latin": "Perfect! Barah-e-karam apne trade license ki copy yahan share kar dein (photo ya PDF). Is se hum aap ko aap ke business ke mutabiq shops dikha sakenge.",
+        "ur": "بہترین! براہ کرم اپنے ٹریڈ لائسنس کی کاپی یہاں شیئر کر دیں (فوٹو یا PDF)۔ اس سے ہم آپ کو آپ کے کاروبار کے مطابق دکانیں دکھا سکیں گے۔",
+        "hi_latin": "Perfect! Kripya apne trade license ki copy yahan share kar dijiye (photo ya PDF). Isse hum aapko aapke business ke hisaab se shops dikha payenge.",
+        "hi": "बहुत बढ़िया! कृपया अपने ट्रेड लाइसेंस की कॉपी यहाँ शेयर कर दीजिए (फ़ोटो या PDF)। इससे हम आपको आपके बिज़नेस के हिसाब से दुकानें दिखा पाएँगे।",
+    },
+    # Shops: the licence copy came, while the request was open.
+    "licence_thanks": {
+        "en": "Thank you, got it.",
+        "ar": "شكراً لك، وصلتني.",
+        "ur_latin": "Shukriya, mil gaya.",
+        "ur": "شکریہ، مل گیا۔",
+        "hi_latin": "Shukriya, mil gaya.",
+        "hi": "शुक्रिया, मिल गया।",
+    },
+    # Shops: "Need to reschedule", before the two nearest free slots (shop_flow.reschedule_text).
+    "reschedule_slots": {
+        "en": "Sure.",
+        "ar": "بالتأكيد.",
+        "ur_latin": "Zaroor.",
+        "ur": "ضرور۔",
+        "hi_latin": "Zaroor.",
+        "hi": "ज़रूर।",
     },
     # Shops: the build pack's next question when the reply invited before the licence was known.
     "ask_licence": {

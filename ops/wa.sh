@@ -77,6 +77,10 @@
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
+#   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
+#   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
+#   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
+#   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
 #   ops/wa.sh qr-disable                  stop OpenWA + wa-qr; keep files; no autostart
 #   ops/wa.sh qr-status                   OpenWA + wa-qr: state, restart policy, data on disk
 #   ops/wa.sh load                        host load, RAM, disk, top containers
@@ -1291,6 +1295,94 @@ case "$cmd" in
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
       -e LEADAI_OFFICE_MAPS_URL='$1' -e LEADAI_OFFICE_LAT='$2' -e LEADAI_OFFICE_LNG='$3' web python manage.py shell"
+    ;;
+
+  leadai-media-import)
+    # The build pack's shop media into the Lead AI media library (board T30): one folder
+    # per type ("Type 1 ...", the typo "Tpye 2 ...", "Type 3 ..."), the office photo
+    # (a file whose name starts with "office") at the top, files in name order, each
+    # checked by its bytes. Run in the web container on a folder of the media volume:
+    # first `ops/wa.sh sync <local folder named leadai_import> /opt/a7-wa/media`, then
+    # this with /app/media/leadai_import (its own name may hold no space; the folders
+    # inside it may). --dry-run checks and reports, and stores nothing. Running it twice
+    # adds nothing twice.
+    dir="${1:-}"
+    [[ "$dir" == /app/media/leadai_import || "$dir" == /app/media/leadai_import/* ]] ||
+      die "leadai-media-import takes a folder under /app/media/leadai_import"
+    [[ "$dir" != *..* ]] || die "refusing '..' in: '$dir'"
+    [[ "$dir" =~ ^[A-Za-z0-9._/-]+$ ]] || die "refusing unusual characters in: '$dir'"
+    flag=""
+    if [[ $# -eq 2 && "$2" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 1 ]]; then
+      die "leadai-media-import takes DIR, or DIR --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_media_import '$dir' $flag"
+    ;;
+
+  leadai-optout-import)
+    # Back-fill the WhatsApp opt-out registry (board T60, Q8) from what customers already
+    # said: an Unsubscribe / Stop / Stop messages / Stop promotions tap, a STOP or a wrong
+    # number typed, and the Lead AI chats stopped for those. --dry-run counts, shows ten
+    # and stores nothing. A phone already blocked keeps its first reason.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "leadai-optout-import takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_optout_import $flag"
+    ;;
+
+  submit-shops-templates)
+    # The International City shops templates (board T61) to the eight sending numbers'
+    # WABAs (board D4): intl_city_shops_followup (Template B, which the automatic
+    # follow-ups send) and intl_city_shops_reconnect (Template A, whose video header is
+    # reviewed against the Type 1 video of the Lead AI media library). A WABA that has
+    # one already, in any status, keeps it untouched. --dry-run says what would go and
+    # uploads and submits nothing.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "submit-shops-templates takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_shops_templates $flag"
+    ;;
+
+  crm-mirror-backfill)
+    # Board T57 and the Bitrix REST throttle: queue the CRM timeline mirror again for
+    # messages that never reached their record. --since UTC picks every message from
+    # then on (each task posts only what its records miss); --leadai picks every
+    # message of every Lead AI chat not on the chat's own lead yet. At least one of
+    # the two. Campaign templates, panel copies, reactions, system notes, failed sends
+    # and the last 5 minutes are never picked. Tasks go one every --every seconds
+    # (1-60, default 8), at most --limit (1-20000, default 2000) and never more than
+    # 45 minutes ahead; run it again for the rest once those have run, from the
+    # --since it prints. Refused while a campaign is sending. Nothing is posted twice
+    # (Mirror, and a look at the timeline first). --dry-run counts and queues nothing.
+    # Prints counts only. Every value is checked here, whole, before anything reaches
+    # the server.
+    args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --since)
+          [[ "${2:-}" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$ ]] ||
+            die "--since takes a UTC time like 2026-10-14T07:40:00Z"
+          args+=(--since "$2"); shift 2 ;;
+        --leadai|--dry-run) args+=("$1"); shift ;;
+        --limit)
+          [[ "${2:-}" =~ ^([1-9][0-9]{0,3}|1[0-9]{4}|20000)$ ]] || die "--limit takes 1 to 20000"
+          args+=(--limit "$2"); shift 2 ;;
+        --every)
+          [[ "${2:-}" =~ ^([1-9]|[1-5][0-9]|60)$ ]] || die "--every takes 1 to 60 (seconds)"
+          args+=(--every "$2"); shift 2 ;;
+        *) die "crm-mirror-backfill takes --since TIME, --leadai, --dry-run, --limit N and --every S" ;;
+      esac
+    done
+    [[ " ${args[*]:-} " == *" --since "* || " ${args[*]:-} " == *" --leadai "* ]] ||
+      die "crm-mirror-backfill needs --since TIME, --leadai, or both"
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py crmlink_backfill_mirrors ${args[*]}"
     ;;
 
   ""|-h|--help|help) usage ;;

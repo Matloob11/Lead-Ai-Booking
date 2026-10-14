@@ -8,8 +8,11 @@ Bitrix's CRM factory with business processes and automation off, and accepts
 only the allow-listed codes and enum ids of the board's field map.
 
 REST crm.lead.update is never used for these: Bitrix BP 235 runs on every REST
-edit, rewrites the title and wipes the meeting time (board C4, C7). The
-booking's own stage and meeting write is still crm.py's, until board T55.
+edit, rewrites the title and wipes the meeting time (board C4, C7). A booking's
+stage, meeting time and to-do go through the same tool's "booking" action
+(crm.booking_body, from tasks.sync_appointment_crm; board C9, T55), and the
+customer's trade licence copy as its ``license_file`` (licence_body, from
+tasks.write_licence_file; board T34).
 
 What a shops chat with a Bitrix lead (LeadAiChat.crm_entity "lead") writes:
 - Bot Status: Qualifying on the first answered turn; Viewing booked on a
@@ -62,6 +65,10 @@ FIELD_ACTIVITY = crm.FIELD_ACTIVITY
 FIELD_LICENCE = crm.FIELD_LICENCE
 # Not a field: the move to a lost stage, with its reason.
 LOST = "lost"
+# Not a field either: the customer's trade licence copy (``value`` is the inbound message's id).
+LICENCE_FILE = "license_file"
+LICENCE_MAX = 5 * 1024 * 1024
+LICENCE_FORMATS = {"pdf": "licence.pdf", "jpeg": "licence.jpg", "png": "licence.png"}
 
 SHOP_TYPE_IDS = {"type_1": 2471, "type_2": 2472, "type_3": 2473, "not_sure": 2474}
 STATUS_QUALIFYING = 2476
@@ -211,9 +218,56 @@ def queue(conversation, chat, writes) -> list[int]:
     return ids
 
 
+def licence_format(data: bytes) -> str:
+    """'pdf', 'jpeg' or 'png' by the file's first bytes (what the tool accepts), else ''."""
+    if data[:4] == b"%PDF":
+        return "pdf"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    return ""
+
+
+def licence_body(lead_id: int, data: bytes) -> dict:
+    """The tool's body for the customer's licence copy (pure; tested). Raises ValueError
+    for a file the tool would refuse: not a PDF, JPEG or PNG, or over 5 MB."""
+    import base64
+
+    found = licence_format(data)
+    if not found:
+        raise ValueError("not a PDF, JPEG or PNG")
+    if len(data) > LICENCE_MAX:
+        raise ValueError("larger than 5 MB")
+    return {
+        "lead_id": int(lead_id),
+        "license_file": {"name": LICENCE_FORMATS[found], "content_base64": base64.b64encode(data).decode("ascii")},
+        "comment": "The customer shared their trade licence on WhatsApp; it is on the Trade License File field.",
+    }
+
+
+def queue_licence(conversation, chat, message) -> int | None:
+    """Record that this inbound photo or PDF is the customer's licence copy, and post it to the
+    lead after the commit (tasks.write_licence_file, which waits for the download). Returns the
+    row's id; None when the chat has no Bitrix lead or this message was queued already."""
+    from ..tasks import write_licence_file
+
+    lead = lead_of(chat, conversation)
+    if lead is None:
+        return None
+    if LeadAiCrmField.objects.filter(conversation=conversation, field=LICENCE_FILE, value=str(message.pk)).exists():
+        return None
+    row = LeadAiCrmField.objects.create(
+        conversation=conversation, lead_id=lead, field=LICENCE_FILE, value=str(message.pk), payload={"message": message.pk}
+    )
+    transaction.on_commit(lambda pk=row.pk: write_licence_file.delay(pk))
+    return row.pk
+
+
 def body_for(rows) -> dict:
-    """The tool's body for some rows of one lead (pure; tested)."""
-    rows = list(rows)
+    """The tool's body for some rows of one lead (pure; tested). A licence copy is never one
+    of them: it goes on its own (licence_body)."""
+    rows = [row for row in rows if row.field != LICENCE_FILE]
     body: dict = {"lead_id": rows[0].lead_id if rows else None, "fields": {}}
     empty_only = []
     for row in rows:

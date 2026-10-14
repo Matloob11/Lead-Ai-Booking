@@ -60,7 +60,12 @@ def reminder_template(category="UTILITY"):
 
 class FakeBitrix:
     """The lead's stage, its to-dos and the comments. Like BP 235, an update of a
-    lead in stage 10 plans a new "Viewing/Meeting" to-do, due now."""
+    lead in stage 10 plans a new "Viewing/Meeting" to-do, due now.
+
+    ``tool`` is the Lead fields tool's "booking" action (board C9) as Cursor built it:
+    confirmed / rescheduled set stage 10 and move the lead's newest open
+    "Viewing/Meeting" to-do to the meeting time (or plan one), answering its id;
+    cancelled closes it and leaves the stage; the comment goes on the timeline."""
 
     def __init__(self, stage="IN_PROCESS", assigned="88", todos=None, down=False, plans_todo=True, stale_reads=False):
         self.stage = stage
@@ -71,7 +76,38 @@ class FakeBitrix:
         self.stale_reads = stale_reads  # every read sees the stage before anyone wrote
         self.comments = []
         self.calls = []
+        self.posted = []
         self.next_todo = 901
+
+    def _open_todo(self):
+        ids = [i for i, t in self.todos.items() if not t["done"]]
+        return max(ids) if ids else None
+
+    def tool(self, body):
+        from apps.leadai.assistant import crm_fields
+
+        self.posted.append(body)
+        self.calls.append(("tool", body))
+        if self.down:
+            raise crm_fields.FieldsError("Bitrix unreachable: ConnectError")
+        if body.get("comment"):
+            self.comments.append(body["comment"])
+        booking = body.get("booking") or {}
+        todo_id = None
+        if booking.get("event") == "cancelled":
+            todo_id = self._open_todo()
+            if todo_id:
+                self.todos[todo_id]["done"] = True
+        elif booking:
+            self.stage = "10"
+            todo_id = self._open_todo()
+            if todo_id:
+                self.todos[todo_id]["deadline"] = booking["meeting_at"]
+            else:
+                todo_id = self.next_todo
+                self.todos[todo_id] = {"deadline": booking["meeting_at"], "done": False, "created": timezone.now()}
+                self.next_todo += 1
+        return {"ok": True, "lead_id": body.get("lead_id"), "todo_id": todo_id}
 
     def __call__(self, method, payload=None):
         self.calls.append((method, payload))
@@ -507,66 +543,120 @@ class CrmBase(RcBase):
 
     def sync(self, bitrix, appointment, event, revision=None, hot=False):
         bitrix.calls.clear()
-        with patch("apps.crmlink.client.call", side_effect=bitrix):
+        with patch("apps.crmlink.client.call", side_effect=bitrix), patch("apps.leadai.assistant.crm_fields.post", side_effect=bitrix.tool):
             tasks.sync_appointment_crm(appointment.pk, event, hot, revision)
         appointment.refresh_from_db()
         return bitrix.methods()
 
 
 class CrmTodoTests(CrmBase):
-    """find:crm_alerts#0: only the assistant's own to-do is moved or completed."""
+    """find:crm_alerts#0, and board T55: a booking goes through the Lead fields tool, which owns
+    the one "Viewing/Meeting" to-do; a person's own booking in stage 10 is never touched."""
 
     def test_a_lead_already_in_ten_keeps_its_agents_todo(self):
         bitrix = FakeBitrix(stage="10", todos={700: todo("2026-10-15T15:00:00+04:00")})
         appointment = self.make()
         self.sync(bitrix, appointment, "confirmed", revision=1)
         self.assertNotIn("crm.lead.update", bitrix.methods())
+        self.assertEqual(bitrix.posted, [])  # the tool would move the lead's open to-do: it is not called
         self.assertEqual(bitrix.todos[700]["deadline"], "2026-10-15T15:00:00+04:00")
         self.assertIsNone(appointment.crm_todo_id)
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(status="cancelled")
         self.sync(bitrix, appointment, "cancelled", revision=2)
         self.assertFalse(bitrix.todos[700]["done"])
+        self.assertEqual(bitrix.posted, [])
 
-    def test_a_reschedule_moves_the_assistants_own_todo_not_the_newest(self):
+    def test_a_reschedule_moves_the_same_todo_through_the_tool(self):
         bitrix = FakeBitrix()
         appointment = self.make()
-        self.sync(bitrix, appointment, "confirmed", revision=1)  # the lead goes to 10; BP 235 plans 901
-        self.assertEqual(appointment.crm_todo_id, 901)
+        self.sync(bitrix, appointment, "confirmed", revision=1)  # the tool moves the lead to 10 and plans 901
+        self.assertEqual((bitrix.stage, appointment.crm_todo_id), ("10", 901))
         self.assertEqual(bitrix.todos[901]["deadline"], TUESDAY_5PM.isoformat())
-        # An agent edits the lead while it sits in 10: BP 235 plans 902, due now.
-        bitrix.todos[902] = todo(days_old=0)
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(starts_at=T2)
         self.sync(bitrix, appointment, "rescheduled", revision=2)
         self.assertEqual(bitrix.todos[901]["deadline"], T2.isoformat())
-        self.assertEqual(bitrix.todos[902]["deadline"], "now")
         self.assertEqual(appointment.crm_todo_id, 901)
+        self.assertEqual([body["booking"]["event"] for body in bitrix.posted], ["confirmed", "rescheduled"])
+        self.assertNotIn("crm.lead.update", bitrix.methods())
 
-    def test_an_older_todo_is_never_taken_for_the_one_our_update_planned(self):
-        bitrix = FakeBitrix(plans_todo=False, todos={700: todo("2026-10-15T15:00:00+04:00")})
+    def test_no_rest_update_ever_runs_bp_235(self):
+        bitrix = FakeBitrix()
         appointment = self.make()
         self.sync(bitrix, appointment, "confirmed", revision=1)
-        self.assertIn("crm.lead.update", bitrix.methods())
-        self.assertEqual(bitrix.todos[700]["deadline"], "2026-10-15T15:00:00+04:00")
-        self.assertIsNone(appointment.crm_todo_id)
+        # Two REST reads (the lead, then its open Viewing/Meeting to-dos: is the newest ours?), then the tool.
+        self.assertEqual([method for method, _ in bitrix.calls], ["crm.lead.get", "crm.activity.list", "tool"])
+        self.assertEqual(bitrix.posted[0]["booking"]["mode"], 42)
+        self.assertIn("MEETING CONFIRMED", bitrix.comments[0])
 
-    def test_our_todo_closed_in_bitrix_hands_the_meeting_to_the_heads_up(self):
+    def test_our_todo_closed_in_bitrix_gets_a_new_one_on_a_reschedule(self):
         bitrix = FakeBitrix()
         appointment = self.make()
         self.sync(bitrix, appointment, "confirmed", revision=1)
         bitrix.todos[901]["done"] = True  # the agent ticked it off
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(starts_at=T2)
         self.sync(bitrix, appointment, "rescheduled", revision=2)
-        self.assertIsNone(appointment.crm_todo_id)
+        self.assertEqual(appointment.crm_todo_id, 902)
+        self.assertEqual(bitrix.todos[902]["deadline"], T2.isoformat())
 
-    def test_a_cancel_closes_our_todo_even_before_its_id_was_stored(self):
+    def test_a_cancel_closes_our_todo_through_the_tool(self):
         bitrix = FakeBitrix()
         appointment = self.make()
-        with patch("apps.leadai.assistant.crm.find_meeting_todo", side_effect=client.BitrixError("crm.activity.list: timed out")):
-            self.sync(bitrix, appointment, "confirmed", revision=1)
-        self.assertIsNone(appointment.crm_todo_id)
+        self.sync(bitrix, appointment, "confirmed", revision=1)
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(status="cancelled")
         self.sync(bitrix, appointment, "cancelled", revision=2)
         self.assertTrue(bitrix.todos[901]["done"])
+        self.assertIsNone(appointment.crm_todo_id)
+        self.assertIn("MEETING CANCELLED", bitrix.comments[-1])
+
+    def test_a_cancel_while_the_booking_ran_closes_the_todo_it_planned(self):
+        bitrix = FakeBitrix()
+        appointment = self.make()
+
+        def cancel_meanwhile(body):
+            answer = FakeBitrix.tool(bitrix, body)
+            LeadAiAppointment.objects.filter(pk=appointment.pk).update(status="cancelled")
+            return answer
+
+        with patch("apps.crmlink.client.call", side_effect=bitrix), patch("apps.leadai.assistant.crm_fields.post", side_effect=cancel_meanwhile):
+            tasks.sync_appointment_crm(appointment.pk, "confirmed", False, 1)
+        self.assertEqual([body["booking"]["event"] for body in bitrix.posted], ["confirmed", "cancelled"])
+        self.assertTrue(bitrix.todos[901]["done"])
+
+    def test_a_booking_the_old_rest_way_is_still_ours(self):
+        # Booked before board T55 (the REST update's own step, and the to-do it moved, 901): its
+        # reschedule and cancel go through the tool.
+        bitrix = FakeBitrix(stage="10", todos={901: todo()})
+        appointment = self.make(crm_todo_id=901)
+        LeadAiCrmStep.objects.create(appointment=appointment, step=tasks.LEAD_UPDATE)
+        self.sync(bitrix, appointment, "rescheduled", revision=2)
+        self.assertEqual(bitrix.posted[0]["booking"]["event"], "rescheduled")
+        self.assertEqual(bitrix.todos[901]["deadline"], TUESDAY_5PM.isoformat())
+
+    def test_an_old_booking_whose_todo_was_never_found_moves_no_todo(self):
+        # The old REST way could not find the to-do it caused (crm_todo_id empty): the open one is
+        # nobody we know, so only the meeting time is written, and the heads-up covers the visit.
+        bitrix = FakeBitrix(stage="10", todos={901: todo()})
+        appointment = self.make()
+        LeadAiCrmStep.objects.create(appointment=appointment, step=tasks.LEAD_UPDATE)
+        self.sync(bitrix, appointment, "rescheduled", revision=2)
+        self.assertEqual(bitrix.posted[0]["fields"], {"UF_CRM_1731838813769": TUESDAY_5PM.isoformat()})
+        self.assertNotIn("booking", bitrix.posted[0])
+        self.assertEqual(bitrix.todos[901]["deadline"], "now")
+        self.assertIsNone(appointment.crm_todo_id)
+
+    def test_a_passing_failure_of_the_tool_is_retried_and_left_for_the_sweep(self):
+        bitrix = FakeBitrix()
+        appointment = self.make()
+        down = FakeBitrix()
+        down.down = True
+        with patch("apps.crmlink.client.call", side_effect=bitrix), patch("apps.leadai.assistant.crm_fields.post", side_effect=down.tool):
+            result = tasks.sync_appointment_crm.apply(args=[appointment.pk, "confirmed", False, 1])
+        self.assertTrue(result.successful())
+        self.assertEqual(len(down.posted), 1 + len(tasks.CRM_RETRY))
+        appointment.refresh_from_db()
+        self.assertIn("Bitrix unreachable", appointment.crm_error)
+        self.assertTrue(LeadAiCrmStep.objects.filter(step__startswith=tasks.CRM_PENDING).exists())
+        self.assertFalse(LeadAiCrmStep.objects.filter(step__startswith=tasks.BOOKING_STEP).exists())  # not done: tried again later
 
 
 class CrmRevisionTests(CrmBase):
@@ -589,13 +679,14 @@ class CrmRevisionTests(CrmBase):
         self.assertEqual(sum("MEETING RESCHEDULED" in c for c in bitrix.comments), 3)
         self.assertIn("When: Wednesday 14 October 2026, 11:00 AM", bitrix.comments[-1])
 
-    def test_the_lead_is_updated_once_per_appointment(self):
+    def test_one_todo_per_appointment_whatever_the_lead_reads(self):
         bitrix = FakeBitrix(stale_reads=True)  # both syncs read the lead before either wrote
         appointment = self.make()
         methods = self.sync(bitrix, appointment, "confirmed", revision=1)
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(starts_at=T2)
         methods += self.sync(bitrix, appointment, "rescheduled", revision=2)
-        self.assertEqual(methods.count("crm.lead.update"), 1)
+        self.assertEqual(methods.count("crm.lead.update"), 0)
+        self.assertEqual([body["booking"]["event"] for body in bitrix.posted], ["confirmed", "rescheduled"])
         self.assertEqual([i for i, t in bitrix.todos.items() if not t["done"]], [901])
         self.assertEqual(bitrix.todos[901]["deadline"], T2.isoformat())
 
@@ -676,7 +767,7 @@ class CrmCatchUpTests(CrmBase):
         self.assertIn("timed out", appointment.crm_error)
         bitrix = FakeBitrix()
         self.sync(bitrix, appointment, "confirmed", revision=1)
-        self.assertIn("crm.lead.update", bitrix.methods())
+        self.assertIn("tool", bitrix.methods())
         self.assertEqual(appointment.crm_error, "")
         self.assertFalse(LeadAiCrmStep.objects.filter(step__startswith=tasks.CRM_PENDING).exists())
 

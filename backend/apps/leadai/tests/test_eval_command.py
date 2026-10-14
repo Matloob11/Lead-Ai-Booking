@@ -198,8 +198,8 @@ RIGHT = {
     "shops-discount": answer("Our agent can discuss the best price for you at the viewing. Shall I hold today at 2:30 PM or 4:30 PM for you?"),
     "shops-sunday": answer("Our office is closed on Sunday. I can hold a slot for you on Monday at 11:00 AM or 5:00 PM — which is better?"),
     "shops-invite": answer(
-        "Perfect, a DED licence works for our shops. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
-        facts={"licence_kind": "ded", "trade_licence": "yes"},
+        "Perfect, a new licence is fine for our shops. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        facts={"licence_kind": "new", "trade_licence": "no"},
         invited=True,
     ),
     "shops-taken": answer("Sorry, 5:00 PM tomorrow is already booked. I can hold 4:30 PM or 5:30 PM tomorrow for you — which is better?"),
@@ -220,6 +220,65 @@ RIGHT = {
         facts={"business_activity": "vape"},
     ),
     "shops-spam": answer("", send=False),  # settled by code (the spam rule): never asked
+    # Batch 2b. The list, a type's media and the licence request replace the model's words.
+    "shops-for-myself-list": answer("Great. What business will the shop be for?", facts={"for_client": False}),
+    "shops-asks-types": answer("We have three types of shops, by size. What size do you need?"),
+    "shops-photos": answer("Here are the photos of Type 1.", facts={"shop_type": "type_1"}),
+    "shops-licence-ask": answer(
+        "Perfect, a DED licence works for our shops. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        facts={"licence_kind": "ded", "trade_licence": "yes"},
+        invited=True,
+    ),
+    # Settled by code before the model (a tap on the list or a card, the licence copy alone): never asked.
+    "shops-type-tap": answer("", send=False),
+    "shops-type-tap-again": answer("", send=False),
+    "shops-book-tap": answer("", send=False),
+    "shops-other-types-tap": answer("", send=False),
+    "shops-licence-copy": answer("", send=False),
+    "shops-licence-copy-question": answer(
+        "Yes, the shops are a few minutes from Dragon Mart. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        invited=True,
+    ),
+    "shops-licence-later": answer(
+        "No problem, please bring it with you. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        invited=True,
+    ),
+    "shops-licence-send-later": answer(
+        "No problem, send it whenever you are ready. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        invited=True,
+    ),
+    "lang-inshallah-english": answer("See you tomorrow at 5 PM, Ahmed."),
+    "shops-licence-second-page": answer("", send=False),  # settled by code (the copy's next page): never asked
+    "shops-reschedule": answer("Sure. Which day and time would suit you instead?", action="reschedule"),
+    # The model copies the prompt's old example; code puts the customer's own business in (board T56).
+    "shops-vape-match": answer(
+        "For a mobile shop, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED or Trakhees "
+        "licence, or will you open a new one?",
+        facts={"size_sqft": 450, "shop_type": "type_1"},
+    ),
+    "lang-urdu-after-english": answer(
+        "شکریہ۔ کیا آپ کے پاس ٹریڈ لائسنس ہے؟", language="ur", reply_en="Thank you. Do you have a trade licence?"
+    ),
+    "lang-hindi-devanagari": answer(
+        "धन्यवाद। क्या आपके पास ट्रेड लाइसेंस है?", language="hi", reply_en="Thank you. Do you have a trade licence?"
+    ),
+    "lang-arabic-booking": booked("2026-10-13", "17:00"),
+    "stop-arabic-after-english": answer("", send=False),  # settled by code (the stop rule)
+    # Batch 2b stage B. Settled by code (Template B's taps, a known end user's yes): never asked.
+    "shops-b-yes-tap": answer("", send=False),
+    "shops-b-not-now": answer("", send=False),
+    "shops-b-yes-known": answer("", send=False),
+    "shops-a-yes-known": answer("", send=False),
+    "shops-nudge-yes": answer(
+        "Sure. I can hold a slot for you today at 5:00 PM or 6:30 PM — which is better?",
+        action="tentative",
+        place="office",
+        date="2026-10-12",
+        words="this evening",
+    ),
+    "shops-nudge-morning-pick": booked("2026-10-13", "13:00"),
+    "shops-old-lead": answer("Thanks! What business will the shop be for?", facts={"for_client": False}),
+    "shops-crm-notes-data": answer("A grocery store, got it. What size do you need?", facts={"business_activity": "grocery store"}),
 }
 
 
@@ -345,11 +404,26 @@ class EvalCommandTests(TestCase):
             sorted(settled),
             [
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
-                "shops-not-now", "shops-not-now-no", "shops-not-now-yes", "shops-rented-no", "shops-spam", "shops-stop",
-                "shops-yes-tap", "stop-all", "wrong-number",
+                "shops-a-yes-known", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
+                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page", "shops-not-now", "shops-not-now-no", "shops-not-now-yes",
+                "shops-other-types-tap", "shops-rented-no", "shops-spam", "shops-stop", "shops-type-tap",
+                "shops-type-tap-again", "shops-yes-tap", "stop-all", "stop-arabic-after-english", "wrong-number",
             ],
         )
-        self.assertEqual(model.call_count, total - len(settled))
+        # The fake answers in English, so a customer who types Arabic, Urdu or Devanagari script
+        # gets the reply asked for once more in it (engine.ask_model, board T19); English letters
+        # (scripts.LATIN) are what it answers in already.
+        corrected = [
+            s.id
+            for s in leadai_eval.SCENARIOS
+            if s.id not in settled and s.handed_over == "no"
+            and leadai_eval.scripts.customer_script(leadai_eval.typed(s)) not in ("", leadai_eval.scripts.LATIN)
+        ]
+        self.assertEqual(
+            sorted(corrected),
+            ["lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english", "shops-arabic"],
+        )
+        self.assertEqual(model.call_count, total - len(settled) + len(corrected))
         system, context = model.call_args_list[0].args[0][:2]
         self.assertEqual(system, {"role": "system", "content": prompt.system_prompt()})
         self.assertIn("NEW SINCE YOUR LAST REPLY", context["content"])
@@ -358,7 +432,7 @@ class EvalCommandTests(TestCase):
             send.assert_not_called()
         self.assertEqual(len(self.verdicts(text)), total)
         self.assertRegex(text, rf"\npassed \d+ of {total} \(\d+\.\d%\)\n")
-        calls = total - len(settled)
+        calls = total - len(settled) + len(corrected)
         self.assertIn(f"OpenAI: {calls} call(s) to gpt-4.1-mini, {calls * 1000:,} input and {calls * 100:,} output tokens", text)
         self.assertIn(f"estimated cost ${calls * (1000 * 0.40 + 100 * 1.60) / 1_000_000:.4f} at gpt-4.1-mini prices", text)
         for table in (LeadAiAppointment, LeadAiTurn, LeadAiAlert, LeadAiChatState):
@@ -396,12 +470,15 @@ class EvalCommandTests(TestCase):
         self.assertIn("booked Tue 13 Oct 18:00 (reschedule), expected no booking", verdict)
         self.assertRegex(text, r"\n\s+goes out:\s+Done, Ahmed\. Your meeting is now on:")
 
-        # ...while confirming the slot already booked changes nothing: the engine
-        # says the booking again and moves nothing.
+        # ...while confirming the slot already booked changes nothing: the engine moves
+        # nothing and sends no second confirmation (engine._said_again; batch 2b gate).
         with patch(MODEL, return_value=booked("2026-10-13", "17:00")):
             text = self.call("--only", "booked-same-time", "--show")
-        self.assertTrue(self.verdicts(text)[0].startswith("PASS booked-same-time"))
-        self.assertRegex(text, r"\n\s+goes out:\s+Perfect, Ahmed\. Your meeting is confirmed\.")
+        verdict = self.verdicts(text)[0]
+        self.assertTrue(verdict.startswith("PASS booked-same-time"), verdict)
+        self.assertIn("action=none", verdict)
+        self.assertNotIn("goes out:", text)
+        self.assertNotIn("Your meeting is confirmed", text)
 
     def test_a_booking_the_system_had_to_correct_fails_a_strict_scenario(self):
         sunday = booked("2026-10-18", "17:00")

@@ -95,6 +95,17 @@ def fake_send_location(conversation, agent, latitude, longitude, name="", addres
     return _outbound(conversation, agent, Message.Kind.LOCATION, name, {**(payload or {}), "location": {"latitude": latitude}})
 
 
+def fake_send_list(conversation, language, shops_facts, *, turn_id=None):
+    """shop_media.send_list, stored as it is, nothing sent."""
+    from apps.leadai.assistant import shop_flow
+
+    interactive = shop_flow.list_interactive(language, shops_facts)
+    return _outbound(
+        conversation, None, Message.Kind.INTERACTIVE, shop_flow.list_text(language, shops_facts),
+        {"source": "leadai_ai", "turn": turn_id, "shop_list": True, "interactive": interactive},
+    )
+
+
 QUIET_TASKS = (
     "apps.crmlink.tasks.mirror_message.delay",
     "apps.leadbot.tasks.reply_to_inbound.apply_async",
@@ -843,19 +854,26 @@ class CrmTests(TestCase):
     def appointment(self, **details):
         return LeadAiAppointment(status="confirmed", starts_at=TUESDAY_5PM, details=details, customer_name="Ahmed", mobile="971501234567")
 
-    def test_booking_fields(self):
-        fields = crm.booking_fields({}, self.appointment(budget_aed=40000, budget_basis="per_year", size_sqft=450, trade_licence="yes"), "https://maps.app.goo.gl/x")
-        self.assertEqual(fields["STATUS_ID"], "10")
-        self.assertEqual(fields[crm.FIELD_MEETING_AT], "2026-10-13T17:00:00+04:00")
-        self.assertEqual(fields[crm.FIELD_MODE], 42)
-        self.assertEqual(fields[crm.FIELD_BUDGET], 40000.0)
-        self.assertEqual(fields[crm.FIELD_SIZE], "450 sq ft")
-        self.assertEqual(fields[crm.FIELD_LICENCE], 2159)
-        kept = crm.booking_fields({crm.FIELD_LOCATION: "https://agent.link", crm.FIELD_BUDGET: "60000"}, self.appointment(budget_aed=1, budget_basis="per_year"), "https://maps.app.goo.gl/x")
-        self.assertNotIn(crm.FIELD_LOCATION, kept)
-        self.assertNotIn(crm.FIELD_BUDGET, kept)
-        monthly = crm.booking_fields({}, self.appointment(budget_aed=4000, budget_basis="per_month"))
-        self.assertNotIn(crm.FIELD_BUDGET, monthly)
+    def test_the_booking_body_for_the_lead_fields_tool(self):
+        # Board T55: the C9 "booking" action, never a REST lead update (BP 235 wipes the meeting time).
+        body = crm.booking_body(555, self.appointment(business_activity="vape [shop]", trade_licence="yes"), "confirmed", "MEETING CONFIRMED")
+        self.assertEqual(
+            body,
+            {
+                "lead_id": 555,
+                "booking": {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42},
+                "fields": {crm.FIELD_ACTIVITY: "vape (shop)", crm.FIELD_LICENCE: 2159},
+                "only_if_empty": [crm.FIELD_ACTIVITY, crm.FIELD_LICENCE],
+                "comment": "MEETING CONFIRMED",
+            },
+        )
+        self.assertNotIn("STATUS_ID", body.get("fields", {}))  # the tool moves the stage itself, with BP 235 off
+        # A shops licence kind wins over yes/no; nothing known, no fields at all.
+        self.assertEqual(crm.booking_body(1, self.appointment(licence_kind="trakhees", trade_licence="yes"), "rescheduled")["fields"], {crm.FIELD_LICENCE: 2456})
+        self.assertNotIn("fields", crm.booking_body(1, self.appointment(), "rescheduled"))
+        # A cancel carries no time or fields; a long comment is cut to what the tool keeps.
+        self.assertEqual(crm.booking_body(1, self.appointment(trade_licence="yes"), "cancelled", "x" * 1500), {"lead_id": 1, "booking": {"event": "cancelled"}, "comment": "x" * 1000})
+        self.assertEqual((crm.todo_of({"todo_id": 7}), crm.todo_of({"todo_id": None}), crm.todo_of({})), (7, None, None))
 
     def test_stage_decisions(self):
         lead = {"assigned": "77", "stage": "IN_PROCESS"}
@@ -884,64 +902,97 @@ class CrmSyncTests(Base):
             conversation=self.conversation, status="confirmed", starts_at=TUESDAY_5PM, customer_name="Ahmed", crm_entity="lead", crm_id=555
         )
 
-    def sync(self, stage="IN_PROCESS", assigned="88", event="confirmed", todo_method_missing=True):
-        from apps.crmlink import client
+    def sync(self, stage="IN_PROCESS", assigned="88", event="confirmed", tool_answer=None, revision=None, todos=()):
         from apps.leadai.tasks import sync_appointment_crm
 
-        calls = []
+        calls, posted = [], []
 
         def call(method, payload=None):
             calls.append((method, payload))
             if method == "crm.lead.get":
                 return {"ID": "555", "STATUS_ID": stage, "ASSIGNED_BY_ID": assigned}
             if method == "crm.activity.list":
-                return [{"ID": "901", "DEADLINE": "now"}]
-            if method == "crm.activity.todo.updateDeadline" and todo_method_missing:
-                raise client.BitrixError("crm.activity.todo.updateDeadline: Method not found")
+                return [{"ID": str(pk)} for pk in todos]  # the lead's open Viewing/Meeting to-dos
             return True
 
-        with patch("apps.crmlink.client.call", side_effect=call), patch("apps.leadai.tasks.crm_readback.apply_async") as readback, self.captureOnCommitCallbacks(execute=True):
-            sync_appointment_crm(self.appointment.pk, event, False)
-        return [m for m, _ in calls], calls, readback
+        def tool(body):
+            posted.append(body)
+            return tool_answer if tool_answer is not None else {"ok": True, "lead_id": 555, "todo_id": 901}
 
-    def test_a_booking_moves_the_lead_once_moves_its_todo_and_comments(self):
-        methods, calls, readback = self.sync()
-        self.assertEqual(
-            methods,
-            ["crm.lead.get", "crm.lead.update", "crm.activity.list", "crm.activity.todo.updateDeadline", "crm.activity.update", "crm.timeline.comment.add"],
-        )
-        update = dict(calls)["crm.activity.update"]["fields"]
-        self.assertEqual(update["DEADLINE"], "2026-10-13T17:00:00+04:00")
+        with patch("apps.crmlink.client.call", side_effect=call), patch(
+            "apps.leadai.assistant.crm_fields.post", side_effect=tool
+        ), patch("apps.leadai.tasks.crm_readback.apply_async") as readback, self.captureOnCommitCallbacks(execute=True):
+            sync_appointment_crm(self.appointment.pk, event, False, revision)
+        return [m for m, _ in calls], calls, readback, posted
+
+    def test_a_booking_goes_through_the_lead_fields_tool_once_with_its_comment(self):
+        methods, calls, readback, posted = self.sync()
+        # Board T55: no REST lead update and no to-do of our own; the tool owns both (C9). The one
+        # other REST call is a read: the lead's open Viewing/Meeting to-dos (none: the tool may plan one).
+        self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
+        self.assertEqual(len(posted), 1)
+        body = posted[0]
+        self.assertEqual((body["lead_id"], body["booking"]), (555, {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42}))
+        self.assertIn("MEETING CONFIRMED", body["comment"])
+        self.assertIn("moved this lead to Meeting/Viewing Scheduled", body["comment"])
         self.appointment.refresh_from_db()
         self.assertEqual(self.appointment.crm_todo_id, 901)
         self.assertIsNotNone(self.appointment.crm_stage_moved_at)
-        self.assertIn("moved this lead to Meeting/Viewing Scheduled", dict(calls)["crm.timeline.comment.add"]["fields"]["COMMENT"])
         readback.assert_called_once()
         self.assertEqual(LeadAiChatState.objects.get(conversation=self.conversation).responsible_agent, self.responsible)
-        methods, _, _ = self.sync()
-        self.assertEqual(methods, ["crm.lead.get"])
+        # The same event again (a redelivered task) writes nothing twice.
+        methods, _, _, posted = self.sync(todos=[901])
+        self.assertEqual((methods, posted), (["crm.lead.get"], []))
 
-    def test_a_lead_already_in_ten_is_never_updated_and_keeps_its_own_todos(self):
-        # A lead a person already put in stage 10 holds their own to-do: the
-        # assistant neither updates the lead nor moves that to-do.
-        methods, _, _ = self.sync(stage="10", event="rescheduled")
-        self.assertNotIn("crm.lead.update", methods)
-        self.assertFalse(any(method.startswith("crm.activity.") for method in methods), methods)
-        self.assertIn("crm.timeline.comment.add", methods)
+    def test_a_lead_a_person_put_in_ten_keeps_its_own_booking(self):
+        # A lead a person already put in stage 10 holds their own to-do: the tool, which
+        # moves the lead's open "Viewing/Meeting" to-do, is not called; the comment goes.
+        methods, calls, _, posted = self.sync(stage="10", event="rescheduled")
+        self.assertEqual(posted, [])
+        self.assertEqual(methods, ["crm.lead.get", "crm.timeline.comment.add"])
+
+    def test_a_lead_we_booked_in_ten_is_moved_by_the_tool(self):
+        self.sync(revision=1)
+        LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(starts_at=TUESDAY_5PM + dt.timedelta(days=1))
+        methods, _, readback, posted = self.sync(stage="10", event="rescheduled", revision=2, todos=[901])
+        self.assertEqual(posted[0]["booking"], {"event": "rescheduled", "meeting_at": "2026-10-14T17:00:00+04:00", "mode": 42})
+        self.assertIn("MEETING RESCHEDULED", posted[0]["comment"])
+        self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
+        readback.assert_not_called()  # the stage was 10 already
 
     def test_new_or_admin_held_leads_only_get_a_comment(self):
         for stage, assigned in (("NEW", "88"), ("IN_PROCESS", "1")):
             LeadAiCrmStep.objects.all().delete()
             with self.subTest(stage=stage, assigned=assigned):
-                methods, calls, _ = self.sync(stage=stage, assigned=assigned)
-                self.assertEqual(methods, ["crm.lead.get", "crm.timeline.comment.add"])
+                methods, calls, _, posted = self.sync(stage=stage, assigned=assigned)
+                self.assertEqual((methods, posted), (["crm.lead.get", "crm.timeline.comment.add"], []))
                 self.assertIn("give it an owner", dict(calls)["crm.timeline.comment.add"]["fields"]["COMMENT"])
 
-    def test_a_cancel_closes_the_todo(self):
-        LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(crm_todo_id=901, status="cancelled")
+    def test_a_cancel_of_our_booking_closes_its_todo_through_the_tool(self):
+        self.sync(revision=1)
+        LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(status="cancelled")
         self.appointment.refresh_from_db()
-        methods, calls, _ = self.sync(event="cancelled")
-        self.assertIn(("crm.activity.update", {"id": 901, "fields": {"COMPLETED": "Y"}}), calls)
+        methods, _, _, posted = self.sync(stage="10", event="cancelled", revision=2, todos=[901])
+        self.assertEqual(posted[0]["booking"], {"event": "cancelled"})
+        self.assertIn("MEETING CANCELLED", posted[0]["comment"])
+        self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
+        self.appointment.refresh_from_db()
+        self.assertIsNone(self.appointment.crm_todo_id)
+
+    def test_a_cancel_of_a_visit_we_never_booked_is_a_comment_only(self):
+        LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(status="cancelled")
+        methods, _, _, posted = self.sync(event="cancelled")
+        self.assertEqual((methods, posted), (["crm.lead.get", "crm.timeline.comment.add"], []))
+
+    def test_a_refused_booking_still_comments_and_is_not_ours(self):
+        methods, calls, readback, posted = self.sync(tool_answer={"ok": False, "error": "Unknown enum."})
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(methods, ["crm.lead.get", "crm.activity.list", "crm.timeline.comment.add"])
+        self.assertNotIn("moved this lead", dict(calls)["crm.timeline.comment.add"]["fields"]["COMMENT"])
+        self.appointment.refresh_from_db()
+        self.assertIn("refused the booking: Unknown enum.", self.appointment.crm_error)
+        readback.assert_not_called()
+        self.assertFalse(LeadAiCrmStep.objects.filter(step__startswith="booking:").exists())
 
 
 class AlertTests(Base):
@@ -1242,16 +1293,16 @@ class EngineFixTests(Base):
 
     def test_restating_the_booked_time_changes_nothing(self):
         appointment = self.confirmed(customer_state="on_my_way")
-        outcome, _, crm_delay, _ = self.turn(
-            self.inbound("Yes confirmed, see you tomorrow at 5 pm"),
-            [answer(action="confirm", place="office", date="2026-10-13", time="17:00")],
-        )
+        message = self.inbound("Yes confirmed, see you tomorrow at 5 pm")
+        outcome, _, crm_delay, _ = self.turn(message, [answer("See you then!", action="confirm", place="office", date="2026-10-13", time="17:00")])
         appointment.refresh_from_db()
         self.assertEqual(appointment.customer_state, "on_my_way")
         self.assertEqual(appointment.reminder_due_at, TUESDAY_5PM - dt.timedelta(minutes=30))
         crm_delay.assert_not_called()
         self.assertFalse(LeadAiAlert.objects.filter(kind="rescheduled").exists())
-        self.assertIn("Your meeting is confirmed", self.body(outcome))
+        # No second confirmation (batch 2b gate, engine._said_again): the model's own words, if any, are the reply.
+        self.assertEqual(self.body(outcome), "See you then!")
+        self.assertEqual(LeadAiTurn.objects.get(inbound=message).actions["action"], "none")
 
     def test_a_reschedule_request_without_a_time_holds_the_reminder_and_tells_the_agents(self):
         appointment = self.confirmed()

@@ -28,7 +28,7 @@ import { numberNameWithDial } from "../../core/number-label.js";
 import { bindFileSources, openAttachmentDialog } from "../attach.js";
 import { openTemplateComposer } from "../template-composer.js";
 import { asList, inbox, leadAiApi } from "./api.js";
-import { followUpChip } from "./shops.js";
+import { followUpChip, followUpNote } from "./shops.js";
 
 const PAGE_SIZE = 40;
 const HIGHLIGHT_PAGES = 5;
@@ -48,6 +48,8 @@ const CHIP_LABELS_MAX = 3;
 /** message.source of what the assistant itself sent. */
 const AI_SOURCES = new Set(["leadai_ai", "leadai_tap"]);
 const REMINDER_SOURCE = "leadai_reminder";
+/** A shops chat's Template B, sent by the automatic follow-ups (followups.py). */
+const FOLLOW_UP_SOURCE = "leadai_followup";
 
 const THINKING_TEXT = "The AI is writing a reply… If you send first, it drops its reply.";
 // The server always says "idle" when a turn ends; this only covers a lost frame.
@@ -562,8 +564,8 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       conversation.number ? `on ${numberNameWithDial(conversation.number)}` : "",
       conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
     ].filter(Boolean);
-    // The shops assistant's "check back in a month" date, beside the chat's chips.
-    const chips = [...chatChips(conversation), followUpChip(conversation)].filter(Boolean);
+    // The shops assistant's "check back in a month" date, and a follow-up waiting for Meta, beside the chat's chips.
+    const chips = [...chatChips(conversation), followUpChip(conversation), followUpNote(conversation)].filter(Boolean);
 
     clear(header).append(
       el("div.lai-avatar", {}, [initials(name)]),
@@ -867,6 +869,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     // AI messages have no sent_by; their source says who wrote them.
     const fromAi = outbound && AI_SOURCES.has(source);
     const reminder = outbound && source === REMINDER_SOURCE;
+    const followUp = outbound && source === FOLLOW_UP_SOURCE;
     const media = mediaMessageNode(message, { onImageClick: openImage, formatBytes });
     const special = specialMessageNode(message);
     const bodyText = String(message.body || "").trim();
@@ -906,7 +909,12 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
             icon("bell", { size: 10 }),
             "Reminder",
           ])
-        : null;
+        : followUp
+          ? el("span.lai-msg__badge.lai-msg__badge--followup", { title: "The automatic follow-up the Lead AI sent" }, [
+              icon("clock", { size: 10 }),
+              "Follow-up",
+            ])
+          : null;
     const classes = [
       outbound ? "lai-msg--out" : "lai-msg--in",
       fromAi ? "lai-msg--ai" : "",

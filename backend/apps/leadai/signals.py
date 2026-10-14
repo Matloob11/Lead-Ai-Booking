@@ -1,5 +1,6 @@
-"""Lead AI signals: confirm a chat when its campaign row settles, and wake the
-assistant when a customer writes in a Lead AI chat."""
+"""Lead AI signals: confirm a chat when its campaign row settles, wake the
+assistant when a customer writes in a Lead AI chat, and put a customer who asks
+any of our numbers to stop on the opt-out registry (optout.py)."""
 
 import logging
 
@@ -53,6 +54,50 @@ def on_message_saved(sender, instance, created, **kwargs):
         )
     except Exception:  # noqa: BLE001 - storing a customer's message must never fail
         logger.exception("Lead AI could not queue the assistant for message %s", instance.pk)
+
+
+@receiver(post_save, sender=Message, dispatch_uid="leadai_optout_registry")
+def on_inbound_opt_out(sender, instance, created, **kwargs):
+    """Any chat, any number: a STOP, a wrong number or an Unsubscribe / Stop tap blocks
+    the phone on every campaign (board T60, Q8).
+
+    Judged here by message kind and words only (optout.message_opt_out), so it is
+    cheap inside the webhook ingest; the registry is written after the commit,
+    outside that transaction (_record_opt_out). There, a tap counts in every chat;
+    typed words in an active Lead AI chat are left to the assistant's turn, which
+    knows a STOP from "الغاء" cancelling a booked meeting and reads the customer's
+    whole burst (engine.record_opt_out writes the registry there), except in a chat
+    transferred to another agent, which no turn reads; and the words that are as
+    often something else ("الغاء", "block") count only as the answer to a campaign
+    (optout.counts).
+    """
+    if not created or instance.direction != Message.Direction.INBOUND or instance.mirrored_from_id:
+        return
+    if instance.kind not in ("text", "button", "interactive"):
+        return
+    try:
+        from . import optout
+
+        kind = optout.message_opt_out(instance)
+        if not kind:
+            return
+        transaction.on_commit(lambda pk=instance.pk, k=kind: _record_opt_out(pk, k), robust=True)
+    except Exception:  # noqa: BLE001 - storing a customer's message must never fail
+        logger.exception("Lead AI could not judge message %s for the opt-out registry", instance.pk)
+
+
+def _record_opt_out(message_id: int, kind: str) -> None:
+    from . import optout
+
+    message = Message.objects.select_related("conversation__contact").filter(pk=message_id).first()
+    if message is None:
+        return
+    conversation = message.conversation
+    if not optout.is_tap(message) and not conversation.linked_conversation_id and is_lead_ai_conversation_id(conversation.pk):
+        return  # the assistant's turn reads it (engine.run_turn); a transferred chat has no turn
+    if not optout.counts(message):
+        return
+    optout.record(conversation.contact.wa_id, reason=message.body, source=optout.inbox_source(kind), conversation=conversation)
 
 
 @receiver(post_save, sender=CampaignRecipient, dispatch_uid="leadai_recipient_saved")

@@ -1,3 +1,36 @@
+## 2026-10-14 — Lead AI batch 2b live, with the gate-guard fixes and T57 (Claude Code)
+
+Up at 13:55 UTC. The build is the 2b `apps/leadai` tree and T57's `apps/crmlink` on top of the deployed code. Campaigns, gateway and settings are unchanged; Cursor's C22–C25 are not in this build. Migrations leadai 0005 + 0006 ran with `migrate-new-image` before `up`.
+
+**Gate:** the first real-model gate on the build context gave 94.7%. shops-licence-ask, shops-nudge-yes and lang-inshallah-english failed 0/2, so they got code guards (a review of the guards found 9 problems, all fixed):
+- a DED or Trakhees licence gets the copy request even when the model invites;
+- a confirm at a time nobody named becomes two free slots;
+- a customer typing English letters who is answered in Arabic gets one corrective call, code lines stay in their script, and a "reschedule" to the booked time changes nothing.
+
+Then 206/208 (99.0%) on the build context and 206/208 (99.0%) on the deployed image.
+
+**T57:** a Lead AI chat mirrors to its own lead. The Bitrix REST client keeps itself to 1.8 r/s (burst 12), background work gives way to campaigns, and 429/5xx are retried. The log now names the status: the "not JSON" answers were HTTP 429.
+
+**Proof:**
+- leadai 812 and crmlink 118 tests on Postgres in the new image;
+- four services Up, sweep fresh, django-check clean, probe-leadai-turn 19/19;
+- image md5 equals the deploy candidate for leadai and crmlink;
+- six panel files: md5 and HTTP 200 sizes equal;
+- media import 18 files (a rerun adds 0); opt-out registry 302 phones; 16 templates PENDING at Meta;
+- back-fill batch 1 (338 of 2,033) queued. Continue with `ops/wa.sh crm-mirror-backfill --since 2026-10-14T08:28:55Z --leadai`.
+
+**Also live, not in git:** `apps/inbox/option_sent_chats.py` and three routes in `apps/inbox/urls.py`. They are another session's Listing Infographics lookup (read-only, token-gated) and sat in the build context, unbuilt. Their owner has to commit them.
+
+**Not tested:**
+- a shops conversation on a real phone (list, media, card, the licence copy reaching Bitrix);
+- Template B, the check-back and the nudges sending (the templates are PENDING);
+- a person's Bot Status change end to end;
+- the Shop media dialog in a browser.
+
+**Next (2c):** bookings send Location / Budget / Size and `crm_todo_id` (C32/C33 are live); the opt-out log masks phones; reminders and turns wait during a credit hold.
+
+---
+
 ## 2026-10-14 — C32/C33/C34 Bitrix live; C31 tests written (Cursor)
 
 **C32+C33** `a7_leadai_fields.php` put live: Location/Budget/Size allow-listed for `only_if_empty` (https_url / number / text); optional `booking.crm_todo_id`. Proof lead 79631 PASS (fill+keep; reschedule ours 2311 left agent's); lead deleted; proofs stubbed. Today's booking body without those keys still 200. **C34** `a7_leadai_bot_status.php` VERSION 2: durable queue ≤3 tries / 15 min + Bitrix agent; proof 79632 fail→retry→200 then deleted. **C31** campaigns test patches written (`test_crm_leads` / `test_renewals` / `test_optout_at_send`); prove with C22–C25 deploy after "2b is live". No Django build. Requests updated for Claude.

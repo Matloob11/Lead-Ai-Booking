@@ -1,24 +1,35 @@
 """Bitrix writes for the Lead AI assistant (owner's choice 2026-10-09: stage + comment).
 
-- A CONFIRMED booking on the lead the agent sent the campaign from: ONE
-  crm.lead.update to stage '10' "Meeting/Viewing Scheduled" with the Meeting
-  Date & Time (required for that stage), mode Offline and, when empty, the
-  office link and the details the lead does not have yet. Bitrix's Lead
-  Automation (BP 235) then plans the agent's "Viewing/Meeting" to-do, but it
-  erases the meeting time first, so the to-do is due "now"; the assistant
-  then moves that to-do to the real meeting time, so the agent's Bitrix
-  reminders ring at the right moment. BP 235 itself is not touched.
-- The lead is updated at most once per appointment (every update plans
-  another to-do). Later, only the assistant's own to-do is moved: the one it
-  stored, while it is still open. A to-do that was there before the
-  assistant's own update (an agent's own booking, an older BP 235 one) is
-  never moved or completed; a lead already in stage '10' at the first
-  booking keeps its to-dos, and our 60-minute heads-up covers the meeting.
+- A CONFIRMED booking (or its move, or its cancel) on the lead the agent sent
+  the campaign from goes through the Lead fields tool's "booking" action
+  (board C9, T55; crm_fields.post), never a REST crm.lead.update: Bitrix's Lead
+  Automation (BP 235) runs on every REST edit, wipes the Meeting Date & Time and
+  plans a to-do due "now" (board C4, C7). The tool writes with business
+  processes and automation off: confirmed / rescheduled set stage '10'
+  "Meeting/Viewing Scheduled", the Meeting Date & Time, Mode Offline (42) and
+  Bot Status "Viewing booked", and create or move ONE "Viewing/Meeting" to-do
+  for the lead's responsible at the meeting time (it answers with its id);
+  cancelled closes that to-do and leaves the stage. The event's timeline
+  comment rides in the same call, and the business activity and licence go
+  along where the lead's own are still empty (``booking_body``).
+- The tool's booking action moves (or, for a cancel, closes) the lead's NEWEST
+  open "Viewing/Meeting" to-do, whoever planned it. So it is used only while
+  that newest one is the assistant's own (the id the tool answered with,
+  ``crm_todo_id``) or there is none (``open_meeting_todos``, a REST read).
+  Otherwise a person's to-do, or the "due now" one BP 235 plans when a person
+  edits a lead in stage 10, would be moved or closed in place of ours: then
+  the assistant's own to-do is moved or closed with crm.activity (an activity
+  write runs no lead business process), the meeting time goes on the lead
+  through the tool's plain fields, and a lead the booking would have had to
+  move to stage 10 stays in its stage, with a line for the agents (our
+  60-minute heads-up then covers the meeting).
+- A lead already in stage '10' that the assistant did not book holds a
+  person's own booking and to-do: it gets the comment only.
 - A NEW lead (the lead-shift intake picks only NEW), a lead held by the
   admin user, a closed lead, or a record found only by phone gets the
   comment only, and the agents are told to act.
-- Everything else (tentative, running late, on my way, cancel, deals, Owner
-  Data, contacts): one timeline comment, which runs no business process.
+- Everything else (tentative, running late, on my way, deals, Owner Data,
+  contacts): one timeline comment, which runs no business process.
 """
 
 from __future__ import annotations
@@ -53,16 +64,17 @@ HOLD_USERS = {"", "0", "1"}
 FIELD_MEETING_AT = "UF_CRM_1731838813769"  # Meeting Date & Time (required for stage 10)
 FIELD_MODE = "UF_CRM_1731838790184"  # Mode of Meeting
 MODE_OFFLINE = 42
-FIELD_LOCATION = "UF_CRM_1731838831905"  # Meeting Location/Link (url)
-FIELD_BUDGET = "UF_CRM_1731838581336"  # Budget (number)
-FIELD_SIZE = "UF_CRM_1760707482053"  # Property Size (text)
 FIELD_ACTIVITY = "UF_CRM_A7_AI_BUSINESS_ACTIVITY"  # text
 FIELD_LICENCE = "UF_CRM_A7_AI_TRADE_LICENSE_STATUS"  # enum
 LICENCE_IDS = {"yes": 2159, "no": 2160}
+# The booking events the Lead fields tool's "booking" action takes.
+BOOKING_EVENTS = ("confirmed", "rescheduled", "cancelled")
+# The subject of the one to-do the tool plans for a booking (and of BP 235's own).
 TODO_SUBJECT = "Viewing/Meeting"
-# Our server's clock and Bitrix's may differ a little: a to-do BP 235 planned
-# during our own lead update must not be missed for it.
-CLOCK_SKEW = dt.timedelta(minutes=2)
+TODO_LENGTH = dt.timedelta(hours=1)
+# The tool keeps 1000 characters of a comment.
+TOOL_COMMENT_MAX = 1000
+ACTIVITY_MAX = 200
 
 COMMENT_ENTITY = {
     "lead": "lead",
@@ -141,100 +153,101 @@ def stage_decision(entity: str, chosen: bool, record: dict) -> str:
     return "closed" if stage else "unknown stage"
 
 
-def _empty(value) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, (list, tuple, dict)):
-        return not value
-    return str(value).strip() in ("", "0", "0.00")
+def booking_body(lead_id: int, appointment, event: str, comment: str = "") -> dict:
+    """The Lead fields tool's body for one booking event (pure; tested).
 
-
-def booking_fields(current: dict, appointment, maps_url: str = "") -> dict:
-    """The one lead update for a confirmed booking (pure; tested).
-
-    ``current`` is the lead as Bitrix returned it. Details are written only
-    where the lead is still empty: an agent's own entry always wins.
+    confirmed / rescheduled carry the meeting's start in Dubai time and Mode
+    Offline (the tool then sets stage 10, the Meeting Date & Time, Bot Status
+    "Viewing booked" and the one "Viewing/Meeting" to-do), with the business
+    activity and the licence the lead does not have yet (``only_if_empty``: an
+    agent's own entry always wins). cancelled closes that to-do and leaves the
+    stage. ``comment`` goes on the lead's timeline in the same call.
     """
-    fields = {
-        "STATUS_ID": STAGE_MEETING,
-        FIELD_MEETING_AT: appointment.starts_at.astimezone(hours.DUBAI).isoformat(),
-        FIELD_MODE: MODE_OFFLINE,
-    }
-    if maps_url and maps_url.lower().startswith("https://") and _empty(current.get(FIELD_LOCATION)):
-        fields[FIELD_LOCATION] = maps_url
-    details = appointment.details or {}
-    budget = details.get("budget_aed")
-    basis = details.get("budget_basis")
-    if isinstance(budget, (int, float)) and budget > 0 and basis in ("per_year", "total") and _empty(current.get(FIELD_BUDGET)):
-        fields[FIELD_BUDGET] = float(budget)
-    size = details.get("size_sqft")
-    if isinstance(size, (int, float)) and size > 0 and _empty(current.get(FIELD_SIZE)):
-        fields[FIELD_SIZE] = f"{int(size)} sq ft"
-    activity = safe(details.get("business_activity"))
-    if activity and _empty(current.get(FIELD_ACTIVITY)):
-        fields[FIELD_ACTIVITY] = activity
-    licence = LICENCE_IDS.get(str(details.get("trade_licence") or "").lower())
-    if licence and _empty(current.get(FIELD_LICENCE)):
-        fields[FIELD_LICENCE] = licence
-    return fields
+    booking: dict = {"event": event}
+    body: dict = {"lead_id": int(lead_id), "booking": booking}
+    if event != "cancelled":
+        booking["meeting_at"] = appointment.starts_at.astimezone(hours.DUBAI).isoformat()
+        booking["mode"] = MODE_OFFLINE
+        details = appointment.details or {}
+        fields = {}
+        activity = safe(details.get("business_activity"))[:ACTIVITY_MAX]
+        if activity:
+            fields[FIELD_ACTIVITY] = activity
+        licence = _licence_id(details)
+        if licence:
+            fields[FIELD_LICENCE] = licence
+        if fields:
+            body["fields"] = fields
+            body["only_if_empty"] = list(fields)
+    if comment:
+        body["comment"] = comment[:TOOL_COMMENT_MAX]
+    return body
 
 
-def _created(row: dict) -> dt.datetime | None:
+def _licence_id(details: dict) -> int | None:
+    """The Trade license status the details give: the shops' kind when known, else yes or no."""
+    from .crm_fields import licence_value
+
+    return licence_value(details or {})
+
+
+def todo_of(answer: dict) -> int | None:
+    """The "Viewing/Meeting" to-do id the tool answered with, else None."""
+    value = (answer or {}).get("todo_id")
     try:
-        created = dt.datetime.fromisoformat(str(row.get("CREATED") or ""))
-    except ValueError:
+        number = int(value)
+    except (TypeError, ValueError):
         return None
-    return created if created.tzinfo else created.replace(tzinfo=hours.DUBAI)
+    return number if number > 0 else None
 
 
-def find_meeting_todo(lead_id: int, *, todo_id: int | None = None, created_since: dt.datetime | None = None) -> dict | None:
-    """The newest open "Viewing/Meeting" to-do on the lead: ``todo_id`` itself while
-    it is still open, and/or one created at or after ``created_since`` (the
-    assistant's own lead update). Raises BitrixError."""
-    flt = {
-        "OWNER_TYPE_ID": 1,
-        "OWNER_ID": int(lead_id),
-        "PROVIDER_ID": "CRM_TODO",
-        "SUBJECT": TODO_SUBJECT,
-        "COMPLETED": "N",
-    }
-    if todo_id:
-        flt["ID"] = int(todo_id)
+def meeting_fields_body(lead_id: int, appointment, comment: str = "") -> dict:
+    """The Lead fields tool's body for the meeting time alone (pure; tested): a lead whose newest
+    "Viewing/Meeting" to-do is not ours, so the booking action (which would move that one) is
+    not used. No stage, no to-do, and no Bot Status: a person may have changed it since."""
+    body: dict = {"lead_id": int(lead_id), "fields": {FIELD_MEETING_AT: appointment.starts_at.astimezone(hours.DUBAI).isoformat()}}
+    if comment:
+        body["comment"] = comment[:TOOL_COMMENT_MAX]
+    return body
+
+
+def open_meeting_todos(lead_id: int) -> list[int]:
+    """The ids of the lead's open "Viewing/Meeting" to-dos, newest first: the first is the one the
+    tool's booking action would move or close. A REST read, nothing written. Raises BitrixError."""
     rows = client.call(
         "crm.activity.list",
         {
-            "filter": flt,
+            "filter": {"OWNER_TYPE_ID": 1, "OWNER_ID": int(lead_id), "PROVIDER_ID": "CRM_TODO", "SUBJECT": TODO_SUBJECT, "COMPLETED": "N"},
             "order": {"ID": "DESC"},
-            "select": ["ID", "DEADLINE", "START_TIME", "END_TIME", "RESPONSIBLE_ID", "CREATED"],
+            "select": ["ID"],
         },
     )
-    rows = rows if isinstance(rows, list) else []
-    if created_since is not None:
-        # Compared here, not in the filter: CREATED comes back with its own
-        # offset, whatever time zone the portal reads a filter value in.
-        since = created_since - CLOCK_SKEW
-        rows = [row for row in rows if _created(row) is None or _created(row) >= since]
-    return rows[0] if rows else None
+    ids = set()
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            ids.add(int((row or {}).get("ID")))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return sorted((pk for pk in ids if pk > 0), reverse=True)
 
 
 def move_todo(todo_id: int, lead_id: int, start: dt.datetime) -> str:
-    """Move a to-do's deadline to the meeting time. Returns the method that worked. Raises BitrixError."""
+    """Move the assistant's own to-do to the meeting time (an activity write: no lead business
+    process runs). Returns the method that worked. Raises BitrixError."""
     at = start.astimezone(hours.DUBAI)
     iso = at.isoformat()
     try:
-        client.call(
-            "crm.activity.todo.updateDeadline",
-            {"id": int(todo_id), "ownerTypeId": 1, "ownerId": int(lead_id), "value": iso},
-        )
+        client.call("crm.activity.todo.updateDeadline", {"id": int(todo_id), "ownerTypeId": 1, "ownerId": int(lead_id), "value": iso})
         return "crm.activity.todo.updateDeadline"
     except client.BitrixError as exc:
         logger.info("Lead AI: todo.updateDeadline unavailable (%s); using crm.activity.update", exc)
-    end = (at + dt.timedelta(hours=1)).isoformat()
+    end = (at + TODO_LENGTH).isoformat()
     client.call("crm.activity.update", {"id": int(todo_id), "fields": {"DEADLINE": iso, "START_TIME": iso, "END_TIME": end}})
     return "crm.activity.update"
 
 
 def complete_todo(todo_id: int) -> None:
+    """Close the assistant's own to-do (the meeting was cancelled). Raises BitrixError."""
     client.call("crm.activity.update", {"id": int(todo_id), "fields": {"COMPLETED": "Y"}})
 
 
@@ -258,6 +271,7 @@ DETAIL_LABELS = (
     ("licence_kind", "Licence"),
     ("shop_type", "Shop type wanted"),
     ("opening_when", "Opening"),
+    ("licence_copy", "Licence copy"),
     ("preapproval", "Initial approval"),
     # A shops chat keeps a list here: the questions our agent answers at the viewing.
     ("notes", "Notes"),
@@ -351,7 +365,3 @@ def note_text(kind: str, customer: str, wa_id: str) -> str:
 
 def add_comment(entity: str, crm_id: int, text: str) -> None:
     client.add_comment(COMMENT_ENTITY[entity], int(crm_id), text)
-
-
-def update_lead(crm_id: int, fields: dict) -> None:
-    client.update_fields("lead", int(crm_id), fields)

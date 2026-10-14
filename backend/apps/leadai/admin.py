@@ -7,7 +7,9 @@ from .models import (
     LeadAiChat,
     LeadAiChatState,
     LeadAiCrmField,
+    LeadAiOptOut,
     LeadAiSettings,
+    LeadAiShopMedia,
     LeadAiTurn,
 )
 
@@ -38,7 +40,11 @@ class LeadAiSettingsAdmin(admin.ModelAdmin):
 
 @admin.register(LeadAiChatState)
 class LeadAiChatStateAdmin(admin.ModelAdmin):
-    list_display = ("conversation", "stopped_at", "stop_reason", "paused_at", "handed_over_at", "language", "updated_at")
+    list_display = (
+        "conversation", "stopped_at", "stop_reason", "paused_at", "handed_over_at", "language",
+        # The shops chats' automatic follow-ups (followups.py).
+        "followup_due_at", "template_b_sent_at", "nudges", "updated_at",
+    )
     raw_id_fields = ("conversation", "paused_by", "responsible_agent")
 
 
@@ -66,6 +72,44 @@ class LeadAiCrmFieldAdmin(admin.ModelAdmin):
     readonly_fields = (
         "conversation", "lead_id", "field", "value", "payload", "sent_at", "error", "attempts", "retry_at", "created_at",
     )
+
+
+@admin.register(LeadAiOptOut)
+class LeadAiOptOutAdmin(admin.ModelAdmin):
+    """The phones no campaign may message (optout.py). Deleting a row undoes a mistake:
+    the phone can be messaged again, and nothing is written to Bitrix (a lead's own
+    WhatsApp Opt-out field is changed there, by hand)."""
+
+    list_display = ("phone", "source", "reason", "conversation", "created_at")
+    list_filter = ("source",)
+    search_fields = ("phone", "reason")
+    raw_id_fields = ("conversation",)
+    readonly_fields = ("phone", "source", "reason", "conversation", "created_at")
+
+    def has_add_permission(self, request):
+        return False  # rows come from the customers' own words, Bitrix or the import
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LeadAiShopMedia)
+class LeadAiShopMediaAdmin(admin.ModelAdmin):
+    """The shops media library; files are added, replaced and deleted in the Lead AI screen, which
+    checks them and their limits (only their order may be changed here)."""
+
+    list_display = ("shop", "kind", "order", "file_name", "size_bytes", "uploaded_by", "updated_at")
+    list_filter = ("shop", "kind")
+    raw_id_fields = ("asset", "uploaded_by")
+    readonly_fields = (
+        "shop", "kind", "file", "file_name", "mime_type", "size_bytes", "sha256", "asset", "uploaded_by", "created_at", "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # the screen's delete also removes the stored file (shop_media.delete)
 
 
 @admin.register(LeadAiAlert)

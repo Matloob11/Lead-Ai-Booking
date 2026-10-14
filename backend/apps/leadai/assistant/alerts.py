@@ -48,6 +48,9 @@ LISTED_KINDS = frozenset(
     {
         "booked", "hot_lead", "tentative", "rescheduled", "cancelled", "on_my_way", "running_late",
         "reschedule_requested", "handover", "stale",
+        # A shops customer's licence copy that could not reach the lead (tasks.write_licence_file),
+        # and a Bot Status a person set in Bitrix (bitrix_status.py).
+        "licence", "bitrix_status",
     }
 )
 

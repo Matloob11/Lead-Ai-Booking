@@ -9,13 +9,18 @@ meeting reminder.
 - handle_reminder_tap    a tap on the meeting reminder's buttons (no model);
 - send_due_reminders     beat, every minute: reminders, stuck turns, missed
                          turns and taps, messages nobody answered, past
-                         meetings, the agents' heads-up, Bitrix catch-up;
-- sync_appointment_crm   an appointment event's Bitrix work, step by step;
+                         meetings, the agents' heads-up, Bitrix catch-up, and
+                         the shops chats' automatic follow-ups (followups.py);
+- send_follow_up         one shops chat's Template B, check-back or nudge;
+- sync_appointment_crm   an appointment event's Bitrix work, step by step (a
+                         booking through the Lead fields tool's "booking" action);
 - crm_readback           six minutes after a stage move, checks it stuck;
 - deliver_alert          one alert to the agent's panel and to Bitrix;
 - record_crm_note        an opt-out or "not interested" as a timeline comment;
 - resolve_responsible    the CRM record's responsible person, cached per chat;
-- write_crm_fields       a shops chat's lead fields, through the Lead fields tool.
+- write_crm_fields       a shops chat's lead fields, through the Lead fields tool;
+- write_licence_file     a shops customer's trade licence copy, to the lead;
+- send_shop_media        a shop type's video, photos and detail card (shop_media.py).
 """
 
 from __future__ import annotations
@@ -107,6 +112,8 @@ def send_due_reminders() -> None:
         _retry_crm_syncs,
         _retry_crm_fields,
         _reminders,
+        # Last: it only queues one task per due chat, and must never delay a reminder.
+        _follow_ups,
     ):
         try:
             job()
@@ -114,6 +121,26 @@ def send_due_reminders() -> None:
             raise
         except Exception:  # noqa: BLE001 - one job must not stop the others
             logger.exception("Lead AI sweep step %s failed", job.__name__)
+
+
+def _follow_ups() -> None:
+    """The shops chats due Template B (72 hours after a campaign nobody answered, or the day they
+    asked us to check back) or a nudge: one send_follow_up task each (followups.py)."""
+    from . import followups
+
+    queued = followups.sweep()
+    if queued:
+        logger.info("Lead AI queued %s shops follow-up(s)", queued)
+
+
+@shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)
+def send_follow_up(conversation_id: int, kind: str) -> None:
+    """One shops chat's follow-up (followups.send decides again before anything goes)."""
+    from . import followups
+
+    result = followups.send(conversation_id, kind)
+    if result != "sent":
+        logger.info("Lead AI %s for conversation %s: %s", kind, conversation_id, result)
 
 
 def _reminders() -> None:
@@ -463,6 +490,11 @@ def _undo_step(appointment, name: str) -> None:
     LeadAiCrmStep.objects.filter(appointment=appointment, step=name[:120]).delete()
 
 
+def _agents(alerts, conversation) -> str:
+    """The agents this chat's alerts reach, for the CRM comment."""
+    return ", ".join(sorted({(a.display_name or a.get_username()) for a, _ in alerts.recipients(conversation) if a is not None}))
+
+
 def _agent_for_bitrix(bitrix_user_id: str):
     from django.contrib.auth import get_user_model
 
@@ -502,75 +534,182 @@ def _parse_pending(step: str) -> tuple[str, int | None, bool]:
     return event, (int(revision) if revision.isdigit() else None), hot == "1"
 
 
-def _lead_updated_at(appointment):
-    """When the assistant itself moved this appointment's lead (its own update), or None."""
+BOOKING_STEP = "booking:"
+# A booking sent to the Lead fields tool, answered or not: the tool may have saved it before its
+# answer was lost (a read timeout, its own 502 after the save), so the lead may hold our booking.
+BOOKING_TRY = "booking-try:"
+# The new meeting time alone, through the tool's plain fields (_book_around).
+BOOKING_TIME = "booking-time:"
+# The assistant's own to-do moved or closed with crm.activity (_book_around).
+TODO_STEP = "todo:"
+NOT_OUR_TODO = (
+    "The lead has an open Viewing/Meeting to-do that Lead AI did not plan, so Lead AI left the lead's stage and "
+    "to-dos as they are: please move it to Meeting/Viewing Scheduled and set the meeting time."
+)
+
+
+def _booked_by_us(appointment) -> bool:
+    """The assistant booked this appointment's lead itself: through the Lead fields tool
+    (a "booking:confirmed..." or "booking:rescheduled..." step, or such a booking sent and
+    never answered: BOOKING_TRY), or before it, with the REST update it used until board T55
+    (LEAD_UPDATE). A lead in stage 10 the assistant did not book holds a person's own booking
+    and to-do, which nothing here touches."""
     from .models import LeadAiCrmStep
 
-    return (
-        LeadAiCrmStep.objects.filter(appointment=appointment, step=LEAD_UPDATE).values_list("created_at", flat=True).first()
-    )
+    steps = LeadAiCrmStep.objects.filter(appointment=appointment)
+    return steps.filter(step=LEAD_UPDATE).exists() or steps.filter(
+        Q(step__startswith=f"{BOOKING_STEP}confirmed")
+        | Q(step__startswith=f"{BOOKING_STEP}rescheduled")
+        | Q(step__startswith=f"{BOOKING_TRY}confirmed")
+        | Q(step__startswith=f"{BOOKING_TRY}rescheduled")
+    ).exists()
 
 
-def _move_own_todo(appointment, crm_id: int) -> None:
-    """Move the assistant's own "Viewing/Meeting" to-do to the meeting time.
+def _book(appointment, crm_id: int, event: str, decision: str, stamp: str, extra: list, comment_for) -> tuple[bool, str]:
+    """One booking event of a lead the assistant books (sync_appointment_crm): (its comment went in
+    the Lead fields tool's own call, why the tool refused it).
 
-    That is the one it stored, while it is still open, or else the one BP 235
-    planned in answer to the assistant's own lead update (created at or after
-    it). A to-do that was there before (an agent's own booking, an older BP 235
-    one) is never touched; without one, our 60-minute heads-up covers the
-    meeting. Raises BitrixError.
-    """
-    from .assistant import crm
+    The tool's booking action moves, or for a cancel closes, the lead's NEWEST open
+    "Viewing/Meeting" to-do, whoever planned it (board C9). So it is used only while that
+    newest one is the assistant's own (``crm_todo_id``), or there is none, or this very event
+    was sent before and no answer came back (the to-do it planned then is the newest: sent
+    again, the tool moves that same one and answers its id). Otherwise a person's to-do, or
+    the "due now" one BP 235 plans when a person edits a lead in stage 10, would take the
+    meeting time in place of ours, or be closed: ``_book_around``. ``comment_for(lines)``
+    writes the event's comment with these extra lines."""
+    from .assistant import crm, crm_fields
+    from .models import LeadAiAppointment, LeadAiCrmStep
+
+    step = f"{BOOKING_STEP}{stamp}"
+    if not _step(appointment, step):
+        return True, ""  # done before (a task delivered twice): its comment went with it
+    try:
+        todos = crm.open_meeting_todos(crm_id)
+    except Exception:
+        _undo_step(appointment, step)
+        raise
+    own = appointment.crm_todo_id if appointment.crm_todo_id in todos else None
+    tried = f"{BOOKING_TRY}{stamp}"
+    sent_before = LeadAiCrmStep.objects.filter(appointment=appointment, step=tried).exists()
+    if todos and todos[0] != own and not sent_before:
+        _undo_step(appointment, step)
+        return _book_around(appointment, crm_id, event, decision, stamp, own, extra, comment_for), ""
+    lines = list(extra)
+    if decision == "move" and event != "cancelled":
+        lines.append("WhatsApp Lead AI moved this lead to Meeting/Viewing Scheduled.")
+    if event != "cancelled":
+        _step(appointment, tried)
+    try:
+        answer = crm_fields.post(crm.booking_body(crm_id, appointment, event, comment_for(lines)))
+    except crm_fields.FieldsError:
+        _undo_step(appointment, step)  # sent again on the retry; the attempt stays ours (BOOKING_TRY)
+        raise
+    if not answer.get("ok"):
+        # Refused (a field or enum the tool does not allow): nothing was booked there, so this
+        # does not count as ours; the comment still goes, the REST way.
+        _undo_step(appointment, step)
+        _undo_step(appointment, tried)
+        error = f"The Lead fields tool refused the booking: {answer.get('error') or 'refused'}"[:500]
+        logger.warning("Lead AI booking write refused for appointment %s: %s", appointment.pk, error)
+        return False, error
+    done = {}
+    todo = crm.todo_of(answer)
+    if event != "cancelled":
+        done["crm_todo_id"] = todo
+        if decision == "move":
+            done["crm_stage_moved_at"] = timezone.now()
+            crm_readback.apply_async(args=[appointment.pk], countdown=360)
+    else:
+        done["crm_todo_id"] = None
+    LeadAiAppointment.objects.filter(pk=appointment.pk).update(**done)
+    if event != "cancelled" and not LeadAiAppointment.objects.filter(pk=appointment.pk, status=LeadAiAppointment.Status.CONFIRMED).exists():
+        # Cancelled while this ran: that sync could not know the to-do was planned yet (it is the newest).
+        try:
+            crm_fields.post(crm.booking_body(crm_id, appointment, "cancelled"))
+        except crm_fields.FieldsError as exc:
+            logger.warning("Lead AI could not close the viewing to-do of appointment %s: %s", appointment.pk, exc)
+    return True, ""
+
+
+def _book_around(appointment, crm_id: int, event: str, decision: str, stamp: str, own, extra: list, comment_for) -> bool:
+    """The lead's newest open "Viewing/Meeting" to-do is not the assistant's (_book): the booking
+    action is not used, so that to-do keeps its time and stays open. The assistant's own to-do
+    (``own``, still open) is moved or closed with crm.activity, which runs no lead business
+    process. The meeting time goes on the lead through the tool's plain fields (BP 235 empties
+    it when a person edits a lead in stage 10), with the comment in the same call; a lead the
+    booking would have had to move to stage 10 stays in its stage, and the comment tells the
+    agents so (NOT_OUR_TODO). With no to-do of ours, our 60-minute heads-up covers the meeting
+    (crm_todo_id empty). True when the comment went with the meeting time."""
+    from apps.crmlink import client
+
+    from .assistant import crm, crm_fields
     from .models import LeadAiAppointment
 
-    if appointment.crm_todo_id:
-        todo = crm.find_meeting_todo(crm_id, todo_id=appointment.crm_todo_id)
-        if todo is None:
-            # Done or deleted in Bitrix since: the heads-up takes its place.
-            LeadAiAppointment.objects.filter(pk=appointment.pk, crm_todo_id=appointment.crm_todo_id).update(crm_todo_id=None)
-            return
+    todo_step = f"{TODO_STEP}{stamp}"
+    if event == "cancelled":
+        if own is not None:
+            if _step(appointment, todo_step):
+                try:
+                    crm.complete_todo(own)
+                except client.BitrixError:
+                    _undo_step(appointment, todo_step)
+                    raise
+            LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_todo_id=None)
+        return False
+    if decision != "already":
+        extra.append(NOT_OUR_TODO)
+    commented = True
+    time_step = f"{BOOKING_TIME}{stamp}"
+    if _step(appointment, time_step):
+        try:
+            answer = crm_fields.post(crm.meeting_fields_body(crm_id, appointment, comment_for(list(extra))))
+        except crm_fields.FieldsError:
+            _undo_step(appointment, time_step)
+            raise
+        commented = bool(answer.get("ok"))
+        if not commented:
+            _undo_step(appointment, time_step)
+            logger.warning("The Lead fields tool refused the meeting time of appointment %s: %s", appointment.pk, answer.get("error"))
+    if own is not None:
+        if _step(appointment, todo_step):
+            try:
+                crm.move_todo(own, crm_id, appointment.starts_at)
+            except client.BitrixError:
+                _undo_step(appointment, todo_step)
+                raise
     else:
-        since = _lead_updated_at(appointment)
-        todo = crm.find_meeting_todo(crm_id, created_since=since) if since is not None else None
-        if todo is None:
-            return
-    todo_id = int(todo["ID"])
-    crm.move_todo(todo_id, crm_id, appointment.starts_at)
-    LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_todo_id=todo_id)
-    if not LeadAiAppointment.objects.filter(pk=appointment.pk, status=LeadAiAppointment.Status.CONFIRMED).exists():
-        crm.complete_todo(todo_id)  # cancelled while this ran: that sync could not see the to-do yet
-
-
-def _own_todo_to_complete(appointment, entity: str, crm_id: int) -> int | None:
-    """The to-do a cancel closes: the stored one, or, while that is not stored yet
-    (the booking's sync still running or failed), the one BP 235 planned after
-    the assistant's own lead update. Raises BitrixError."""
-    from .assistant import crm
-
-    if appointment.crm_todo_id:
-        return appointment.crm_todo_id
-    since = _lead_updated_at(appointment) if entity == "lead" else None
-    if since is None:
-        return None
-    todo = crm.find_meeting_todo(crm_id, created_since=since)
-    return int(todo["ID"]) if todo is not None else None
+        LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_todo_id=None)
+    return commented
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=len(CRM_RETRY), soft_time_limit=120, time_limit=150)
 def sync_appointment_crm(self, appointment_id: int, event: str, hot: bool = False, revision: int | None = None) -> None:
     """One appointment event in Bitrix. Each write is recorded (LeadAiCrmStep) before
-    the next, so a retry never repeats a lead update (each plans another to-do).
+    the next, so a retry never repeats one.
+
+    A booking (confirmed, rescheduled) on the campaign's own lead, and its cancel,
+    go through the Lead fields tool's "booking" action (crm.booking_body; board
+    C9, T55) with the event's comment in the same call: the tool moves the lead
+    to stage 10 with the Meeting Date & Time and owns the one "Viewing/Meeting"
+    to-do, all with BP 235 off. The tool moves or closes the lead's NEWEST open
+    "Viewing/Meeting" to-do, so the action is used only while that one is the
+    assistant's own, or there is none (_book); otherwise our own to-do is moved
+    or closed by itself and nobody else's is touched (_book_around). A booking
+    sent and never answered still counts as ours (BOOKING_TRY), so its retry
+    finds the lead in stage 10 and sends it again. A lead already in stage 10
+    that we did not book, and every lead the stage rules keep where it is
+    (crm.stage_decision), get the comment alone, as every other event does (a
+    REST timeline comment, which runs no business process).
 
     ``revision`` is the length of the appointment's history right after the
     event (engine), so each change has its own steps and comment, even back to
-    an earlier time; without it the event and the start name them. The lead is
-    moved to stage 10 at most once per appointment. A booking or reschedule
-    writes nothing once the meeting is no longer confirmed (its cancel has its
-    own sync); the to-do and the comment use the meeting's time as it is now.
+    an earlier time; without it the event and the start name them. A booking or
+    reschedule writes nothing once the meeting is no longer confirmed (its
+    cancel has its own sync); the call carries the meeting's time as it is now.
     """
     from apps.crmlink import client
 
-    from .assistant import alerts, crm, live
+    from .assistant import alerts, crm, crm_fields, live
     from .models import LeadAiAppointment, LeadAiChat, LeadAiCrmStep, LeadAiSettings
 
     appointment = (
@@ -613,44 +752,34 @@ def sync_appointment_crm(self, appointment_id: int, event: str, hot: bool = Fals
                     )
             LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_entity=entity, crm_id=crm_id)
             decision = crm.stage_decision(entity, chosen, record)
+            ours = entity == "lead" and _booked_by_us(appointment)
+            booking = ""  # the tool's booking event this sync sends, if any
             if event in ("confirmed", "rescheduled") and entity == "lead":
-                if decision == "move" and _step(appointment, LEAD_UPDATE):
-                    try:
-                        crm.update_lead(crm_id, crm.booking_fields(record["fields"], appointment, settings_row.office_maps_url))
-                    except client.BitrixError:
-                        _undo_step(appointment, LEAD_UPDATE)
-                        raise
-                    LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_stage_moved_at=timezone.now())
-                    extra.append("WhatsApp Lead AI moved this lead to Meeting/Viewing Scheduled.")
-                    crm_readback.apply_async(args=[appointment.pk], countdown=360)
+                if decision == "move" or (decision == "already" and ours):
+                    booking = event
                 elif decision in ("new lead", "held by admin"):
                     extra.append("The lead is NEW or unassigned, so its stage was left as it is. Please give it an owner.")
                 elif decision in ("closed", "unknown stage"):
                     extra.append(f"The lead's stage ({record['stage'] or 'unknown'}) was left as it is; please move it if needed.")
-                if decision in ("move", "already") and _step(appointment, f"todo:{stamp}"):
-                    try:
-                        _move_own_todo(appointment, crm_id)
-                    except client.BitrixError as exc:
-                        logger.warning("Lead AI could not move the meeting to-do on lead %s: %s", crm_id, exc)
-            if event == "cancelled" and _step(appointment, f"todo_done:{stamp}"):
-                try:
-                    todo_id = _own_todo_to_complete(appointment, entity, crm_id)
-                    if todo_id:
-                        crm.complete_todo(todo_id)
-                except client.BitrixError as exc:
-                    logger.warning("Lead AI could not complete the meeting to-do of appointment %s: %s", appointment.pk, exc)
             if event == "cancelled" and entity == "lead":
+                if ours:
+                    booking = "cancelled"  # the tool closes the one "Viewing/Meeting" to-do it planned
                 extra.append("The lead stays in its stage; please move it if the customer will not come.")
-            if _step(appointment, f"comment:{stamp}"):
-                agents = ", ".join(
-                    sorted(
-                        {
-                            (a.display_name or a.get_username())
-                            for a, _ in alerts.recipients(conversation)
-                            if a is not None
-                        }
+            if booking:
+
+                def comment_for(lines, event=event):
+                    return crm.comment_text(
+                        appointment, event, office_address=settings_row.office_address, agents=_agents(alerts, conversation),
+                        extra=" ".join(lines), hot=hot,
                     )
-                )
+
+                # "booking:confirmed:r1": once per event and revision.
+                commented, refused = _book(appointment, crm_id, booking, decision, stamp, extra, comment_for)
+                if refused:
+                    error = refused
+                if not commented:
+                    booking = ""
+            if not booking and _step(appointment, f"comment:{stamp}"):
                 try:
                     crm.add_comment(
                         entity,
@@ -659,7 +788,7 @@ def sync_appointment_crm(self, appointment_id: int, event: str, hot: bool = Fals
                             appointment,
                             event,
                             office_address=settings_row.office_address,
-                            agents=agents,
+                            agents=_agents(alerts, conversation),
                             extra=" ".join(extra),
                             hot=hot,
                         ),
@@ -667,6 +796,9 @@ def sync_appointment_crm(self, appointment_id: int, event: str, hot: bool = Fals
                 except client.BitrixError:
                     _undo_step(appointment, f"comment:{stamp}")
                     raise
+    except crm_fields.FieldsError as exc:
+        error = _retry_or_give_up(self, exc)
+        passing = True
     except client.BitrixError as exc:
         if _transient(exc):
             error = _retry_or_give_up(self, exc)
@@ -774,7 +906,11 @@ def write_crm_fields(self, row_ids) -> None:
     from .assistant import crm_fields
     from .models import LeadAiCrmField
 
-    rows = list(LeadAiCrmField.objects.filter(pk__in=list(row_ids or []), sent_at__isnull=True).order_by("pk"))
+    rows = list(
+        LeadAiCrmField.objects.filter(pk__in=list(row_ids or []), sent_at__isnull=True)
+        .exclude(field=crm_fields.LICENCE_FILE)  # a licence copy has its own task (write_licence_file)
+        .order_by("pk")
+    )
     live = []
     for row in rows:
         if _replaced(row):
@@ -802,6 +938,139 @@ def write_crm_fields(self, row_ids) -> None:
     logger.warning("The Lead fields tool refused the shops fields of lead %s: %s", live[0].lead_id, error)
 
 
+# A licence copy waits this many times, LICENCE_WAIT seconds apart, for the gateway's download.
+LICENCE_WAITS = 12
+LICENCE_WAIT = 30
+
+
+def _licence_alert(row, text: str) -> None:
+    """The agents (and the listed users, 2311) hear that a licence copy did not reach the lead."""
+    from apps.inbox.models import Conversation
+
+    from .assistant import alerts
+
+    conversation = Conversation.objects.select_related("contact", "assigned_agent").filter(pk=row.conversation_id).first()
+    if conversation is None:
+        return
+    who = conversation.contact.display_name or f"+{conversation.contact.wa_id}"
+    alerts.raise_alert(
+        kind="licence",
+        conversation=conversation,
+        title=f"Trade licence not on the lead: {who}",
+        text=f"{who} (WhatsApp +{conversation.contact.wa_id}) shared a trade licence copy: {text}",
+        dedupe_key=f"licence:{conversation.pk}:{row.pk}",
+        crm_url=alerts.crm_path("lead", row.lead_id),
+    )
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=LICENCE_WAITS, soft_time_limit=90, time_limit=120)
+def write_licence_file(self, row_id: int) -> None:
+    """The customer's trade licence copy (a photo or PDF they sent while the shops assistant
+    asked for it; board T34) to their Bitrix lead, as the Lead fields tool's license_file.
+
+    The file comes from the stored attachment, once the gateway has downloaded it (this
+    task waits for it). Only a PDF, JPEG or PNG of at most 5 MB, by its bytes, goes; any
+    other file stays in the chat, and the agents (the listed users too) are told. A passing
+    failure is retried like the other fields, then by the sweep (_retry_crm_fields).
+    """
+    from django.db.models import F
+
+    from apps.inbox.models import Message
+
+    from .assistant import crm_fields
+    from .models import LeadAiCrmField
+
+    row = LeadAiCrmField.objects.filter(pk=row_id, field=crm_fields.LICENCE_FILE, sent_at__isnull=True).first()
+    if row is None:
+        return
+    if _replaced(row):
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error="Replaced by a newer licence copy before it was sent.", retry_at=None)
+        return
+    message = Message.objects.select_related("media").filter(pk=int(row.value) if row.value.isdigit() else 0).first()
+    asset = message.media if message is not None else None
+    if asset is None:
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error="The message has no file.", retry_at=None)
+        return
+    if not asset.downloaded or not asset.file:
+        if self.request.retries < LICENCE_WAITS and not (asset.download_error and self.request.retries >= 4):
+            raise self.retry(countdown=LICENCE_WAIT)
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error="The file never downloaded.", retry_at=None)
+        _licence_alert(row, "the file could not be downloaded, so it is only in the chat. Please save it on the lead by hand.")
+        return
+    try:
+        with asset.file.open("rb") as handle:
+            data = handle.read(crm_fields.LICENCE_MAX + 1)
+    except OSError as exc:
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error=f"The file could not be read ({type(exc).__name__}).", retry_at=None)
+        _licence_alert(row, "the file could not be read here, so it is only in the chat. Please save it on the lead by hand.")
+        return
+    try:
+        body = crm_fields.licence_body(row.lead_id, data)
+    except ValueError as exc:
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error=f"Licence file {exc}.", retry_at=None)
+        if len(data) > crm_fields.LICENCE_MAX:
+            _licence_alert(row, "licence file too large, saved in the chat (the lead takes at most 5 MB). Please save it on the lead by hand.")
+        else:
+            _licence_alert(row, "it is not a PDF, JPEG or PNG, so it is saved in the chat only. Please save it on the lead by hand.")
+        return
+    LeadAiCrmField.objects.filter(pk=row.pk).update(attempts=F("attempts") + 1)
+    try:
+        answer = crm_fields.post(body)
+    except crm_fields.FieldsError as exc:
+        LeadAiCrmField.objects.filter(pk=row.pk).update(error=str(exc)[:500])
+        retries = self.request.retries
+        if retries < len(CRM_RETRY):
+            raise self.retry(exc=exc, countdown=CRM_RETRY[retries])
+        LeadAiCrmField.objects.filter(pk=row.pk).update(retry_at=timezone.now() + CRM_CATCH_UP_EVERY)
+        logger.warning("Lead AI could not put the licence copy on lead %s yet (the sweep tries again): %s", row.lead_id, exc)
+        return
+    if answer.get("ok"):
+        LeadAiCrmField.objects.filter(pk=row.pk).update(sent_at=timezone.now(), error="", retry_at=None)
+        return
+    error = str(answer.get("error") or "Refused")[:500]
+    LeadAiCrmField.objects.filter(pk=row.pk).update(error=error, retry_at=None)
+    logger.warning("The Lead fields tool refused the licence copy of lead %s: %s", row.lead_id, error)
+    _licence_alert(row, f"Bitrix refused the file ({error[:120]}), so it is only in the chat. Please save it on the lead by hand.")
+
+
+@shared_task(ignore_result=True, soft_time_limit=300, time_limit=330)
+def send_shop_media(conversation_id: int, shop_type: str, turn_id: int | None = None, language: str = "en", files: bool = True) -> None:
+    """A shop type's video, its photos one by one, then its detail card (shop_media.send_type),
+    on the leadai queue and outside the turn that asked for it; ``files`` False sends the
+    card alone (the files went out today already). Nothing here can fail that turn: a file
+    the gateway refuses is skipped, and when the card itself cannot go the agents are told."""
+    from apps.inbox.models import Conversation
+
+    from . import shop_media
+    from .assistant import alerts
+    from .models import LeadAiChat
+
+    try:
+        result = shop_media.send_type(conversation_id, shop_type, turn_id, language, files=files)
+    except SoftTimeLimitExceeded:
+        logger.warning("Lead AI ran out of time sending the %s media to conversation %s", shop_type, conversation_id)
+        return
+    except Exception as exc:  # noqa: BLE001 - told to the agents below
+        logger.warning("Lead AI could not send the %s details to conversation %s: %s", shop_type, conversation_id, exc)
+        conversation = Conversation.objects.select_related("contact", "assigned_agent").filter(pk=conversation_id).first()
+        if conversation is None:
+            return
+        chat = LeadAiChat.objects.filter(conversation=conversation).first()
+        who = conversation.contact.display_name or f"+{conversation.contact.wa_id}"
+        alerts.raise_alert(
+            kind="send_failed",
+            conversation=conversation,
+            title="Lead AI could not send the shop details",
+            text=f"The assistant could not send {who} the details of the shop type they picked ({type(exc).__name__}). "
+            "Please send them by hand.",
+            dedupe_key=f"shop_media:{conversation_id}:{turn_id or shop_type}",
+            crm_url=alerts.crm_path(chat.crm_entity if chat else "", chat.crm_id if chat else None),
+        )
+        return
+    if result.get("stopped"):
+        logger.info("Lead AI stopped sending the %s media to conversation %s: %s", shop_type, conversation_id, result["stopped"])
+
+
 FIELD_NAMES = {
     "UF_CRM_A7_BOT_STATUS": "Bot Status",
     "UF_CRM_A7_SHOP_TYPE": "Shop Type Wanted",
@@ -810,6 +1079,7 @@ FIELD_NAMES = {
     "UF_CRM_A7_AI_BUSINESS_ACTIVITY": "Business activity",
     "UF_CRM_A7_AI_TRADE_LICENSE_STATUS": "Trade license status",
     "lost": "the move to a lost stage",
+    "license_file": "the trade licence copy (it is in the chat)",
 }
 
 
@@ -848,11 +1118,18 @@ def _retry_crm_fields() -> None:
             dedupe_key=f"crm_fields_failed:{conversation_id}:{rows[-1].pk}",
             crm_url=alerts.crm_path("lead", rows[0].lead_id),
         )
+    from .assistant import crm_fields
+
     for conversation_id, rows in retry.items():
         ids = [row.pk for row in rows]
         # Not due again before the task has had its own tries.
         LeadAiCrmField.objects.filter(pk__in=ids).update(retry_at=now + CRM_CATCH_UP_EVERY)
-        write_crm_fields.delay(ids)
+        fields = [row.pk for row in rows if row.field != crm_fields.LICENCE_FILE]
+        if fields:
+            write_crm_fields.delay(fields)
+        for row in rows:
+            if row.field == crm_fields.LICENCE_FILE:
+                write_licence_file.delay(row.pk)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3, soft_time_limit=60, time_limit=90)
@@ -886,12 +1163,13 @@ def outbound_failed(message_id: int) -> None:
     reminded or confirmed when they were not. Only the appointment's current
     reminder counts: a late failure of an older one (before a reschedule, or
     one already retried) changes nothing, and a second copy of the same
-    status never retries twice.
+    status never retries twice. A shops chat's Template B (followups.py) is
+    only logged: it never goes twice, and the chat shows it failed.
     """
     from apps.inbox import services as inbox_services
     from apps.inbox.models import Message
 
-    from .assistant import alerts, live, reminders
+    from .assistant import alerts, live, reminders, transcript
     from .models import LeadAiAppointment, LeadAiChat
 
     message = (
@@ -957,6 +1235,19 @@ def outbound_failed(message_id: int) -> None:
         live.appointment_changed(conversation.pk)
         return
 
+    if data.get("shop_media_id"):
+        # A shop photo or video that did not arrive: its media id may be no good any more, so the
+        # next send uploads the file again. The detail card that follows says the rest.
+        from . import shop_media
+
+        shop_media.forget_upload(data["shop_media_id"], conversation.number_id)
+        logger.info("Lead AI shop media message %s failed (%s); its upload is forgotten", message.pk, code)
+        return
+    if data.get("source") == transcript.FOLLOW_UP:
+        # A Template B WhatsApp did not deliver (a MARKETING template often meets Meta's daily
+        # cap per customer): it is not sent again, and nobody is alerted; the chat shows it failed.
+        logger.info("Lead AI Template B message %s (%s) was not delivered: %s", message.pk, data.get("followup"), code)
+        return
     chat = LeadAiChat.objects.filter(conversation=conversation).first()
     # The engine tags its booking confirmation when it sends it, before the turn row is saved.
     booking = bool(data.get("booking"))

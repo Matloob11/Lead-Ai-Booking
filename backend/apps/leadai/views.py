@@ -14,7 +14,9 @@ private phone numbers, only as a count); anyone with admin rights may
 switch the assistant OFF (an emergency stop); switching it ON and every
 other change needs a panel admin (is_wa_admin) or a superuser. The shops
 playbook's facts, brand and viewing agent are settings too (shops.validate
-checks them); a shops chat's row says when it is due a follow-up.
+checks them); a shops chat's row says when it is due a follow-up, and when its
+automatic follow-up waits because Template B is not approved on its number
+(followups.panel_note: a note on the row, never an alert).
 """
 
 import datetime as dt
@@ -37,7 +39,7 @@ from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
 from .assistant import hours, openai_client, shops
-from .lane import GENERAL, move_to_inbox, only_lead_ai, playbooks
+from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
 OPEN_STATUSES = LeadAiAppointment.OPEN
@@ -235,11 +237,15 @@ def _lead_ai_part(chat: LeadAiChat, playbook: str = GENERAL) -> dict:
     }
 
 
-def serialize_lead_ai_conversation(conversation, settings_row=None, *, thinking=None, note=None, playbook=None) -> dict:
+def serialize_lead_ai_conversation(
+    conversation, settings_row=None, *, thinking=None, note=None, playbook=None, approved=None
+) -> dict:
     """The inbox's own shape (with its lead_ai flag and labels), plus where the chat
     came from and its playbook, the assistant's state and the open appointment.
 
-    ``playbook`` may be worked out once for a whole list (lane.playbooks).
+    ``playbook`` may be worked out once for a whole list (lane.playbooks), and so may
+    ``approved``, the WABAs Template B can go from (followups.approved_wabas): a shops
+    chat's ``followup_note`` says when its automatic follow-up waits for Meta.
     """
     row = serialize_conversation(conversation)
     chat = getattr(conversation, "lead_ai_chat", None)
@@ -247,6 +253,14 @@ def serialize_lead_ai_conversation(conversation, settings_row=None, *, thinking=
         playbook = playbooks([conversation.pk]).get(conversation.pk, GENERAL)
     row["lead_ai_info"] = _lead_ai_part(chat, playbook) if chat is not None else None
     row["lead_ai_ai"] = serialize_ai(conversation, settings_row, thinking=thinking, note=note)
+    followup_note = ""
+    if playbook == IC_SHOPS:
+        from . import followups
+
+        followup_note = followups.panel_note(
+            conversation, _state(conversation), followups.approved_wabas() if approved is None else approved
+        )
+    row["lead_ai_ai"]["followup_note"] = followup_note
     row["lead_ai_appointment"] = serialize_appointment(_open_appointment(conversation))
     return row
 
@@ -299,13 +313,18 @@ def chat_list(request):
     thinking = _thinking(c.pk for c in page)
     note = _silent_note(settings_row) if page else ""
     scripts = playbooks(c.pk for c in page)
+    approved = None
+    if IC_SHOPS in scripts.values():
+        from . import followups
+
+        approved = followups.approved_wabas()
     return Response(
         {
             "count": total,
             "unread_chats": unread,
             "results": [
                 serialize_lead_ai_conversation(
-                    c, settings_row, thinking=c.pk in thinking, note=note, playbook=scripts.get(c.pk, GENERAL)
+                    c, settings_row, thinking=c.pk in thinking, note=note, playbook=scripts.get(c.pk, GENERAL), approved=approved
                 )
                 for c in page
             ],
@@ -348,9 +367,15 @@ def chat_pause_ai(request, pk):
 
 @api_view(["POST"])
 def chat_resume_ai(request, pk):
-    """Let the assistant answer again: after a pause, an opt-out, an automatic-reply stop or a handover."""
+    """Let the assistant answer again: after a pause, an opt-out, an automatic-reply stop or a handover.
+    A stop the assistant read as spam or a wrong number also takes the phone off the opt-out
+    registry again (optout.release_for_resume): that was code's reading, not the customer's STOP."""
+    from . import optout
+
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
     state = LeadAiChatState.for_conversation(conversation)
+    if state.stopped_at is not None:
+        optout.release_for_resume(conversation, state.stop_reason)
     LeadAiChatState.objects.filter(pk=state.pk).update(
         paused_at=None,
         paused_by=None,

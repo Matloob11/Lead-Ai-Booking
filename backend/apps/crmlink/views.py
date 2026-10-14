@@ -28,6 +28,10 @@ LABELS = {
     f"DYNAMIC_{client.OWNER_DATA_TYPE_ID}": "Owner Data",
 }
 
+# A lookup that met a passing failure (the REST throttle, a timeout) has not answered "no
+# record", and must not read as one: the panel would offer to create a second lead.
+BUSY = "Bitrix is busy. Try again in a minute."
+
 
 @api_view(["GET"])
 def whereis(request):
@@ -36,7 +40,10 @@ def whereis(request):
     if not client.configured():
         return Response({"records": [], "detail": "No CRM connection is configured."})
 
-    records = client.find_records(phone)
+    try:
+        records = client.find_records(phone, strict=True)
+    except client.BitrixTransient:
+        return Response({"detail": BUSY}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     return Response(
         {
             "phone": "".join(ch for ch in phone if ch.isdigit()),
@@ -105,7 +112,10 @@ def create(request):
             return Response({"detail": "Not your conversation."}, status=status.HTTP_404_NOT_FOUND)
 
     wa_id = conversation.contact.wa_id
-    existing = client.find_records(wa_id)
+    try:
+        existing = client.find_records(wa_id, strict=True)
+    except client.BitrixTransient:
+        return Response({"detail": BUSY}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     if existing:
         return Response(
             {
@@ -140,8 +150,10 @@ def create(request):
     copied = failed = 0
     for message in messages:
         try:
-            comment_id = client.add_comment(record["type"], record["id"], _line(message))
+            comment_id = client.comment_id(client.add_comment(record["type"], record["id"], _line(message)))
         except client.BitrixError:
+            comment_id = None
+        if comment_id is None:
             # Kept going. A record holding most of the conversation is worth
             # more than one abandoned halfway, and Mirror records exactly what
             # did land so a later run finishes the job without duplicating.
@@ -151,7 +163,7 @@ def create(request):
             message_id=message.pk,
             entity_type=record["type"],
             entity_id=record["id"],
-            defaults={"comment_id": comment_id if isinstance(comment_id, int) else None},
+            defaults={"comment_id": comment_id},
         )
         copied += 1
 

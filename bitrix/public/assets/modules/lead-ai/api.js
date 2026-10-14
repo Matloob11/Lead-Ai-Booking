@@ -9,14 +9,34 @@
  * A chat row (list, detail, and every POST below) carries lead_ai_info (the
  * campaign, and its playbook: "general" or "ic_shops"), lead_ai_ai (the
  * assistant's mode in that chat, and in a shops chat followup_due_at /
- * followup_label when it will check back with the customer),
+ * followup_label when it will check back with the customer, and followup_note
+ * while its automatic follow-up waits for Template B's approval),
  * lead_ai_appointment (the open meeting, or null) and the inbox's own labels
  * ([{id, name, colour}]). The settings carry the shops playbook's
  * shops_facts, brand_name and viewing_agent_name.
+ *
+ * The shops media library (shop-media.js): every agent reads it; a panel admin
+ * adds, replaces, deletes and reorders its files. Each call that changes it
+ * answers with the whole library again; a refused file is 400 {detail}.
  */
 
 import { apiFetch } from "../../core/bitrix-sso.js";
 import { asList, inbox, leadbot } from "../../api/api.js";
+
+// A 16 MB video on a slow line takes longer than an ordinary call may.
+const UPLOAD_MS = 180000;
+
+function fileForm(fields) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  return form;
+}
+
+/** A library file's id as it may go in a path: a whole number, else nothing. */
+function mediaId(id) {
+  const n = Number(id);
+  return Number.isInteger(n) && n > 0 ? String(n) : "0";
+}
 
 export const leadAiApi = {
   /** `label` keeps only the chats carrying that label ("Broker"). */
@@ -52,6 +72,22 @@ export const leadAiApi = {
 
   /** Sara's lead automations (apps/leadbot), shown on their own tab as before. */
   saraBoard: () => leadbot.board(),
+
+  /** {can_edit, limits: {video_mb, photo_mb}, shops: [{shop, label, limits, items: [...]}]}, in sending order. */
+  shopMedia: () => apiFetch("/api/leadai/shop-media/"),
+
+  /** Adds one file to a shop ("type_1".."type_3", "office"). Returns the library, with `created`. */
+  addShopMedia: (shop, file) =>
+    apiFetch("/api/leadai/shop-media/", { method: "POST", body: fileForm({ shop, file }), timeoutMs: UPLOAD_MS }),
+
+  /** Another file in the same place of the order. Returns the library. */
+  replaceShopMedia: (id, file) =>
+    apiFetch(`/api/leadai/shop-media/${mediaId(id)}/replace/`, { method: "POST", body: fileForm({ file }), timeoutMs: UPLOAD_MS }),
+
+  deleteShopMedia: (id) => apiFetch(`/api/leadai/shop-media/${mediaId(id)}/`, { method: "DELETE" }),
+
+  /** Every file id of the shop, once, in the new order. Returns the library. */
+  reorderShopMedia: (shop, ids) => apiFetch("/api/leadai/shop-media/reorder/", { method: "POST", body: { shop, ids } }),
 };
 
 export { asList, inbox };

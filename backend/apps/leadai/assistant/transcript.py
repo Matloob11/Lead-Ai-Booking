@@ -32,6 +32,9 @@ REVOKED = Q(payload__has_key="type") & Q(payload__type="revoke")
 ASSISTANT = "leadai_ai"
 REMINDER = "leadai_reminder"
 TAP_REPLY = "leadai_tap"
+# A shops chat's Template B, sent by the automatic follow-ups (followups.py): ours, never a
+# colleague's, and read like the campaign it follows up (who, campaign_message).
+FOLLOW_UP = "leadai_followup"
 
 
 def payload(message) -> dict:
@@ -91,6 +94,10 @@ def who(message, campaign_templates: set[int]) -> str:
         return "customer"
     if source(message) == REMINDER:
         return "reminder"
+    if source(message) == FOLLOW_UP:
+        # Template B: a campaign template, so the customer's answer to it is a first answer
+        # (the shops rules' yes, "Not now"), as to the campaign's own.
+        return "campaign"
     if is_ours(message):
         return "assistant"
     if message.kind == Message.Kind.TEMPLATE and message.template_id in campaign_templates:
@@ -207,8 +214,9 @@ def transcript_text(row) -> str | None:
 
 
 def campaign_message(conversation, campaign_templates: set[int]):
-    """The newest template our campaign sent in this chat (what the customer answers)."""
+    """The newest template our campaign sent in this chat (what the customer answers), or the
+    Template B the follow-ups sent after it (a shops chat only: FOLLOW_UP)."""
     query = Message.objects.filter(conversation=conversation, kind=Message.Kind.TEMPLATE, direction=Message.Direction.OUTBOUND)
     if campaign_templates:
-        query = query.filter(template_id__in=campaign_templates)
+        query = query.filter(Q(template_id__in=campaign_templates) | Q(payload__source=FOLLOW_UP))
     return query.select_related("template").order_by("-pk").first()

@@ -2,7 +2,9 @@
 
 A tap needs no model: it sets the appointment's state, alerts the agents and
 sends the owner's own words back ("Perfect. See you shortly."), in the
-customer's language. It works even after "Move to inbox" (the meeting still
+customer's language. In a shops chat, "Need to Reschedule" gets the two nearest
+free slots from the slot finder instead of an open question (board T44); the
+time they pick then re-books through the assistant's normal turn. It works even after "Move to inbox" (the meeting still
 stands), and its alert goes out even when the assistant is switched off; only
 the reply then stays unsent. A tap that is not on our reminder for a meeting
 around now (reminders.tap_on_reminder) is left to the assistant's normal
@@ -35,11 +37,29 @@ STATES = {
 }
 
 
-def reply_line(action: str, language: str) -> str:
-    """The owner's words for a tap (rules 54-56), in the customer's language."""
+def reply_line(action: str, language: str, slots: list | None = None, now=None) -> str:
+    """The owner's words for a tap (rules 54-56), in the customer's language. ``slots``: a
+    shops chat's two nearest free starts, offered for "Need to Reschedule" (T44)."""
     if action == "on_my_way":
         return filters.on_my_way(language)
+    if action == "reschedule" and slots is not None:
+        from . import shop_flow
+
+        return shop_flow.reschedule_text(language, slots, now)
     return rules.line("ask_eta" if action == "running_late" else "ask_new_time", language)
+
+
+def _reschedule_slots(conversation, appointment, now) -> list | None:
+    """A shops chat's two nearest free slots for a move (never the one they have), else None."""
+    from .. import lane
+
+    if lane.playbook_for(conversation) != lane.IC_SHOPS:
+        return None
+    from . import engine
+
+    taken = engine.taken_slots(conversation, now)
+    own = [appointment.starts_at] if appointment.starts_at else []
+    return hours.offer_pair(now, LeadAiSettings.load().closed_dates, [*taken, *own])
 
 
 def handle(message_id: int) -> str:
@@ -82,11 +102,12 @@ def handle(message_id: int) -> str:
     reason = f"tap: {action}"
     if LeadAiSettings.load().answers(conversation.contact.wa_id) and _window_open(conversation, now):
         language = LeadAiChatState.objects.filter(conversation=conversation).values_list("language", flat=True).first() or "en"
+        slots = _reschedule_slots(conversation, appointment, now) if action == "reschedule" else None
         try:
             from apps.inbox import services as inbox_services
 
             sent = inbox_services.send_text(
-                conversation, None, reply_line(action, language), payload={"source": SOURCE, "turn": turn.pk}
+                conversation, None, reply_line(action, language, slots, now), payload={"source": SOURCE, "turn": turn.pk}
             )
             reply_id = sent.pk
             outcome = LeadAiTurn.Status.REPLIED

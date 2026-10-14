@@ -8,7 +8,9 @@
  *   as shops_facts, brand_name and viewing_agent_name; the server checks every
  *   value and answers errors keyed "shops_facts.types.1.rent_to" and so on.
  * - The thread header's "Follow-up 12 Nov" chip: the customer said yes to
- *   "Should I check back with you in a month?" (lead_ai_ai.followup_due_at).
+ *   "Should I check back with you in a month?" (lead_ai_ai.followup_due_at);
+ *   and "Follow-up waits" while Template B is not approved on the chat's
+ *   number (lead_ai_ai.followup_note).
  *
  * Everything is built with el(): no innerHTML, whatever an admin typed.
  */
@@ -61,6 +63,16 @@ export function followUpChip(conversation) {
     { title: "The customer asked us to check back with them; the follow-up goes out on this day (Dubai time)." },
     [`Follow-up ${label}`]
   );
+}
+
+/**
+ * "Follow-up waits" when the chat's automatic follow-up (Template B) cannot go yet because the
+ * template is not approved on its number (lead_ai_ai.followup_note, the server's own words); else null.
+ */
+export function followUpNote(conversation) {
+  const note = String(conversation?.lead_ai_ai?.followup_note || "").trim();
+  if (!note) return null;
+  return el("span.lai-chip.lai-chip--wait", { title: note }, ["Follow-up waits"]);
 }
 
 /** The shops facts as read-only rows, for an agent who cannot change the settings. */

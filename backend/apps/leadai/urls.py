@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import bitrix_views, media_views, views
 
 app_name = "leadai"
 
@@ -12,4 +12,12 @@ urlpatterns = [
     path("chats/<int:pk>/resume-ai/", views.chat_resume_ai, name="chat-resume-ai"),
     path("chats/<int:pk>/appointment/cancel/", views.appointment_cancel, name="appointment-cancel"),
     path("settings/", views.assistant_settings, name="settings"),
+    # The shops playbook's media library (board T30).
+    path("shop-media/", media_views.library, name="shop-media"),
+    path("shop-media/reorder/", media_views.reorder, name="shop-media-reorder"),
+    path("shop-media/<int:pk>/", media_views.item, name="shop-media-item"),
+    path("shop-media/<int:pk>/replace/", media_views.replace, name="shop-media-replace"),
+    path("shop-media/<int:pk>/file/", media_views.file, name="shop-media-file"),
+    # A person's Bot Status in Bitrix (board T52, C12): signed, no session.
+    path("bitrix/bot-status/", bitrix_views.bot_status, name="bitrix-bot-status"),
 ]

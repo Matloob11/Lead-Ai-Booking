@@ -44,7 +44,7 @@ from apps.leadai.models import (
     LeadAiSettings,
     LeadAiTurn,
 )
-from apps.leadai.tests.test_assistant import NOW, TUESDAY_5PM, _outbound, answer, fake_send_location, fake_send_text
+from apps.leadai.tests.test_assistant import NOW, TUESDAY_5PM, _outbound, answer, fake_send_list, fake_send_location, fake_send_text
 from apps.leadai.tests.test_eval_command import answer as eval_answer
 from apps.leadai.tests.test_first_chat_fixes import FirstChatBase
 
@@ -80,6 +80,13 @@ class ShopsBase(FirstChatBase):
         super().setUp()
         lane.mark_campaign(self.campaign, playbook=self.playbook)
         self.fields_delay = self.stub("apps.leadai.tasks.write_crm_fields.delay")
+        # Batch 2b's sends: a type's media and the licence copy run as their own tasks;
+        # the shop types list goes through its own send (shop_media.send_list).
+        self.media_delay = self.stub("apps.leadai.tasks.send_shop_media.delay")
+        self.licence_delay = self.stub("apps.leadai.tasks.write_licence_file.delay")
+        self.list_send = patch("apps.leadai.shop_media.send_list", side_effect=fake_send_list)
+        self.sent_lists = self.list_send.start()
+        self.addCleanup(self.list_send.stop)
         self.requests = []
 
     def stub(self, target):
@@ -1179,11 +1186,11 @@ class FieldsQueueTests(ShopsBase):
         self.later(1)
         _, _, crm_delay, _ = self.turn(booking, [shop_answer("", action="confirm", place="office", date="2026-10-13", time="17:00")])
         self.assertIn((crm_fields.FIELD_BOT_STATUS, "2477"), self.fields())
-        crm_delay.assert_called_once()  # the stage and meeting time still go the REST way (board T55)
+        crm_delay.assert_called_once()  # the stage, meeting time and to-do: the tool's booking action (board T55)
 
     def test_the_tool_is_the_only_way_these_fields_are_written(self):
         facts = {"shop_type": "type_2", "licence_kind": "new"}
-        with patch("apps.crmlink.client.update_fields") as rest, patch("apps.leadai.assistant.crm.update_lead") as lead_update:
+        with patch("apps.crmlink.client.update_fields") as rest:
             self.turn(self.inbound("Medium shop please, new licence"), [shop_answer("Type 2 then.", facts=facts)])
             ids = list(LeadAiCrmField.objects.values_list("pk", flat=True))
             with override_settings(LEADAI_BITRIX_FIELDS_URL=FIELDS_URL, CRM_LEAD_WA_SECRET="test-crm-secret"), patch(
@@ -1191,7 +1198,7 @@ class FieldsQueueTests(ShopsBase):
             ) as post:
                 tasks.write_crm_fields.apply(args=[ids])
         rest.assert_not_called()
-        lead_update.assert_not_called()
+        self.assertFalse(hasattr(crm, "update_lead"))  # no REST lead update is left anywhere (board T55)
         self.assertEqual(post.call_args.args[0], FIELDS_URL)
         body = json.loads(post.call_args.kwargs["content"])
         self.assertEqual(body["fields"], {crm_fields.FIELD_BOT_STATUS: 2476, crm_fields.FIELD_SHOP_TYPE: 2472, crm_fields.FIELD_LICENCE: 2457})
@@ -1240,12 +1247,19 @@ class ShopsConfirmationTests(ShopsBase):
 
     def test_a_reschedule_and_another_language(self):
         LeadAiAppointment.objects.create(conversation=self.conversation, status="confirmed", starts_at=TUESDAY_5PM)
-        message = self.inbound("Can we make it Wednesday at 5 pm?")
+        message = self.inbound("هل يمكن أن نجعله يوم الأربعاء الساعة 5 مساءً؟")
         outcome, _, _, _ = self.turn(message, [shop_answer("", action="reschedule", place="office", date="2026-10-14", time="17:00", language="ar")])
         text = self.body(outcome)
         self.assertTrue(text.startswith("تم تأكيد موعد المعاينة ✅\nالتاريخ: Wednesday 14 October\nالوقت: 5:00 PM"))
         self.assertIn("دفتر الشيكات", text)
         self.assertEqual(LeadAiAppointment.objects.get().starts_at, WEDNESDAY_5PM)
+        # Typed in English letters, the move is written in English whatever language the model named
+        # (script.follow with script.LATIN; batch 2b gate, lang-inshallah-english).
+        self.later(5)
+        again = self.inbound("Sorry, can we make it Thursday at 5 pm?", seconds_ago=10)
+        outcome, _, _, _ = self.turn(again, [shop_answer("", action="reschedule", place="office", date="2026-10-15", time="17:00", language="ar")])
+        self.assertTrue(self.body(outcome).startswith("Your viewing is confirmed ✅\nDate: Thursday 15 October\nTime: 5:00 PM"), self.body(outcome))
+        self.assertEqual(self.actions(again)["line_language"], "en")
         for language in ("ur_latin", "ur", "hi_latin", "hi"):
             with self.subTest(language=language):
                 other = shops.confirmation(language, TUESDAY_5PM, shop_type="type_2", office_address=ADDRESS)
@@ -1305,10 +1319,11 @@ class ShopsEvalTests(TestCase):
                 self.assertEqual((requests, run.out, run.out_by, run.failures), ([], line, leadai_eval.CODE, []))
 
     def test_an_open_when_is_rewritten_and_a_taken_slot_refused_as_live(self):
-        run, _ = self.run_with("shops-invite", eval_answer("Perfect. When would you like to come to see the shops?", invited=True, facts={"licence_kind": "ded"}))
+        # A new licence (batch 2b: a DED or Trakhees one gets its copy asked for first, shops-licence-ask).
+        run, _ = self.run_with("shops-invite", eval_answer("Perfect. When would you like to come to see the shops?", invited=True, facts={"licence_kind": "new"}))
         self.assertEqual(run.out, f"Perfect. {TWO_SLOTS_NOW}")
         self.assertEqual(run.failures, [])
-        run, _ = self.run_with("shops-invite", eval_answer("Perfect. Would today at 3:00 PM or 5:00 PM work?", invited=True, facts={"licence_kind": "ded"}))
+        run, _ = self.run_with("shops-invite", eval_answer("Perfect. Would today at 3:00 PM or 5:00 PM work?", invited=True, facts={"licence_kind": "new"}))
         self.assertIn("offers 15:00, which another client has", run.failures)
         booked = eval_answer("", action="confirm", place="office", date="2026-10-13", time="17:00")
         run, requests = self.run_with("shops-taken", booked, booked)
@@ -1771,4 +1786,6 @@ class ReviewSmallTests(ShopsBase):
         self.turn(self.inbound("Join our crypto group now, forward to 10 friends"), [shop_answer("", send=False, opt_out="spam")])
         alert = LeadAiAlert.objects.get(kind="opt_out")
         self.assertIn("Junk Lead", alert.text)
-        self.assertIn("move the lead back in Bitrix by hand: Resume only restarts the assistant", alert.text)
+        # Resume restarts the assistant and takes the phone off the registry (board review 2b); the lead
+        # in Bitrix is still moved back by hand.
+        self.assertIn("takes the phone off the registry again) and move the lead back in Bitrix by hand", alert.text)

@@ -207,6 +207,13 @@ def _sentence_key(sentence: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", str(sentence or "").casefold()).split())
 
 
+def said_before(text: str, sent: list[str]) -> bool:
+    """Every sentence of ``text`` is one that an earlier message of ours (``sent``) said word for word."""
+    said = {_sentence_key(s) for message in sent for s in _SENTENCE.split(message or "") if _sentence_key(s)}
+    keys = [_sentence_key(s) for s in split_sentences(text)]
+    return bool(keys) and all(key in said for key in keys)
+
+
 def drop_repeats(text: str, sent: list[str], keep=None) -> tuple[str, bool]:
     """The reply without the sentences one of our earlier messages already said word for
     word (the shops build pack: never the same sentence twice in a chat).
