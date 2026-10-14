@@ -247,7 +247,7 @@ Cursor owns these. Claim each one in its row before starting, follow CLAUDE.md f
 | C16 | **Say it loudly when the gateway runs out of credit, and stop burning retries** (2026-10-14: "Insufficient credits … Available credits are 1.8829" failed 55 of campaign 408's 58 sends and most other sends). When a send fails with that error:<br>- **Campaign retries:** the recipient waits as "no credit", is retried only after credit returns, and never becomes "exhausted" for it.<br>- **Banner:** the Official panel shows a red banner "WhatsApp credit is out — messages are not going".<br>- **Bell:** a Bitrix bell goes to the Lead AI alert users (2311), at most once an hour.<br>If the gateway has a balance endpoint, poll it hourly and warn below a threshold (setting, default 50). Tests; deploy the CLAUDE.md way | `backend/apps/campaigns/**`, `backend/apps/gateway/**`, panel banner (new module) | Done (2026-10-14) — insufficient-credit waits (never exhausted); banner + `/api/gateway/credit/`; hourly poll; bell ≤1/h. Tests 9 OK. gateway.0003 live. Four services up. |
 | C17 | **Remove the dead `backfill_placeholder_bodies.delay()`** in `backend/apps/gateway/tasks.py:127`, with its `cache` import and the `if cache.add(...)` line (flagged 2026-10-08). After every restart it raises a NameError on the first webhook and that event is retried 30 s later. Prove: after a deploy, no NameError in `ops/wa.sh logs app worker 400` | `backend/apps/gateway/tasks.py` | Done (2026-10-14) — dead backfill call removed. After up, worker log has no NameError; webhook process_webhook_event succeeded. |
 | C18 | **No dead verbs in `ops/wa.sh`**: 11 verbs call `ops/catalog` probes deleted on 2026-09-29. Remove those verbs and their usage lines (or restore a probe if it is still wanted; say which). `bash -n` clean; each remaining catalog verb's script exists | `ops/wa.sh` | Done (2026-10-14) — removed 16 verbs whose catalog scripts were missing; bash -n clean; every remaining catalog verb's script exists. |
-| C19 | **Report only: lead and contact names that hold a portal title** ("Bayut WhatsApp \| Sabeer" in NAME). Count them per source and per field (lead NAME, contact NAME). Show 10 examples and the clean value C1's rule would give. Propose a one-off fix. **No CRM writes**: Matloob decides | read-only Bitrix SQL, this board | Open |
+| C19 | **Report only: lead and contact names that hold a portal title** ("Bayut WhatsApp \| Sabeer" in NAME). Count them per source and per field (lead NAME, contact NAME). Show 10 examples and the clean value C1's rule would give. Propose a one-off fix. **No CRM writes**: Matloob decides | read-only Bitrix SQL, this board | Done (2026-10-14) — report below; no CRM writes. Contacts 1839 with \| in NAME (1771 portal-style); leads 67 (none portal-style). |
 
 ### Lead fields tool contract (C6)
 
@@ -326,6 +326,65 @@ There is no stage named exactly "Reject". The failed one with a required field i
 The shared Leads preset **IC shops — ready for Lead AI** uses **Unit Type** `UF_CRM_1731838348693` = **Shop** (enum 384). That is the only lead field whose value is the word Shop. Client Type is Buyer / Seller / Tenant / owner (4,195 of the 5,010 International City leads are Tenant, almost all with an empty unit type). Purpose is investor / myself / agent / broker. Property Segment Commercial is 26 leads and is not the shop list. Community is the text field `UF_CRM_1770537051525`, and every Shop-typed lead in it is International City (35, of which 34 have a phone).
 
 The preset also requires Community = International City, Bot Status empty or New (2475) or Qualifying (2476), WhatsApp Opt-out empty or No (not Yes 2482), and a phone. It is a common preset and is on each administrator's own filter list. Bot Status, Shop Type Wanted and WhatsApp Opt-out are columns on all 12 administrators' saved Leads grids. Preset count 34, SQL count 34.
+
+## Portal titles in NAME (C19) — report only, no CRM writes
+
+Read-only Bitrix SQL (`NAME LIKE '%|%'`). Counts are for the **NAME** field only (not TITLE).
+
+### Totals by field
+
+| Field | Rows with `\|` in NAME |
+|---|---|
+| Lead NAME | **67** |
+| Contact NAME | **1839** |
+
+### By source
+
+**Leads** (all 67 are "Person \| Company / note", not a portal title — none start with Bayut / Property Finder / Dubizzle):
+
+| SOURCE_ID | Label | n |
+|---|---|---|
+| UC_KQ0WO3 | Property Finder WhatsApp | 38 |
+| UC_Y3VNS9 | Bayut WhatsApp | 22 |
+| WEBFORM | CRM form | 3 |
+| UC_BUIJB2 / UC_7J0E2Q / UC_VX4335 / WZ… | Dubizzle / Personal / Omni / WhatsApp channel | 1 each |
+
+**Contacts** (all 1839 are source `UC_7J0E2Q` Personal). By NAME prefix:
+
+| KIND | n |
+|---|---|
+| Property Finder… | 1039 |
+| Bayut… | 714 |
+| Dubizzle… | 18 |
+| other `\|` | 68 |
+
+So the "Bayut WhatsApp \| Sabeer" problem is almost entirely **contact NAME**, not lead NAME. Lead TITLE still holds the portal string (C1 already reads TITLE after the last `|` when NAME is a real first name).
+
+### Ten contact examples and what C1 greets today
+
+C1 maps contact/lead `NAME` → `first_name` and takes the **first word** when that word looks real. It does **not** strip a `|` inside NAME first. So a portal string in NAME greets the portal brand:
+
+| ID | NAME | C1 greets as | After last `\|` (intended) |
+|---|---|---|---|
+| 89634 | Property Finder WhatsApp \| Shanaz | Property | Shanaz |
+| 89633 | Bayut WhatsApp \| Sabeer | Bayut | Sabeer |
+| 89632 | Bayut WhatsApp \| محمد | Bayut | محمد |
+| 89631 | Bayut WhatsApp \| حسىب | Bayut | حسىب |
+| 89630 | Property Finder WhatsApp \| Aslam Salim | Property | Aslam Salim |
+| 89629 | Property Finder WhatsApp \| Nagesh...J | Property | Nagesh...J |
+| 89628 | Bayut WhatsApp \| بودا❤ | Bayut | بودا❤ |
+| 89627 | Bayut WhatsApp \| Ben | Bayut | Ben |
+| 89626 | Property Finder Call \| | Property | *(empty → "there")* |
+| 89625 | Property Finder WhatsApp \| AlKo LuQs | Property | AlKo LuQs |
+
+Lead examples with `|` in NAME (e.g. `Adhith | TPH GROUP`) already greet the person's first word (`Adhith`); leave those alone.
+
+### Proposed one-off fix (Matloob decides)
+
+1. **CRM data (contacts only):** one SQL/admin script that, for contacts whose NAME matches `^(Bayut|Property Finder|Dubizzle).+\|`, sets `NAME` to the trimmed part after the last `|` (or clears it when that part is empty). Do not touch the 67 lead rows — they are agent/company tags, not portal titles.
+2. **Greeting rule (C1 follow-up):** in `lead_display_name` / `a7_lead_wa_display`, if `first_name` contains `|`, run the same after-pipe + honorific path before taking the first word, so a future portal paste cannot greet as "Bayut" even before a cleanup.
+
+No writes were made for this report.
 
 ## Field-only lead updates (C4)
 

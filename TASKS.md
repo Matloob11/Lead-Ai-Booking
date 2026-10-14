@@ -1,3 +1,9 @@
+## 2026-10-14 — Portal titles in NAME report (Cursor)
+
+C19 read-only. Contact NAME holds a portal title on 1839 rows (all source Personal): Property Finder 1039, Bayut 714, Dubizzle 18, other 68. Lead NAME has `|` on 67 rows, none portal-style (they are "Person | Company"). C1 greets the first word of NAME, so "Bayut WhatsApp | Sabeer" becomes "Bayut". Proposed: one-off contact NAME cleanup to the part after the last `|`, plus a C1 follow-up that strips `|` inside first_name. No CRM writes.
+
+---
+
 ## 2026-10-14 — Drop dead ops/wa.sh catalog verbs (Cursor)
 
 Removed 16 verbs whose `ops/catalog` scripts were gone (diag-131026, diag-audio-urls, diag-media-337/337b, diag-villa-nova2-error, fix-waba-typo-971507563104, probe-alots-hvalue-create, probe-alots-media-template, probe-alots-panel-session, probe-bulk-campaign, probe-empty-template-wabas, probe-meta-graph, probe-openai-configured, probe-openai-credits, probe-plus-recipient, probe-utility-rewrite). Usage lines and the trailing probe calls from `set-meta-graph-token` / `set-alots-ui-cookie` went with them. `bash -n` clean; every remaining catalog verb's script exists. None restored.
