@@ -8,9 +8,17 @@ every property in ``required`` and ``additionalProperties: false``;
 "unknown" is null through a type list, and a nullable enum lists null in both
 its type and its values. ``normalize`` then cleans whatever came back: the
 schema shapes the answer, code is the gate.
+
+A shops chat (the International City shops playbook) answers SHOPS_SCHEMA: the
+same answer, with the shop facts the build pack collects (shop_type,
+licence_kind, opening_when, already_rented), ``notes`` as the list of questions
+our agent must answer at the viewing, and "spam" as an opt-out. SCHEMA itself
+is left exactly as it was, so a general chat's request does not change.
 """
 
 from __future__ import annotations
+
+import copy
 
 LANGUAGES = ("en", "ar", "ur_latin", "ur", "hi_latin", "hi", "other")
 SEGMENTS = (
@@ -202,6 +210,73 @@ SCHEMA = {
 }
 
 
+# The shops playbook's answer ---------------------------------------------------------------
+
+SHOP_TYPES = ("type_1", "type_2", "type_3", "not_sure")
+LICENCE_KINDS = ("ded", "trakhees", "new", "none")
+SHOPS_OPT_OUT = (*OPT_OUT, "spam")
+NOTES_MAX = 5
+NOTE_MAX = 120
+SHOPS_TEXT_FACTS = (*(key for key in TEXT_FACTS if key != "notes"), "opening_when")
+SHOPS_BOOL_FACTS = (*BOOL_FACTS, "already_rented")
+SHOPS_ENUM_FACTS = {**ENUM_FACTS, "shop_type": SHOP_TYPES, "licence_kind": LICENCE_KINDS}
+SHOPS_FACT_KEYS = (
+    *(key for key in FACT_KEYS if key not in ("preapproval", "notes")),
+    "licence_kind",
+    "shop_type",
+    "opening_when",
+    "already_rented",
+    "preapproval",
+    "notes",
+)
+
+
+def _shops_schema() -> dict:
+    node = copy.deepcopy(SCHEMA)
+    facts = node["properties"]["facts"]
+    old = facts["properties"]
+    properties = {key: old[key] for key in SHOPS_FACT_KEYS if key in old and key != "notes"}
+    properties["for_client"] = _bool(
+        "True if the shop is for a client of theirs (a broker or agent), false if it is for themselves, null until they say."
+    )
+    properties["licence_kind"] = _enum(
+        LICENCE_KINDS, "ded (Dubai mainland), trakhees, new (they will open a new licence) or none, as they said; else null."
+    )
+    properties["shop_type"] = _enum(SHOP_TYPES, "The shop type they chose or you recommended from MATCH; else null.")
+    properties["opening_when"] = _text("When they want to open the shop, e.g. 'next month', else null.")
+    properties["already_rented"] = _bool("True if they say they already rented a shop, else null.")
+    properties["notes"] = {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Only the NEW questions our agent must answer at the viewing (service charge, DEWA, parking, "
+        "fit-out, ...), in English, a few words each; [] when there are none.",
+    }
+    facts["properties"] = {key: properties[key] for key in SHOPS_FACT_KEYS}
+    facts["required"] = list(SHOPS_FACT_KEYS)
+    node["properties"]["opt_out"] = {"type": "string", "enum": list(SHOPS_OPT_OUT)}
+    return node
+
+
+SHOPS_SCHEMA = _shops_schema()
+
+
+def schema_for(shops: bool) -> dict:
+    return SHOPS_SCHEMA if shops else SCHEMA
+
+
+def _notes(value) -> list[str]:
+    """The questions for our agent: short English strings, at most NOTES_MAX, no repeats."""
+    items = value if isinstance(value, list) else []
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        text = _clean(item, NOTE_MAX)
+        if text and text.casefold() not in {note.casefold() for note in out}:
+            out.append(text)
+    return out[:NOTES_MAX]
+
+
 def _clean(value, limit: int = TEXT_MAX):
     if value is None:
         return None
@@ -229,21 +304,29 @@ def _number_value(value):
     return number if 0 < number < 1e12 else None
 
 
-def normalize(data: dict) -> dict:
-    """The model's answer with every value cleaned, bounded and checked."""
+def normalize(data: dict, shops: bool = False) -> dict:
+    """The model's answer with every value cleaned, bounded and checked.
+
+    ``shops``: the answer follows SHOPS_SCHEMA (a shops chat).
+    """
     data = data if isinstance(data, dict) else {}
     facts_in = data.get("facts") if isinstance(data.get("facts"), dict) else {}
     facts = {}
-    for key in FACT_KEYS:
+    keys, texts, bools, enums = (
+        (SHOPS_FACT_KEYS, SHOPS_TEXT_FACTS, SHOPS_BOOL_FACTS, SHOPS_ENUM_FACTS) if shops else (FACT_KEYS, TEXT_FACTS, BOOL_FACTS, ENUM_FACTS)
+    )
+    for key in keys:
         value = facts_in.get(key)
-        if key in TEXT_FACTS:
+        if shops and key == "notes":
+            facts[key] = _notes(value)
+        elif key in texts:
             facts[key] = _clean(value)
         elif key in NUMBER_FACTS:
             facts[key] = _number_value(value)
-        elif key in BOOL_FACTS:
+        elif key in bools:
             facts[key] = value if isinstance(value, bool) else None
         else:
-            facts[key] = _enum_value(value, ENUM_FACTS[key])
+            facts[key] = _enum_value(value, enums[key])
 
     appointment_in = data.get("appointment") if isinstance(data.get("appointment"), dict) else {}
     action = _enum_value(appointment_in.get("action"), ACTIONS) or "none"
@@ -266,7 +349,7 @@ def normalize(data: dict) -> dict:
         "facts": facts,
         "appointment": appointment,
         "handover": {"needed": needed, "reason": reason if needed else None},
-        "opt_out": _enum_value(data.get("opt_out"), OPT_OUT) or "none",
+        "opt_out": _enum_value(data.get("opt_out"), SHOPS_OPT_OUT if shops else OPT_OUT) or "none",
         "hot_lead": data.get("hot_lead") is True,
         "invited_to_meeting": data.get("invited_to_meeting") is True,
         "share_office_location": data.get("share_office_location") is True,

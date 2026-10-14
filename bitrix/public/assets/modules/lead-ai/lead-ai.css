@@ -391,6 +391,12 @@
   color: #9fb0c4;
 }
 
+/* A shops chat the assistant will check back with ("Follow-up 12 Nov"). */
+.lai-chip--followup {
+  --lai-chip: #38bdf8;
+  color: #bae6fd;
+}
+
 /* Read by screen readers, not drawn. */
 .lai-sr {
   position: absolute;
@@ -1376,6 +1382,82 @@ textarea.lai-set__input {
 
 .lai-set__actions--start {
   justify-content: flex-start;
+}
+
+/* The International City shops facts in the AI settings (shops.js). */
+.lai-shops {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 12px;
+  min-width: 0;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.lai-shops__legend {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+
+.lai-shops__scroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.lai-shops__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lai-shops__table th,
+.lai-shops__table td {
+  padding: 4px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.lai-shops__table thead th {
+  font-weight: 700;
+  color: #9fb0c4;
+}
+
+.lai-shops__table tbody th {
+  font-weight: 700;
+  color: #dbe5f1;
+}
+
+.lai-shops__table .lai-set__input {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.lai-shops__text {
+  min-width: 90px;
+}
+
+.lai-shops__num {
+  min-width: 82px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lai-shops__errors {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #fca5a5;
+}
+
+.lai-shops__errors[hidden] {
+  display: none;
 }
 
 /* The assistant's on/off switch: a real checkbox (role="switch") under a drawn track. */

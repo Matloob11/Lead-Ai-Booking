@@ -1012,12 +1012,17 @@ class EvalMirrorTests(TestCase):
         run, _ = self.run_with("location-again", eval_answer("It is in the message above.", share_location=True))
         self.assertEqual(run.out, "It is in the message above.")
         self.assertIn("LOCATION ALREADY SENT: yes", leadai_eval.build(scenario("location-again")).context)
-        # As live, the address typed again is cut (engine.settle), and the reply still had to point to it;
-        # a reply that is only the address stays, and fails.
+        # As live, the address typed again is cut (engine.settle) and code's line points to it
+        # (engine.point_to_location); a reply that is only the address becomes that line.
+        pointer = rules.line("location_above", "en")
         run, _ = self.run_with("location-again", eval_answer(f"Sure, we are at {ADDRESS}. See you soon."))
-        self.assertEqual((run.out, run.failures), ("See you soon.", ["does not point to the location already sent"]))
+        self.assertEqual((run.out, run.failures), (f"{pointer} See you soon.", []))
+        self.assertEqual(run.answer["trimmed"], ["location"])
         run, _ = self.run_with("location-again", eval_answer(f"We are at {ADDRESS}."))
-        self.assertIn("repeats the office address the chat already has", run.failures)
+        self.assertEqual((run.out, run.failures, run.answer["pointed"]), (pointer, [], "location"))
+        # The model's own times, with no word of the location (two of batch 2a's runs): the line opens it.
+        run, _ = self.run_with("location-again", eval_answer("Would you like to visit us tomorrow at 10 AM, 2 PM or 5 PM?"))
+        self.assertEqual((run.out, run.failures), (f"{pointer} Would you like to visit us tomorrow at 10 AM, 2 PM or 5 PM?", []))
 
     def test_asked_for_again_the_location_goes_again_as_live(self):
         again = leadai_eval.Scenario(

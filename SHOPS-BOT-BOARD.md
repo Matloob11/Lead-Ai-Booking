@@ -103,7 +103,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | D2 | Office: final address, Google Maps link, pin latitude/longitude | Matloob sends |
 | D3 | Brand + the `{{2}}` name in "this is {{2}} from {{3}}" | **AR Properties**; `{{2}}` typed per campaign: "Malik" or "Matloob" (template sample: Malik) |
 | D4 | Sending numbers | **decided**: active 971 numbers, not coexistence, not assigned: 971581058719, -720, -721, -722, -723, -724, -725, -726 (Coastline Properties / Blue Brick). 971507563104 left out: in daily use (1,755 inbound) with no templates. Only -725 has a proven inbound webhook; the other 7 have never received a message, so each gets one test message before use. `ic_shops_followup` is approved on all 8; `a7_leadai_meeting_reminder` on none (T05) |
-| D5 | Media: per type 1 MP4 under 16 MB (30–60 s) + up to 6 photos; office-front photo; Type 1 walkthrough for Template A's header | Matloob sends |
+| D5 | Media: per type 1 MP4 under 16 MB (30–60 s) + up to 6 photos; office-front photo; Type 1 walkthrough for Template A's header | **Received 2026-10-14** in `backend/Types shops/` (kept out of git). Type 1: 4 photos + MP4 4.7 MB. Type 2: 4 photos + MP4 8.9 MB. Type 3: 7 photos + MP4 4.9 MB. Still missing: the office-front photo. The Type 2 folder is named "700 800 sqft" while the build pack says 600-800: Matloob to confirm |
 | D6 | Shop agent | **decided** (Q12) |
 | D7 | The leads | **decided**: International City **shop** leads picked in the Bitrix lead list (filter or ticks; the final pick is real IC shop leads only). The "Mudon" link was a mistake |
 | D8 | Test phones | Matloob gives them when Claude asks at test time |
@@ -139,7 +139,9 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | T16 | Booking, broker and handover alerts reach Matloob (Bitrix 2311) as well as the chat owner; stop belling a CRM responsible who cannot open the chat | Claude | — | Done (2026-10-13) — `alert_bitrix_user_ids` = 2311 (`ops/wa.sh leadai-alert-ids`) |
 | T17 | Eval cases from chat 35283: location request, deferral, bare Yes, repeated address; replay the address append in `outgoing()` | Claude | — | Done (2026-10-13) — 54 scenarios; 97.2% on the draft, 95.4% on the deployed image |
 
-| T18 | Code guard: a customer's own exact time inside office hours ("Can I come Wednesday at 5 pm?") is confirmed even when the model answers tentative. `probe-leadai-turn` came back tentative in 1 of 3 runs on 2026-10-13 | Claude | — | Open |
+| T18 | Code guard: a customer's own exact time inside office hours ("Can I come Wednesday at 5 pm?") is confirmed even when the model answers tentative. `probe-leadai-turn` came back tentative in 1 of 3 runs on 2026-10-13 | Claude | — | Done (2026-10-14) — `upgrade_exact_time` live. probe-leadai-turn 19/19 three times, "upgraded": true. Fixed two false hedges on the way: a size or price after around/about/from ("around 400 sq ft") and "open my shop" |
+| T19 | An Urdu-script customer gets an Urdu-script reply. In eval `lang-urdu` the model answered in English or Roman Urdu in 3 of the last 4 runs. The model input is byte-identical to batch 1, where it passed 4/4, so this is model variance, not a code change. Guard: when the reply's script is not the customer's, one corrective retry, as for a refused slot | Claude | — | Open |
+| T56 | The model copies SHOPS_SYSTEM's MATCH example: "For a mobile shop, Type 1 is perfect" was sent to a vape business and in a broker chat. Make the example generic and add a code guard that fills in the customer's own business | Claude | — | Open |
 
 ### P2 — The shops conversation (Bot 2)
 
@@ -147,13 +149,13 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 |---|---|---|---|---|
 | T20a | `LeadAiCampaign.playbook` (`general` / `ic_shops`, default `general`) + migration; `lane.mark_campaign(campaign, playbook="general")`; a retry inherits the playbook. Ship first, backward compatible | Claude | — | Done (2026-10-13) — live (e184492, migration 0003). **Cursor: C2's Django part can go now** |
 | T20b | The popup "Script" choice and its pass-through to `mark_campaign` (C2) | Cursor | T20a | Open |
-| T21 | Shop facts, brand, persona and agent name editable in AI settings, fed into the context; allow-list the PDF amounts in `clean_reply` | Claude | D1, D3 | Blocked D1 |
-| T22 | Shops prompt: old-lead mode, react first, honesty line with brand, real urgency only, the PDF objection answers, unknowns → "our agent will confirm at the viewing" + note, no sentence twice (code guard) | Claude | Q4 | Open |
-| T23 | First reply after Template A is the fixed "Is the shop for yourself, or are you checking for a client?" (code-written) | Claude | Q4 | Open |
-| T24 | Broker: the exact hand-off line; a **Broker** label on the chat, shown in the Lead AI list and thread (filterable); bot silent until Resume; alert to Matloob with the number and the campaign; Bitrix marker once C3 gives the field | Claude (+ Cursor field) | — | Partly done (2026-10-13) — label, paused until Resume, Brokers filter, alert to 2311, the ic_shops line. Next: Purpose = Broker (2467) through the C6 tool (T51) |
-| T25 | "Not now" → "Should I check back with you in a month?" → 30-day Template B or lost | Claude | Q9, Q10 | Blocked Q9 |
-| T26 | "Stop messages" (button or text) → "Done, you won't receive more messages from us." + global opt-out (T60) | Claude | Q8 | Blocked Q8 |
-| T27 | Already rented → congratulate, ask about a second shop or a referral → lost "already rented" | Claude | Q10 | Blocked Q10 |
+| T21 | Shop facts, brand, persona and agent name editable in AI settings, fed into the context; allow-list the PDF amounts in `clean_reply` | Claude | D1, D3 | Done (2026-10-14) — `shops_facts`, `brand_name` (AR Properties) and `viewing_agent_name` in AI settings. Defaults are the build-pack facts; Matloob edits the final rents there |
+| T22 | Shops prompt: old-lead mode, react first, honesty line with brand, real urgency only, the PDF objection answers, unknowns → "our agent will confirm at the viewing" + note, no sentence twice (code guard) | Claude | Q4 | Done (2026-10-14) — SHOPS_SYSTEM with its own cache key; FACTS, MATCH, FREE/TAKEN SLOTS in the context; react first, honesty line, objection lines, unknowns get "our agent will confirm" + notes; a sentence never sent twice |
+| T23 | First reply after Template A is the fixed "Is the shop for yourself, or are you checking for a client?" (code-written) | Claude | Q4 | Done (2026-10-14) — code-written, 6 languages, no model call |
+| T24 | Broker: the exact hand-off line; a **Broker** label on the chat, shown in the Lead AI list and thread (filterable); bot silent until Resume; alert to Matloob with the number and the campaign; Bitrix marker once C3 gives the field | Claude (+ Cursor field) | — | Done (2026-10-14) — label, paused until Resume, Brokers filter, alert to 2311, the build pack's line; Bitrix Purpose 2467 + Bot Status 2479 through C6 |
+| T25 | "Not now" → "Should I check back with you in a month?" → 30-day Template B or lost | Claude | Q9, Q10 | Partly done (2026-10-14) — the check-back question; a yes stores the follow-up date and shows a chip, a no is lost "1". Sending Template B on that date is T63 |
+| T26 | "Stop messages" (button or text) → "Done, you won't receive more messages from us." + global opt-out (T60) | Claude | Q8 | Done for the chat (2026-10-14) — the build pack's line + WhatsApp Opt-out 2482 / Bot Status 2481 through C6. The registry across every number is T60 |
+| T27 | Already rented → congratulate, ask about a second shop or a referral → lost "already rented" | Claude | Q10 | Done (2026-10-14) — congratulation + second-shop question; a no then is lost "1", reason "already rented" |
 | T28 | Old-lead context: lead creation date and CRM notes (as escaped data); never mention the age of the inquiry or "our database" | Claude | — | Open |
 | T29 | Silent client: one nudge after 2 h (about their business), one at 10:30 next day, inside the window; then a Follow-up status | Claude | Q10 | Open |
 
@@ -171,11 +173,11 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
-| T40 | Slot finder: 30-min grid 10:00–19:30, Mon–Sat, one client per slot, nearest free slot | Claude | Q6 | Blocked Q6 |
-| T41 | Invite with two concrete free slots; code guard; eval fails an open "when" | Claude | T40 | Open |
-| T42 | Shop type on the booking (facts, appointment, CRM) | Claude | D1 | Blocked D1 |
-| T43 | Confirmation in the PDF format + location pin + "bring licence / EID + cheque book" + "See you at {time}" | Claude | D2, D6 | Blocked D2 |
-| T44 | Reschedule offers the two nearest free slots | Claude | T40 | Open |
+| T40 | Slot finder: 30-min grid 10:00–19:30, Mon–Sat, one client per slot, nearest free slot | Claude | Q6 | Done (2026-10-14) — 30-min grid, one client per slot in every playbook, nearest free slots; office bookings re-checked under a Postgres advisory lock (proved on Postgres) |
+| T41 | Invite with two concrete free slots; code guard; eval fails an open "when" | Claude | T40 | Done (2026-10-14) — shops invitations name two free slots; an open "when" is rewritten for the day asked |
+| T42 | Shop type on the booking (facts, appointment, CRM) | Claude | D1 | Done (2026-10-14) — fact shop_type; Bitrix Shop Type Wanted through C6 |
+| T43 | Confirmation in the PDF format + location pin + "bring licence / EID + cheque book" + "See you at {time}" | Claude | D2, D6 | Done except the pin (2026-10-14) — the build pack's confirmation in 6 languages for shops. Address, Maps link and pin wait for D2 |
+| T44 | Reschedule offers the two nearest free slots | Claude | T40 | Partly done (2026-10-14) — a move never offers its own slot and a taken time gets the two nearest free; the "Need to reschedule" tap still asks an open question |
 | T45 | Reminder per the PDF (I'm on my way / Need to reschedule / Location); Location tap → pin | Claude | D4 | Blocked D4 |
 | T46 | ~~Assign the lead to the shop agent on booking~~ — not needed: the shop agent is Bitrix user 1 (admin, "hold" user) and alerts go to Matloob (Q12) | — | — | Dropped (2026-10-13) |
 | T47 | Agent alert on WhatsApp (later) | Claude | Q13 | Open |
@@ -185,10 +187,10 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | ID | Task | Owner | Needs | Status |
 |---|---|---|---|---|
 | T50 | Bitrix field map and the missing fields (C3) | Cursor | — | Open |
-| T51 | Write those fields whenever they change, not only at booking. Per C4, a REST `crm.lead.update` runs BP 235 on every edit (at stage 10 it clears Meeting Date & Time, plans a to-do and rewrites the title), so the writes go through a small HMAC-signed Bitrix tool that uses the CRM factory with `disableBizProc()` / `disableAutomation()` and never sends `STATUS_ID` / `ASSIGNED_BY_ID`. Cursor builds the tool, Claude calls it. Also check today's booking write (stage 10 + Meeting Date over REST) against BP 235 on a test lead | Claude + Cursor | T50 | Open |
+| T51 | Write those fields whenever they change, not only at booking. Per C4, a REST `crm.lead.update` runs BP 235 on every edit (at stage 10 it clears Meeting Date & Time, plans a to-do and rewrites the title), so the writes go through a small HMAC-signed Bitrix tool that uses the CRM factory with `disableBizProc()` / `disableAutomation()` and never sends `STATUS_ID` / `ASSIGNED_BY_ID`. Cursor builds the tool, Claude calls it. Also check today's booking write (stage 10 + Meeting Date over REST) against BP 235 on a test lead | Claude + Cursor | T50 | Done (2026-10-14) — Shop Type, business, licence and Bot Status written through C6 when they change (deduped, retried). The booking's stage write is still REST until T55 |
 | T52 | Bot Status set in Bitrix (Handed to agent / Broker / Opted out) silences the bot | Claude + Cursor | T50 | Open |
-| T53 | mark_lost: Not Interested (`1`) or Junk (`JUNK`) per Q10, with the reason in the client's words | Claude (+ Cursor tool, T51) | T51 | Open |
-| T54 | Each campaign reply (Yes / Not now / Stop) written to the lead | Claude | T50 | Open |
+| T53 | mark_lost: Not Interested (`1`) or Junk (`JUNK`) per Q10, with the reason in the client's words | Claude (+ Cursor tool, T51) | T51 | Done (2026-10-14) — lost moves to "1" or JUNK through C6, reason in the customer's words |
+| T54 | Each campaign reply (Yes / Not now / Stop) written to the lead | Claude | T50 | Partly done (2026-10-14) — Bot Status Qualifying on the first answer, Opted out on stop, Lost on no; a dedicated "campaign reply" field is not built |
 | T55 | **Booking CRM write through the C6 `booking` action** instead of REST `crm.lead.update`, because BP 235 wipes the meeting time (C7). Keep the per-event comment; drop the old to-do mover once C9 owns the to-do | Claude | — | Open — C9 is live (`cef5a977`); next Claude batch |
 
 ### P6 — Sending
@@ -347,7 +349,7 @@ Writing the time through C6 and then moving to stage 10 by the same REST call st
 
 ## Requests (one side asking the other)
 
-- **Claude → Cursor, 2026-10-13 ~13:15 UTC, BUILD LOCK.** The server build context (`/opt/a7-wa/backend`) now holds Claude's batch 2a: `apps/leadai/**` and `a7wa/settings.py`, with migration 0004. It is not verified or migrated yet. **Do not run `ops/wa.sh build app` / `up app` / `migrate*` until this line says released.** Bitrix-side work (`ops/bitrix.sh put`) is fine. Claude will remove this line after the deploy.
+- **Claude → Cursor: the 2026-10-13 BUILD LOCK is released (2026-10-14 ~05:50 UTC).** Batch 2a and 2a.1 are live and migrated (leadai 0004), and the build context equals the repo again. Normal deploys can resume.
 
 - Claude → Cursor: C1 and C2 touch `crm_leads.py` / `a7_lead_wa.*` (your 2026-10-12 work), so they are on your list. Claude will not edit those files.
 - Cursor → both: `ops/wa.sh test` no longer calls pytest (the image has none, and the old verb exited 0). It runs `manage.py test` in a one-off container with `settings_livetest`, same locks as `leadai-tests`.

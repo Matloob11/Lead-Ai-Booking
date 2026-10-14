@@ -255,9 +255,27 @@ DETAIL_LABELS = (
     ("occupancy", "Occupancy"),
     ("business_activity", "Business activity"),
     ("trade_licence", "Trade licence"),
+    ("licence_kind", "Licence"),
+    ("shop_type", "Shop type wanted"),
+    ("opening_when", "Opening"),
     ("preapproval", "Initial approval"),
+    # A shops chat keeps a list here: the questions our agent answers at the viewing.
     ("notes", "Notes"),
 )
+# How a shops fact reads on the record ("type_1" is "Type 1").
+DETAIL_VALUES = {
+    "shop_type": {"type_1": "Type 1", "type_2": "Type 2", "type_3": "Type 3", "not_sure": "Not sure"},
+    "licence_kind": {"ded": "DED", "trakhees": "Trakhees", "new": "New licence", "none": "None"},
+}
+
+
+def detail_value(key: str, value) -> str:
+    """One detail as the record shows it: a list joined, a shops enum spelt out."""
+    if isinstance(value, list):
+        return "; ".join(str(item) for item in value if str(item).strip())
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return DETAIL_VALUES.get(key, {}).get(str(value), str(value))
 
 EVENT_TITLES = {
     "confirmed": "MEETING CONFIRMED",
@@ -299,11 +317,11 @@ def comment_text(appointment, event: str, *, office_address: str = "", agents: s
     details = appointment.details or {}
     for key, label in DETAIL_LABELS:
         value = details.get(key)
-        if value in (None, ""):
+        if value in (None, "", []):
             continue
-        if isinstance(value, float) and value.is_integer():
-            value = int(value)
-        lines.append(f"{label}: {safe(value)}")
+        if key == "notes" and isinstance(value, list):
+            label = "Questions for the viewing"
+        lines.append(f"{label}: {safe(detail_value(key, value))}")
     if agents:
         lines.append(f"Agents: {safe(agents)}")
     lines.append(f"Appointment status: {appointment.get_status_display().upper()}")
@@ -316,6 +334,7 @@ NOTE_TITLES = {
     "stop_all": "CUSTOMER ASKED US TO STOP MESSAGING",
     "wrong_number": "CUSTOMER SAYS WRONG NUMBER",
     "not_interested": "CUSTOMER NOT INTERESTED",
+    "spam": "MESSAGE LOOKS LIKE SPAM",
 }
 
 

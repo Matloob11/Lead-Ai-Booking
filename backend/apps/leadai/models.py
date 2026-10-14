@@ -21,6 +21,34 @@ from django.utils import timezone
 
 # The visit address the assistant sends (owner's choice, 2026-10-09).
 DEFAULT_OFFICE_ADDRESS = "Russia Cluster, Building V02/V03, Shop 20, Dubai International City"
+# The brand the shops campaigns run under (owner's choice 2026-10-13).
+DEFAULT_BRAND_NAME = "AR Properties"
+
+# What the shops playbook may quote (the build pack of 2026-10-12, section 2).
+# The owner edits the final figures in the Lead AI settings; assistant/shops.py
+# reads them and falls back to these, key by key, for anything missing or broken.
+# Rents are per year in AED; "cheapest" is the "from" price quoted to customers.
+DEFAULT_SHOPS_FACTS = {
+    "types": [
+        {"label": "Small", "size_from": 400, "size_to": 550, "rent_from": 33000, "rent_to": 45000, "cheapest": 33000},
+        {"label": "Medium", "size_from": 600, "size_to": 800, "rent_from": 48000, "rent_to": 65000, "cheapest": 48000},
+        {"label": "Large", "size_from": 900, "size_to": 1200, "rent_from": 80000, "rent_to": 200000, "cheapest": 80000},
+    ],
+    "clusters": ["France", "England", "China", "Russia", "Morocco", "Persia"],
+    "cheques": "1 to 4 cheques",
+    "licences": "DED (mainland) or Trakhees licence; opening a new licence is also fine",
+    "viewing": (
+        "The client comes to our office; our agent drives them to the shops (5 minutes away) and back. "
+        "30-minute slots, one client per slot, 10:00 to the last slot at 19:30, Monday to Saturday, Sunday closed."
+    ),
+}
+
+
+def default_shops_facts() -> dict:
+    """A fresh copy, so no row ever shares (and changes) the module's own lists."""
+    import copy
+
+    return copy.deepcopy(DEFAULT_SHOPS_FACTS)
 
 
 class LeadAiCampaign(models.Model):
@@ -101,6 +129,8 @@ class LeadAiChatState(models.Model):
         STOP_ALL = "stop_all", "Customer asked us to stop"
         WRONG_NUMBER = "wrong_number", "Wrong number"
         AUTO_REPLY = "auto_reply", "Customer side is an automatic reply"
+        # Shops chats only: a forwarded chain message, a scam or another business's advert.
+        SPAM = "spam", "Spam"
 
     conversation = models.OneToOneField(
         "inbox.Conversation", on_delete=models.CASCADE, related_name="lead_ai_state"
@@ -125,6 +155,12 @@ class LeadAiChatState(models.Model):
     # Declined this offer: no more invitations, still answered politely.
     not_interested_at = models.DateTimeField(null=True, blank=True)
     invites = models.PositiveSmallIntegerField(default=0)
+    # Shops chats: after a "Not now" the assistant asked "Should I check back with
+    # you in a month?" and that question is still the last thing it said; a yes
+    # sets followup_due_at (the follow-up template goes out then), a no closes the
+    # lead. Both nullable: rows the old code inserts during a deploy leave them empty.
+    followup_asked_at = models.DateTimeField(null=True, blank=True)
+    followup_due_at = models.DateTimeField(null=True, blank=True)
     unsupported_notice_at = models.DateTimeField(null=True, blank=True)
     # The CRM record's responsible person, looked up once and cached.
     responsible_bitrix_user_id = models.CharField(max_length=16, blank=True)
@@ -177,6 +213,12 @@ class LeadAiSettings(models.Model):
     # unanswered message besides the chat's owner and the CRM responsible
     # (owner's choice 2026-10-13: Matloob).
     alert_bitrix_user_ids = models.JSONField(default=list, blank=True)
+    # The shops playbook (International City shops campaigns): the facts it may
+    # quote (DEFAULT_SHOPS_FACTS shows the shape), the brand it speaks for and the
+    # agent a booked client meets ("" is "our agent").
+    shops_facts = models.JSONField(default=default_shops_facts, blank=True)
+    brand_name = models.CharField(max_length=80, default=DEFAULT_BRAND_NAME, db_default=DEFAULT_BRAND_NAME)
+    viewing_agent_name = models.CharField(max_length=60, blank=True, default="", db_default="")
     # Circuit breaker: after repeated OpenAI failures the assistant pauses itself.
     paused_until = models.DateTimeField(null=True, blank=True)
     consecutive_failures = models.PositiveSmallIntegerField(default=0)
@@ -358,6 +400,39 @@ class LeadAiCrmStep(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["appointment", "step"], name="leadai_crm_step_once")]
+
+
+class LeadAiCrmField(models.Model):
+    """One value the shops playbook writes to the chat's Bitrix lead through the
+    Lead fields tool (assistant/crm_fields.py), or the lead's lost move.
+
+    Insert-only. A value is queued only when it is not what the chat last queued
+    for that lead and field (crm_fields.queue, under the chat's lock), so the
+    same value is never posted twice in a row, and one that comes back (Lost,
+    then a booking, then Lost again) is posted again. ``field`` is a Bitrix UF
+    code, or "lost" for the move to a lost stage (``value`` is then the stage,
+    ``payload`` holds the reason). ``sent_at`` is set once the tool took it;
+    ``error`` keeps why it did not; ``retry_at`` is when the sweep sends it again
+    after Bitrix was down (tasks._retry_crm_fields).
+    """
+
+    conversation = models.ForeignKey("inbox.Conversation", on_delete=models.CASCADE, related_name="+")
+    lead_id = models.PositiveIntegerField()
+    field = models.CharField(max_length=64)
+    value = models.CharField(max_length=255)
+    # What goes to the tool besides the value: {"only_if_empty": true}, {"reason": "..."}.
+    payload = models.JSONField(default=dict, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["pk"]
+
+    def __str__(self):
+        return f"{self.field}={self.value} on lead {self.lead_id}"
 
 
 class LeadAiAlert(models.Model):

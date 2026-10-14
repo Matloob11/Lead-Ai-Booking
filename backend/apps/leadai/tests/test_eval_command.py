@@ -162,6 +162,64 @@ RIGHT = {
     "booked-same-time": answer("", send=False),
     "booked-ok-thanks": answer("", send=False),
     "booked-emoji": answer("", send=False),
+    "exact-time": booked("2026-10-14", "17:00"),
+    # The model records these tentative (as the prompt says); code must not book them.
+    "exact-time-may": answer(
+        "Sure. Shall I hold 5 PM tomorrow for you?", action="tentative", place="office", date="2026-10-13", time="17:00",
+        words="I may come tomorrow at 5 pm",
+    ),
+    # Settled by code (the deferral rule, with a day and an hour beside it): never asked.
+    "defer-with-time": answer("", send=False),
+    # The shops playbook. Settled by code before the model (its own rules, the opt-out tap): never asked.
+    "shops-yes-tap": answer("", send=False),
+    "shops-not-now": answer("", send=False),
+    "shops-not-now-yes": answer("", send=False),
+    "shops-not-now-no": answer("", send=False),
+    "shops-stop": answer("", send=False),
+    "shops-broker": answer(SPECIALIST_REPLIES, handover="broker_or_for_client", facts={"for_client": True}),
+    "shops-already-rented": answer(
+        "Congratulations on your new shop! Do you need a second shop, or do you know someone who does?",
+        facts={"already_rented": True},
+    ),
+    "shops-rented-no": answer("", send=False),  # settled by code
+    "shops-rented-licence-no": answer(
+        "No problem, many of our tenants open a new licence. What size do you need?",
+        facts={"trade_licence": "no", "licence_kind": "new"},
+    ),
+    "shops-rent": answer(
+        "Type 1 (400-550 sq ft) is AED 33,000-45,000 a year, Type 2 (600-800 sq ft) AED 48,000-65,000 and Type 3 "
+        "(900-1,200 sq ft) AED 80,000-200,000. What business will the shop be for?"
+    ),
+    "shops-service-charge": answer(
+        "Good question — I'll have our agent confirm that for you at the viewing. Do you have a DED or Trakhees licence, "
+        "or will you open a new one?",
+        facts={"notes": ["service charge"]},
+    ),
+    "shops-discount": answer("Our agent can discuss the best price for you at the viewing. Shall I hold today at 2:30 PM or 4:30 PM for you?"),
+    "shops-sunday": answer("Our office is closed on Sunday. I can hold a slot for you on Monday at 11:00 AM or 5:00 PM — which is better?"),
+    "shops-invite": answer(
+        "Perfect, a DED licence works for our shops. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+        facts={"licence_kind": "ded", "trade_licence": "yes"},
+        invited=True,
+    ),
+    "shops-taken": answer("Sorry, 5:00 PM tomorrow is already booked. I can hold 4:30 PM or 5:30 PM tomorrow for you — which is better?"),
+    "shops-arabic": answer(
+        "أهلاً بك! هل المحل لك شخصياً، أم تبحث عنه لعميل؟",
+        language="ar",
+        reply_en="Welcome! Is the shop for yourself, or are you looking for it for a client?",
+    ),
+    "shops-roman-urdu": answer(
+        "Zabardast, mobile ka kaam. Kya shop aap ke apne liye hai, ya kisi client ke liye?",
+        language="ur_latin",
+        reply_en="Great, a mobile business. Is the shop for yourself, or for a client?",
+        facts={"business_activity": "mobile accessories"},
+    ),
+    "shops-35283": answer(
+        "A vape shop, got it. For a vape shop, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED "
+        "or Trakhees licence, or will you open a new one?",
+        facts={"business_activity": "vape"},
+    ),
+    "shops-spam": answer("", send=False),  # settled by code (the spam rule): never asked
 }
 
 
@@ -285,7 +343,11 @@ class EvalCommandTests(TestCase):
         settled = [s.id for s in leadai_eval.SCENARIOS if leadai_eval.code_first(s) is not None]
         self.assertEqual(
             sorted(settled),
-            ["away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "stop-all", "wrong-number"],
+            [
+                "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
+                "shops-not-now", "shops-not-now-no", "shops-not-now-yes", "shops-rented-no", "shops-spam", "shops-stop",
+                "shops-yes-tap", "stop-all", "wrong-number",
+            ],
         )
         self.assertEqual(model.call_count, total - len(settled))
         system, context = model.call_args_list[0].args[0][:2]

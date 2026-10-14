@@ -14,7 +14,8 @@ meeting reminder.
 - crm_readback           six minutes after a stage move, checks it stuck;
 - deliver_alert          one alert to the agent's panel and to Bitrix;
 - record_crm_note        an opt-out or "not interested" as a timeline comment;
-- resolve_responsible    the CRM record's responsible person, cached per chat.
+- resolve_responsible    the CRM record's responsible person, cached per chat;
+- write_crm_fields       a shops chat's lead fields, through the Lead fields tool.
 """
 
 from __future__ import annotations
@@ -104,6 +105,7 @@ def send_due_reminders() -> None:
         _close_past_appointments,
         _agent_heads_up,
         _retry_crm_syncs,
+        _retry_crm_fields,
         _reminders,
     ):
         try:
@@ -738,6 +740,119 @@ def resolve_responsible(conversation_id: int) -> None:
         logger.info("Lead AI could not resolve the responsible of conversation %s: %s", conversation_id, exc)
         # Not looked up after all: the chat's next turn asks again.
         LeadAiChatState.objects.filter(conversation_id=conversation_id).update(responsible_checked_at=None)
+
+
+def _replaced(row) -> bool:
+    """A newer row of the same chat replaced this one before it was sent: a newer value of
+    its field, or, for a lost move, a newer Bot Status other than Lost (they booked or
+    asked for a person after declining: the lead is not lost)."""
+    from .assistant import crm_fields
+    from .models import LeadAiCrmField
+
+    newer = LeadAiCrmField.objects.filter(conversation_id=row.conversation_id, pk__gt=row.pk)
+    if newer.filter(field=row.field).exists():
+        return True
+    if row.field == crm_fields.LOST:
+        return newer.filter(field=crm_fields.FIELD_BOT_STATUS).exclude(value=str(crm_fields.STATUS_LOST)).exists()
+    return False
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=len(CRM_RETRY), soft_time_limit=60, time_limit=90)
+def write_crm_fields(self, row_ids) -> None:
+    """One turn's shops lead fields (assistant/crm_fields.py), in one call to the tool.
+
+    A row that a newer row of the same chat replaced is not sent (_replaced): a
+    retry must never write an older Bot Status over a newer one, nor move a lead
+    that has booked since to Not Interested. A passing failure (Bitrix down,
+    5xx, 429) is retried at 1, 3 and 10 minutes; after that the sweep sends the
+    rows again every 15 minutes for six hours (_retry_crm_fields). A refusal (a
+    field or enum the tool does not allow, no such lead) stays on the rows and
+    is not retried. Nothing reaches the customer.
+    """
+    from django.db.models import F
+
+    from .assistant import crm_fields
+    from .models import LeadAiCrmField
+
+    rows = list(LeadAiCrmField.objects.filter(pk__in=list(row_ids or []), sent_at__isnull=True).order_by("pk"))
+    live = []
+    for row in rows:
+        if _replaced(row):
+            LeadAiCrmField.objects.filter(pk=row.pk).update(error="Replaced by a newer value before it was sent.", retry_at=None)
+        else:
+            live.append(row)
+    if not live:
+        return
+    ids = [row.pk for row in live]
+    LeadAiCrmField.objects.filter(pk__in=ids).update(attempts=F("attempts") + 1)
+    try:
+        answer = crm_fields.post(crm_fields.body_for(live))
+    except crm_fields.FieldsError as exc:
+        LeadAiCrmField.objects.filter(pk__in=ids).update(error=str(exc)[:500])
+        if self.request.retries < len(CRM_RETRY):
+            raise self.retry(exc=exc, countdown=CRM_RETRY[self.request.retries])
+        LeadAiCrmField.objects.filter(pk__in=ids).update(retry_at=timezone.now() + CRM_CATCH_UP_EVERY)
+        logger.warning("Lead AI could not write the shops fields of lead %s yet (the sweep tries again): %s", live[0].lead_id, exc)
+        return
+    if answer.get("ok"):
+        LeadAiCrmField.objects.filter(pk__in=ids).update(sent_at=timezone.now(), error="", retry_at=None)
+        return
+    error = str(answer.get("error") or answer.get("detail") or "Refused")[:500]
+    LeadAiCrmField.objects.filter(pk__in=ids).update(error=error, retry_at=None)
+    logger.warning("The Lead fields tool refused the shops fields of lead %s: %s", live[0].lead_id, error)
+
+
+FIELD_NAMES = {
+    "UF_CRM_A7_BOT_STATUS": "Bot Status",
+    "UF_CRM_A7_SHOP_TYPE": "Shop Type Wanted",
+    "UF_CRM_A7_WA_OPT_OUT": "WhatsApp Opt-out",
+    "UF_CRM_LEAD_1737031634747": "Purpose",
+    "UF_CRM_A7_AI_BUSINESS_ACTIVITY": "Business activity",
+    "UF_CRM_A7_AI_TRADE_LICENSE_STATUS": "Trade license status",
+    "lost": "the move to a lost stage",
+}
+
+
+def _retry_crm_fields() -> None:
+    """Shops lead fields the task could not write while Bitrix was down: sent again every
+    15 minutes for six hours (each value its own newest row; a replaced one never),
+    then the agents are told once which to set by hand. Opt-outs most of all: those
+    fields keep every later campaign away from the customer (board C10, C11)."""
+    from apps.inbox.models import Conversation
+
+    from .assistant import alerts
+    from .models import LeadAiChat, LeadAiCrmField
+
+    now = timezone.now()
+    due = list(LeadAiCrmField.objects.filter(sent_at__isnull=True, retry_at__lte=now).order_by("pk")[:200])
+    retry: dict = {}
+    expired: dict = {}
+    for row in due:
+        (expired if now - row.created_at > CRM_CATCH_UP_FOR else retry).setdefault(row.conversation_id, []).append(row)
+    for conversation_id, rows in expired.items():
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in rows]).update(retry_at=None)
+        rows = [row for row in rows if not _replaced(row)]
+        conversation = Conversation.objects.select_related("contact").filter(pk=conversation_id).first()
+        if not rows or conversation is None:
+            continue
+        chat = LeadAiChat.objects.filter(conversation=conversation).first()
+        who = conversation.contact.display_name or f"+{conversation.contact.wa_id}"
+        names = ", ".join(dict.fromkeys(FIELD_NAMES.get(row.field, row.field) for row in rows))
+        logger.warning("Lead AI gave up writing %s of lead %s after six hours", names, rows[0].lead_id)
+        alerts.raise_alert(
+            kind="crm_failed",
+            conversation=conversation,
+            title=f"Bitrix was not updated for {who}",
+            text=f"For six hours Bitrix did not take the shops fields of {who}'s lead {rows[0].lead_id} ({names}: "
+            f"{(rows[-1].error or 'Bitrix did not answer')[:150]}). Please set them on the lead by hand.",
+            dedupe_key=f"crm_fields_failed:{conversation_id}:{rows[-1].pk}",
+            crm_url=alerts.crm_path("lead", rows[0].lead_id),
+        )
+    for conversation_id, rows in retry.items():
+        ids = [row.pk for row in rows]
+        # Not due again before the task has had its own tries.
+        LeadAiCrmField.objects.filter(pk__in=ids).update(retry_at=now + CRM_CATCH_UP_EVERY)
+        write_crm_fields.delay(ids)
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3, soft_time_limit=60, time_limit=90)

@@ -74,6 +74,9 @@ ops/catalog/_numbers_roster.*
 ops/_q_failed.*
 ops/bitrix-aws/_n8n_*.sql
 ops/test-bin/
+# The shop photos and videos Matloob drops for the Lead AI media library (D5):
+# uploaded through the panel, not kept in git.
+/backend/Types shops/
 
 # Node / frontend
 node_modules/

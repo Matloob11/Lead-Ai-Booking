@@ -28,6 +28,7 @@ import { numberNameWithDial } from "../../core/number-label.js";
 import { bindFileSources, openAttachmentDialog } from "../attach.js";
 import { openTemplateComposer } from "../template-composer.js";
 import { asList, inbox, leadAiApi } from "./api.js";
+import { followUpChip } from "./shops.js";
 
 const PAGE_SIZE = 40;
 const HIGHLIGHT_PAGES = 5;
@@ -561,7 +562,8 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       conversation.number ? `on ${numberNameWithDial(conversation.number)}` : "",
       conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
     ].filter(Boolean);
-    const chips = chatChips(conversation);
+    // The shops assistant's "check back in a month" date, beside the chat's chips.
+    const chips = [...chatChips(conversation), followUpChip(conversation)].filter(Boolean);
 
     clear(header).append(
       el("div.lai-avatar", {}, [initials(name)]),

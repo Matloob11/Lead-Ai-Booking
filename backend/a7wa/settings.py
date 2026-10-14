@@ -322,6 +322,14 @@ LEADAI_BITRIX_NOTIFY_URL = env(
     "LEADAI_BITRIX_NOTIFY_URL",
     "https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_notify.php",
 )
+# The Bitrix-side tool that writes the shops playbook's lead fields (Bot Status,
+# Shop Type, licence, broker, opt-out, the lost move) with Bitrix's business
+# processes off: a REST crm.lead.update would run BP 235, which rewrites the
+# title and wipes the meeting time. Signed with CRM_LEAD_WA_SECRET.
+LEADAI_BITRIX_FIELDS_URL = env(
+    "LEADAI_BITRIX_FIELDS_URL",
+    "https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_fields.php",
+)
 # Official Conversation Health — same default as OpenWA linked-device monitor.
 CONVERSATION_HEALTH_OVERRIDE_PASSWORD = env("CONVERSATION_HEALTH_OVERRIDE_PASSWORD", "222007")
 

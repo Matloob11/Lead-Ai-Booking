@@ -1,3 +1,70 @@
+## 2026-10-14 — Lead AI batch 2a live: the International City shops conversation (Claude Code)
+
+Board tasks T18, T21–T27, T40–T44, T51, T53, T54 (statuses on SHOPS-BOT-BOARD.md). The ic_shops playbook applies only to chats whose campaign was sent with the popup's Script = "International City shops" (Cursor's C2). General chats are unchanged except the capacity rule and T18. The general prompt, correction and schema are pinned by hash; for eval `lang-urdu` the full model input is byte-identical to batch 1.
+
+**What a shops chat now does:**
+- **Facts and settings:** facts in AI settings (`shops_facts`, defaults = the build pack's three types). `brand_name` is "AR Properties"; `viewing_agent_name` is a new field.
+- **Prompt:** its own static prompt, `SHOPS_SYSTEM`, with its own cache key. The context carries FACTS, a code-computed MATCH, and FREE/TAKEN SLOTS. The reply may quote only the FACTS figures.
+- **Code-written lines** (6 languages):
+  - yes tap → "for yourself or for a client?";
+  - "Not now" → "check back in a month?", then a stored follow-up date or lost "1";
+  - stop → the build pack's line;
+  - broker → the exact line, the Broker label and a pause;
+  - already rented → congratulate, ask about a second shop, else lost.
+- **Bookings:**
+  - one client per 30-minute slot in every playbook, re-checked under a Postgres advisory lock;
+  - a taken time → the two nearest free slots;
+  - an open "when" → two concrete slots;
+  - the build pack's confirmation.
+- **Bitrix:** writes go through Cursor's C6 tool (`assistant/crm_fields.py`, setting `LEADAI_BITRIX_FIELDS_URL`): Bot Status, Shop Type, business, licence kind, Purpose = Broker, WhatsApp Opt-out, and the lost move "1"/JUNK.
+- **Eval guards** from the gate rounds:
+  - the location pointer;
+  - dated deferrals;
+  - the taken tentative;
+  - licence first;
+  - spam by code;
+  - and their follow-ups: handover before slots, a bare "later" is no deferral, the same exclusions as T18, "Tomorrow 5", no address under the licence question, no spam rule once a visit or two facts exist.
+- **T18:** a customer's own exact time is confirmed when the model said tentative.
+- **Migration** `leadai.0004_shops_playbook`.
+
+**Gate:**
+- Review: 3 reviewers found 24 issues (20 fixed). A second review of the eval guards found 10 (F1–F3, F6, F7, F10 fixed and re-checked by paraphrase probes).
+- Draft eval: 141/152 (92.8%, below the gate) → 151/152 (99.3%).
+- Deployed eval 148/152 (97.4%).
+- **2a.1** (same day): `hours._HOUR_AHEAD` read "around 400 sq ft" as an approximate hour, and `_OPEN_OR_FREE` read "open my shop" as "are you open?". Both made a plain booking "no promise", so T18 never fired on a message with a size and a time. Fixed with tests. Draft 149/152 (98.0%), deployed: see below.
+
+**Deployed:**
+- Drift check first: build context == HEAD for every file.
+- `sync apps/leadai` + `settings*.py`.
+- `build app`; `leadai-tests` on Postgres: one test asserted SQLite's no-lock and failed on Postgres. The test was fixed, the lock itself works. After the fix, 507 OK.
+- crmlink 4 OK.
+- `migrate-new-image` (0004 OK).
+- `up app` with nothing in flight. Campaign 408 was retrying with 0 pending.
+- Panel `lead-ai/{shops.js (NEW), api.js, lead-ai.css, thread.js, screen.js}`: server md5 == local, public 200 with equal sizes.
+- 2a.1: push, `build`, `leadai-tests` OK, `up`.
+
+**Verified LIVE:**
+- All four services up together; `last_sweep_at` fresh; `django-check` reports No changes.
+- `probe-backend-md5` live == local.
+- Settings row: AR Properties, 3 types, Type 1 from 33,000, alert ids 2311.
+- `probe-leadai-turn` 19/19 three times with `"upgraded": true`. The probe's fixture now makes the campaign it pretends to have sent; before, its template read as a colleague's message and T18 stood aside.
+- worker-leadai, web and beat logs clean. worker shows only the known `backfill_placeholder_bodies` NameError (gateway/tasks.py:127, once per restart, retried, no loss).
+
+**Not verified:**
+- a real ic_shops chat (none exists yet; C2 is live, so the first campaign with Script = shops starts one);
+- a real C6 write from Django (tested against the contract only);
+- the panel's shops settings and follow-up chip in a browser;
+- the Template B send for a stored follow-up date (T63, batch 2b).
+
+**Found:**
+- **Gateway credits (alots/WBBOX) are nearly out:** "Insufficient credits … Available credits are 1.8829". 55 of campaign 408's 58 messages failed on it this morning, and 7 of 8 outgoing messages since 05:00 UTC. Nothing gets out until the balance is topped up.
+- **Model variance:** eval `lang-urdu` answered an Urdu-script customer in English or Roman Urdu in 3 of 4 recent runs (T19). The MATCH example is copied: "For a mobile shop…" (T56).
+- **D5 media:** Matloob put the shop photos and videos in `backend/Types shops/`, now ignored by git. The Type 2 folder says 700-800 sq ft.
+
+**Shared/touched:** `backend/apps/leadai/**`, `backend/a7wa/settings.py` + `settings_livetest.py` (`LEADAI_BITRIX_FIELDS_URL` only), `bitrix/public/assets/modules/lead-ai/**`, `ops/catalog/probe-leadai-turn.py`, `.gitignore`, `SHOPS-BOT-BOARD.md`.
+
+---
+
 ## 2026-10-13 — Popup send button counts only who can be messaged (Cursor)
 
 The five CRM popups no longer put the selected count on the send button. The button uses the number that can actually be messaged. At 0 it is disabled and reads `Nothing to send: all left out`.

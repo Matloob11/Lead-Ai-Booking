@@ -6,10 +6,15 @@
   most-tapped template button on this account; one sales-style reply after
   it invites a block, which lowers the agent's number's quality rating.
 - Acknowledgements ("ok", "thanks", an emoji) that need no answer.
-- Deferrals ("I will message you") that put a visit off, and plain yeses
-  ("yes", "ji") that accept one.
+- Deferrals ("I will message you", and "Tomorrow at 5 pm, I will let you
+  know": a day or an hour said with it is still no promise) that put a visit
+  off, and plain yeses ("yes", "ji") that accept one.
 - Automatic replies from the customer's own WhatsApp Business bot.
 - The fixed lines sent in those cases, in the customer's language.
+- The shops playbook's own (International City shops campaigns, owner's
+  choice 2026-10-13, never in a general chat): the template's "Stop messages"
+  tap, "Not now", a plain no, the positive first answer, a plain chain message
+  or scam, and their lines.
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ import unicodedata
 STOP_ALL = "stop_all"
 NOT_INTERESTED = "not_interested"
 WRONG_NUMBER = "wrong_number"
+# Shops chats only (the model's call): a forwarded chain message, a scam or an advert.
+SPAM = "spam"
 
 BUTTON_OPT_OUT = {
     "unsubscribe": STOP_ALL,
@@ -186,10 +193,55 @@ _TYPED = {
 }
 
 
+def _typed_words(text: str) -> str:
+    return " ".join(_TYPED.get(word, word) for word in normalize_text(text).split())
+
+
 def is_deferral(text: str) -> bool:
     """A whole short message that puts the visit off ("ok, I'll message u later")."""
-    words = " ".join(_TYPED.get(word, word) for word in normalize_text(text).split())
-    return _whole_short_message(words, DEFERRALS, DEFERRAL_FILLERS)
+    return _whole_short_message(_typed_words(text), DEFERRALS, DEFERRAL_FILLERS)
+
+
+# What a deferral may name besides ("Tomorrow at 5 pm, I will let you know", "kal 5 baje
+# bata dunga"): a day, a part of the day, an hour, the words that join them, a hedge. The
+# hour is no promise to come at it (hours.no_promise reads it the same way).
+_WHEN_WORDS = frozenset(
+    """
+    today tonight tomorrow tomorow tommorow tommorrow tmrw tmr tmw kal aaj aj parso parson
+    monday tuesday wednesday thursday friday saturday sunday mon tue tues wed weds thu thur thurs fri sat sun
+    morning afternoon evening night noon midday subah sham shaam raat dopahar
+    this next week weekend day after at on by around about in the
+    am pm a p m baje bajay bje oclock maybe probably perhaps shayad
+    """.split()
+)
+_WHEN_NUMBER = re.compile(r"^\d{1,2}(?:am|pm)?$")  # "5", "5pm"; "17:00" reads "17 00"
+DATED_DEFERRAL_WORDS = 14
+# With a day or an hour, only a real deferral phrase puts the visit off ("I will let you
+# know", "bata dunga", "I'll text u"), never a bare "later": "Today later at 5 pm" asks
+# for 5 PM today. Alone, "later" is still a deferral (is_deferral).
+PUTS_OFF = frozenset(DEFERRALS - {"later"})
+
+
+def is_dated_deferral(text: str) -> bool:
+    """A short message that is a deferral once its day, its hour and the words around them
+    are set aside ("Tomorrow at 5 pm, I will let you know"): the visit is still put off.
+    What is left must be a real deferral phrase (PUTS_OFF): "Today later at 5 pm" is
+    not one. "I will come tomorrow at 5" is not, nor anything with a question
+    ("Tomorrow at 5? I will let you know" may ask whether 5 is free): the model answers
+    those."""
+    words = _typed_words(text).split()
+    if not words or len(words) > DATED_DEFERRAL_WORDS or asks_question(text):
+        return False
+    rest = [word for word in words if word not in _WHEN_WORDS and not _WHEN_NUMBER.match(word)]
+    return bool(rest) and len(rest) < len(words) and _whole_short_message(" ".join(rest), PUTS_OFF, DEFERRAL_FILLERS)
+
+
+def mentions_deferral(text: str) -> bool:
+    """The message puts the visit off somewhere, however long it is ("Tomorrow at 5 pm,
+    I will let you know"): a time said with it is no booking (engine.upgrade_exact_time).
+    A bare "later" puts nothing off ("I will come tomorrow at 5 pm, see you later")."""
+    words = f" {_typed_words(text)} "
+    return any(f" {phrase} " in words for phrase in PUTS_OFF)
 
 
 # A plain yes, which right after our invitation means they will come.
@@ -205,6 +257,101 @@ ACCEPTANCES = {
 
 def is_acceptance(text: str) -> bool:
     return _whole_short_message(text, ACCEPTANCES, FILLERS)
+
+
+# The shops playbook -----------------------------------------------------------------
+
+# Template A's buttons are [Yes, show me shops] [Not now] [Stop messages] and
+# Template B's [Yes, book a viewing] [Not now]; the live campaign's own is "Interested".
+SHOPS_OPT_OUT = {normalize_text("stop messages"): STOP_ALL, normalize_text("stop message"): STOP_ALL}
+POSITIVE_TAPS = {
+    normalize_text(p)
+    for p in ("yes, show me shops", "yes show me shops", "show me shops", "yes, book a viewing", "book a viewing", "interested", "i am interested", "im interested")
+}
+NOT_NOW = {
+    normalize_text(p)
+    for p in (
+        "not now", "not right now", "not now thanks", "not now thank you", "not at the moment", "not for now", "maybe later",
+        "ليس الآن", "ليس الان", "مش الحين", "مو الحين", "مش دلوقتي", "مش هلق",
+        "abhi nahi", "abhi nahin", "abhi nhi", "filhal nahi", "filhaal nahi", "abhi nahi chahiye",
+        "ابھی نہیں", "فی الحال نہیں",
+        "अभी नहीं",
+    )
+}
+# A plain no, which answers our "Should I check back with you in a month?" or
+# "Do you need a second shop?"; on its own, anywhere else, it is the model's.
+REFUSALS = {
+    normalize_text(p)
+    for p in (
+        "no", "nope", "nah", "no sir", "no need", "not needed", "no thanks", "no thank you", "not interested", "no its ok",
+        "nahi", "nahin", "nhi", "na", "nai", "nahi chahiye", "zaroorat nahi", "nahi shukriya",
+        "لا", "لا شكرا", "لا شكراً", "لا ما ابي", "لا شكرا لك",
+        "نہیں", "جی نہیں", "نہیں شکریہ",
+        "नहीं", "जी नहीं", "नहीं धन्यवाद",
+    )
+}
+
+
+def shops_opt_out(label: str) -> str | None:
+    """"Stop messages" (the shops template's button, or typed alone): a STOP in a shops chat."""
+    words = normalize_text(label)
+    return SHOPS_OPT_OUT.get(words) or SHOPS_OPT_OUT.get(words.removeprefix("please ").removesuffix(" please"))
+
+
+def is_positive_tap(label: str) -> bool:
+    return normalize_text(label) in POSITIVE_TAPS
+
+
+def is_not_now(text: str) -> bool:
+    return _whole_short_message(text, NOT_NOW, FILLERS)
+
+
+def is_refusal(text: str) -> bool:
+    return _whole_short_message(text, REFUSALS, FILLERS)
+
+
+# A forwarded chain message, a scam or another business's advert, in words no customer
+# answering us writes. Spam stops the assistant and closes the lead as Junk, so code
+# calls it only when it is plain: a strong marker and a second marker of any kind,
+# the second looked for outside the first's own words ("a shop for my crypto trading
+# platform" is one marker, never two). Anything less is the model's call (SHOPS_SYSTEM).
+_SPAM_STRONG = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bforward\b[^.!?\n]{0,30}?\b(?:\d+|five|ten|twenty|all (?:of )?your|every)\s+(?:friends|people|contacts|groups|persons|members|numbers)\b",
+        r"\bshare\b[^.!?\n]{0,30}?\bwith\s+(?:\d+|five|ten|twenty|all (?:of )?your)\s+(?:friends|people|contacts|groups)\b",
+        r"chat\.whatsapp\.com/|\bt\.me/|\bbit\.ly/|\btinyurl\.com/",
+        r"\bearn(?:ing)?\s+(?:money|cash|income|extra income|profits?|\$\s*\d+|aed\s*\d+|usd\s*\d+|\d+)[^.!?\n]{0,25}?"
+        r"\b(?:daily|per day|a day|every day|from home|online|per week|weekly)\b",
+        r"\b(?:crypto|bitcoin|btc|forex|binary|trading|investment)\s+(?:investment\s+|trading\s+)?(?:group|signals?|channel|scheme|plan)\b",
+        r"\bguaranteed\s+(?:profit|returns?|income|earnings)\b|\bdouble your (?:money|investment|income)\b",
+        r"\byou (?:have )?(?:won|been selected)\b|\bclaim your (?:prize|reward|gift|bonus)\b",
+    )
+)
+_SPAM_WEAK = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:crypto|bitcoin|btc|usdt|forex|lottery|jackpot|giveaway)\b",
+        r"\blimited (?:seats|slots|spots|time offer)\b",
+        r"\bjoin (?:our|my|the|now|us)\b",
+        r"\bclick (?:here|the link|this link|below)\b|\blink (?:below|in bio)\b",
+        r"\b(?:work|earn) from home\b|\bpassive income\b|\bdaily (?:profit|income|earnings)\b",
+        r"\b100% (?:free|guaranteed|profit|safe)\b|\bfree (?:gift|money|bonus|crypto)\b",
+    )
+)
+
+
+def looks_like_spam(text: str) -> bool:
+    """Plainly a chain message, a scam or an advert (a shops chat's spam rule, engine.shops_rule)."""
+    rest = unicodedata.normalize("NFKC", str(text or "")).replace("’", "'")
+    strong = 0
+    for pattern in _SPAM_STRONG:
+        if pattern.search(rest):
+            strong += 1
+            rest = pattern.sub(" ", rest)
+    if not strong:
+        return False
+    return strong + sum(1 for pattern in _SPAM_WEAK if pattern.search(rest)) >= 2
 
 
 ACK_INDEX = {normalize_text(a) for a in ACKS}
@@ -385,9 +532,80 @@ LINES = {
         "hi_latin": "Aapki dilchaspi ke liye shukriya. Main aapki details sambandhit agent ko de raha hoon, woh aapse sampark karenge.",
         "hi": "आपकी दिलचस्पी के लिए शुक्रिया। मैं आपकी जानकारी संबंधित एजेंट को दे रहा हूँ, वो आपसे संपर्क करेंगे।",
     },
+    # Shops: the first answer to the campaign is a yes, and we do not know yet who the shop is for.
+    "for_whom": {
+        "en": "Thank you! Is the shop for yourself, or are you checking for a client?",
+        "ar": "شكراً لك! هل المحل لك شخصياً، أم تبحث عنه لعميل؟",
+        "ur_latin": "Shukriya! Kya shop aap ke apne liye hai, ya aap kisi client ke liye dekh rahe hain?",
+        "ur": "شکریہ! کیا دکان آپ کے اپنے لیے ہے، یا آپ کسی کلائنٹ کے لیے دیکھ رہے ہیں؟",
+        "hi_latin": "Shukriya! Kya shop aapke apne liye hai, ya aap kisi client ke liye dekh rahe hain?",
+        "hi": "शुक्रिया! क्या दुकान आपके अपने लिए है, या आप किसी क्लाइंट के लिए देख रहे हैं?",
+    },
+    # Shops: "Not now".
+    "check_back": {
+        "en": "No problem! Should I check back with you in a month?",
+        "ar": "لا مشكلة! هل أتواصل معك مرة أخرى بعد شهر؟",
+        "ur_latin": "Koi baat nahi! Kya main ek mahine baad aap se dobara rabta karun?",
+        "ur": "کوئی بات نہیں! کیا میں ایک مہینے بعد آپ سے دوبارہ رابطہ کروں؟",
+        "hi_latin": "Koi baat nahi! Kya main ek mahine baad aapse dobara sampark karun?",
+        "hi": "कोई बात नहीं! क्या मैं एक महीने बाद आपसे दोबारा संपर्क करूँ?",
+    },
+    # Shops: yes to "Should I check back with you in a month?".
+    "check_back_yes": {
+        "en": "Great, I'll check back with you then.",
+        "ar": "رائع، سأتواصل معك حينها.",
+        "ur_latin": "Behtareen, main tab aap se dobara rabta karunga.",
+        "ur": "بہترین، میں تب آپ سے دوبارہ رابطہ کروں گا۔",
+        "hi_latin": "Badhiya, main tab aapse dobara sampark karunga.",
+        "hi": "बढ़िया, मैं तब आपसे दोबारा संपर्क करूँगा।",
+    },
+    # Shops: a no ("Not now" then no, already rented then no, not interested): the lead is lost.
+    "shops_not_interested": {
+        "en": "No problem, thank you for letting us know.",
+        "ar": "لا مشكلة، شكراً لإبلاغنا.",
+        "ur_latin": "Koi baat nahi, batane ka shukriya.",
+        "ur": "کوئی بات نہیں، بتانے کا شکریہ۔",
+        "hi_latin": "Koi baat nahi, batane ke liye shukriya.",
+        "hi": "कोई बात नहीं, बताने के लिए शुक्रिया।",
+    },
+    # Shops: "Stop messages", or any STOP.
+    "shops_stop_all": {
+        "en": "Done, you won't receive more messages from us.",
+        "ar": "تم، لن تصلك منا رسائل أخرى.",
+        "ur_latin": "Ho gaya, aap ko hamari taraf se mazeed messages nahi aayenge.",
+        "ur": "ہو گیا، آپ کو ہماری طرف سے مزید میسجز نہیں آئیں گے۔",
+        "hi_latin": "Ho gaya, aapko hamari taraf se aur messages nahi aayenge.",
+        "hi": "हो गया, आपको हमारी तरफ़ से और मैसेज नहीं आएँगे।",
+    },
+    # "How do I reach there?" once our location went out: the reply points to it (engine.settle).
+    "location_above": {
+        "en": "Our office location is in my message above.",
+        "ar": "موقع مكتبنا موجود في رسالتي أعلاه.",
+        "ur_latin": "Hamare office ki location upar wale message mein hai.",
+        "ur": "ہمارے آفس کی لوکیشن اوپر والے میسج میں ہے۔",
+        "hi_latin": "Hamare office ki location upar wale message mein di gayi hai.",
+        "hi": "हमारे ऑफ़िस की लोकेशन ऊपर वाले मैसेज में है।",
+    },
+    # Shops: the build pack's next question when the reply invited before the licence was known.
+    "ask_licence": {
+        "en": "Do you have a DED or Trakhees licence, or will you open a new one?",
+        "ar": "هل لديك رخصة DED أو Trakhees، أم ستفتح رخصة جديدة؟",
+        "ur_latin": "Kya aap ke paas DED ya Trakhees ka licence hai, ya aap naya licence banwayenge?",
+        "ur": "کیا آپ کے پاس DED یا Trakhees کا لائسنس ہے، یا آپ نیا لائسنس بنوائیں گے؟",
+        "hi_latin": "Kya aapke paas DED ya Trakhees ka licence hai, ya aap naya licence banwayenge?",
+        "hi": "क्या आपके पास DED या Trakhees का लाइसेंस है, या आप नया लाइसेंस बनवाएँगे?",
+    },
 }
+
+# The shops playbook says these in its own words (the build pack's).
+SHOPS_LINES = {STOP_ALL: "shops_stop_all", NOT_INTERESTED: "shops_not_interested"}
 
 
 def line(kind: str, language: str) -> str:
     table = LINES[kind]
     return table.get(language) or table["en"]
+
+
+def line_for(kind: str, language: str, shops: bool = False) -> str:
+    """``line``, in the shops playbook's own words where it has them."""
+    return line(SHOPS_LINES.get(kind, kind) if shops else kind, language)

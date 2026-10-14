@@ -166,6 +166,82 @@ def offers_time(text: str) -> bool:
     return bool(_CLOCK_TIME.search(text or ""))
 
 
+# An open question about WHEN to come ("When would you like to come?", "Which day
+# suits you?"), which the shops playbook never asks: it names two free slots.
+_WHEN_VISIT = re.compile(
+    r"\bwhen (?:would|will|can|could|do|shall) you (?:like to |want to |prefer to |be able to |plan to )?"
+    r"(?:come|visit|drop|pass|stop|meet|see|pop)"
+    r"|\bwhen (?:are|r) you (?:free|available|coming)"
+    r"|\b(?:what|which) (?:day|time|date|days|times)\b"
+    r"|\bkab (?:aa|aana|aayenge|aaenge|aa sakte|aasakte|tashreef|visit|mil)"
+    r"|متى (?:يمكنك|تستطيع|تود|تريد|يناسبك|ستأتي|تأتي)|أي وقت|اي وقت|أي يوم|اي يوم"
+    r"|کب (?:آ|تشریف)|کس دن|کتنے بجے"
+    r"|कब (?:आ|मिल)|किस दिन|कितने बजे",
+    re.IGNORECASE,
+)
+# About opening the shop, not coming to see it ("When do you want to open?").
+_OPENING = re.compile(r"\b(?:open|opening|start|launch)\b|kholna|khol|افتتاح|فتح|کھول|खोल", re.IGNORECASE)
+# About arriving at a viewing already booked ("Approximately what time will you reach?").
+_ARRIVAL = re.compile(
+    r"\b(?:reach|reaching|arrive|arriving|arrival|get here|get there|eta)\b|pahunch|pohanch|پہنچ|تصل|يصل|ستصل|وصول|पहुँच|पहुंच",
+    re.IGNORECASE,
+)
+
+
+def split_sentences(text: str) -> list[str]:
+    """The reply's sentences, as the filters here read them."""
+    return [s.strip() for s in _SENTENCE.split(text or "") if s.strip()]
+
+
+def is_open_when(sentence: str) -> bool:
+    """One of our sentences asks when (or whether) they will come without naming a time."""
+    text = sentence or ""
+    if not any(mark in text for mark in QUESTION_MARKS) or offers_time(text):
+        return False
+    if _OPENING.search(text) or asks_for_location(text) or _ARRIVAL.search(text):
+        return False
+    return bool(_WHEN_VISIT.search(text)) or is_invitation(text)
+
+
+def _sentence_key(sentence: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", str(sentence or "").casefold()).split())
+
+
+def drop_repeats(text: str, sent: list[str], keep=None) -> tuple[str, bool]:
+    """The reply without the sentences one of our earlier messages already said word for
+    word (the shops build pack: never the same sentence twice in a chat).
+
+    A question is never dropped: asked again, it still wants its answer ("Is the shop
+    for yourself, or are you checking for a client?" after answering the rent). Nor is
+    a sentence ``keep`` accepts (the playbook's fixed answers, said each time they fit:
+    "Good question — I'll have our agent confirm that for you at the viewing."). A
+    reply that is nothing else stays whole: a repeat beats no answer."""
+    said = {_sentence_key(s) for message in sent for s in _SENTENCE.split(message or "") if _sentence_key(s)}
+    sentences = split_sentences(text)
+
+    def repeated(sentence: str) -> bool:
+        if _sentence_key(sentence) not in said or any(mark in sentence for mark in QUESTION_MARKS):
+            return False
+        return not (keep is not None and keep(sentence))
+
+    kept = [s for s in sentences if not repeated(s)]
+    if not kept or len(kept) == len(sentences):
+        return (text or "").strip(), False
+    return " ".join(kept), True
+
+
+def offer_slots(text: str, line: str) -> tuple[str, bool]:
+    """The reply with its open "when would you like to come?" replaced by ``line`` (two
+    concrete slots), and whether it was; a second question goes with it (one per reply)."""
+    if not line:
+        return (text or "").strip(), False
+    sentences = split_sentences(text)
+    if not any(is_open_when(sentence) for sentence in sentences):
+        return (text or "").strip(), False
+    kept = [s for s in sentences if not is_open_when(s) and not any(mark in s for mark in QUESTION_MARKS)]
+    return " ".join([*kept, line]), True
+
+
 def _plain(text: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", str(text or "").lower()).split())
 
@@ -218,6 +294,52 @@ _LOCATION_ASK = re.compile(
 
 def asks_for_location(text: str) -> bool:
     return bool(_LOCATION_ASK.search(text or ""))
+
+
+# The customer asks the way to us, or where we are, without asking for the location
+# itself (that is asks_for_location, which sends it again): "How do I reach there?",
+# "How do I come?", "Where is your office?", "Which way to your office?", "kaise aaun?",
+# "كيف أصل؟". Once our location went out, the reply points to it (engine.settle). Not
+# "How do I get a licence?", "How do I come up with the deposit?" or "Which way is
+# better?", nor "Where is it?": the "it" may be the shop or the unit we described.
+_THE_WAY = re.compile(
+    r"\bhow\s+(?:do|can|could|should|shall|will|would|to)\s+(?:i\s+|we\s+)?"
+    # "come" ends the question, or a comma brings the means ("How should we come, by
+    # metro?"); "How should I come, with my partner or alone?" is not the way.
+    r"(?:reach|arrive|come\s+(?:there|here|to|over)|come(?=\s*(?:[?.!؟]|$|,\s*by\b))|get\s+(?:there|here|to)|go\s+(?:there|to)"
+    r"|find\s+(?:you|your|ur|the\s+office|it))\b"
+    # "Which way to your office / to you", "which way is the office": not "which way is
+    # your shop facing" or "which way for you is better, cash or cheque".
+    r"|\bwhich\s+way\s+(?:to\s+(?:you|u|your|ur|the\s+office)|is\s+(?:your|ur|the)\s+office)\b"
+    r"|\bwhere\s+(?:is|are|r)\s+(?:you|u|your|ur|the\s+office)\b|\bwhere\s+exactly\b"
+    r"|\b(?:can'?t|cannot|couldn'?t|not\s+able\s+to)\s+find\s+(?:you|your|ur|the\s+office|it)\b"
+    r"|\bkaise\s+(?:aa|aaun|aaoon|aaon|aayen|aaen|aain|aana|pahunch\w*|pohanch\w*)"
+    r"|\b(?:office|daftar)\s+(?:kahan|kidhar)\b|\b(?:kahan|kidhar)\s+(?:hai|hain|ho|par|pe|pr)\b"
+    r"|كيف\s+(?:أصل|اصل|أوصل|اوصل|أجي|اجي|آجي|أروح|اروح)|(?:وين|أين|اين|فين)\s+(?:مكتبكم|المكتب|انتم|أنتم|موقعكم|مكانكم)|وينكم"
+    r"|کیسے\s+(?:آؤں|آؤ|آئیں|آنا|پہنچوں|پہنچیں|پہنچ)|(?:آفس|دفتر)\s+کہاں|کہاں\s+(?:ہے|ہیں)"
+    r"|कैसे\s+(?:आऊं|आऊँ|आएं|आएँ|आना|पहुंच|पहुँच)|(?:ऑफिस|ऑफ़िस|दफ्तर)\s+(?:कहाँ|कहां)|(?:कहाँ|कहां)\s+(?:है|हैं)",
+    re.IGNORECASE,
+)
+# A reply that already points to the location we sent ("the location above", "already
+# shared"). Strict on purpose: missing one only adds the pointer twice, while reading
+# "Shops above 400 sq ft" as one would leave "How do I reach there?" unanswered.
+_POINTER = re.compile(
+    r"\b(?:location|address|pin|map|maps|link|details|message)\b[^.?!]{0,25}?\b(?:above|earlier|before|previously|already)\b"
+    r"|\b(?:above|earlier|previous)\b[^.?!]{0,12}?\b(?:location|address|pin|map|link|message)\b"
+    r"|\b(?:already|i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:already\s+)?(?:shared|sent|given)\b"
+    r"|\b(?:upar|oopar)\s+wal[aei]\b|\bbhej\s+(?:di|diya|chuke|chuka)\b"
+    r"|أعلاه|بالأعلى|بالاعلى|أرسلت|ارسلت|أرسلنا|ارسلنا|الرسالة السابقة"
+    r"|اوپر\s+(?:والے|والی|والا|دیکھ)|بھیج\s+(?:دی|دیا|چکے)|ऊपर\s+(?:वाले|वाली|वाला|देख)|भेज\s+(?:दी|दिया|चुके)",
+    re.IGNORECASE,
+)
+
+
+def asks_the_way(text: str) -> bool:
+    return bool(_THE_WAY.search(str(text or "").replace("’", "'")))
+
+
+def points_to_location(text: str) -> bool:
+    return bool(_POINTER.search(str(text or "").replace("’", "'")))
 
 
 # Booking texts ------------------------------------------------------------------

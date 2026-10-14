@@ -29,10 +29,25 @@ The order matters, and each step can end the turn:
 13. apply     after the send: facts, state, appointment, then the CRM work
               and the agents' alerts.
 No OpenAI, gateway or Bitrix call ever runs inside a database transaction.
+
+The office takes one client per 30-minute slot (hours.free_slots): a time
+another chat's open office visit holds is refused with the two nearest free
+ones, whatever the playbook, and so is a tentative visit kept at such a time;
+those two come from code when the model would offer others. A shops chat
+(lane.IC_SHOPS) has its own rules before the model (the yes, "Not now",
+"Should I check back in a month?", a no after "already rented", "Stop
+messages", a plain chain message or scam), its own prompt, schema and context,
+guards that turn an open "when would you like to come?" into two free slots
+and an invitation made before the licence is known into the licence question,
+its own booking message (shops.confirmation) and its Bitrix fields
+(crm_fields.py). Every chat: a deferral said with a day or an hour is still a
+deferral, and "How do I reach there?" once the location went out gets a line
+pointing to it. A general chat otherwise keeps every rule it had.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import logging
@@ -41,7 +56,7 @@ import time
 from dataclasses import dataclass, field
 
 from celery.exceptions import SoftTimeLimitExceeded
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -49,7 +64,21 @@ from apps.inbox.models import Message
 
 from .. import lane
 from ..models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
-from . import alerts, filters, hours, live, openai_client, prompt, reminders, rules, schema, transcribe, transcript
+from . import (
+    alerts,
+    crm_fields,
+    filters,
+    hours,
+    live,
+    openai_client,
+    prompt,
+    reminders,
+    rules,
+    schema,
+    shops,
+    transcribe,
+    transcript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +133,24 @@ _NOW_WORDS = re.compile(
     r"(\b(now|right now|asap|outside|downstairs|on my way|on the way|coming|abhi|abhee)\b|الآن|الان|ابھی|अभी)",
     re.IGNORECASE,
 )
+# A time for a call, not a visit ("Call me Wednesday at 5 pm").
+_CALL_WORDS = re.compile(
+    r"\b(call|calls|calling|phone|ring|video)\b|اتصل|اتصال|مكالمة|كلمني|کال|فون|कॉल|फ़ोन|फोन",
+    re.IGNORECASE,
+)
+# They are coming to us now ("I'm outside", "on my way", "coming now"): read in the
+# burst alone, never in the chat's history ("I need a shop right now" an hour ago).
+_WALK_IN_WORDS = re.compile(
+    r"\b(?:on my way|on the way|outside|downstairs|in front of|i'?m here|i am here|we'?re here|we are here|"
+    r"(?:i'?m|i am|we'?re|we are) coming|reached|arrived|almost there|(?:coming|come|leaving|left) (?:right )?now|"
+    r"(?:coming|reaching|reach|be there|there) in \d+ ?(?:min|mins|minutes))\b"
+    r"|\babhi (?:aa|aaya|aata|aati|nikal|pahunch)|\b(?:raste|raaste) (?:mein|main|me)\b|\b(?:pahunch|pohanch) gaya\b"
+    r"|في الطريق|بالطريق|وصلت|انا برا|أنا برا|راستے میں|پہنچ گیا|ابھی آ|रास्ते में|पहुँच गया|पहुंच गया|अभी आ",
+    re.IGNORECASE,
+)
+# The pg_advisory_lock key of the office's booking slots (engine.office_lock): any fixed number.
+OFFICE_LOCK = 7_301_202_610
+OFFICE_LOCK_WAIT = 20  # seconds; a booking then goes ahead on its own (and says so in the log)
 
 
 class NotReady(Exception):
@@ -218,28 +265,45 @@ def _said(burst) -> list:
     return [item for item in burst if not _is_ack(item)]
 
 
-def _item_opt_out(item, meeting_open: bool) -> str | None:
-    text = (item.body or "").strip()
+def _tap_label(item) -> str:
+    """The button a customer tapped (a template quick reply or one of our buttons), else ''."""
     data = transcript.payload(item)
     if item.kind == "button":
-        return rules.opt_out_from_button((data.get("button") or {}).get("text") or text)
+        return str((data.get("button") or {}).get("text") or item.body or "").strip()
     if item.kind == "interactive":
         reply = (data.get("interactive") or {}).get("button_reply") or (data.get("interactive") or {}).get("list_reply") or {}
-        return rules.opt_out_from_button(reply.get("title") or text)
+        return str(reply.get("title") or item.body or "").strip()
+    return ""
+
+
+def _item_opt_out(item, meeting_open: bool, shops_chat: bool = False) -> str | None:
+    """``shops_chat``: a shops chat also takes "Stop messages" (its template's button)."""
+    text = (item.body or "").strip()
+    if item.kind in ("button", "interactive"):
+        label = _tap_label(item)
+        return rules.opt_out_from_button(label) or (rules.shops_opt_out(label) if shops_chat else None)
     if item.kind == "text":
         if meeting_open and rules.is_meeting_cancel(text):
             # "الغاء" / "cancel" with a meeting booked: the model records a cancel.
             return None
-        return rules.opt_out_from_text(text)
+        return rules.opt_out_from_text(text) or (rules.shops_opt_out(text) if shops_chat else None)
     return None
 
 
-def _burst_opt_out(burst, meeting_open: bool) -> str | None:
+def _burst_opt_out(burst, meeting_open: bool, shops_chat: bool = False) -> str | None:
     """An opt-out is the last thing the customer said ("STOP" then "🙏" is still a
     STOP; "Stop" then "sending studios, I need a 2BR" is not)."""
     said = _said(burst)
     key = said[-1] if said else burst[-1]
-    return _item_opt_out(key, meeting_open)
+    return _item_opt_out(key, meeting_open, shops_chat)
+
+
+def _their_words(burst, heard: dict | None = None) -> str:
+    """What the customer said in this burst, acknowledgements aside: a lost lead's
+    reason ("Not Interested" for that button, a voice note's words)."""
+    said = _said(burst) or burst
+    words = [_tap_label(item) or transcript.inbound_text(item, (heard or {}).get(item.pk)) for item in said]
+    return " ".join(word for word in words if word).strip()[:255]
 
 
 def human_after(message, campaign_templates: set[int], since=None) -> bool:
@@ -443,11 +507,24 @@ def _time_is_grounded(start: dt.datetime, words: str, ours: str, now: dt.datetim
     return bool(re.search(offered, ours or ""))
 
 
-def check_proposal(proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "") -> dt.datetime | None:
+def _walk_in(start: dt.datetime, said: str, now) -> bool:
+    """They are coming now ("I'm outside", "on my way"), in this burst's own words: no slot
+    to refuse them for."""
+    return start - now <= WALK_IN and bool(_WALK_IN_WORDS.search((said or "").replace("’", "'")))
+
+
+def check_proposal(
+    proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "", taken=(), said: str = ""
+) -> dt.datetime | None:
     """The validated start (or arrival), None when the action needs no time. Raises SlotError.
 
     ``grounding`` is (customer words, our last words); when given, a new time
-    must be one the customer named or agreed to.
+    must be one the customer named or agreed to. ``taken``: the starts of the
+    other chats' open office visits; the office takes one client per 30-minute
+    slot, so a time one of them holds is refused with the two nearest free ones
+    (never the time this chat already has booked). The time already booked, said
+    again, and a walk-in (``said``, the burst's own words: "I'm outside") are
+    never refused.
     """
     action = effective_action(proposal["action"], appointment)
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
@@ -475,6 +552,17 @@ def check_proposal(proposal: dict, appointment, now, closed_dates=(), *, groundi
                 "The customer has not named that time or agreed to it. Offer one or two exact times and ask "
                 "them to pick.",
             )
+        if taken and not unchanged and not _walk_in(start, said, now) and hours.is_taken(start, taken):
+            # A move offers neither another client's slot nor the one they are moving from.
+            own = [appointment.starts_at] if confirmed and appointment.starts_at else []
+            nearest = hours.nearest_free(start, now, closed_dates, [*taken, *own])
+            offer = " and ".join(hours.describe(slot) for slot in nearest) or "none in the next three weeks"
+            raise hours.SlotError(
+                "taken",
+                "That time is already booked by another client: the office takes one client per 30-minute slot. "
+                f"The nearest free times are {offer}. Say it is taken and offer those two, asking which is better.",
+                alternatives=nearest,
+            )
         return start
     if action == "running_late":
         if not confirmed or not appointment.starts_at:
@@ -491,6 +579,58 @@ def check_proposal(proposal: dict, appointment, now, closed_dates=(), *, groundi
             "time they will arrive, place office.",
         )
     return None
+
+
+def _code_may_act(answer: dict, said: str) -> bool:
+    """Code may act on this answer's visit by itself (upgrade_exact_time books the
+    customer's own time; taken_tentative, and a correction refused as taken in
+    ask_model, offer the two nearest free slots): no fixed line goes out instead
+    (_shape), the customer is in our segments, nothing is handed to a person in this
+    answer, and no call is asked for ("Call me Wednesday at 5 pm": a time for a call)."""
+    return not (
+        answer.get("converted") or answer["segment"] == "other" or answer["handover"]["needed"] or _CALL_WORDS.search(said or "")
+    )
+
+
+def _at_office(proposal: dict, segment: str) -> bool:
+    """The visit is at our office: "office", or no place outside the owner segment (an
+    owner's day and hour with none may be a viewing at their property: check_proposal's
+    no_place). The model's tentatives in eval shops-taken named no place."""
+    place = proposal.get("place")
+    return place == "office" or (place is None and segment != "owner")
+
+
+def taken_tentative(answer: dict, appointment, now, closed_dates=(), taken=(), said: str = "") -> list:
+    """The free starts nearest a time another client has, when the answer keeps the visit
+    tentative at it and the customer named it themselves ("Tomorrow at 5 pm is better for
+    me", 5 PM taken); else []. One client per slot holds for a tentative too: the reply
+    is then code's, the two nearest free slots (shops.slot_taken), as for a confirm the
+    office refused twice, and the tentative keeps their words, not the time (_apply).
+    The model answered eval shops-taken this way in every run, offering other times or
+    the taken one. Only where code would book the visit itself (upgrade_exact_time's
+    exclusions, _code_may_act): an office visit (_at_office), never a fixed line,
+    someone outside our segments, a handover in this answer or a call. A walk-in ("I'm
+    outside") is never refused (check_proposal)."""
+    proposal = answer["appointment"]
+    if not taken or proposal["action"] != "tentative" or not _at_office(proposal, answer["segment"]):
+        return []
+    if not _code_may_act(answer, said):
+        return []
+    day, at = hours.parse_date(proposal.get("date")), hours.parse_time(proposal.get("time"))
+    if day is None or at is None or at not in hours.named_times(said):
+        return []
+    start = dt.datetime.combine(day, at, tzinfo=hours.DUBAI)
+    if not hours.is_taken(start, taken) or _walk_in(start, said, now):
+        return []
+    confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
+    own = [appointment.starts_at] if confirmed and appointment.starts_at else []
+    return hours.nearest_free(start, now, closed_dates, [*taken, *own])
+
+
+def offers_starts(reply: str, starts) -> bool:
+    """The reply names the hour of every one of these starts ("4:30 PM or 5:30 PM")."""
+    named = hours.named_times(reply or "")
+    return bool(starts) and all(start.astimezone(hours.DUBAI).time() in named for start in starts)
 
 
 def _shape(answer: dict) -> dict:
@@ -542,13 +682,50 @@ def first_price_question(earlier: list) -> bool:
 
 
 _ASKING = re.compile(r"[?؟]|\b(tell|how much|kitna|kitne|batao|bataiye|bata do|first)\b|كم", re.IGNORECASE)
+# A shops chat may quote the rents, so only a discount is a price question there.
+_DISCOUNT = re.compile(
+    r"discount|best price|last price|final price|lowest|\blower\b|reduce|reduction|cheaper|negotia|kam kar|kuch kam|rebate"
+    r"|خصم|تخفيض|تنزيل|أرخص|ارخص|ڈسکاؤنٹ|رعایت|کم کر|छूट|डिस्काउंट|कम कर",
+    re.IGNORECASE,
+)
 
 
-def settle_handover(answer: dict, earlier: list, new_texts: list | None = None) -> dict:
+def first_discount_question(earlier: list) -> bool:
+    """No earlier discount question of the customer's was answered by us yet (shops)."""
+    asked = False
+    for author, text in earlier:
+        if author == "customer" and _DISCOUNT.search(text or ""):
+            asked = True
+        elif asked and author in ("assistant", "agent"):
+            return False
+    return True
+
+
+def _settle_shops_handover(answer: dict, earlier: list, new_texts: list | None) -> dict:
+    """A shops chat quotes the rents, so a price question is never a handover there; a
+    discount is: not the first time (our agent discusses the best price at the
+    viewing), but when they insist on a figure after that line."""
+    handover = answer["handover"]
+    if handover["needed"] and handover["reason"] == "owner_viewing_slot":
+        answer["handover"] = handover = {"needed": False, "reason": None}
+    if handover["needed"] and handover["reason"] == "price_or_details_insisted":
+        if first_discount_question(earlier):
+            answer["handover"] = {"needed": False, "reason": None}
+    elif not handover["needed"] and new_texts and not first_discount_question(earlier):
+        asked = " ".join(new_texts)
+        if _DISCOUNT.search(asked) and _ASKING.search(asked):
+            answer["handover"] = {"needed": True, "reason": "price_or_details_insisted"}
+            answer["converted"] = answer.get("converted") or "holding"
+    return answer
+
+
+def settle_handover(answer: dict, earlier: list, new_texts: list | None = None, shops_chat: bool = False) -> dict:
     """The model's handover, corrected where code knows better: a renewal's price
     question is renewal_terms; the first price question is no handover; asking
     for the price again after our answer is one (with the holding line, never
-    a second copy of the deflection)."""
+    a second copy of the deflection). A shops chat has its own (discounts)."""
+    if shops_chat:
+        return _settle_shops_handover(answer, earlier, new_texts)
     handover = answer["handover"]
     renewal = answer["segment"] in ("renewal_tenant", "renewal_owner")
     if handover["needed"] and handover["reason"] == "owner_viewing_slot" and answer["segment"] != "owner":
@@ -596,15 +773,17 @@ def deferral(said: list, *, appointment=None, offered: bool = False, invites: in
 
     ``said`` is the burst without its acknowledgements, a message that is not
     text as '': a question sent with the deferral is the model's to answer.
-    On the table: ``offered`` (visit_offered), an invitation counted
-    (``invites``), or ``appointment``, the open one, being an office visit
-    still tentative. Any other open one stays the model's, which sees it: a
-    confirmed meeting, an owner's viewing at their property, a call. ``quiet``:
-    a person has the chat, they declined, or they are no customer of ours (a
-    job applicant): nothing to book.
+    A day or an hour said with it ("Tomorrow at 5 pm, I will let you know",
+    rules.is_dated_deferral) is still a deferral: no promise, so no time is
+    kept (their words are). On the table: ``offered`` (visit_offered), an
+    invitation counted (``invites``), or ``appointment``, the open one, being
+    an office visit still tentative. Any other open one stays the model's,
+    which sees it: a confirmed meeting, an owner's viewing at their property, a
+    call. ``quiet``: a person has the chat, they declined, or they are no
+    customer of ours (a job applicant): nothing to book.
     """
     words = (said[0] if len(said) == 1 else "").strip()
-    if quiet or not words or not rules.is_deferral(words):
+    if quiet or not words or not (rules.is_deferral(words) or rules.is_dated_deferral(words)):
         return ""
     if appointment is not None:
         office = (appointment.place or LeadAiAppointment.Place.OFFICE) == LeadAiAppointment.Place.OFFICE
@@ -633,6 +812,203 @@ def deferral_answer(words: str, language: str, appointment=None, segment: str = 
     return answer
 
 
+# The shops playbook's rules before the model -----------------------------------------------------
+# (owner's choice 2026-10-13: the build pack's OLD-LEAD MODE, in code where the words are fixed)
+
+CHECK_BACK_YES = "check_back_yes"
+CHECK_BACK_NO = "check_back_no"
+RENTED_NO = "rented_no"
+NOT_NOW = "not_now"
+FOR_WHOM = "for_whom"
+SPAM_RULE = "spam"
+# What a lead in discovery has told us, in the build pack's order (business, size or budget,
+# licence): with two of these, spam words are the model's to judge, never code's.
+_DISCOVERY = (("business_activity",), ("size_sqft",), ("budget_aed",), ("licence_kind", "trade_licence"))
+
+
+def _discovery_facts(facts: dict | None) -> int:
+    """How many of the business, the size, the budget and the licence the chat's facts hold."""
+    facts = facts or {}
+    return sum(1 for keys in _DISCOVERY if any(facts.get(key) not in (None, "", []) for key in keys))
+
+
+def shops_rule(
+    text: str,
+    *,
+    tapped: bool = False,
+    single: bool = True,
+    followup_open: bool = False,
+    rented_open: bool = False,
+    first_answer: bool = False,
+    for_client_known: bool = False,
+    visit_on_table: bool = False,
+    meeting_open: bool = False,
+    quiet: bool = False,
+    facts: dict | None = None,
+) -> str:
+    """Which of the shops rules settles this burst without the model, else ''.
+
+    ``text`` is the last thing the customer said (a tap's label, ``tapped``),
+    ``single`` that nothing else was said with it. ``followup_open``: our last
+    message asked "Should I check back with you in a month?"; ``rented_open``:
+    they said they already rented a shop and our last message asked about a
+    second one; ``first_answer``: nobody from our side wrote since the campaign;
+    ``visit_on_table``: a visit is open or our last message offered times, so a
+    typed "not now" means another time (the model's); ``meeting_open``: a visit
+    is open, so even the template's "Not now" is the model's, which sees it;
+    ``quiet``: a person has the chat; ``facts``: the chat's facts. A plain chain
+    message, scam or advert (rules.looks_like_spam) is spam whatever our last
+    line asked, and nothing goes out; but not with a visit open, nor from a lead
+    who told us two of their business, size, budget and licence: those are the
+    model's to judge (it can still call them spam).
+    """
+    words = (text or "").strip()
+    if quiet or not single or not words:
+        return ""
+    if not tapped and not meeting_open and _discovery_facts(facts) < 2 and rules.looks_like_spam(words):
+        return SPAM_RULE
+    if followup_open:
+        if rules.is_acceptance(words):
+            return CHECK_BACK_YES
+        return CHECK_BACK_NO if rules.is_refusal(words) else ""
+    if rented_open and rules.is_refusal(words):
+        return RENTED_NO
+    if ((tapped and not meeting_open) or not visit_on_table) and rules.is_not_now(words):
+        return NOT_NOW
+    if first_answer and not for_client_known and (rules.is_positive_tap(words) or rules.is_acceptance(words)):
+        return FOR_WHOM
+    return ""
+
+
+def shops_answer(rule: str, language: str, words: str = "") -> dict:
+    """What code answers for a shops rule, shaped like a model's answer: a fixed line
+    (``converted``), or for a no the not-interested opt-out with the reason
+    (``lost_reason``). ``followup`` tells _apply what to do with the check-back:
+    "ask", "schedule" (in a month) or "clear"."""
+    answer = schema.normalize({"language": language, "segment": "commercial_tenant", "send": True, "reply": "-"}, shops=True)
+    answer["rule"] = rule
+    if rule == SPAM_RULE:
+        # As the model's spam (_opt_out): no line at all, the chat stops, the lead is Junk
+        # with the words that were sent, so an agent can tell whether it really was spam.
+        answer.update(opt_out=rules.SPAM, send=False, reply="", segment="other")
+        return answer
+    if rule in (CHECK_BACK_NO, RENTED_NO):
+        answer["opt_out"] = rules.NOT_INTERESTED
+        answer["lost_reason"] = "already rented" if rule == RENTED_NO else (words or "not interested")
+        answer["followup"] = "clear"
+        answer["reply"] = rules.line_for(rules.NOT_INTERESTED, language, shops=True)
+        return answer
+    line = {CHECK_BACK_YES: "check_back_yes", NOT_NOW: "check_back", FOR_WHOM: "for_whom"}[rule]
+    answer["converted"] = line
+    answer["reply"] = rules.line(line, language)
+    if rule == CHECK_BACK_YES:
+        answer["followup"] = "schedule"
+    elif rule == NOT_NOW:
+        answer["followup"] = "ask"
+    return answer
+
+
+def shops_language(text: str, tapped: bool, so_far: str) -> str:
+    """The language of a fixed shops line: a tap, or a plain yes or no in English
+    letters, keeps the language so far; anything else is read from the words."""
+    guess = "en" if tapped else rules.guess_language(text)
+    return guess if guess != "en" else (so_far or "en")
+
+
+def point_to_location(answer: dict, new_texts: list, address_sent: str) -> str:
+    """The reply made to answer "How do I reach there?" (filters.asks_the_way) once our
+    location went out: "" when nothing changes, "pointer" when the line pointing to it
+    (rules "location_above") opens the reply, "location" when the reply was only the
+    address again and the line replaces it. The model was told to refer to "the
+    location above" and did not, in any run of eval location-again: it offered times
+    instead, or retyped the address, which drop_location cuts and leaves no answer.
+    ``address_sent``: the office address, '' when the location was not sent (or they
+    asked for the location itself: it goes again, filters.asks_for_location)."""
+    if not address_sent or answer["opt_out"] != "none" or answer.get("converted"):
+        return ""
+    if not filters.asks_the_way(" ".join(new_texts or [])):
+        return ""
+    reply = answer["reply"]
+    pointer, pointer_en = rules.line("location_above", answer["language"]), rules.line("location_above", "en")
+    if reply and filters.carries_location(reply, address_sent):
+        # Nothing but the address again (drop_location keeps such a reply whole): the line instead.
+        answer["reply_en"] = pointer_en if answer["reply_en"] else ""
+        answer["reply"] = pointer
+        answer["send"] = True
+        return "location"
+    if filters.points_to_location(reply):
+        return ""
+    answer["reply"] = f"{pointer} {reply}".strip()
+    if answer["reply_en"]:
+        answer["reply_en"] = f"{pointer_en} {answer['reply_en']}"
+    answer["send"] = True
+    return "pointer"
+
+
+# Our last line asked about the licence, or the business, already.
+_LICENCE_WORDS = re.compile(r"licen[cs]e|\bDED\b|trakhees|رخصة|لائسنس|लाइसेंस", re.IGNORECASE)
+_BUSINESS_WORDS = re.compile(r"\bbusiness\b|\bactivity\b|\bkaam\b|\bkaro?bar\b|نشاط|عمل|کاروبار|کام|व्यापार|बिज़नेस|बिजनेस|काम", re.IGNORECASE)
+# The customer asks to see the shops, to come or to book: an invitation is then the answer.
+_VISIT_WORDS = re.compile(
+    r"\b(?:visit|view|viewing|see|show|come|meet|appointment|book|booking|slot)\b|\bdekh\w*|\bmil(?:na|ne|en)\b|\baa\s+(?:sakta|sakte|jaun|jaunga)"
+    r"|زيارة|أزور|ازور|أشوف|اشوف|أجي|اجي|موعد|معاينة|دیکھ|ملاقات|آ\s+سکت|देख|मिल|आ\s+सकत",
+    re.IGNORECASE,
+)
+
+
+def _inviting(sentence: str) -> bool:
+    return filters.offers_time(sentence) or filters.is_open_when(sentence) or filters.is_invitation(sentence)
+
+
+def licence_first(answer: dict, known: dict, earlier: list, new_texts: list, now=None) -> bool:
+    """A shops reply that invites while the licence, the build pack's next discovery
+    item, is still unknown, rewritten to ask it (rules "ask_licence"), without the
+    location the invitation would have carried; True when it was.
+
+    The build pack: business, size or budget, licence, then the viewing (SHOPS_SYSTEM's
+    THE VIEWING says the same; the model invited instead in eval shops-35283, after
+    "I have vape business."). Only for a known end user whose business (known, or
+    answering our question about it) and size or budget are known, while no slot is
+    on the table, our last line did not ask about the licence already (no loop on an
+    answer the model could not read), and the customer's own words this time neither
+    ask anything nor ask to come, see or book, nor name a day or an hour: those
+    still get the invitation straight away. ``known``: the chat's facts before the
+    turn; ``earlier``: the conversation before the burst, as (author, text).
+    """
+    known = known or {}
+    facts = dict(known)
+    facts.update({key: value for key, value in answer["facts"].items() if value not in (None, "", [])})
+    ours = [text for author, text in earlier if author in ("assistant", "agent")]
+    last = ours[-1] if ours else ""
+    if facts.get("for_client") is not False or facts.get("licence_kind") or facts.get("trade_licence"):
+        return False
+    if not (facts.get("size_sqft") or facts.get("budget_aed")):
+        return False
+    # The business: recorded, or what they answer now to our question about it (size or budget known before).
+    answering_business = bool(_BUSINESS_WORDS.search(last)) and bool(known.get("size_sqft") or known.get("budget_aed"))
+    if not (facts.get("business_activity") or answering_business):
+        return False
+    if filters.offers_time(last) or _LICENCE_WORDS.search(last):
+        return False
+    said = " ".join(new_texts or [])
+    if (
+        rules.asks_question(said) or filters.asks_for_location(said) or filters.asks_the_way(said) or _VISIT_WORDS.search(said)
+        or hours.named_days(said, now) or hours.named_times(said)
+    ):
+        return False
+    sentences = filters.split_sentences(answer["reply"])
+    if not (answer["invited_to_meeting"] or any(_inviting(sentence) for sentence in sentences)):
+        return False
+    # Its reaction and its MATCH stay; the invitation and any other question go.
+    kept = [sentence for sentence in sentences if not _inviting(sentence) and not rules.asks_question(sentence)]
+    answer["reply"] = " ".join([*kept, rules.line("ask_licence", answer["language"])])
+    answer["invited_to_meeting"] = False
+    # The location went with the invitation: no address or Maps link under the licence
+    # question. (A message asking for the location never gets here: it is invited at once.)
+    answer["share_office_location"] = False
+    return True
+
+
 def settle(
     answer: dict,
     earlier: list,
@@ -643,6 +1019,9 @@ def settle(
     playbook: str = lane.GENERAL,
     broker_labelled: bool = False,
     address_sent: str = "",
+    slots: list | None = None,
+    now=None,
+    facts: dict | None = None,
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
@@ -650,11 +1029,19 @@ def settle(
     the chat's script (lane.playbook_for); ``broker_labelled``: the chat carries
     the Broker label already, so an agent pressed Resume on it (or labelled it):
     a broker is then an ordinary handover; ``address_sent``: the office
-    address, when one of our messages gave the location already. What is cut
-    from the reply is listed in ``answer["trimmed"]``, so its English gloss no
-    longer holds; ``answer["broker"]`` asks _apply to label and pause the chat.
+    address, when one of our messages gave the location already (asked the way
+    then, the reply points to it: point_to_location); ``slots``: in a shops chat
+    that may still be invited, the two free starts an open "when would you like
+    to come?" is turned into (invitation_slots, at ``now``); ``facts``: the
+    chat's facts before this turn (a shops chat asks the licence before it
+    invites: licence_first).
+    What is cut or rewritten in the reply is listed in ``answer["trimmed"]``, so
+    its English gloss no longer holds; ``answer["broker"]`` asks _apply to label
+    and pause the chat; ``answer["pointed"]`` says the reply now points to the
+    location (its gloss got the same line).
     """
-    settle_handover(answer, earlier, new_texts)
+    shops_chat = playbook == lane.IC_SHOPS
+    settle_handover(answer, earlier, new_texts, shops_chat=shops_chat)
     # language names the script the reply is written in (Urdu script is ur, never ur_latin).
     script = rules.guess_language(answer["reply"]) if answer["reply"] else ""
     if script in ("ar", "ur", "hi") and answer["language"] != script:
@@ -678,6 +1065,29 @@ def settle(
         answer["reply"], repeated = filters.drop_location(answer["reply"], address_sent)
         if repeated:
             trimmed.append("location")
+    if shops_chat and answer["reply"] and not answer.get("converted") and not rules.asks_question(" ".join(new_texts or [])):
+        # The build pack: never the same sentence twice in a chat. Not when they asked
+        # something (the same question can have the same answer), and never a
+        # question of ours or one of the build pack's fixed answers.
+        answer["reply"], repeated = filters.drop_repeats(
+            answer["reply"], [text for author, text in earlier if author == "assistant"], keep=shops.is_fixed_line
+        )
+        if repeated:
+            trimmed.append("repeat")
+    if (
+        shops_chat and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
+        and not answer["handover"]["needed"] and not agreed and licence_first(answer, facts or {}, earlier, new_texts, now)
+    ):
+        trimmed.append("licence_first")
+    if shops_chat and slots and answer["reply"] and not answer.get("converted"):
+        # The build pack's assumptive close: never "when are you free?", always two slots.
+        answer["reply"], rewritten = filters.offer_slots(answer["reply"], shops.slot_offer(answer["language"], slots, now))
+        if rewritten:
+            trimmed.append("slots")
+    # Last, so neither the no-repeat guard nor the slots rewrite takes the pointer out again.
+    pointed = point_to_location(answer, new_texts, address_sent)
+    if pointed:
+        answer["pointed"] = pointed
     if trimmed:
         answer["trimmed"] = trimmed
         if not answer["reply"]:
@@ -691,6 +1101,26 @@ def settle(
     return answer
 
 
+def invitation_slots(answer: dict, appointment, said: str, now, closed_dates=(), taken=(), *, may_invite: bool = True) -> list | None:
+    """The two free slots a shops reply's open "when would you like to come?" becomes
+    (settle's ``slots``; live and in the eval), or None when the reply is no invitation
+    to rewrite: the chat may not be invited any more, they are running late, on the
+    way or cancelling, or a booked customer is not moving the viewing (a question then
+    is about something else: "Approximately what time will you reach?"). A move never
+    offers the time they already have; the pair follows the day they asked for
+    (shops.invitation_slots)."""
+    if not may_invite:
+        return None
+    action = effective_action(answer["appointment"]["action"], appointment)
+    confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
+    if action in ("running_late", "on_my_way", "cancel") or (confirmed and action != "reschedule"):
+        return None
+    if confirmed and appointment.starts_at:
+        taken = [*taken, appointment.starts_at]
+    asked = [sentence for sentence in filters.split_sentences(answer["reply"]) if filters.is_open_when(sentence)]
+    return shops.invitation_slots(said, asked, now, closed_dates, taken)
+
+
 def ask_model(
     system: str,
     context: str,
@@ -702,23 +1132,59 @@ def ask_model(
     deadline: float | None = None,
     grounding=None,
     codes: list | None = None,
+    taken=(),
+    shops_chat: bool = False,
+    alternatives: list | None = None,
+    said: str = "",
 ):
     """(answer, validated time, completions, rejection reason, still_invalid).
 
-    ``codes`` collects the SlotError code of each refused proposal.
+    ``codes`` collects the SlotError code of each refused proposal, and
+    ``alternatives`` the free slots offered for a taken one. ``shops_chat``: the
+    shops schema and its own prompt cache key (the caller passes its prompt).
+    ``said``: the burst's own words (check_proposal's walk-in).
+
+    A slot another client has is offered around by code (``answer["slot_taken"]``,
+    shops.slot_taken with ``alternatives``) when the answer keeps the visit
+    tentative at it (taken_tentative), or when a confirm refused as taken was
+    corrected with a reply that does not name the two free starts; never where
+    code would not book the visit itself (_code_may_act), and never while a person
+    has the chat (_run_claimed).
     """
     codes = codes if codes is not None else []
+    alternatives = alternatives if alternatives is not None else []
+    answer_schema = schema.schema_for(shops_chat)
+    cache_key = openai_client.SHOPS_CACHE_KEY if shops_chat else openai_client.CACHE_KEY
     messages = [{"role": "system", "content": system}, {"role": "user", "content": context}]
     completions = []
-    first = openai_client.complete_json(messages, schema.SCHEMA, user=user, deadline=deadline)
+    first = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
     completions.append(first)
-    answer = _shape(schema.normalize(first.data))
+    answer = _shape(schema.normalize(first.data, shops=shops_chat))
+
+    def checked(answer):
+        return check_proposal(
+            answer["appointment"], appointment, now, closed_dates, grounding=grounding, segment=answer["segment"], taken=taken,
+            said=said,
+        )
+
+    def held_by_another(answer) -> bool:
+        free = taken_tentative(answer, appointment, now, closed_dates, taken, said)
+        if free:
+            codes.append("taken")
+            alternatives[:] = free
+            answer["slot_taken"] = True
+        return bool(free)
+
     try:
-        when = check_proposal(answer["appointment"], appointment, now, closed_dates, grounding=grounding, segment=answer["segment"])
-        return answer, when, completions, "", False
+        when = checked(answer)
     except hours.SlotError as exc:
         reason = exc.message
         codes.append(exc.code)
+        if exc.alternatives:
+            alternatives[:] = exc.alternatives
+    else:
+        held_by_another(answer)
+        return answer, when, completions, "", False
     if deadline is not None and deadline - time.monotonic() < CORRECTION_NEEDS:
         answer["appointment"] = dict(NO_TIME)
         return answer, None, completions, f"{reason} / no time for a second try", True
@@ -726,16 +1192,82 @@ def ask_model(
         {"role": "assistant", "content": json.dumps(first.data, ensure_ascii=False)},
         {"role": "user", "content": prompt.CORRECTION.format(reason=reason)},
     ]
-    second = openai_client.complete_json(messages, schema.SCHEMA, user=user, deadline=deadline)
+    second = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
     completions.append(second)
-    answer = _shape(schema.normalize(second.data))
+    answer = _shape(schema.normalize(second.data, shops=shops_chat))
     try:
-        when = check_proposal(answer["appointment"], appointment, now, closed_dates, grounding=grounding, segment=answer["segment"])
-        return answer, when, completions, reason, False
+        when = checked(answer)
     except hours.SlotError as exc:
         codes.append(exc.code)
+        if exc.alternatives:
+            alternatives[:] = exc.alternatives
         answer["appointment"] = dict(NO_TIME)
         return answer, None, completions, f"{reason} / {exc.message}", True
+    # Not where code would not book the visit itself either (_code_may_act): a correction that
+    # hands the chat to a person, or answers a call, keeps its own words.
+    refused_as_taken = codes[-1:] == ["taken"] and bool(alternatives) and _code_may_act(answer, said)
+    if not held_by_another(answer) and refused_as_taken and when is None and not offers_starts(answer["reply"], alternatives):
+        # The slot was refused as taken and the correction offers other times (or none):
+        # the two nearest free ones come from code, never another guess.
+        answer["slot_taken"] = True
+    return answer, when, completions, reason, False
+
+
+def upgrade_exact_time(
+    answer: dict,
+    said: str,
+    appointment,
+    now,
+    closed_dates=(),
+    *,
+    taken=(),
+    grounding=None,
+    handed_over: bool = False,
+    agent_last: bool = False,
+) -> dt.datetime | None:
+    """The customer's own exact day and time, free and inside hours, which the model
+    recorded only as tentative: confirmed after all (board T18; every playbook).
+
+    ``said`` is the burst's own words. Only an office visit the customer stated
+    plainly is upgraded: never a time said as no promise (hours.no_promise: "I
+    may come", "if I finish early", "I can't come", "after 5 pm", "are you open
+    then?"), nor one put off ("Tomorrow at 5 pm, I will let you know"), an
+    owner's day and hour with no place (a viewing at their property, or our
+    office? check_proposal's no_place), a call, someone outside our segments or a
+    fixed line. Never while a person has the chat (``handed_over``) or after a
+    colleague's message (``agent_last``): their plan is not overridden. Returns
+    the checked start, with the answer changed to a confirm; else None, untouched.
+    """
+    proposal = answer["appointment"]
+    if proposal["action"] != "tentative" or not proposal.get("date") or not proposal.get("time"):
+        return None
+    # A fixed line, someone outside our segments, a handover in this answer or a call (_code_may_act).
+    if proposal.get("place") not in (None, "office") or not _code_may_act(answer, said):
+        return None
+    # Handed to a person earlier (a call, an owner's viewing, someone abroad), or a colleague's plan: theirs to agree, not ours.
+    if handed_over or agent_last:
+        return None
+    if hours.no_promise(said) or rules.mentions_deferral(said):
+        return None
+    day, at = hours.parse_date(proposal["date"]), hours.parse_time(proposal["time"])
+    days, times = hours.named_days(said, now), hours.named_times(said)
+    # One day and one hour: "Wednesday at 5 or 6" or "Tuesday or Wednesday at 5" is a choice, not a booking.
+    one_day = len({value for value in days if value - dt.timedelta(days=7) not in days}) == 1
+    if day is None or at is None or day not in days or not one_day or times != {at}:
+        return None
+    # Checked with the model's own place: an owner's time with none is refused (no_place).
+    upgraded = {**proposal, "action": "confirm"}
+    try:
+        start = check_proposal(
+            upgraded, appointment, now, closed_dates, grounding=grounding, segment=answer["segment"], taken=taken, said=said
+        )
+    except hours.SlotError:
+        return None
+    booked = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
+    if start is None or (booked and appointment.starts_at == start):
+        return None  # the time already booked, said again: nothing to send
+    answer["appointment"] = {**upgraded, "place": "office"}
+    return start
 
 
 def _same_words(left: str, right: str) -> bool:
@@ -743,9 +1275,14 @@ def _same_words(left: str, right: str) -> bool:
 
 
 def _merge_facts(old: dict, new: dict) -> dict:
+    """The known facts with the new ones over them; a shops chat's notes (a list of
+    questions for our agent) are added to, never replaced."""
     merged = dict(old or {})
     for key, value in (new or {}).items():
-        if value not in (None, "", []):
+        if key == "notes" and isinstance(value, list):
+            if value:
+                merged[key] = shops.merge_notes(merged.get(key), value)
+        elif value not in (None, "", []):
             merged[key] = value
     return merged
 
@@ -797,9 +1334,10 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "") ->
     burst = _burst(conversation, message, revoked)
     settings_row = LeadAiSettings.load()
     state = LeadAiChatState.for_conversation(conversation)
-    opt = _burst_opt_out(burst, meeting_open=_open_appointment(conversation) is not None)
+    playbook = lane.playbook_for(conversation)
+    opt = _burst_opt_out(burst, meeting_open=_open_appointment(conversation) is not None, shops_chat=playbook == lane.IC_SHOPS)
     if opt:
-        return _rule_opt_out(message, conversation, chat, state, settings_row, burst, opt)
+        return _rule_opt_out(message, conversation, chat, state, settings_row, burst, opt, playbook=playbook)
 
     if not settings_row.answers(conversation.contact.wa_id):
         return _skip("assistant switched off")
@@ -848,8 +1386,13 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "") ->
         return _skip("already handled")
 
     live.thinking(conversation, True)
+    # What a booking holds until it is stored (the office lock); let go however the turn ends.
+    hold = contextlib.ExitStack()
     try:
-        outcome = _run_claimed(turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline)
+        outcome = _run_claimed(
+            turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline, playbook=playbook,
+            hold=hold,
+        )
         if turn.calls:
             _breaker_ok(settings_row)
     except SoftTimeLimitExceeded:
@@ -870,6 +1413,7 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "") ->
         turn.error = str(exc)[:2000]
         _alert_failure(conversation, chat, type(exc).__name__)
     finally:
+        hold.close()
         live.thinking(conversation, False)
     return _finish(turn, outcome)
 
@@ -1002,7 +1546,7 @@ def _send(conversation, text: str, turn, extra: dict | None = None):
 # Opt-outs ------------------------------------------------------------------------------
 
 
-def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind: str) -> Outcome:
+def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind: str, *, playbook: str = lane.GENERAL) -> Outcome:
     """A STOP, wrong number or "not interested" found by code: recorded whatever the
     assistant's state; the polite line only when the assistant may speak now."""
     turn = _claim(message)
@@ -1012,7 +1556,7 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
     # reminder or later reply reaches them, but nobody is alerted about a chat
     # the assistant is not part of.
     answers = settings_row.answers(conversation.contact.wa_id)
-    recorded = record_opt_out(conversation, kind, by="rule", quiet=not answers)
+    recorded = record_opt_out(conversation, kind, by="rule", quiet=not answers, words=_their_words(burst), playbook=playbook)
     actions = {"opt_out": kind, "by": "rule"}
     if not recorded:
         return _finish(turn, Outcome(LeadAiTurn.Status.SKIPPED, f"opt-out ({kind}) already recorded", actions=actions))
@@ -1029,7 +1573,7 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
         return _finish(turn, Outcome(LeadAiTurn.Status.SKIPPED, f"opt-out ({kind}) recorded, no line sent", actions=actions))
     language = state.language or rules.guess_language(" ".join((item.body or "") for item in burst))
     try:
-        sent = _send(conversation, rules.line(kind, language), turn)
+        sent = _send(conversation, rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS), turn)
     except SoftTimeLimitExceeded:
         raise
     except Exception as exc:  # noqa: BLE001 - the opt-out is recorded either way
@@ -1038,22 +1582,36 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
     return _finish(turn, Outcome(LeadAiTurn.Status.REPLIED, f"opt-out ({kind})", reply_message_id=sent.pk, actions=actions))
 
 
-def record_opt_out(conversation, kind: str, *, by: str, quiet: bool = False) -> bool:
+STOP_KINDS = (rules.STOP_ALL, rules.WRONG_NUMBER, rules.SPAM)
+
+
+def record_opt_out(
+    conversation, kind: str, *, by: str, quiet: bool = False, words: str = "", playbook: str | None = None, reason: str = ""
+) -> bool:
     """Record a customer's opt-out once; True only the first time. Sends nothing.
 
-    STOP and wrong number stop the assistant and drop the open meeting's
-    reminder (the meeting itself stays: they may still come). "Not
-    interested" cancels the open meeting, so nobody is reminded of, or waits
-    for, a visit the customer has declined. The agents are told; the CRM gets
-    a note; ``quiet`` skips both (a chat the switched-off assistant is not
-    part of). ``by`` is "rule", "model" or "reminder_check".
+    STOP and wrong number (and, in a shops chat, spam) stop the assistant and
+    drop the open meeting's reminder (the meeting itself stays: they may still
+    come). "Not interested" cancels the open meeting, so nobody is reminded of,
+    or waits for, a visit the customer has declined. Either way no follow-up is
+    left planned. The agents are told; the CRM gets a note; ``quiet`` skips both
+    (a chat the switched-off assistant is not part of). ``by`` is "rule",
+    "model" or "reminder_check". A shops chat's lead also gets its fields
+    (crm_fields.opt_out_writes): Opted out, or Lost with ``reason`` (else the
+    customer's ``words``), quiet or not: those fields are what keeps every later
+    campaign away from someone who asked us to stop (board C10, C11).
     """
     now = timezone.now()
     state = LeadAiChatState.for_conversation(conversation)
-    if kind in (rules.STOP_ALL, rules.WRONG_NUMBER):
-        updated = LeadAiChatState.objects.filter(pk=state.pk, stopped_at__isnull=True).update(stopped_at=now, stop_reason=kind)
+    no_follow_up = {"followup_asked_at": None, "followup_due_at": None}
+    if kind in STOP_KINDS:
+        updated = LeadAiChatState.objects.filter(pk=state.pk, stopped_at__isnull=True).update(
+            stopped_at=now, stop_reason=kind, **no_follow_up
+        )
     elif kind == rules.NOT_INTERESTED:
-        updated = LeadAiChatState.objects.filter(pk=state.pk, not_interested_at__isnull=True).update(not_interested_at=now)
+        updated = LeadAiChatState.objects.filter(pk=state.pk, not_interested_at__isnull=True).update(
+            not_interested_at=now, **no_follow_up
+        )
     else:
         return False
     if not updated:
@@ -1081,9 +1639,29 @@ def record_opt_out(conversation, kind: str, *, by: str, quiet: bool = False) -> 
                 appointment_alert(conversation, chat, current, "cancelled", False, _customer_name(conversation, state.facts or {}), revision)
     elif appointment is not None:
         LeadAiAppointment.objects.filter(pk=appointment.pk).update(reminder_due_at=None)
+    if (playbook if playbook is not None else lane.playbook_for(conversation)) == lane.IC_SHOPS:
+        # Data, not an alert: written even for a chat the switched-off assistant is not part of.
+        crm_fields.queue(conversation, chat, crm_fields.opt_out_writes(kind, reason or words))
     if quiet:
         return True
-    if kind in (rules.STOP_ALL, rules.WRONG_NUMBER):
+    if kind == rules.SPAM:
+        alerts.raise_alert(
+            kind="opt_out",
+            conversation=conversation,
+            appointment=appointment,
+            title=f"{_who(conversation)} sent what looks like spam",
+            text="The assistant read the customer's message as spam (a chain message, a scam or an advert), sent nothing "
+            "and stopped in this chat."
+            + (
+                " In Bitrix the lead goes to Junk Lead with Bot Status Lost. If that is wrong, press Resume AI and move "
+                "the lead back in Bitrix by hand: Resume only restarts the assistant."
+                if crm_fields.lead_of(chat, conversation) is not None
+                else " Press Resume AI if that is wrong."
+            ),
+            dedupe_key=f"opt_out:{conversation.pk}:{now:%Y%m%d}",
+            crm_url=_crm_url(chat),
+        )
+    elif kind in (rules.STOP_ALL, rules.WRONG_NUMBER):
         alerts.raise_alert(
             kind="opt_out",
             conversation=conversation,
@@ -1106,22 +1684,29 @@ def record_opt_out(conversation, kind: str, *, by: str, quiet: bool = False) -> 
     return True
 
 
-def _opt_out(turn, conversation, chat, state, kind: str, language: str, answer: dict) -> Outcome:
-    """The model found an opt-out: one fixed polite line, then record it."""
+def _opt_out(turn, conversation, chat, state, kind: str, language: str, answer: dict, *, playbook: str = lane.GENERAL, words: str = "") -> Outcome:
+    """The model (or a shops rule, ``answer["rule"]``) found an opt-out: one fixed
+    polite line, then record it. Spam gets no line at all."""
     with transaction.atomic():
         fresh = LeadAiChatState.objects.select_for_update().get(pk=state.pk)
         fresh.facts = _merge_facts(fresh.facts, answer["facts"])
         fresh.language = answer["language"][:16]
         fresh.save(update_fields=["facts", "language", "updated_at"])
-    try:
-        sent = _send(conversation, rules.line(kind, language), turn)
-    except SoftTimeLimitExceeded:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Lead AI opt-out line failed on conversation %s: %s", conversation.pk, exc)
-        sent = None
-    record_opt_out(conversation, kind, by="model")
-    actions = {"opt_out": kind, "by": "model"}
+    by = "rule" if answer.get("rule") else "model"
+    sent = None
+    if kind != rules.SPAM:
+        try:
+            sent = _send(conversation, rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS), turn)
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Lead AI opt-out line failed on conversation %s: %s", conversation.pk, exc)
+    record_opt_out(conversation, kind, by=by, words=words, playbook=playbook, reason=answer.get("lost_reason") or "")
+    actions = {"opt_out": kind, "by": by}
+    if answer.get("rule"):
+        actions["rule"] = answer["rule"]
+    if kind == rules.SPAM:
+        return Outcome(LeadAiTurn.Status.SKIPPED, "opt-out (spam) recorded, no line sent", actions=actions)
     if sent is None:
         return Outcome(LeadAiTurn.Status.FAILED, "opt-out line not sent", actions=actions)
     return Outcome(LeadAiTurn.Status.REPLIED, f"opt-out ({kind})", reply_message_id=sent.pk, actions=actions)
@@ -1162,7 +1747,109 @@ def _context_words(rows, campaign_msg, burst, heard, facts, campaign_templates) 
     return " ".join(texts)
 
 
-def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline) -> Outcome:
+def taken_slots(conversation, now=None) -> list:
+    """The starts of every OTHER chat's open office visit with a time (confirmed, or
+    tentative with a time): the slots the office has no room in."""
+    now = now or timezone.now()
+    return list(
+        LeadAiAppointment.objects.filter(
+            status__in=LeadAiAppointment.OPEN,
+            place=LeadAiAppointment.Place.OFFICE,
+            starts_at__gte=now - hours.SLOT,
+            starts_at__lte=now + hours.MAX_AHEAD + dt.timedelta(days=1),
+        )
+        .exclude(conversation=conversation)
+        .values_list("starts_at", flat=True)
+    )
+
+
+@contextlib.contextmanager
+def office_lock():
+    """Office bookings one at a time across the workers: a Postgres advisory lock, held
+    from the last look at the taken slots until the booking is stored (two customers of
+    one campaign answering the same offered slot seconds apart). Elsewhere (the tests'
+    SQLite) nothing. Never inside a transaction: the session holds it, not a query."""
+    held = False
+    if connection.vendor == "postgresql":
+        deadline = time.monotonic() + OFFICE_LOCK_WAIT
+        try:
+            with connection.cursor() as cursor:
+                while True:
+                    cursor.execute("SELECT pg_try_advisory_lock(%s)", [OFFICE_LOCK])
+                    held = bool(cursor.fetchone()[0])
+                    if held or time.monotonic() > deadline:
+                        break
+                    time.sleep(0.25)
+        except DatabaseError:
+            logger.exception("Lead AI could not take the office booking lock")
+        if not held:
+            logger.warning("Lead AI is booking without the office lock (waited %s s)", OFFICE_LOCK_WAIT)
+    try:
+        yield held
+    finally:
+        if held:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", [OFFICE_LOCK])
+            except DatabaseError:
+                logger.exception("Lead AI could not release the office booking lock")
+
+
+def _slot_gone(conversation, when, appointment, now, closed_dates, said: str) -> list | None:
+    """Another chat's visit took this slot while the model was thinking: the free starts
+    nearest it (to offer instead), else None (still free, the time they already have, or
+    a walk-in)."""
+    confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
+    if (confirmed and appointment.starts_at == when) or _walk_in(when, said, now):
+        return None
+    taken = taken_slots(conversation, now)
+    if not hours.is_taken(when, taken):
+        return None
+    own = [appointment.starts_at] if confirmed and appointment.starts_at else []
+    return hours.nearest_free(when, now, closed_dates, [*taken, *own])
+
+
+def _asked_second_shop(message) -> bool:
+    """Our message is the reply of the turn that learned they already rented a shop (_apply's
+    "rented_asked"): the one that congratulated them and asked about a second shop."""
+    actions = LeadAiTurn.objects.filter(reply_message=message).values_list("actions", flat=True).first()
+    return isinstance(actions, dict) and actions.get("rented_asked") is True
+
+
+def _shops_rule_for(conversation, state, burst, said, appointment, last_ours, campaign_templates) -> tuple[str, str, str]:
+    """(rule, its line's language, the customer's words) when a shops rule settles this burst."""
+    key = said[-1] if said else burst[-1]
+    label = _tap_label(key)
+    tapped = bool(label)
+    text = label or ((key.body or "").strip() if key.kind == "text" else "")
+    ours_last = last_ours is not None and transcript.who(last_ours, campaign_templates) == "assistant"
+    facts = state.facts or {}
+    rule = shops_rule(
+        text,
+        tapped=tapped,
+        single=len(said) <= 1,
+        followup_open=state.followup_asked_at is not None and ours_last,
+        # Only the reply right after "I already rented": not every later "no" in the chat.
+        rented_open=(
+            facts.get("already_rented") is True and ours_last and state.not_interested_at is None
+            and _asked_second_shop(last_ours)
+        ),
+        first_answer=last_ours is not None and transcript.who(last_ours, campaign_templates) == "campaign",
+        for_client_known=facts.get("for_client") is not None,
+        visit_on_table=appointment is not None or (last_ours is not None and filters.offers_time(transcript.outbound_text(last_ours))),
+        meeting_open=appointment is not None,
+        quiet=state.handed_over_at is not None,
+        facts=facts,
+    )
+    return rule, shops_language(text, tapped, state.language), _their_words(burst)
+
+
+def _run_claimed(
+    turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline, *, playbook: str = lane.GENERAL,
+    hold: contextlib.ExitStack | None = None,
+) -> Outcome:
+    """``hold``: where a booking keeps the office lock until it is stored (run_turn lets go of it)."""
+    shops_chat = playbook == lane.IC_SHOPS
     campaign_templates = transcript.campaign_template_ids(conversation)
     if human_after(message, campaign_templates):
         return _skip("an agent already answered this message")
@@ -1247,8 +1934,19 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         conversation, settings_row.office_address, settings_row.office_maps_url, since=now - LOCATION_FRESH
     )
     codes: list = []
+    alternatives: list = []
+    upgraded = False
     segment = _last_segment(conversation)
-    deferred = deferral(
+    # The other chats' office visits: one client per 30-minute slot, whatever the playbook.
+    taken = taken_slots(conversation, now)
+    # What the customer said in this burst (voice notes as heard): a walk-in, an exact time, the day they want.
+    said_words = " ".join(transcript.inbound_text(item, heard.get(item.pk)) for item in burst)
+    shops_rule_name, shops_words = "", ""
+    if shops_chat:
+        shops_rule_name, rule_language, shops_words = _shops_rule_for(
+            conversation, state, burst, said, appointment, last_ours, campaign_templates
+        )
+    deferred = "" if shops_rule_name else deferral(
         [(item.body or "") if item.kind == "text" else "" for item in said],
         appointment=appointment,
         offered=visit_offered(ours),
@@ -1256,7 +1954,13 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         # A person has the chat, they declined, or they are no customer of ours.
         quiet=state.handed_over_at is not None or state.not_interested_at is not None or segment == "other",
     )
-    if deferred:
+    if shops_rule_name:
+        # The shops playbook's fixed words (the yes, "Not now", the check-back's
+        # answer, a no after "already rented"): settled like a deferral, before the
+        # model, and shaped like its answer, so the same path sends and stores it.
+        answer = shops_answer(shops_rule_name, rule_language, shops_words)
+        when, completions, rejected, still_invalid = None, [], "", False
+    elif deferred:
         # A deferral of a visit we offered is settled here, before the model, not
         # by a settle() backstop: the words are fixed and the decision needs
         # nothing the model knows, so there is no call to pay for or to get wrong
@@ -1267,6 +1971,7 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         answer = deferral_answer(deferred, rules.guess_language(deferred), appointment, segment or "other")
         when, completions, rejected, still_invalid = None, [], "", False
     else:
+        grounding = (_customer_words(rows, heard, burst), ours)
         context = prompt.context_message(
             now=now,
             closed_dates=settings_row.closed_dates,
@@ -1285,18 +1990,38 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
             new_lines=[transcript.line(item, campaign_templates, heard.get(item.pk)) for item in burst],
             map_link=bool(settings_row.office_maps_url),
             location_sent=location,
+            shops=shops.context(settings_row, facts, now, taken) if shops_chat else None,
         )
         answer, when, completions, rejected, still_invalid = ask_model(
-            prompt.system_prompt(),
+            prompt.system_prompt(playbook),
             context,
             appointment,
             now,
             settings_row.closed_dates,
             openai_client.safety_id(conversation.pk),
             deadline=deadline,
-            grounding=(_customer_words(rows, heard, burst), ours),
+            grounding=grounding,
             codes=codes,
+            taken=taken,
+            shops_chat=shops_chat,
+            alternatives=alternatives,
+            said=said_words,
         )
+        if when is None and not still_invalid and answer["appointment"]["action"] == "tentative" and not answer.get("slot_taken"):
+            # The customer's own exact day and time, which the model left tentative.
+            exact = upgrade_exact_time(
+                answer,
+                said_words,
+                appointment,
+                now,
+                settings_row.closed_dates,
+                taken=taken,
+                grounding=grounding,
+                handed_over=state.handed_over_at is not None,
+                agent_last=_agent_spoke_last(conversation, campaign_templates),
+            )
+            if exact is not None:
+                when, upgraded = exact, True
         turn.model = completions[-1].model[:64]
         turn.calls = len(completions)
         turn.prompt_tokens = sum(c.prompt_tokens for c in completions)
@@ -1316,7 +2041,8 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         our_last=our_last,
         texts=[(item.body or "").strip() if item.kind == "text" else "" for item in burst if item.kind != "sticker"],
     )
-    playbook = lane.playbook_for(conversation)
+    # A shops chat that may still be invited: the two free slots an open "when" becomes.
+    may_invite = state.handed_over_at is None and state.not_interested_at is None and (agreed or state.invites < 2)
     settle(
         answer,
         earlier,
@@ -1327,6 +2053,11 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         # Only a broker's turn asks (settle_handover never makes one).
         broker_labelled=answer["handover"]["reason"] == BROKER and conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
         address_sent=settings_row.office_address if location else "",
+        slots=invitation_slots(answer, appointment, said_words, now, settings_row.closed_dates, taken, may_invite=may_invite)
+        if shops_chat
+        else None,
+        now=now,
+        facts=facts,
     )
     # What the model (or the rule) decided, so the turn can be traced afterwards.
     plan = {
@@ -1339,10 +2070,16 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
     }
     if deferred:
         plan["rule"] = "deferral"
+    elif shops_rule_name:
+        plan["rule"] = shops_rule_name
+    if upgraded:
+        plan["upgraded"] = True
     if agreed:
         plan["agreed"] = True
     if answer.get("trimmed"):
         plan["trimmed"] = answer["trimmed"]
+    if answer.get("pointed"):
+        plan["pointed"] = answer["pointed"]
     if playbook != lane.GENERAL:
         plan["playbook"] = playbook
     if rejected:
@@ -1357,7 +2094,14 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
     live.thinking(conversation, False)
 
     if answer["opt_out"] != "none":
-        return _opt_out(turn, conversation, chat, state, answer["opt_out"], answer["language"], answer)
+        outcome = _opt_out(
+            turn, conversation, chat, state, answer["opt_out"], answer["language"], answer,
+            playbook=playbook, words=_their_words(burst, heard),
+        )
+        if shops_chat:
+            # The shops rule that decided it, and the playbook, stay on the turn.
+            outcome.actions = {**plan, **outcome.actions}
+        return outcome
 
     # A time only a colleague can agree, after a colleague spoke: leave it to them.
     if set(codes) & set(HOURS_CODES) and _agent_spoke_last(conversation, campaign_templates):
@@ -1383,10 +2127,26 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         action = "reschedule_requested"
     elif action == "running_late" and when is not None and confirmed and appointment.starts_at == when:
         action = "on_time"
+    if action in ("confirm", "reschedule") and when is not None:
+        # One client per slot, looked at again under the office lock (held until the
+        # booking is stored): another chat may have booked it while the model thought.
+        if hold is not None:
+            hold.enter_context(office_lock())
+        gone = _slot_gone(conversation, when, appointment, now, settings_row.closed_dates, said_words)
+        if gone is not None:
+            codes.append("taken")
+            alternatives[:] = gone
+            plan["codes"] = codes
+            plan["rejected"] = "booked by another chat while the assistant was answering"
+            answer["appointment"] = dict(NO_TIME)
+            when, still_invalid, action = None, True, "none"
     plan["effective"] = action
     merged = _merge_facts(facts, answer["facts"])
     name = _customer_name(conversation, merged)
     rows_context = _context_words(rows, campaign_msg, burst, heard, facts, campaign_templates)
+    if shops_chat:
+        # A shops reply may quote SHOP FACTS' own figures, and no other new one.
+        rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
     maps = settings_row.office_maps_url
     text = ""
     holding = False
@@ -1394,25 +2154,54 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
     filtered = []
     gloss = False  # the model's own words go out whole, so its English translation (reply_en) holds
     appended = ""  # the Maps link or the address code added to the reply
+
+    def booking_text(rescheduled: bool) -> str:
+        if shops_chat:
+            # The build pack's confirmation: date, time, shop type, place, who they meet, what to bring.
+            return shops.confirmation(
+                language,
+                when,
+                shop_type=merged.get("shop_type"),
+                facts=settings_row.shops_facts,
+                office_address=settings_row.office_address,
+                maps_url=maps,
+                agent=shops.agent_of(settings_row),
+            )
+        if rescheduled:
+            return filters.rescheduled(language, name, when, settings_row.office_address, maps)
+        return filters.confirmation(language, name, when, settings_row.office_address, maps, _is_commercial(answer["segment"], merged))
+
+    # Code's two free slots for a taken one, never while a person has the chat: that keeps
+    # what it had before them (the booking texts, else the holding line; refused twice, ask_time).
+    offer_free = state.handed_over_at is None
     if still_invalid:
         if "no_appointment_otw" in codes:
             text = filters.on_my_way(language)
             _walk_in_alert(conversation, chat, name)
+            plan["fallback"] = "ask_time"
+        elif "taken" in codes and alternatives and offer_free:
+            # Another client has that slot: the two nearest free ones instead.
+            text = shops.slot_taken(language, alternatives, now)
+            plan["fallback"] = "slot_taken"
         else:
             text = rules.line("ask_time", language)
-        plan["fallback"] = "ask_time"
+            plan["fallback"] = "ask_time"
+    elif answer.get("slot_taken") and alternatives and offer_free:
+        # Kept tentative at another client's time, or a correction that offered other
+        # times (ask_model): the two nearest free ones, from code; the tentative keeps
+        # their words, not that time (_apply).
+        text = shops.slot_taken(language, alternatives, now)
+        plan["fallback"] = "slot_taken"
+        plan["codes"] = codes
     elif action in ("confirm", "reschedule") and when is not None:
-        if action == "confirm":
-            text = filters.confirmation(language, name, when, settings_row.office_address, maps, _is_commercial(answer["segment"], merged))
-        else:
-            text = filters.rescheduled(language, name, when, settings_row.office_address, maps)
+        text = booking_text(rescheduled=action == "reschedule")
         booking = {
             "event": "confirmed" if action == "confirm" else "rescheduled",
             "starts_at": when.isoformat(),
             "appointment": appointment.pk if appointment is not None else None,
         }
     elif action == "reconfirm":
-        text = filters.confirmation(language, name, when, settings_row.office_address, maps, _is_commercial(answer["segment"], merged))
+        text = booking_text(rescheduled=False)
     elif action == "running_late" and when is not None:
         text = filters.arrival(language, when)
     elif action == "on_time" or (action == "on_my_way" and confirmed):
@@ -1456,7 +2245,10 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
             plan["location_appended"] = True
 
     if not text:
-        done = _apply(conversation, chat, state, answer, action, when, appointment, now, sent=False, holding=False)
+        done = _apply(
+            conversation, chat, state, answer, action, when, appointment, now, sent=False, holding=False, playbook=playbook,
+            taken=taken,
+        )
         done.update(plan)
         return _skip("no reply needed", **done)
 
@@ -1486,7 +2278,12 @@ def _run_claimed(turn, message, conversation, chat, state, settings_row, burst, 
         )
         return Outcome(LeadAiTurn.Status.FAILED, f"send failed: {type(exc).__name__}", actions=plan)
 
-    done = _apply(conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=holding)
+    done = _apply(
+        conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=holding, playbook=playbook,
+        taken=taken,
+    )
+    if hold is not None:
+        hold.close()  # the booking is stored: the next one may look at the slots
     done.update(plan)
     # The booking is stored: the turn row says so before the slower pin goes out.
     turn.reply_message_id = sent.pk
@@ -1561,29 +2358,55 @@ BOOKING_DETAILS = (
     "customer_name", "intent", "property_type", "community", "building_unit", "bedrooms", "size_sqft",
     "budget_aed", "budget_basis", "move_in", "business_activity", "trade_licence",
 )
+# A shops chat's booking also follows its own facts, and its questions for the viewing.
+SHOPS_BOOKING_DETAILS = (*BOOKING_DETAILS, "licence_kind", "shop_type", "opening_when", "notes")
 
 
 def _details(facts: dict) -> dict:
     return {k: v for k, v in (facts or {}).items() if v not in (None, "")}
 
 
-def _apply(conversation, chat, state, answer, action, when, appointment, now, *, sent: bool, holding: bool) -> dict:
+def _apply(
+    conversation, chat, state, answer, action, when, appointment, now, *, sent: bool, holding: bool, playbook: str = lane.GENERAL,
+    taken=(),
+) -> dict:
     """Store what this turn decided, after the reply went out (or when none was needed).
 
     ``action`` is the effective action, including the engine's own
-    "reconfirm", "reschedule_requested" and "on_time".
+    "reconfirm", "reschedule_requested" and "on_time". A shops chat's
+    check-back ("Should I check back with you in a month?") is opened, answered
+    (a follow-up a month from now) or closed by any other reply we send, and its
+    lead's fields go to Bitrix (crm_fields). The reply of the turn that learned
+    they already rented a shop is marked ("rented_asked"): a plain no to it, and
+    only to it, closes the lead (_shops_rule_for). ``taken``: the other chats'
+    office starts; a tentative visit never keeps one of those as its time.
     """
     from ..tasks import sync_appointment_crm
 
     done: dict = {}
+    shops_chat = playbook == lane.IC_SHOPS
     with transaction.atomic():
         fresh = LeadAiChatState.objects.select_for_update().get(pk=state.pk)
+        facts_before = dict(fresh.facts or {})
         fresh.facts = _merge_facts(fresh.facts, answer["facts"])
         fresh.language = answer["language"][:16]
         fields = ["facts", "language", "updated_at"]
         if sent and answer["invited_to_meeting"]:
             fresh.invites = min(fresh.invites + 1, 99)
             fields.append("invites")
+        follow = answer.get("followup")
+        if sent and follow == "ask":
+            fresh.followup_asked_at = now
+            fields.append("followup_asked_at")
+        elif sent and follow == "schedule":
+            fresh.followup_asked_at = None
+            fresh.followup_due_at = now + shops.FOLLOW_UP_AFTER
+            fields += ["followup_asked_at", "followup_due_at"]
+            done["followup_due_at"] = fresh.followup_due_at.isoformat()
+        elif sent and fresh.followup_asked_at is not None:
+            # Anything else we said is now the last word: the question is no longer open.
+            fresh.followup_asked_at = None
+            fields.append("followup_asked_at")
         if holding:
             fresh.holding_line_at = now
             fields.append("holding_line_at")
@@ -1606,8 +2429,14 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
         if sent and action in ("confirm", "reschedule") and when is not None and fresh.not_interested_at is not None:
             fresh.not_interested_at = None  # they declined once, and have now booked
             fields.append("not_interested_at")
+        if sent and action in ("confirm", "reschedule") and when is not None and fresh.followup_due_at is not None:
+            fresh.followup_due_at = None  # booked now: no "checking back in a month"
+            fields.append("followup_due_at")
         fresh.save(update_fields=fields)
         facts = fresh.facts
+        if shops_chat and sent and facts.get("already_rented") is True and facts_before.get("already_rented") is not True:
+            # This reply congratulated them and asked about a second shop (SHOPS_SYSTEM).
+            done["rented_asked"] = True
 
         name = _customer_name(conversation, facts)
         proposal = answer["appointment"]
@@ -1658,6 +2487,10 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
                     except hours.SlotError as exc:
                         if exc.code != "too_far":
                             start = None
+                    if start is not None and hours.is_taken(start, taken):
+                        # Another client's slot (just refused as taken): their words are kept,
+                        # not the time, or this tentative would block that slot for everyone.
+                        start = None
             changed = current is None or (current.starts_at, current.place, current.note) != (start, place, note)
             if changed:
                 is_new = current is None
@@ -1729,8 +2562,9 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
         if not crm_event and current is not None and current.pk and current.status in LeadAiAppointment.OPEN:
             # Facts given after the booking reach the appointment (the CRM timeline
             # already has them from the WhatsApp mirror).
-            if {k: v for k, v in _details(facts).items() if k in BOOKING_DETAILS} != {
-                k: v for k, v in (current.details or {}).items() if k in BOOKING_DETAILS
+            keys = SHOPS_BOOKING_DETAILS if shops_chat else BOOKING_DETAILS
+            if {k: v for k, v in _details(facts).items() if k in keys} != {
+                k: v for k, v in (current.details or {}).items() if k in keys
             }:
                 current.details = _details(facts)
                 current.save(update_fields=["details", "updated_at"])
@@ -1755,8 +2589,21 @@ def _apply(conversation, chat, state, answer, action, when, appointment, now, *,
         if done.get("handover"):
             moment = fresh.paused_at if done.get("broker") else fresh.handed_over_at
             _handover_alert(conversation, chat, current, done["handover"], name, facts, moment, broker=bool(done.get("broker")))
-        if crm_event or done.get("handover"):
+        if crm_event or done.get("handover") or done.get("followup_due_at"):
             transaction.on_commit(lambda pk=conversation.pk: live.appointment_changed(pk))
+        if shops_chat:
+            # The lead's shops fields, through the Lead fields tool (never a REST update).
+            writes = crm_fields.turn_writes(
+                facts_before,
+                facts,
+                answered=sent,
+                first=not crm_fields.has_status(conversation, chat),
+                handover=bool(done.get("handover")) and not done.get("broker"),
+                broker=bool(done.get("broker")),
+                booked=crm_event in ("confirmed", "rescheduled"),
+            )
+            if crm_fields.queue(conversation, chat, writes):
+                done["crm_fields"] = [field for field, _, _ in writes]
     return done
 
 
@@ -1774,6 +2621,10 @@ def _detail_lines(facts: dict) -> list[str]:
         ("available_from", "Available from"),
         ("business_activity", "Business activity"),
         ("trade_licence", "Trade licence"),
+        # A shops chat's own (a general chat never has these).
+        ("licence_kind", "Licence"),
+        ("shop_type", "Shop type wanted"),
+        ("opening_when", "Opening"),
     )
     out = []
     for key, label in labels:
@@ -1781,7 +2632,17 @@ def _detail_lines(facts: dict) -> list[str]:
         if value not in (None, ""):
             if isinstance(value, float) and value.is_integer():
                 value = int(value)
+            if key == "shop_type":
+                value = shops.type_label(value)
+            elif key == "licence_kind":
+                value = shops.licence_label(value)
             out.append(f"{label}: {value}")
+    if facts.get("already_rented") is True:
+        out.append("Already rented a shop")
+    notes = facts.get("notes")
+    if isinstance(notes, list) and notes:
+        # A shops chat's questions for the viewing (a general chat's notes are text, not shown here).
+        out.append("Questions for the viewing: " + "; ".join(str(note) for note in notes))
     return out
 
 

@@ -12,7 +12,9 @@ Permissions: anyone who can open a chat may pause, resume or cancel its
 meeting. Settings: every agent may read them (the test numbers, which are
 private phone numbers, only as a count); anyone with admin rights may
 switch the assistant OFF (an emergency stop); switching it ON and every
-other change needs a panel admin (is_wa_admin) or a superuser.
+other change needs a panel admin (is_wa_admin) or a superuser. The shops
+playbook's facts, brand and viewing agent are settings too (shops.validate
+checks them); a shops chat's row says when it is due a follow-up.
 """
 
 import datetime as dt
@@ -34,7 +36,7 @@ from apps.inbox.serializers import serialize_conversation
 from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
-from .assistant import hours, openai_client
+from .assistant import hours, openai_client, shops
 from .lane import GENERAL, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
@@ -81,6 +83,14 @@ def _visible(user):
 
 def _iso(value):
     return value.isoformat() if value else None
+
+
+def _day_month(value) -> str:
+    """'12 Nov' in Dubai time, '' for none."""
+    if not value:
+        return ""
+    local = value.astimezone(hours.DUBAI)
+    return f"{local.day} {local:%b}"
 
 
 def serialize_appointment(appointment) -> dict | None:
@@ -188,7 +198,11 @@ def serialize_ai(conversation, settings_row=None, *, thinking=None, note=None) -
     else:
         note = ""
     paused_by = state.paused_by if state is not None else None
+    followup = state.followup_due_at if state is not None else None
     return {
+        # A shops chat whose customer said yes to "Should I check back with you in a month?".
+        "followup_due_at": _iso(followup),
+        "followup_label": _day_month(followup),
         "mode": mode,
         "test_number": bool(not settings_row.assistant_enabled and answers),
         "thinking": bool(thinking),
@@ -443,6 +457,10 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "daily_call_limit": row.daily_call_limit,
         "alert_bitrix_user_ids": row.alert_user_ids(),
         "alert_recipients": _alert_recipients(row),
+        # The shops playbook: what it may quote, the brand it speaks for, who a booked client meets.
+        "shops_facts": shops.facts_of(row.shops_facts),
+        "brand_name": shops.brand_of(row),
+        "viewing_agent_name": shops.agent_of(row),
         "paused_until": _iso(row.paused_until),
         "last_sweep_at": _iso(row.last_sweep_at),
         "updated_at": _iso(row.updated_at),
@@ -672,6 +690,24 @@ def assistant_settings(request):
             errors["alert_bitrix_user_ids"] = error
         else:
             change("alert_bitrix_user_ids", ids)
+    if "shops_facts" in data:
+        facts, problems = shops.validate(data.get("shops_facts"))
+        if problems:
+            errors.update(problems)
+        else:
+            change("shops_facts", facts)
+    if "brand_name" in data:
+        brand, error = shops.clean_text(data.get("brand_name"), shops.BRAND_MAX)
+        if error or not brand:
+            errors["brand_name"] = error or "The brand name cannot be empty."
+        else:
+            change("brand_name", brand)
+    if "viewing_agent_name" in data:
+        agent, error = shops.clean_text(data.get("viewing_agent_name"), shops.AGENT_MAX)
+        if error:
+            errors["viewing_agent_name"] = error
+        else:
+            change("viewing_agent_name", agent)
     if errors:
         return Response({"detail": "Some values are not valid.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
     if changes:

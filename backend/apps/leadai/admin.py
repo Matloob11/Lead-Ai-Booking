@@ -6,6 +6,7 @@ from .models import (
     LeadAiCampaign,
     LeadAiChat,
     LeadAiChatState,
+    LeadAiCrmField,
     LeadAiSettings,
     LeadAiTurn,
 )
@@ -53,6 +54,18 @@ class LeadAiTurnAdmin(admin.ModelAdmin):
     list_display = ("conversation", "status", "reason", "calls", "prompt_tokens", "completion_tokens", "created_at")
     list_filter = ("status",)
     raw_id_fields = ("conversation", "inbound", "reply_message")
+
+
+@admin.register(LeadAiCrmField)
+class LeadAiCrmFieldAdmin(admin.ModelAdmin):
+    """What the shops playbook wrote to each Bitrix lead through the Lead fields tool (read only)."""
+
+    list_display = ("conversation", "lead_id", "field", "value", "sent_at", "attempts", "retry_at", "error", "created_at")
+    list_filter = ("field",)
+    raw_id_fields = ("conversation",)
+    readonly_fields = (
+        "conversation", "lead_id", "field", "value", "payload", "sent_at", "error", "attempts", "retry_at", "created_at",
+    )
 
 
 @admin.register(LeadAiAlert)

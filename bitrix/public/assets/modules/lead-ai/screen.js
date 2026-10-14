@@ -21,6 +21,7 @@
 import { el, clear, debounce, initials, stamp, toast } from "../../core/dom.js";
 import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
+import { shopsForm, shopsValues } from "./shops.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
 const PAGE = 40;
@@ -793,6 +794,8 @@ function formSection(data, { onSaved, onClose }) {
 
   const pinHintId = "lai-set-pin-hint";
   const save = el("button.lai-btn.lai-btn--primary", { type: "submit" }, ["Save"]);
+  // The shops playbook's facts, brand and viewing agent (shops.js).
+  const shopsPart = shopsForm(data);
 
   const splitList = (text, pattern) =>
     String(text || "")
@@ -835,6 +838,7 @@ function formSection(data, { onSaved, onClose }) {
     // Sent as typed: the server takes digits only, at most 10, and says which entry is wrong.
     const alertIds = splitList(fields.alert_bitrix_user_ids.input.value, /[\s,;]+/);
     if (!sameList(alertIds, (data.alert_bitrix_user_ids || []).map(String))) out.alert_bitrix_user_ids = alertIds;
+    Object.assign(out, shopsPart.changes());
     return out;
   }
 
@@ -842,6 +846,7 @@ function formSection(data, { onSaved, onClose }) {
     event.preventDefault();
     if (save.disabled) return;
     for (const key of Object.keys(fields)) clearError(key);
+    shopsPart.clearErrors();
     setNote("");
     const payload = changes();
     if (!Object.keys(payload).length) {
@@ -859,7 +864,12 @@ function formSection(data, { onSaved, onClose }) {
       let first = null;
       if (errors && typeof errors === "object") {
         for (const [key, message] of Object.entries(errors)) {
-          if (showError(key, String(message)) && !first) first = fields[key].input;
+          if (showError(key, String(message))) {
+            if (!first) first = fields[key].input;
+            continue;
+          }
+          const input = shopsPart.showError(key, String(message));
+          if (input && !first) first = input;
         }
       }
       setNote(error?.message || "Could not save the settings.", true);
@@ -930,6 +940,7 @@ function formSection(data, { onSaved, onClose }) {
       { value: (data.alert_bitrix_user_ids || []).join(", "), placeholder: "2311" }
     ),
     el("div.lai-set__hint", {}, [`Now: ${alertRecipientsText(data)}.`]),
+    shopsPart.node,
     note,
     el("div.lai-set__actions", {}, [
       el("button.lai-btn.lai-btn--ghost", { type: "button", onclick: () => onClose() }, ["Close"]),
@@ -990,6 +1001,7 @@ function openSettingsDialog() {
       parts.push(formSection(data, { onSaved: saved, onClose: () => dialog.close() }));
     } else {
       parts.push(valuesSection(data));
+      if (data.shops_facts) parts.push(section("International City shops", shopsValues(data)));
       if (data.can_disable) parts.push(stopSection(data, (next) => saved(next, { assistant_enabled: false })));
       else parts.push(el("p.lai-set__note", {}, ["Only a panel admin can change these settings."]));
     }

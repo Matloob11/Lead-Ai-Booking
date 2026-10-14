@@ -32,6 +32,8 @@ CHAT_URL = "https://api.openai.com/v1/chat/completions"
 TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
 TRANSCRIBE_MAX_BYTES = 2 * 1024 * 1024  # about ten minutes of WhatsApp voice
 CACHE_KEY = "leadai-v2"
+# The shops playbook's own static prompt is cached apart from the general one.
+SHOPS_CACHE_KEY = "leadai-shops-v1"
 CONNECT_TIMEOUT = 5.0
 RETRY_PAUSE = 2.0
 # Below this, a call cannot finish before the turn's deadline: it is not made.
@@ -170,11 +172,13 @@ def complete_json(
     max_tokens: int = 700,
     user: str = "",
     deadline: float | None = None,
+    cache_key: str = CACHE_KEY,
 ) -> Completion:
     """One chat completion whose answer must match ``schema`` (structured outputs).
 
     One retry after a short pause on a timeout, a 429 rate limit or a 5xx,
     when the deadline leaves time for it; anything else is not retried.
+    ``cache_key`` names the static system prompt for OpenAI's prompt cache.
     Raises AssistantError.
     """
     key = _key()
@@ -189,7 +193,7 @@ def complete_json(
             "type": "json_schema",
             "json_schema": {"name": name, "strict": True, "schema": schema},
         },
-        "prompt_cache_key": CACHE_KEY,
+        "prompt_cache_key": cache_key or CACHE_KEY,
     }
     if user:
         body["safety_identifier"] = user

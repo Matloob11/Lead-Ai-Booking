@@ -13,6 +13,7 @@
 # The one thing that leaves: two or three OpenAI calls with this synthetic
 # text, billed to the Lead AI key.
 import datetime as dt
+import json
 from unittest import mock
 
 from django.db import transaction
@@ -20,6 +21,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Agent
+from apps.campaigns.models import Campaign, CampaignRecipient
 from apps.catalog.models import WabaNumber, WaTemplate
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai.assistant import engine, hours, openai_client
@@ -151,6 +153,16 @@ try:
                 status=Message.Status.DELIVERED,
                 created_at=now - dt.timedelta(hours=2),
             )
+            # As live, the template came from a campaign, so the engine reads it as the campaign
+            # and not as a colleague's message (transcript.campaign_template_ids). Without this
+            # the exact-time upgrade (board T18) stood aside: "a colleague spoke last".
+            campaign = Campaign.objects.create(
+                name="ZZ Lead AI probe (rolled back)", number=number, template=template, created_by=admin,
+                status=Campaign.Status.DONE,
+            )
+            CampaignRecipient.objects.create(
+                campaign=campaign, phone=CUSTOMER, conversation=conversation, status=CampaignRecipient.Status.SENT,
+            )
 
             # 1. An exact day and time: booked, confirmation written by code.
             day = next_open_day(now, settings_row.closed_dates or [])
@@ -158,6 +170,10 @@ try:
             outcome = turn(say(conversation, asked))
             reply = Message.objects.filter(pk=outcome.reply_message_id).first()
             print("turn 1:", outcome.status, outcome.reason, "|", (reply.body if reply else "").replace("\n", " / "))
+            # What the model and the code decided, so a tentative left as it is can be traced (board T18).
+            first = LeadAiTurn.objects.filter(conversation=conversation).order_by("pk").last()
+            if first is not None:
+                print("turn 1 actions:", json.dumps(first.actions, default=str, ensure_ascii=False)[:600])
             check("turn 1 replied", outcome.status == "replied", (outcome.status, outcome.reason))
             check("turn 1 reply tagged as the assistant, no sender", reply is not None and reply.payload.get("source") == "leadai_ai" and reply.sent_by_id is None)
             appointment = LeadAiAppointment.objects.filter(conversation=conversation).first()

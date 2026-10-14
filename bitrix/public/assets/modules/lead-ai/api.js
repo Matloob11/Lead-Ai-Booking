@@ -8,8 +8,11 @@
  *
  * A chat row (list, detail, and every POST below) carries lead_ai_info (the
  * campaign, and its playbook: "general" or "ic_shops"), lead_ai_ai (the
- * assistant's mode in that chat), lead_ai_appointment (the open meeting, or
- * null) and the inbox's own labels ([{id, name, colour}]).
+ * assistant's mode in that chat, and in a shops chat followup_due_at /
+ * followup_label when it will check back with the customer),
+ * lead_ai_appointment (the open meeting, or null) and the inbox's own labels
+ * ([{id, name, colour}]). The settings carry the shops playbook's
+ * shops_facts, brand_name and viewing_agent_name.
  */
 
 import { apiFetch } from "../../core/bitrix-sso.js";

@@ -29,6 +29,21 @@ send services; the only network call is OpenAI, with the Lead AI key; and
 every database query is refused while the scenarios run, so a change that
 made the prompt path touch the database fails a scenario here instead of
 writing to the live tables.
+
+A scenario with playbook "ic_shops" is a shops chat (the International City
+shops campaigns): it gets the shops prompt, schema and context (its SHOP
+FACTS, MATCH and FREE SLOTS, with the scenario's ``taken`` slots), its own
+rules before the model (the yes, "Not now", the check-back's answer, a no
+after "already rented", "Stop messages", a plain chain message or scam), the
+guards that turn an open "when" into two free slots and an invitation made
+before the licence is known into the licence question, and its booking
+message, all as engine.py runs them. In every playbook a time the customer
+named, free and inside hours, that the model left tentative is confirmed
+(engine.upgrade_exact_time); a slot another client has (``taken``) is refused
+with the nearest free ones, a tentative kept at it too, and code offers those
+two when the model offers others; a deferral said with a day or an hour is
+code's; and "How do I reach there?" after the address went out gets code's
+line pointing to it (engine.point_to_location).
 """
 
 from __future__ import annotations
@@ -38,6 +53,7 @@ import datetime as dt
 import json
 import re
 import time
+import types
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -45,8 +61,8 @@ from dataclasses import dataclass, field
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connections
 
-from apps.leadai.assistant import engine, filters, hours, openai_client, prompt, reminders, rules, schema, transcript
-from apps.leadai.models import DEFAULT_OFFICE_ADDRESS, LeadAiAppointment
+from apps.leadai.assistant import engine, filters, hours, openai_client, prompt, reminders, rules, schema, shops, transcript
+from apps.leadai.models import DEFAULT_BRAND_NAME, DEFAULT_OFFICE_ADDRESS, DEFAULT_SHOPS_FACTS, LeadAiAppointment
 
 DUBAI = hours.DUBAI
 NOW = dt.datetime(2026, 10, 12, 14, 0, tzinfo=DUBAI)  # a Monday: every run reads the same calendar
@@ -139,6 +155,41 @@ JOB_INTERVIEW = Campaign(
         "Please reply with your availability."
     ),
 )
+# The shops build pack's Template A (Bot 2, the old shop leads), and the live
+# campaign of conversation 35283 (#395, ic_shops_followup).
+SHOPS_A = Campaign(
+    template="intl_city_shops_reconnect",
+    category="MARKETING",
+    record="record: lead",
+    body=(
+        "Hi {name}, this is Malik from AR Properties. Some time ago you asked us about a shop in International City. "
+        "We now have new shops available in France, England, China, Russia, Morocco and Persia clusters, from AED 33,000 "
+        "per year, payable in 1 to 4 cheques. Are you still looking for a shop?"
+    ),
+    buttons=("Yes, show me shops", "Not now", "Stop messages"),
+)
+SHOPS_395 = Campaign(
+    template="ic_shops_followup",
+    category="MARKETING",
+    record="record: lead",
+    body=(
+        "Hi {name}, A7 Real Estate here. We still have shops for rent in International City, close to Dragon Mart. "
+        "Are you looking for a shop for your business?"
+    ),
+    buttons=("Interested", "Not Interested"),
+)
+IC_SHOPS = "ic_shops"
+
+
+def settings_for(scenario) -> types.SimpleNamespace:
+    """The Lead AI settings a scenario's turn reads (no database): the build pack's facts, AR Properties."""
+    return types.SimpleNamespace(
+        shops_facts=DEFAULT_SHOPS_FACTS,
+        closed_dates=list(scenario.closed),
+        brand_name=DEFAULT_BRAND_NAME,
+        viewing_agent_name="",
+        office_address=ADDRESS,
+    )
 
 
 # Text helpers -------------------------------------------------------------------------------
@@ -465,13 +516,95 @@ def offers_choice(minimum: int = 2) -> Check:
 
 
 def sends_line(kind: str) -> Check:
-    """What goes out is code's fixed line ``kind`` (rules.LINES), in the answer's language."""
+    """What goes out is code's fixed line ``kind`` (rules.LINES), in the answer's
+    language, in a shops chat's own words where it has them (rules.line_for)."""
 
     def test(run):
-        expected = rules.line(kind, run.answer["language"])
+        expected = rules.line_for(kind, run.answer["language"], shops=run.scenario.playbook == IC_SHOPS)
         return None if run.out == expected else f'sends "{_short(run.out, 60)}", expected the {kind} line'
 
     return _check("send", test)
+
+
+def sends_nothing() -> Check:
+    def test(run):
+        return f'sends "{_short(run.out, 60)}", expected nothing' if run.out else None
+
+    return _check("send", test)
+
+
+def follow_up(expected: str) -> Check:
+    """The check-back of a shops chat: "ask" (the question), "schedule" (in a month), "clear"."""
+
+    def test(run):
+        got = run.answer.get("followup")
+        return None if got == expected else f"follow-up {got or 'none'}, expected {expected}"
+
+    return _check("follow_up", test)
+
+
+def lost_reason(expected: str) -> Check:
+    def test(run):
+        got = run.answer.get("lost_reason")
+        return None if got == expected else f"lost reason {got!r}, expected {expected!r}"
+
+    return _check("lost", test)
+
+
+def flag(key: str, expected: bool) -> Check:
+    def test(run):
+        got = run.answer["facts"].get(key)
+        return None if got is expected else f"facts.{key} {got!r}, expected {expected!r}"
+
+    return _check("fact", test)
+
+
+def has_note() -> Check:
+    """The question for our agent is in facts.notes (a shops chat's list)."""
+
+    def test(run):
+        return None if run.answer["facts"].get("notes") else "facts.notes has no question for our agent"
+
+    return _check("fact", test)
+
+
+def _facts_amounts() -> set[str]:
+    return {re.sub(r"\D", "", amount) for amount in amounts(shops.facts_block(DEFAULT_SHOPS_FACTS))}
+
+
+def quotes_facts(minimum: int = 2) -> Check:
+    """The rents come from SHOP FACTS: at least ``minimum`` of its amounts, none other, none cut."""
+
+    def test(run):
+        if not run.reply:
+            return None
+        found = {re.sub(r"\D", "", amount) for amount in amounts(run.reply)}
+        known = _facts_amounts()
+        if found - known:
+            return f"quotes an amount SHOP FACTS does not have ({sorted(found - known)[0]})"
+        return None if len(found & known) >= minimum else f"quotes {len(found & known)} of SHOP FACTS' amounts, expected {minimum}"
+
+    return _check("reply", test)
+
+
+def offers_free(expected: set | None = None, *, never_taken: bool = True) -> Check:
+    """What goes out names two exact times (``expected`` when given), none of them a
+    taken slot (``never_taken``; a reply that turns the taken one down names it)."""
+
+    def test(run):
+        times = set(offered_times(run.out))
+        taken = {(slot.astimezone(DUBAI).hour, slot.astimezone(DUBAI).minute) for slot in run.scenario.taken}
+        if len(times) < 2:
+            return f"offers {len(times)} exact time(s), expected two free slots"
+        if never_taken and times & taken:
+            hour, minute = sorted(times & taken)[0]
+            return f"offers {hour:02d}:{minute:02d}, which another client has"
+        if expected and not expected <= times:
+            missing = ", ".join(f"{h:02d}:{m:02d}" for h, m in sorted(expected - times))
+            return f"does not offer the nearest free slots ({missing})"
+        return None
+
+    return _check("slots", test)
 
 
 def sends_location() -> Check:
@@ -623,9 +756,14 @@ def short_enough() -> Check:
 
 
 def no_emoji() -> Check:
+    """No emoji; a shops reply may carry one (SHOPS_SYSTEM: "at most one emoji, usually none")."""
+
     def test(run):
         marks = [ch for ch in run.reply if unicodedata.category(ch) == "So"]
-        return f"uses an emoji ({marks[0]})" if marks else None
+        allowed = 1 if run.scenario.playbook == IC_SHOPS else 0
+        if len(marks) <= allowed:
+            return None
+        return f"uses an emoji ({marks[0]})" if not allowed else f"uses {len(marks)} emoji ({''.join(marks)})"
 
     return _check("reply", test)
 
@@ -675,6 +813,11 @@ class Scenario:
     now: dt.datetime = NOW
     campaign_at: dt.datetime | None = None
     loose: tuple = ()  # default expectations this scenario does not judge: "handover", "opt_out", "action"
+    playbook: str = "general"  # "ic_shops": a shops campaign's chat
+    taken: tuple = ()  # other clients' office visits (their starts): those slots are not free
+    followup_asked: bool = False  # a shops chat: our last line asked "Should I check back with you in a month?"
+    # A shops chat: our last line is the reply that learned they already rented a shop (engine._asked_second_shop).
+    rented_asked: bool = False
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -741,6 +884,42 @@ LOCATION_SENT = [
     ASK_LICENCE,
     ("customer", "Yes licence is ready. I need around 400 sq ft. Where is your office?"),
     ("assistant", f"Our office is here:\n{ADDRESS}\nWould you like to visit us to go through the shop options?"),
+]
+
+# A shops chat (the build pack's Bot 2): Template A, the yes, "for yourself?", discovery.
+SHOPS_YES = ("customer", "[tapped: Yes, show me shops]")
+FOR_WHOM = ("assistant", rules.line("for_whom", "en"))
+FOR_MYSELF = ("customer", "For myself")
+ASK_BUSINESS = ("assistant", "Great. What business will the shop be for?")
+SHOPS_MATCHED = [
+    SHOPS_YES,
+    FOR_WHOM,
+    FOR_MYSELF,
+    ASK_BUSINESS,
+    ("customer", "Mobile phone shop"),
+    ("assistant", "A mobile shop, got it. What size do you need?"),
+    ("customer", "Around 450 sq ft"),
+    (
+        "assistant",
+        "For a mobile shop, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED or Trakhees "
+        "licence, or will you open a new one?",
+    ),
+]
+SHOPS_KNOWN = {
+    "for_client": False,
+    "property_type": "shop",
+    "business_activity": "mobile phone shop",
+    "size_sqft": 450,
+    "shop_type": "type_1",
+}
+SHOPS_INVITED = SHOPS_MATCHED + [
+    ("customer", "DED licence, yes"),
+    ("assistant", "Perfect. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"),
+]
+CHECK_BACK = [("customer", "[tapped: Not now]"), ("assistant", rules.line("check_back", "en"))]
+RENTED_ASKED = [
+    ("customer", "Thank you but I already rented a shop last month"),
+    ("assistant", "Congratulations on your new shop! Do you need a second shop, or do you know someone who does?"),
 ]
 
 SCENARIOS = [
@@ -884,6 +1063,8 @@ SCENARIOS = [
         expect=[sends_location()],
     ),
     Scenario(
+        # The pointer is code's when the model leaves it out (engine.point_to_location): it
+        # offered times instead, or retyped the address, in every run of batches 1 and 2a.
         "location-again",
         "the address went out already: it is not sent again, the reply points to it",
         chat=SHOP_INVITED + [("customer", "Where is your office?"), ("assistant", f"Our office is here:\n{ADDRESS}")],
@@ -1348,6 +1529,263 @@ SCENARIOS = [
         expect=[action("none")],
         words=SILENT,
     ),
+    # Every playbook: the customer's own exact time is a booking (board T18) --------------------------
+    Scenario(
+        "exact-time",
+        "'Can I come Wednesday at 5 pm?' after the invitation is booked for Wednesday 17:00, even if the model said tentative",
+        chat=SHOP_INVITED,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["Can I come Wednesday at 5 pm?"],
+        expect=[books("2026-10-14", "17:00")],
+        words=CODE,
+    ),
+    Scenario(
+        # Code must not confirm what the prompt calls tentative ("I may come").
+        "exact-time-may",
+        "'I may come tomorrow at 5 pm' is no promise: nothing is booked, whatever the model records",
+        chat=SHOP_INVITED,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["I may come tomorrow at 5 pm"],
+        expect=[no_booking()],
+    ),
+    Scenario(
+        # Settled by code like "I will message you" (rules.is_dated_deferral): the model,
+        # asked, invited again and appended the address in every run.
+        "defer-with-time",
+        "'Tomorrow at 5 pm, I will let you know' is a deferral: tentative, the let-me-know line, nothing booked",
+        chat=SHOP_INVITED,
+        facts=SHOP_FACTS,
+        invites=1,
+        new=["Tomorrow at 5 pm, I will let you know"],
+        expect=[no_booking(), action("tentative"), place("office"), invited(False), sends_line("let_me_know")],
+        words=CODE,
+    ),
+    # International City shops (the build pack's Bot 2, playbook ic_shops) -----------------------------
+    Scenario(
+        "shops-yes-tap",
+        "shops: the first tap 'Yes, show me shops' gets 'for yourself, or for a client?' from code",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["[tapped: Yes, show me shops]"],
+        expect=[sends_line("for_whom"), invited(False)],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-broker",
+        "shops: an agent asking for a client gets the build pack's hand-off line, as a broker",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM],
+        new=["I am an agent, I am checking for my client. He needs a shop around 500 sq ft"],
+        expect=[handover("broker_or_for_client"), sends_line("broker")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-not-now",
+        "shops: a tap on 'Not now' gets 'Should I check back with you in a month?' from code",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["[tapped: Not now]"],
+        expect=[sends_line("check_back"), follow_up("ask")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-not-now-yes",
+        "shops: yes to the check-back plans the follow-up a month away",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=CHECK_BACK,
+        followup_asked=True,
+        new=["Yes"],
+        expect=[sends_line("check_back_yes"), follow_up("schedule")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-not-now-no",
+        "shops: no to the check-back loses the lead, with their words, and one polite line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=CHECK_BACK,
+        followup_asked=True,
+        new=["No"],
+        expect=[opt_out("not_interested"), sends_line("not_interested"), lost_reason("No")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-stop",
+        "shops: a tap on 'Stop messages' opts out with 'Done, you won't receive more messages from us.'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["[tapped: Stop messages]"],
+        expect=[opt_out("stop_all"), sends_line("stop_all")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-already-rented",
+        "shops: 'I already rented a shop' is congratulated and asked about a second shop, not lost yet",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["Thank you but I already rented a shop last month"],
+        expect=[
+            opt_out("none"),
+            flag("already_rented", True),
+            invited(False),
+            says(r"congrat|mabrook|mubarak", "congratulate them"),
+            says(r"second|another|someone|anyone|friend|know (?:of )?any", "ask about a second shop or someone who needs one"),
+        ],
+    ),
+    Scenario(
+        "shops-rented-no",
+        "shops: no to the second-shop question loses the lead as 'already rented', from code",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENTED_ASKED,
+        facts={"already_rented": True},
+        rented_asked=True,
+        new=["No"],
+        expect=[opt_out("not_interested"), sends_line("not_interested"), lost_reason("already rented")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-rented-licence-no",
+        "shops: rented one, wants a second; 'No' to the licence question is a licence answer, never lost",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENTED_ASKED
+        + [
+            ("customer", "Yes, I need one more for my brother's salon"),
+            ("assistant", "Perfect, a salon. Do you already have a trade licence for it?"),
+        ],
+        facts={"already_rented": True, "for_client": False, "property_type": "shop", "business_activity": "salon"},
+        new=["No"],
+        expect=[opt_out("none"), either(fact("trade_licence", "no"), fact("licence_kind", "none"), fact("licence_kind", "new"))],
+    ),
+    Scenario(
+        "shops-rent",
+        "shops: 'how much is the rent?' is answered with SHOP FACTS' own rents, nothing cut",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM, FOR_MYSELF, ASK_BUSINESS],
+        facts={"for_client": False, "property_type": "shop"},
+        new=["How much is the rent?"],
+        expect=[quotes_facts()],
+    ),
+    Scenario(
+        "shops-service-charge",
+        "shops: the service charge is not in SHOP FACTS: our agent confirms it at the viewing, and it is noted",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=SHOPS_MATCHED,
+        facts=SHOPS_KNOWN,
+        new=["What is the service charge for these shops?"],
+        expect=[no_money(), has_note(), says(r"agent.{0,40}confirm|confirm.{0,60}viewing", "say our agent will confirm it at the viewing")],
+    ),
+    Scenario(
+        "shops-discount",
+        "shops: a discount is the best-price line, not a handover",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=SHOPS_INVITED,
+        facts={**SHOPS_KNOWN, "licence_kind": "ded", "trade_licence": "yes"},
+        invites=1,
+        new=["Can you give me a discount?"],
+        expect=[no_handover(), says(r"best price", "say our agent discusses the best price at the viewing")],
+    ),
+    Scenario(
+        "shops-sunday",
+        "shops: on a Saturday evening, Sunday is closed: says so and offers two Monday slots",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        now=at(17, 18, 0),
+        chat=SHOPS_MATCHED
+        + [
+            ("customer", "DED licence, yes"),
+            ("assistant", "Perfect. I can hold a slot for you today at 7:00 PM or on Monday at 11:00 AM — which is better?"),
+        ],
+        facts={**SHOPS_KNOWN, "licence_kind": "ded", "trade_licence": "yes"},
+        invites=1,
+        new=["Can I come on Sunday?"],
+        expect=[no_booking(), first_try(), says(r"closed", "say Sunday is closed"), says(r"monday", "offer Monday"), offers_free()],
+    ),
+    Scenario(
+        "shops-invite",
+        "shops: once the licence is known, the invitation names two free slots (one slot is another client's)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=SHOPS_MATCHED,
+        facts=SHOPS_KNOWN,
+        taken=(at(12, 15, 0),),
+        new=["Yes I have a DED licence"],
+        expect=[fact("licence_kind", "ded"), offers_free(), never_says(r"when (?:are|would|will|can) you", "asks an open when")],
+    ),
+    Scenario(
+        "shops-taken",
+        "shops: tomorrow 5 PM is another client's: not booked, the nearest free slots offered",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=SHOPS_INVITED,
+        facts={**SHOPS_KNOWN, "licence_kind": "ded", "trade_licence": "yes"},
+        invites=1,
+        taken=(at(13, 17, 0),),
+        new=["Tomorrow at 5 pm is better for me"],
+        expect=[no_booking(), offers_free({(16, 30), (17, 30)}, never_taken=False)],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-arabic",
+        "shops: Arabic in, Arabic out, with an English gloss",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Khalid Hassan",
+        new=["مرحبا، نعم ما زلت أبحث عن محل لمطعم صغير"],
+        language="ar",
+        expect=[segment("commercial_tenant"), script("arabic"), gloss()],
+    ),
+    Scenario(
+        "shops-roman-urdu",
+        "shops: Roman Urdu in, Roman Urdu out (ur_latin)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Muhammad Asif",
+        new=["Ji haan mujhe shop chahiye, mera mobile ka kaam hai"],
+        language="ur_latin",
+        expect=[segment("commercial_tenant"), script("latin"), gloss()],
+    ),
+    Scenario(
+        "shops-35283",
+        "shops: chat 35283 replayed: 'I have vape business' gets a short reaction and the licence question, no address again",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_395,
+        name="Sumon Khan",  # live, the campaign greets "Md Sumon" as Sumon (C8)
+        chat=[
+            ("customer", "[tapped: Interested]"),
+            FOR_WHOM,
+            ("customer", "For myself. Small shop around 450 sq ft, budget 35k. Give me location, I check"),
+            ("assistant", f"Here is our office:\n{ADDRESS}\nWhat business will the shop be for?"),
+        ],
+        facts={"for_client": False, "property_type": "shop", "size_sqft": 450, "budget_aed": 35000, "budget_basis": "per_year"},
+        new=["I have vape 💨 business."],
+        expect=[
+            invited(False),
+            says(r"vape", "react to the vape business"),
+            says(r"licen[cs]e|\bDED\b|trakhees", "ask about the licence"),
+        ],
+    ),
+    Scenario(
+        "shops-spam",
+        "shops: a chain message with a scam link is spam: nothing goes out",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["🔥 Earn money daily from home! Join our crypto investment group now, limited seats, forward to 10 friends 🔥"],
+        expect=[opt_out("spam"), sends_nothing()],
+        words=CODE,
+        loose=("handover",),
+    ),
 ]
 
 
@@ -1440,6 +1878,8 @@ def build(scenario: Scenario) -> Built:
     if appointment is not None and appointment.customer_state:
         events.append(f"The customer told us: {appointment.get_customer_state_display().lower()}.")
     location = location_already_sent(scenario)
+    shops_chat = scenario.playbook == IC_SHOPS
+    settings_row = settings_for(scenario)
     context = prompt.context_message(
         now=scenario.now,
         closed_dates=list(scenario.closed),
@@ -1458,10 +1898,14 @@ def build(scenario: Scenario) -> Built:
         conversation=conversation + new_lines,
         new_lines=new_lines,
         location_sent=location,
+        shops=shops.context(settings_row, scenario.facts, scenario.now, list(scenario.taken)) if shops_chat else None,
     )
     # As engine._context_words: what the customer, the campaign and colleagues wrote, never the assistant.
     colleagues = [item[1] for item in scenario.chat if item[0] in ("customer", "agent")]
     context_words = " ".join([body, *colleagues, *scenario.new, json.dumps(scenario.facts, ensure_ascii=False)])
+    if shops_chat:
+        # As live, a shops reply may quote SHOP FACTS' own figures.
+        context_words = f"{context_words} {shops.known_amounts(settings_row)}"
     return Built(context, appointment, context_words, location)
 
 
@@ -1472,20 +1916,25 @@ def code_first(scenario: Scenario) -> dict | None:
     """The answer when engine._run_claimed settles the turn without the model, else None.
 
     As live: an opt-out as the last thing the customer said, an automatic reply,
-    only acknowledgements with no question of ours pending, or a deferral of a
-    visit we offered ("I will message you") never reach OpenAI.
+    only acknowledgements with no question of ours pending, a shops chat's own
+    rules (the yes, "Not now", the check-back's answer, a no after "already
+    rented"), or a deferral of a visit we offered ("I will message you") never
+    reach OpenAI.
     """
     texts = list(scenario.new)
     said = [text for text in texts if not rules.is_acknowledgement(text)]
     key = said[-1] if said else texts[-1]
     meeting = (scenario.appointment or {}).get("status") in ("tentative", "confirmed")
+    shops_chat = scenario.playbook == IC_SHOPS
     tap = _TAP.match(key)
     if tap:
-        opt = rules.opt_out_from_button(tap[1])
+        opt = rules.opt_out_from_button(tap[1]) or (rules.shops_opt_out(tap[1]) if shops_chat else None)
+    elif meeting and rules.is_meeting_cancel(key):
+        opt = None
     else:
-        opt = None if meeting and rules.is_meeting_cancel(key) else rules.opt_out_from_text(key)
+        opt = rules.opt_out_from_text(key) or (rules.shops_opt_out(key) if shops_chat else None)
     language = scenario.language_so_far if scenario.language_so_far != "en" else rules.guess_language(key)
-    silent = schema.normalize({"language": language, "segment": "other", "send": False})
+    silent = schema.normalize({"language": language, "segment": "other", "send": False}, shops=shops_chat)
     if opt:
         silent["opt_out"] = opt
         silent["send"] = True  # the code's own polite line goes out
@@ -1500,6 +1949,31 @@ def code_first(scenario: Scenario) -> dict | None:
     if not said and (all(text == "[sticker]" for text in texts) or not pending):
         return silent
     appointment = open_appointment(scenario)
+    if shops_chat:
+        # As engine._shops_rule_for: the last thing said (a tap by its label), and our newest line.
+        outbound = [item for item in scenario.chat if item[0] in ("assistant", "agent", "campaign", "reminder")]
+        last = outbound[-1] if outbound else ("campaign", scenario.campaign.body)
+        ours_last = last[0] == "assistant"
+        text = tap[1] if tap else key
+        rule = engine.shops_rule(
+            text,
+            tapped=bool(tap),
+            single=len(said) <= 1,
+            followup_open=scenario.followup_asked and ours_last,
+            rented_open=(
+                scenario.facts.get("already_rented") is True and ours_last and not scenario.not_interested and scenario.rented_asked
+            ),
+            first_answer=last[0] == "campaign",
+            for_client_known=scenario.facts.get("for_client") is not None,
+            visit_on_table=appointment is not None or filters.offers_time(last[1]),
+            meeting_open=appointment is not None,
+            quiet=scenario.handed_over != "no",
+            facts=scenario.facts,
+        )
+        if rule:
+            # As engine._their_words: a tap by its label.
+            words = " ".join(match[1] if (match := _TAP.match(item)) else item for item in (said or texts))
+            return engine.shops_answer(rule, engine.shops_language(text, bool(tap), scenario.language_so_far), words)
     words = engine.deferral(
         said,
         appointment=appointment,
@@ -1525,6 +1999,8 @@ class Run:
     rejected: str = ""
     still_invalid: bool = False
     codes: list = field(default_factory=list)  # why the booking check refused a proposal
+    alternatives: list = field(default_factory=list)  # the free slots offered for a taken one
+    upgraded: bool = False  # the customer's own exact time, confirmed by code (engine.upgrade_exact_time)
     reply: str = ""  # the model's words as they would go out (after clean_reply), else ""
     removed: list = field(default_factory=list)
     out: str = ""  # what the customer would receive
@@ -1545,12 +2021,22 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     """(who writes it, the text) for what engine._run_claimed would send with this answer."""
     scenario, answer = run.scenario, run.answer
     lang = answer["language"]
+    shops_chat = scenario.playbook == IC_SHOPS
+    if answer["opt_out"] == rules.SPAM:
+        return "", ""  # spam gets no line at all
     if answer["opt_out"] != "none":
-        return CODE, rules.line(answer["opt_out"], lang)
+        return CODE, rules.line_for(answer["opt_out"], lang, shops=shops_chat)
+    # As engine._run_claimed: code's two free slots for a taken one, never while a person has the chat.
+    offer_free = scenario.handed_over == "no"
     if run.still_invalid:
         if "no_appointment_otw" in run.codes:
             return CODE, filters.on_my_way(lang)
+        if "taken" in run.codes and run.alternatives and offer_free:
+            return CODE, shops.slot_taken(lang, run.alternatives, scenario.now)
         return CODE, rules.line("ask_time", lang)
+    if answer.get("slot_taken") and run.alternatives and offer_free:
+        # engine.ask_model: kept tentative at another client's time, or corrected with other times.
+        return CODE, shops.slot_taken(lang, run.alternatives, scenario.now)
     name = answer["facts"].get("customer_name") or scenario.facts.get("customer_name") or scenario.name
     appointment = built.appointment
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
@@ -1562,13 +2048,22 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
         action = "reschedule_requested"
     elif action == "running_late" and run.when is not None and confirmed and appointment.starts_at == run.when:
         action = "on_time"
-    commercial = engine._is_commercial(answer["segment"], engine._merge_facts(scenario.facts, answer["facts"]))
+    merged = engine._merge_facts(scenario.facts, answer["facts"])
+    commercial = engine._is_commercial(answer["segment"], merged)
+
+    def booking(rescheduled: bool) -> str:
+        if shops_chat:
+            return shops.confirmation(
+                lang, run.when, shop_type=merged.get("shop_type"), facts=DEFAULT_SHOPS_FACTS, office_address=ADDRESS
+            )
+        if rescheduled:
+            return filters.rescheduled(lang, name, run.when, ADDRESS, "")
+        return filters.confirmation(lang, name, run.when, ADDRESS, "", commercial)
+
     if action in ("confirm", "reschedule") and run.when is not None:
-        if action == "reschedule":
-            return CODE, filters.rescheduled(lang, name, run.when, ADDRESS, "")
-        return CODE, filters.confirmation(lang, name, run.when, ADDRESS, "", commercial)
+        return CODE, booking(rescheduled=action == "reschedule")
     if action == "reconfirm":
-        return CODE, filters.confirmation(lang, name, run.when, ADDRESS, "", commercial)
+        return CODE, booking(rescheduled=False)
     if action == "running_late" and run.when is not None:
         return CODE, filters.arrival(lang, run.when)
     if action == "on_time" or (action == "on_my_way" and confirmed):
@@ -1624,24 +2119,46 @@ def run_once(scenario: Scenario, label: str) -> Run:
         run.context_words = built.context_words
         run.location_sent = built.location_sent
         settled = code_first(scenario)
+        shops_chat = scenario.playbook == IC_SHOPS
+        taken = list(scenario.taken)
+        said = " ".join(scenario.new)
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
         else:
             answer, when, completions, rejected, still_invalid = engine.ask_model(
-                prompt.system_prompt(), built.context, built.appointment, scenario.now, list(scenario.closed), user=SAFETY_ID,
-                codes=run.codes,
+                prompt.system_prompt(scenario.playbook), built.context, built.appointment, scenario.now, list(scenario.closed),
+                user=SAFETY_ID, codes=run.codes, taken=taken, shops_chat=shops_chat, alternatives=run.alternatives, said=said,
             )
+            if when is None and not still_invalid and not answer.get("slot_taken"):
+                # As live: the customer's own exact time, free and in hours, that the model left tentative,
+                # unless a person has the chat or a colleague wrote last (engine._agent_spoke_last).
+                ours = [item[0] for item in scenario.chat if item[0] in ("assistant", "agent", "reminder")]
+                when = engine.upgrade_exact_time(
+                    answer, said, built.appointment, scenario.now, list(scenario.closed), taken=taken,
+                    handed_over=scenario.handed_over != "no", agent_last=bool(ours) and ours[-1] == "agent",
+                )
+                run.upgraded = when is not None
         if settled is None or settled.get("converted"):
             # As live, code settles the model's answer, and the deferral rule's (its other rules end the turn).
             body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
             earlier = [("campaign", body)] + [(item[0], item[1]) for item in scenario.chat]
+            agreed_now = agreed(scenario)
+            may_invite = scenario.handed_over == "no" and not scenario.not_interested and (agreed_now or scenario.invites < 2)
             engine.settle(
                 answer,
                 earlier,
                 list(scenario.new),
                 scenario.invites,
-                agreed=agreed(scenario),
+                agreed=agreed_now,
+                playbook=scenario.playbook,
                 address_sent=ADDRESS if built.location_sent else "",
+                slots=engine.invitation_slots(
+                    answer, built.appointment, said, scenario.now, list(scenario.closed), taken, may_invite=may_invite
+                )
+                if shops_chat
+                else None,
+                now=scenario.now,
+                facts=scenario.facts,
             )
         run.calls = len(completions)
         run.prompt_tokens = sum(c.prompt_tokens for c in completions)
