@@ -85,6 +85,7 @@
 #   ops/wa.sh leadai-switch on|off|status   the Lead AI assistant's switch
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
+#   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
 #   ops/wa.sh qr-disable                  stop OpenWA + wa-qr; keep files; no autostart
 #   ops/wa.sh qr-status                   OpenWA + wa-qr: state, restart policy, data on disk
 #   ops/wa.sh load                        host load, RAM, disk, top containers
@@ -1415,6 +1416,22 @@ case "$cmd" in
       [[ "$n" =~ ^[0-9]{1,10}$ ]] || die "'$n' is not a Bitrix user id (digits only)"
     done
     remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch alert-ids $*"
+    ;;
+
+  set-leadai-office)
+    # The office's Google Maps link and pin for Lead AI (confirmations, reminders,
+    # the location pin), checked by the settings view's own validators and kept
+    # in the settings history. Only a maps.app.goo.gl short link and plain
+    # decimal coordinates pass, so nothing here can break the quoting below.
+    [[ $# -eq 3 ]] || die "set-leadai-office takes URL LAT LNG"
+    [[ "$1" =~ ^https://maps\.app\.goo\.gl/[A-Za-z0-9]+$ ]] || die "the link must be https://maps.app.goo.gl/<code>"
+    [[ "$2" =~ ^-?[0-9]{1,2}\.[0-9]{1,8}$ ]] || die "'$2' is not a latitude"
+    [[ "$3" =~ ^-?[0-9]{1,3}\.[0-9]{1,8}$ ]] || die "'$3' is not a longitude"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-leadai-office.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/set-leadai-office.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
+      -e LEADAI_OFFICE_MAPS_URL='$1' -e LEADAI_OFFICE_LAT='$2' -e LEADAI_OFFICE_LNG='$3' web python manage.py shell"
     ;;
 
   ""|-h|--help|help) usage ;;
