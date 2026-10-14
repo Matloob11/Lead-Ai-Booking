@@ -1,3 +1,24 @@
+## 2026-10-14 — Review of Cursor's C15–C19; Cursor's next list C20–C30 (Claude Code)
+
+Read-only checks against HEAD, the live server and the Bitrix box. Nothing was written there.
+
+**Confirmed:**
+- **C17:** 461 of 461 webhook tasks succeeded after the up; no NameError.
+- **C18:** 16 verbs removed; `bash -n` clean; every remaining catalog verb's script exists.
+- **C16 basics:** hold off, balance polled hourly (23,872 at 08:22 UTC), gateway 0003 applied, banner served, anonymous `/api/gateway/credit/` gets 401.
+
+**Found:**
+- **C15:** the install cut the Leads grid of users 26, 2196, 2633 and 2637 to the three new columns (2311 too, until it was set again by hand). The install script is still web-runnable and does it again on a GET. The CRM's shop marker is **Property Type** (Shop 760 / Retail 12): 907 IC leads, 906 with a phone, ~531 phones. Unit Type finds 34.
+- **C16:** more than 200 parked rows strand after a release (reproduced). A failing poll keeps the hold on. 50 credits is about 7 minutes of traffic. Parked rows go out without an opt-out recheck.
+- **C19:** missed ~1,650 leads named "Property Finder WhatsApp////…" (greeted "Property"). The 1,771 piped contacts have no phone.
+- **Live:** the Bitrix nginx limits `/rest/` from the VPS to 2 requests a second, burst 20, and answers 429. Since 07:46 UTC the worker has logged a few hundred "not JSON" answers an hour. `mirror_message` does not retry, so those messages are missing from the Bitrix timeline.
+
+**Board:** Q17–Q23 for Matloob, C20–C30 for Cursor, corrections in the C15/C19 sections and Known risks, and a Requests gate ("2b is not live yet"). The C24 reproduction is `files/temp/c24/test_c16_adversarial.py` (gitignored).
+
+**Not tested:** the preset in a browser, the banner rendered, the bell, the 429 itself (its status code is not logged).
+
+---
+
 ## 2026-10-14 — Portal titles in NAME report (Cursor)
 
 C19 read-only. Contact NAME holds a portal title on 1839 rows (all source Personal): Property Finder 1039, Bayut 714, Dubizzle 18, other 68. Lead NAME has `|` on 67 rows, none portal-style (they are "Person | Company"). C1 greets the first word of NAME, so "Bayut WhatsApp | Sabeer" becomes "Bayut". Proposed: one-off contact NAME cleanup to the part after the last `|`, plus a C1 follow-up that strips `|` inside first_name. No CRM writes.
