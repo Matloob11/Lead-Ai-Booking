@@ -56,28 +56,19 @@
 #   ops/wa.sh sync-all-templates            pull Alots templates for every Official WABA
 #   ops/wa.sh keep-sheet-official-numbers   hide Official numbers not on the Dubai sheet
 #   ops/wa.sh assign-18-971-44              one 44 + one 971 for the named 18 agents
-#   ops/wa.sh probe-openai-configured       yes/no only: Official OPENAI_API_KEY set
-#   ops/wa.sh probe-openai-credits          yes/no only: Official OpenAI key has credits
 #   ops/wa.sh probe-openai-key              key set? 8-hex fingerprint, model, one-token call result
 #   ops/wa.sh set-leadai-openai-key FILE    Lead AI's own key (LEADAI_OPENAI_API_KEY) from a local file; main key untouched
 #   ops/wa.sh probe-leadai-key              Lead AI key as a new container reads it: fingerprint + one 1-token call
 #   ops/wa.sh probe-leadai-notify           one test Bitrix notification to user 2311 + the tool's refusals
-#   ops/wa.sh probe-utility-rewrite         two draft POSTs; cards must follow the text
-#   ops/wa.sh probe-meta-graph              Meta Graph token set? app id, WABA reach (no secret)
 #   ops/wa.sh probe-send-404                why Official send HTTP 404 on 772479489292535 (read-only)
 #   ops/wa.sh probe-nabiha-500              NABIHA-44 / Matloob test send 500 (read-only)
-#   ops/wa.sh fix-waba-typo-971507563104    one-off: correct that number's Business ID, resync
 #   ops/wa.sh test [apps/x/tests/test_y.py] pytest inside the live web image (needs pytest there)
 #   ops/wa.sh probe-template-header-media  forced-login checks of the header-media route
-#   ops/wa.sh probe-bulk-campaign          forced-login checks of the Excel-campaign routes (no send)
 #   ops/wa.sh probe-crm-entities           live image understands deal/contact campaign rows (no send)
 #   ops/wa.sh probe-media-template-path    can the stack mint a media-template sample handle? yes/no + session state
 #   ops/wa.sh probe-gateway-upload         gateway brokers Meta resumable upload with our API key? (1 tiny PNG, no template)
-#   ops/wa.sh probe-alots-media-template   one throwaway template: does alots take a media id/URL as sample?
-#   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN from FILE's first line, recreate, probe
-#   ops/wa.sh set-alots-ui-cookie FILE     store the alots panel session (Cookie header in FILE), recreate, probe
-#   ops/wa.sh probe-alots-panel-session    is the stored alots panel session alive? one tiny upload
-#   ops/wa.sh probe-alots-hvalue-create    one throwaway template with a panel-minted handle (done 2026-09-22)
+#   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN from FILE's first line, recreate web/worker/beat
+#   ops/wa.sh set-alots-ui-cookie FILE     store the alots panel session (Cookie header in FILE), recreate web/worker/beat
 #   ops/wa.sh raise-upload-limit            Official + OpenWA nginx body size → 1024m
 #   ops/wa.sh ensure-crm-lead-secret HEX    set CRM_LEAD_WA_SECRET if empty (64 hex)
 #   ops/wa.sh submit-leadbot-template       submit a7_lead_enquiry_confirm to agent 971 WABAs
@@ -654,14 +645,6 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  diag-villa-nova2-error)
-    [[ $# -eq 0 ]] || die "diag-villa-nova2-error takes no arguments"
-    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-villa-nova2-error.py"
-    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-villa-nova2-error.py"
-    encoded=$(base64 -w0 < "$diag_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   add-dubai10wbx-numbers)
     [[ $# -eq 0 ]] || die "add-dubai10wbx-numbers takes no arguments"
@@ -710,32 +693,8 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  diag-media-337)
-    [[ $# -eq 0 ]] || die "diag-media-337 takes no arguments"
-    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-media-337.py"
-    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-media-337.py"
-    encoded=$(base64 -w0 < "$diag_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  diag-media-337b)
-    [[ $# -eq 0 ]] || die "diag-media-337b takes no arguments"
-    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-media-337b.py"
-    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-media-337b.py"
-    encoded=$(base64 -w0 < "$diag_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  diag-audio-urls)
-    [[ $# -eq 0 ]] || die "diag-audio-urls takes no arguments"
-    diag_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-audio-urls.py"
-    [[ -f "$diag_script" ]] || die "missing ops/catalog/diag-audio-urls.py"
-    encoded=$(base64 -w0 < "$diag_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   retry-failed-audio)
     [[ $# -eq 0 ]] || die "retry-failed-audio takes no arguments"
@@ -764,14 +723,6 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  probe-empty-template-wabas)
-    [[ $# -eq 0 ]] || die "probe-empty-template-wabas takes no arguments"
-    probe_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-empty-template-wabas.py"
-    [[ -f "$probe_script" ]] || die "missing ops/catalog/probe-empty-template-wabas.py"
-    encoded=$(base64 -w0 < "$probe_script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   explain-template-count-gap)
     [[ $# -eq 0 ]] || die "explain-template-count-gap takes no arguments"
@@ -782,43 +733,9 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  diag-131026)
-    [[ $# -eq 0 ]] || die "diag-131026 takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/diag-131026.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/diag-131026.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-plus-recipient)
-    [[ $# -eq 0 ]] || die "probe-plus-recipient takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-plus-recipient.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-plus-recipient.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-openai-configured)
-    # Yes/no only. Never prints the key.
-    [[ $# -eq 0 ]] || die "probe-openai-configured takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-openai-configured.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-openai-configured.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-openai-credits)
-    # Tiny chat call. Prints credits=yes|no only. Never prints the key.
-    [[ $# -eq 0 ]] || die "probe-openai-credits takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-openai-credits.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-openai-credits.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   probe-openai-key)
     # The OpenAI key the live web container uses: set or not, an 8-hex SHA-256
@@ -908,25 +825,7 @@ case "$cmd" in
     "
     ;;
 
-  probe-utility-rewrite)
-    [[ $# -eq 0 ]] || die "probe-utility-rewrite takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-utility-rewrite.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-utility-rewrite.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-meta-graph)
-    # Read-only. Token set yes/no, its app id, and which WABAs it can read.
-    # Never prints the token.
-    [[ $# -eq 0 ]] || die "probe-meta-graph takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-meta-graph.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-meta-graph.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   probe-send-404)
     [[ $# -eq 0 ]] || die "probe-send-404 takes no arguments"
@@ -946,16 +845,6 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  fix-waba-typo-971507563104)
-    # One-off, fixed script: corrects one mistyped Business ID (evidence-gated
-    # inside the script) and re-syncs that WABA's templates.
-    [[ $# -eq 0 ]] || die "fix-waba-typo-971507563104 takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/fix-waba-typo-971507563104.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/fix-waba-typo-971507563104.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   probe-template-header-media)
     # Forced-login checks of the header-media route: the refusals, then one
@@ -968,37 +857,8 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  probe-alots-media-template)
-    # One throwaway template: does alots turn a media id / URL into Meta's
-    # sample handle? Statuses and Meta's sentences only.
-    [[ $# -eq 0 ]] || die "probe-alots-media-template takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-media-template.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-media-template.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-alots-hvalue-create)
-    # Does the gateway accept a sample handle minted by alots' own panel, and
-    # does that panel upload take the API key? One throwaway template.
-    [[ $# -eq 0 ]] || die "probe-alots-hvalue-create takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-hvalue-create.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-hvalue-create.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
-  probe-bulk-campaign)
-    # Forced-login checks of the Excel-campaign routes. Nothing is sent.
-    [[ $# -eq 0 ]] || die "probe-bulk-campaign takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-bulk-campaign.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-bulk-campaign.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   probe-crm-entities)
     # Read-only: the CRM-leads campaign code in the live image resolves
@@ -1327,8 +1187,6 @@ case "$cmd" in
       mv "$f.tmp" "$f"
       echo token=written
       cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
-    echo "--- probe"
-    "$0" probe-meta-graph
     ;;
 
   set-alots-ui-cookie)
@@ -1352,18 +1210,8 @@ case "$cmd" in
       mv "$f.tmp" "$f"
       echo cookie=written
       cd /opt/a7-wa/deploy && docker compose up -d web worker beat 2>&1 | tail -3'
-    echo "--- probe"
-    "$0" probe-alots-panel-session
     ;;
 
-  probe-alots-panel-session)
-    [[ $# -eq 0 ]] || die "probe-alots-panel-session takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-alots-panel-session.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/probe-alots-panel-session.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
 
   ensure-crm-lead-secret)
     # Writes one env key on the Official host if it is missing. Hex-only so

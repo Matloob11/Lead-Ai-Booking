@@ -1,3 +1,9 @@
+## 2026-10-14 — Drop dead ops/wa.sh catalog verbs (Cursor)
+
+Removed 16 verbs whose `ops/catalog` scripts were gone (diag-131026, diag-audio-urls, diag-media-337/337b, diag-villa-nova2-error, fix-waba-typo-971507563104, probe-alots-hvalue-create, probe-alots-media-template, probe-alots-panel-session, probe-bulk-campaign, probe-empty-template-wabas, probe-meta-graph, probe-openai-configured, probe-openai-credits, probe-plus-recipient, probe-utility-rewrite). Usage lines and the trailing probe calls from `set-meta-graph-token` / `set-alots-ui-cookie` went with them. `bash -n` clean; every remaining catalog verb's script exists. None restored.
+
+---
+
 ## 2026-10-14 — Remove dead backfill_placeholder_bodies call (Cursor)
 
 Deleted the `cache` import and `backfill_placeholder_bodies.delay()` block in `gateway/tasks.py` (flagged 2026-10-08). After `build app` / `up app`, `ops/wa.sh logs app worker 400` shows no NameError; a `process_webhook_event` succeeded right after ready.
