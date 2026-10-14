@@ -203,6 +203,15 @@ class AlotsClient:
                 status_code=response.status_code,
                 payload=body if not redact_response else None,
             )
+        # First accepted send while held: drop the hold (C24).
+        if response.status_code < 300 and "/messages" in path:
+            try:
+                from .credit import clear_credit_out_after_send, credit_is_out
+
+                if credit_is_out():
+                    clear_credit_out_after_send()
+            except Exception:
+                logger.exception("could not clear a credit hold after send")
         return body
 
     # Channels -------------------------------------------------------------

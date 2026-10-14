@@ -543,7 +543,12 @@ def campaign_has_work_left(campaign: Campaign) -> bool:
         | Q(error_detail__icontains="undeliverable")
         | Q(error_detail__icontains="RECIPIENT_MISMATCH")
         | Q(error_detail__icontains="Gateway resolved")
-        | Q(error_detail__istartswith="no credit:")
+        # Parked credit holds wait as FAILED. PENDING rows must still count as work
+        # even if they still carry the old "no credit:" prefix for one beat.
+        | Q(
+            status=CampaignRecipient.Status.FAILED,
+            error_detail__istartswith="no credit:",
+        )
     ).exists()
 
 
@@ -858,10 +863,25 @@ def requeue_due_retries(*, limit: int = 200) -> list[int]:
                 next_retry_at=None,
             )
             continue
+        # Clear a parked "no credit:" prefix so PENDING rows stay visible to
+        # campaign_has_work_left and are not mistaken for a still-held failure.
+        clear_detail = ""
+        if (err or "").lower().startswith("no credit:"):
+            clear_detail = ""
+            updates = {
+                "status": CampaignRecipient.Status.PENDING,
+                "next_retry_at": None,
+                "error_detail": clear_detail,
+            }
+        else:
+            updates = {
+                "status": CampaignRecipient.Status.PENDING,
+                "next_retry_at": None,
+            }
         updated = CampaignRecipient.objects.filter(
             pk=rid,
             status=CampaignRecipient.Status.FAILED,
-        ).update(status=CampaignRecipient.Status.PENDING, next_retry_at=None)
+        ).update(**updates)
         if updated and cid not in seen:
             seen.add(cid)
             campaign_ids.append(cid)

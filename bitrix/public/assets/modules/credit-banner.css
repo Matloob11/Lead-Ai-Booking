@@ -1,13 +1,23 @@
 .crb-banner {
-  position: fixed;
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 4000;
+  z-index: 40;
   margin: 0;
-  padding: 10px 16px;
+  padding: 8px 16px;
+  text-align: center;
+  font: 600 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  /* Sit under the inbox chrome, not over its top strip. */
+  flex-shrink: 0;
+}
+
+.crb-out {
   background: #b42318;
   color: #fff;
-  text-align: center;
-  font: 600 14px/1.4 "Segoe UI", system-ui, sans-serif;
+}
+
+.crb-low {
+  background: #b54708;
+  color: #fff;
 }

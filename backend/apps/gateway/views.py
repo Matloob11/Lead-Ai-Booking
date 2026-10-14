@@ -232,9 +232,8 @@ def inspector_webhook_events(request):
 
 @api_view(["GET"])
 def credit_status(request):
-    """Whether WhatsApp sends are held. The balance itself stays on the server."""
-    from .models import CreditState
+    """Hold (out) and amber warning (low). The balance itself stays on the server."""
+    from .credit import panel_flags
 
-    row = CreditState.objects.filter(pk=1).first()
-    return Response({"out": bool(row and row.out)})
+    return Response(panel_flags())
 

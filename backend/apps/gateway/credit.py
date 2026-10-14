@@ -1,9 +1,9 @@
-"""Hold WhatsApp sends when the gateway wallet is too low to pay for them.
+"""Hold WhatsApp sends when the gateway wallet refuses them.
 
 A send that comes back "Insufficient credits" is not a bad number. The
 recipient waits, the rest of the pending queue waits with them, and nothing
-is counted toward the five-try limit. The hourly balance check lets them go
-again once the wallet is back above the threshold.
+is counted toward the five-try limit. An amber "credit is low" warning is
+separate: it never holds sends.
 """
 
 from __future__ import annotations
@@ -21,12 +21,15 @@ logger = logging.getLogger(__name__)
 
 NO_CREDIT_PREFIX = "no credit:"
 WAITING_NOTE = "no credit: waiting for gateway credit"
-# The board names this user when the Lead AI alert list is empty.
 FALLBACK_ALERT_USER = 2311
+# Q19 default until Matloob sets GATEWAY_CREDIT_WARN_BELOW.
+DEFAULT_WARN = Decimal("1500")
+LOW_BELL_HOURS = 6
+OUT_BELL_HOURS = 1
+POLL_FAIL_BELL_AFTER = 3
 
 
 def is_no_credit(detail: str) -> bool:
-    """True for the gateway's own 'Insufficient credits' refusal."""
     return "insufficient credit" in (detail or "").lower()
 
 
@@ -43,12 +46,18 @@ def credit_is_out() -> bool:
     return CreditState.objects.filter(pk=1, out=True).exists()
 
 
+def credit_is_low() -> bool:
+    from .models import CreditState
+
+    return CreditState.objects.filter(pk=1, low=True).exists()
+
+
 def threshold() -> Decimal:
-    raw = getattr(settings, "GATEWAY_CREDIT_WARN_BELOW", 50)
+    raw = getattr(settings, "GATEWAY_CREDIT_WARN_BELOW", DEFAULT_WARN)
     try:
         return Decimal(str(raw))
-    except (InvalidOperation, ValueError):
-        return Decimal("50")
+    except (InvalidOperation, ValueError, TypeError):
+        return DEFAULT_WARN
 
 
 def parse_amount(raw) -> Decimal | None:
@@ -63,7 +72,6 @@ def parse_amount(raw) -> Decimal | None:
 
 
 def park_recipient(recipient, detail: str, *, undo_attempt: bool = False) -> None:
-    """Leave one recipient waiting. A credit failure does not use up a try."""
     from apps.campaigns.models import CampaignRecipient
 
     if undo_attempt and recipient.attempt_count:
@@ -78,7 +86,6 @@ def park_recipient(recipient, detail: str, *, undo_attempt: bool = False) -> Non
 
 
 def park_pending() -> int:
-    """Stop every not-yet-sent row without calling the gateway."""
     from apps.campaigns.models import CampaignRecipient
 
     return CampaignRecipient.objects.filter(status=CampaignRecipient.Status.PENDING).update(
@@ -89,7 +96,6 @@ def park_pending() -> int:
 
 
 def reclaim_credit_failures() -> int:
-    """Rows already marked exhausted by this error go back to waiting."""
     from apps.campaigns.models import CampaignRecipient
 
     rows = CampaignRecipient.objects.filter(
@@ -109,7 +115,7 @@ def reclaim_credit_failures() -> int:
 
 
 def release_parked() -> int:
-    """Credit is back: the minute retry may pick these up."""
+    """Mark parked rows due. requeue_due_retries clears the prefix when flipping."""
     from apps.campaigns.models import CampaignRecipient
 
     return CampaignRecipient.objects.filter(
@@ -133,77 +139,193 @@ def alert_recipients() -> list[int]:
     return ids or [FALLBACK_ALERT_USER]
 
 
-def maybe_bell() -> bool:
-    """One Bitrix bell per hour, to the Lead AI alert users."""
+def _deliver_bell(*, title: str, message: str, tag_kind: str, field: str, every: timedelta) -> bool:
+    """Send one bell per user. Only stamp the warn clock when Bitrix accepts."""
     from .models import CreditState
 
     now = timezone.now()
     with transaction.atomic():
         row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
-        if row.warned_at and row.warned_at > now - timedelta(hours=1):
+        stamped = getattr(row, field, None)
+        if stamped and stamped > now - every:
             return False
-        row.warned_at = now
-        row.save(update_fields=["warned_at", "updated_at"])
 
     from apps.leadai.assistant.alerts import notify_bitrix
 
-    tag = f"LEADAI|CREDIT|{now.strftime('%Y%m%d%H')}"
-    message = "WhatsApp credit is out — messages are not going"
+    hour = now.strftime("%Y%m%d%H")
+    delivered = False
     for user_id in alert_recipients():
+        tag = f"LEADAI|CREDIT|{tag_kind}|{hour}|{user_id}"
         try:
-            notify_bitrix(
+            body = notify_bitrix(
                 to_user_id=user_id,
-                title="WhatsApp credit is out",
-                message=message,
-                push=message,
+                title=title[:200],
+                message=message[:1000],
+                push=message[:200],
                 tag=tag,
             )
         except Exception:
             logger.warning("credit bell failed for user %s", user_id)
-    return True
+            continue
+        if isinstance(body, dict) and body.get("ok"):
+            delivered = True
+        else:
+            logger.warning("credit bell refused for user %s: %s", user_id, body)
+
+    if delivered:
+        with transaction.atomic():
+            row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
+            setattr(row, field, now)
+            row.save(update_fields=[field, "updated_at"])
+    return delivered
+
+
+def maybe_out_bell() -> bool:
+    return _deliver_bell(
+        title="WhatsApp credit is out",
+        message="WhatsApp credit is out — messages are not going",
+        tag_kind="OUT",
+        field="warned_at",
+        every=timedelta(hours=OUT_BELL_HOURS),
+    )
+
+
+def maybe_low_bell() -> bool:
+    return _deliver_bell(
+        title="WhatsApp credit is low",
+        message="WhatsApp credit is low — top up before sends stop",
+        tag_kind="LOW",
+        field="low_warned_at",
+        every=timedelta(hours=LOW_BELL_HOURS),
+    )
+
+
+def maybe_poll_fail_bell() -> bool:
+    return _deliver_bell(
+        title="WhatsApp credit check failed",
+        message="The gateway credit check failed three times in a row",
+        tag_kind="POLL",
+        field="warned_at",
+        every=timedelta(hours=OUT_BELL_HOURS),
+    )
+
+
+def _write_out_row() -> None:
+    from .models import CreditState
+
+    row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
+    row.out = True
+    row.low = True
+    row.save(update_fields=["out", "low", "updated_at"])
+
+
+def _persist_out_flag() -> None:
+    """Write the hold so a caller's atomic rollback cannot undo it (C24)."""
+    try:
+        with transaction.atomic(durable=True):
+            _write_out_row()
+    except RuntimeError:
+        # Nested inside another atomic — durable is refused. Queue a task that
+        # commits on its own connection after this one settles or rolls back.
+        from .tasks import apply_credit_out_flag
+
+        apply_credit_out_flag.delay()
 
 
 def mark_credit_out() -> None:
+    """Record a real insufficient-credits refusal. Safe inside a rolled-back atomic."""
+    _persist_out_flag()
+    park_pending()
+    reclaim_credit_failures()
+    maybe_out_bell()
+
+
+def clear_credit_out_after_send() -> None:
+    """First accepted /messages while held: drop the hold so release can run."""
     from .models import CreditState
 
     with transaction.atomic():
-        row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
-        row.out = True
+        row = CreditState.objects.select_for_update().filter(pk=1, out=True).first()
+        if row is None:
+            return
+        row.out = False
         row.save(update_fields=["out", "updated_at"])
-    park_pending()
-    reclaim_credit_failures()
-    maybe_bell()
+    released = release_parked()
+    if released:
+        wake_retries()
 
 
 def wake_retries() -> list[int]:
+    """Flip every due parked row. Stagger campaign starts by one minute."""
     from apps.campaigns.services import requeue_due_retries
     from apps.campaigns.tasks import run_campaign
 
-    campaign_ids = requeue_due_retries()
-    for campaign_id in campaign_ids:
-        run_campaign.delay(campaign_id)
-    return campaign_ids
+    started: list[int] = []
+    delay = 0
+    while True:
+        campaign_ids = requeue_due_retries(limit=200)
+        if not campaign_ids:
+            break
+        for campaign_id in campaign_ids:
+            if campaign_id in started:
+                continue
+            if delay:
+                run_campaign.apply_async(args=[campaign_id], countdown=delay)
+            else:
+                run_campaign.delay(campaign_id)
+            started.append(campaign_id)
+            delay += 60
+        # More than 200 parked rows: keep flipping until none are due.
+        if len(campaign_ids) < 200:
+            break
+    return started
 
 
 def record_balance(amount: Decimal) -> str:
-    """Store the wallet reading. Below the threshold, hold. At or above, release."""
+    """Poll result. Warn below the threshold; release a hold only at or above it."""
     from .models import CreditState
 
     low = amount < threshold()
     with transaction.atomic():
         row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
+        was_out = row.out
         row.balance = amount
-        row.out = low
-        row.save(update_fields=["balance", "out", "updated_at"])
-    if low:
-        park_pending()
-        reclaim_credit_failures()
-        maybe_bell()
+        row.low = low
+        row.poll_failures = 0
+        # A poll never *starts* a hold — only an Insufficient credits refusal does.
+        # A poll at or above the warn level clears a hold.
+        if not low and row.out:
+            row.out = False
+        row.save(update_fields=["balance", "low", "out", "poll_failures", "updated_at"])
+        still_out = row.out
+
+    if still_out:
         return "out"
-    released = release_parked()
-    if released:
-        wake_retries()
+    if was_out:
+        released = release_parked()
+        if released:
+            wake_retries()
+    if low:
+        maybe_low_bell()
+        return "low"
     return "ok"
+
+
+def note_poll_failure(status_code: int | None = None) -> str:
+    from .models import CreditState
+
+    with transaction.atomic():
+        row, _ = CreditState.objects.select_for_update().get_or_create(pk=1)
+        row.poll_failures = int(row.poll_failures or 0) + 1
+        failures = row.poll_failures
+        row.save(update_fields=["poll_failures", "updated_at"])
+    if status_code is not None:
+        logger.warning("gateway credit poll failed http=%s", status_code)
+    else:
+        logger.warning("gateway credit poll failed")
+    if failures >= POLL_FAIL_BELL_AFTER:
+        maybe_poll_fail_bell()
+    return "error"
 
 
 def poll_gateway_credit() -> str:
@@ -211,11 +333,18 @@ def poll_gateway_credit() -> str:
 
     try:
         raw = AlotsClient().wallet_balance()
-    except (AlotsError, Exception):
-        logger.warning("gateway credit poll failed")
-        return "error"
+    except AlotsError as exc:
+        return note_poll_failure(getattr(exc, "status_code", None))
+    except Exception:
+        return note_poll_failure(None)
     amount = parse_amount(raw)
     if amount is None:
-        logger.warning("gateway credit poll had no balance")
-        return "error"
+        return note_poll_failure(None)
     return record_balance(amount)
+
+
+def panel_flags() -> dict:
+    from .models import CreditState
+
+    row = CreditState.objects.filter(pk=1).first()
+    return {"out": bool(row and row.out), "low": bool(row and row.low)}

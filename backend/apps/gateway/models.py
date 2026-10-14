@@ -79,19 +79,28 @@ class ApiCall(models.Model):
 
 
 class CreditState(models.Model):
-    """One row: whether the WhatsApp gateway wallet is too low to send.
+    """One row: gateway wallet hold (out) and amber warning (low).
 
     Workers and the panel do not share a cache, so the hold lives here.
-    The balance is kept for the hourly check; the panel only reads ``out``.
+    ``out`` is set only on a real "Insufficient credits" refusal (or a poll
+    that is still below the warn level after a hold). ``low`` is the amber
+    banner. The panel reads only those two booleans.
     """
 
     out = models.BooleanField(default=False)
+    low = models.BooleanField(default=False)
     balance = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
     warned_at = models.DateTimeField(null=True, blank=True)
+    low_warned_at = models.DateTimeField(null=True, blank=True)
+    poll_failures = models.PositiveSmallIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "credit state"
 
     def __str__(self):
-        return "out" if self.out else "ok"
+        if self.out:
+            return "out"
+        if self.low:
+            return "low"
+        return "ok"

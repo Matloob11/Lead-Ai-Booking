@@ -176,10 +176,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.gateway.tasks.panel_keepalive",
         "schedule": 10 * 60,
     },
-    # Gateway wallet. Below GATEWAY_CREDIT_WARN_BELOW, sends wait and the panel warns.
+    # Gateway wallet. Amber warn below GATEWAY_CREDIT_WARN_BELOW; hold only on
+    # an Insufficient credits refusal. While held, poll every 5 minutes.
     "poll-gateway-credit": {
         "task": "apps.gateway.tasks.poll_gateway_credit",
-        "schedule": 60 * 60,
+        "schedule": 60 * 5,
     },
     # Lead AI: the customer's WhatsApp reminder 30 minutes before a booked
     # office visit. Checked every minute so it goes out on time.
@@ -222,7 +223,9 @@ REST_FRAMEWORK = {
 ALOTS_BASE_URL = env("ALOTS_BASE_URL", "https://alots.io").rstrip("/")
 ALOTS_API_KEY = env("ALOTS_API_KEY", "")
 # Hold sends and warn when the gateway wallet is under this many credits.
-GATEWAY_CREDIT_WARN_BELOW = int(env("GATEWAY_CREDIT_WARN_BELOW", "50"))
+# Decimal string — int("1000.5") would crash the settings import (C24).
+# Default 1500 ≈ 3 hours at ~450 credits/hour (Q19). Warn only; hold is separate.
+GATEWAY_CREDIT_WARN_BELOW = env("GATEWAY_CREDIT_WARN_BELOW", "1500")
 ALOTS_VERSION = env("ALOTS_VERSION", "v23.0")
 ALOTS_TIMEOUT = float(env("ALOTS_TIMEOUT", "30"))
 

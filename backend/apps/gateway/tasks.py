@@ -32,10 +32,18 @@ def panel_keepalive():
 
 @shared_task(ignore_result=True)
 def poll_gateway_credit():
-    """Hourly wallet check. Below the threshold, hold sends and warn once."""
+    """Wallet check every 5 minutes (C24). Warn below the threshold; hold only on refusal."""
     from .credit import poll_gateway_credit as poll
 
     return poll()
+
+
+@shared_task(ignore_result=True)
+def apply_credit_out_flag():
+    """Commit the hold outside a caller's rolled-back transaction (C24)."""
+    from .credit import _write_out_row
+
+    _write_out_row()
 
 
 def _resolve_waba_number(value):

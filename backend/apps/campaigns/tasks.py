@@ -58,21 +58,40 @@ def _run_campaign_locked(campaign_id: int) -> None:
         updates.append("started_at")
     campaign.save(update_fields=updates)
 
-    ids = list(
-        campaign.recipients.filter(status=CampaignRecipient.Status.PENDING)
-        .order_by("id")
-        .values_list("id", flat=True)
-    )
-
-    for i, rid in enumerate(ids):
+    # Re-read PENDING after each wave so a credit release that flips more than
+    # 200 rows (or a concurrent requeue) is not left stranded as DONE.
+    while True:
         if Campaign.objects.filter(pk=campaign_id, status=Campaign.Status.CANCELLED).exists():
             break
-        try:
-            process_recipient(rid)
-        except Exception:  # noqa: BLE001
-            logger.exception("Campaign %s recipient %s crashed", campaign_id, rid)
-        if i < len(ids) - 1:
-            time.sleep(SEND_GAP_SEC)
+        if credit_is_out():
+            park_pending()
+            break
+        ids = list(
+            CampaignRecipient.objects.filter(
+                campaign_id=campaign_id, status=CampaignRecipient.Status.PENDING
+            )
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
+        if not ids:
+            break
+        stopped = False
+        for i, rid in enumerate(ids):
+            if Campaign.objects.filter(pk=campaign_id, status=Campaign.Status.CANCELLED).exists():
+                stopped = True
+                break
+            if credit_is_out():
+                park_pending()
+                stopped = True
+                break
+            try:
+                process_recipient(rid)
+            except Exception:  # noqa: BLE001
+                logger.exception("Campaign %s recipient %s crashed", campaign_id, rid)
+            if i < len(ids) - 1:
+                time.sleep(SEND_GAP_SEC)
+        if stopped:
+            break
 
     campaign = Campaign.objects.filter(pk=campaign_id).first()
     if not campaign:
