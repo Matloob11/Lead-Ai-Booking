@@ -129,10 +129,6 @@ def process_webhook_event(self, event_id):
         if handled:
             event.status = WebhookEvent.Status.PROCESSED
             event.error = ("; ".join(item_errors))[:2000]
-            from django.core.cache import cache
-
-            if cache.add("wa_placeholder_backfill_v4", "1", 6 * 3600):
-                backfill_placeholder_bodies.delay()
         elif item_errors:
             event.status = WebhookEvent.Status.FAILED
             event.error = ("; ".join(item_errors))[:2000]

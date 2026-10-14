@@ -1,3 +1,9 @@
+## 2026-10-14 — Remove dead backfill_placeholder_bodies call (Cursor)
+
+Deleted the `cache` import and `backfill_placeholder_bodies.delay()` block in `gateway/tasks.py` (flagged 2026-10-08). After `build app` / `up app`, `ops/wa.sh logs app worker 400` shows no NameError; a `process_webhook_event` succeeded right after ready.
+
+---
+
 ## 2026-10-14 — Gateway credit hold, panel banner and hourly poll (Cursor)
 
 When a send fails with "Insufficient credits", the recipient waits as `no credit:` (attempt not counted, never exhausted), remaining PENDING rows are parked, and a Bitrix bell goes to the Lead AI alert users at most once an hour. `CreditState` + `GATEWAY_CREDIT_WARN_BELOW` (default 50); hourly `poll_gateway_credit` via `wallet_balance`. Official panel red banner module; `GET /api/gateway/credit/` returns only `{out}`. Tests 4+5 OK. Migrated `gateway.0003`. Live: poll ok, anon 401 / auth 200, banner JS/CSS 200, four services up. Reclaimed 55 prior exhausted credit rows on campaign 408 into the retry path once credit returned.
