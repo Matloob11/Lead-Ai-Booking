@@ -12,6 +12,7 @@ urlpatterns = [
     path("bulk/<int:pk>/", bulk_views.batch_detail, name="campaign-batch-detail"),
     path("bulk/<int:pk>/cancel/", bulk_views.batch_cancel, name="campaign-batch-cancel"),
     path("crm-leads/context/", views.crm_leads_context, name="campaign-crm-leads-context"),
+    path("crm-leads/busy/", views.crm_leads_busy, name="campaign-crm-leads-busy"),
     path("crm-leads/send/", views.crm_leads_send, name="campaign-crm-leads-send"),
     # Header image / video / document for any CRM popup. Raw bytes, HMAC, no session.
     path("crm-header-media/", crm_media.crm_header_media, name="campaign-crm-header-media"),

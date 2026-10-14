@@ -2,7 +2,7 @@
 /**
  * C20: restore Leads grid columns for admins whose list was collapsed to the
  * three shop columns. Copies a healthy admin's column list (user 1), appends
- * the three shop fields. CLI only. Does not touch user 2311 (Q23 default).
+ * the three shop fields. CLI only. Q23 = yes: user 2311 gets the same.
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
@@ -20,7 +20,7 @@ const A7_C20_SHOP = [
     'UF_CRM_A7_SHOP_TYPE',
     'UF_CRM_A7_WA_OPT_OUT',
 ];
-const A7_C20_USERS = [26, 2196, 2633, 2637];
+const A7_C20_USERS = [26, 2196, 2633, 2637, 2311];
 const A7_C20_TEMPLATE_USER = 1;
 
 function a7_c20_find_columns(array $node): string

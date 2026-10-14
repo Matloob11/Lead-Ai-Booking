@@ -1,3 +1,15 @@
+## 2026-10-14 — C28 shops script default + C26 booking to-do to 2311 (Cursor)
+
+Lead AI box ticked → Script defaults to International City shops; switching to General shows one English note. Live: `a7_lead_wa.js` `1a6837ba`, `a7_renewals_wa.js` `05b13097` (GET 200). Video header still waits on template approval. C26 Q22: booking Viewing/Meeting to-do responsible is now constant **2311** in `a7_leadai_fields.php` `ccf863c4` (anonymous GET 405). Lead responsible unchanged. C22–C25 Django still waits on "2b is live". No WhatsApp sent.
+
+---
+
+## 2026-10-14 — C20: Matloob's Leads grid restored (Cursor)
+
+Q23 = yes. User 2311's `CRM_LEAD_LIST_V12` had 7 short columns; set to user 1's defaults plus Bot Status / Shop Type / Opt-out (23 cols), same as 26/2196/2633/2637. `a7_c20_fix_grids.php` run via `ops/bitrix.sh run`, then stubbed (`c99f9ec7…`, GET 404). No WhatsApp sent.
+
+---
+
 ## 2026-10-14 — C20: Bitrix include stubs and four admin Leads grids (Cursor)
 
 Stubbed every non-live one-off under `/home/bitrix/www/local/php_interface/include` to md5 `c99f9ec7…` (67 files + bak body). Kept 8 live HR/listing includes referenced from `local/php_interface/init.php`. GET on `a7_c15_install.php` and `a7_probe_booking_bp.php` now 404. Restored Leads grid columns for users 26, 2196, 2633, 2637 from user 1's list plus the three shop fields. Left 2311 alone (Q23). Hardened `a7_c15_install.php` / `a7_c15_proof.php` with CLI guards; empty `columns` is no longer replaced by a three-column list.

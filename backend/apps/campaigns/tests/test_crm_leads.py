@@ -29,8 +29,8 @@ class LeadDisplayNameTests(SimpleTestCase):
         self.assertEqual(lead_display_name({"name": "Missed Call from 0501234567"}), "there")
         self.assertEqual(lead_display_name({"title": "Missed Call | 971501112233"}), "there")
 
-    def test_plain_name_stays_whole(self):
-        self.assertEqual(lead_display_name({"name": "Sara Khan"}), "Sara Khan")
+    def test_plain_name_uses_first_word(self):
+        self.assertEqual(lead_display_name({"name": "Sara Khan"}), "Sara")
 
     def test_name_field_is_the_first_word(self):
         self.assertEqual(
@@ -83,6 +83,30 @@ class LeadDisplayNameTests(SimpleTestCase):
                 "title": "Apartment in Marina",
             }),
             "Ali Hassan",
+        )
+
+    def test_portal_word_without_pipe_is_there(self):
+        # C19 / C23: ~1,650 leads greet "Property" today without this rule.
+        self.assertEqual(
+            lead_display_name({
+                "name": "Property Finder WhatsApp////rent/test",
+                "first_name": "Property Finder WhatsApp////rent/test",
+            }),
+            "there",
+        )
+        self.assertEqual(
+            lead_display_name({"name": "WhatsApp +971501234567"}),
+            "there",
+        )
+        self.assertEqual(lead_display_name({"first_name": "Call"}), "there")
+
+    def test_portal_pipe_still_greets_the_person(self):
+        self.assertEqual(
+            lead_display_name({
+                "name": "Bayut WhatsApp | Testname",
+                "title": "Bayut WhatsApp | Testname",
+            }),
+            "Testname",
         )
 
 
@@ -176,7 +200,8 @@ class BuildRecipientsTests(SimpleTestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(rows[0]["owner_data_id"], 1030633)
         self.assertNotIn("crm_lead_id", rows[0])
-        self.assertEqual(rows[0]["variables"]["1"], "WhatsApp")
+        # C23: "WhatsApp" alone is a portal/channel word, not a greeting.
+        self.assertEqual(rows[0]["variables"]["1"], "there")
 
 
     def test_deal_links_deal_id_not_lead_id(self):
@@ -364,6 +389,9 @@ class LeadAiLeaveOutTests(SimpleTestCase):
             "apps.campaigns.crm_leads.phones_blocked_by_registry",
             return_value=set(),
         ), patch(
+            "apps.campaigns.crm_leads.phones_in_active_lead_ai",
+            return_value=set(),
+        ), patch(
             "apps.campaigns.crm_leads.bitrix_opted_out_phones",
             return_value=set(),
         ):
@@ -416,6 +444,9 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         ), patch(
             "apps.campaigns.crm_leads.phones_blocked_by_registry",
             return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.phones_in_active_lead_ai",
+            return_value=set(),
         ):
             rows, skipped = build_recipients(
                 template=FakeTemplate(0),
@@ -429,6 +460,44 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         self.assertEqual([row["phone"] for row in rows], ["971502222222"])
         self.assertEqual(skipped[0]["reason"], "Sent this template in the last 30 days.")
 
+    def test_active_lead_ai_chat_is_left_out(self):
+        from unittest.mock import patch
+
+        with patch(
+            "apps.campaigns.crm_leads.phones_sent_same_template",
+            return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        ), patch(
+            "apps.campaigns.crm_leads.phones_in_active_lead_ai",
+            return_value={"971501111111", "971502222222"},
+        ), patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        ):
+            rows, skipped = build_recipients(
+                template=FakeTemplate(0),
+                leads=[
+                    {"id": 1, "phone": "971501111111", "name": "Sara"},
+                    {"id": 2, "phone": "971502222222", "name": "Ali"},
+                    {"id": 3, "phone": "971503333333", "name": "Noor"},
+                ],
+                extra_body={},
+                lead_ai=True,
+            )
+        self.assertEqual([row["phone"] for row in rows], ["971503333333"])
+        self.assertEqual(
+            [item["reason"] for item in skipped],
+            ["Already talking to Lead AI.", "Already talking to Lead AI."],
+        )
+        from apps.campaigns.crm_leads import left_out_sentence
+
+        self.assertEqual(
+            left_out_sentence(skipped),
+            "2 left out: already talking to Lead AI 2",
+        )
+
     def test_the_opt_out_registry_hook_is_honoured(self):
         from unittest.mock import patch
 
@@ -438,6 +507,9 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         ), patch(
             "apps.campaigns.crm_leads.phones_blocked_by_registry",
             return_value={"971501111111"},
+        ), patch(
+            "apps.campaigns.crm_leads.phones_in_active_lead_ai",
+            return_value=set(),
         ):
             with self.assertRaises(CrmLeadSendError) as caught:
                 build_recipients(

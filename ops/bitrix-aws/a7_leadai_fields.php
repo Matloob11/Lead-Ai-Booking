@@ -461,10 +461,9 @@ function a7_leadai_fields_plan_todo(int $leadId, int $responsible, string $meeti
 
 $todoId = null;
 if ($booking !== null) {
-    $responsible = (int)$item->getAssignedById();
-    if ($responsible <= 0) {
-        $responsible = 1;
-    }
+    // C26 / Q22: Viewing/Meeting to-do belongs to Matloob (2311). The lead's
+    // responsible is unchanged. A reschedule updates the same to-do and keeps 2311.
+    $responsible = 2311;
     if ($booking['event'] === 'cancelled') {
         $open = a7_leadai_fields_open_todo($leadId);
         if ($open > 0) {

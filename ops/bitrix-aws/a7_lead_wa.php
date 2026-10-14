@@ -117,36 +117,76 @@ function a7_lead_wa_skip_honorific(string $text): string
     return $text;
 }
 
+function a7_lead_wa_portal_candidate(string $text): bool
+{
+    // C23: first word is a portal/channel word, or the string is a missed call.
+    $text = a7_lead_wa_squash($text);
+    if ($text === '' || preg_match('/^missed\s+call\b/iu', $text)) {
+        return true;
+    }
+    $parts = preg_split('/\s+/u', $text);
+    $word = strtolower(rtrim((string)($parts[0] ?? ''), '.'));
+    return in_array($word, [
+        'bayut', 'property', 'propertyfinder', 'dubizzle', 'portal', 'whatsapp', 'call',
+    ], true);
+}
+
+function a7_lead_wa_try_greeting(string $text, bool $firstWord = false): string
+{
+    $text = a7_lead_wa_squash($text);
+    if ($text === '' || a7_lead_wa_portal_candidate($text) || a7_lead_wa_bad_greeting($text)) {
+        return '';
+    }
+    $text = a7_lead_wa_skip_honorific($text);
+    if ($text === '' || a7_lead_wa_portal_candidate($text) || a7_lead_wa_bad_greeting($text)) {
+        return '';
+    }
+    if ($firstWord) {
+        $parts = preg_split('/\s+/u', $text);
+        $word = (string)($parts[0] ?? '');
+        if ($word === '' || a7_lead_wa_portal_candidate($word) || a7_lead_wa_bad_greeting($word)) {
+            return '';
+        }
+        return $word;
+    }
+    return $text;
+}
+
 function a7_lead_wa_display(array $row): string
 {
-    // {{1}} and the popup name: NAME's first word when it is a real name,
-    // otherwise the part of TITLE after the last "|". Phones, missed calls,
-    // untitled and empty become "there". A deal contact name that is not the
-    // deal title is kept when NAME itself is empty.
+    // C23: NAME; after NAME's last "|"; TITLE after its last "|". Portal first
+    // words are not a name. Honorifics skipped. Phones / missed calls / empty → there.
     $first = a7_lead_wa_squash((string)($row['first_name'] ?? ''));
-    if ($first !== '') {
-        $parts = preg_split('/\s+/u', $first);
-        $word = is_array($parts) ? (string)($parts[0] ?? '') : '';
-        if ($word !== '' && !a7_lead_wa_bad_greeting($first) && !a7_lead_wa_bad_greeting($word)) {
-            if (count($parts) >= 2 && a7_lead_wa_honorific($word) && !a7_lead_wa_bad_greeting((string)$parts[1])) {
-                return (string)$parts[1];
-            }
-            if (!a7_lead_wa_honorific($word) || count($parts) === 1) {
-                return $word;
-            }
-        }
-    }
     $title = a7_lead_wa_squash((string)($row['title'] ?? ''));
     $name = a7_lead_wa_squash((string)($row['name'] ?? ''));
-    if ($name !== '' && $title !== '' && strcasecmp($name, $title) !== 0 && !a7_lead_wa_bad_greeting($name)) {
-        $picked = a7_lead_wa_skip_honorific(a7_lead_wa_after_pipe($name));
-        if ($picked !== '' && !a7_lead_wa_bad_greeting($picked)) {
+    $bitrixName = $first !== '' ? $first : $name;
+    if ($bitrixName === '' && $title === '') {
+        return 'there';
+    }
+    if ($first === '' && $name !== '' && $title !== '' && strcasecmp($name, $title) !== 0) {
+        $picked = a7_lead_wa_try_greeting($name, false);
+        if ($picked !== '') {
             return $picked;
         }
     }
-    $source = a7_lead_wa_skip_honorific(a7_lead_wa_after_pipe($title !== '' ? $title : $name));
-    if ($source !== '' && !a7_lead_wa_bad_greeting($source)) {
-        return $source;
+    if ($bitrixName !== '') {
+        $picked = a7_lead_wa_try_greeting($bitrixName, true);
+        if ($picked !== '') {
+            return $picked;
+        }
+        if (strpos($bitrixName, '|') !== false) {
+            $picked = a7_lead_wa_try_greeting(a7_lead_wa_after_pipe($bitrixName), false);
+            if ($picked !== '') {
+                return $picked;
+            }
+        }
+    }
+    if ($title !== '') {
+        $source = strpos($title, '|') !== false ? a7_lead_wa_after_pipe($title) : $title;
+        $picked = a7_lead_wa_try_greeting($source, false);
+        if ($picked !== '') {
+            return $picked;
+        }
     }
     return 'there';
 }
@@ -1144,6 +1184,37 @@ if ($action === 'context') {
     $out['entity'] = $entity;
     $out['leads'] = a7_lead_wa_summaries($leadIds, $entity);
     a7_lead_wa_json($out);
+}
+
+if ($action === 'busy') {
+    // C22 preview: which selected phones already have an active Lead AI chat.
+    $raw = (string)($_POST['payload'] ?? '');
+    if ($raw === '') {
+        $raw = (string)file_get_contents('php://input');
+    }
+    $input = $raw !== '' ? json_decode($raw, true) : null;
+    if (!is_array($input)) {
+        $input = $_POST;
+    }
+    $phones = [];
+    foreach ((array)($input['phones'] ?? []) as $p) {
+        $digits = a7_lead_wa_digits((string)$p);
+        if (strlen($digits) >= 8) {
+            $phones[] = $digits;
+        }
+    }
+    $phones = array_values(array_unique($phones));
+    $reply = a7_lead_wa_inbox(
+        '/api/campaigns/crm-leads/busy/',
+        ['bitrix_user_id' => $bitrixUserId, 'phones' => $phones],
+        $cfg
+    );
+    if ($reply['http'] < 200 || $reply['http'] >= 300) {
+        $detail = (string)($reply['data']['detail'] ?? 'Could not check Lead AI chats.');
+        a7_lead_wa_json(['ok' => false, 'error' => $detail], $reply['http'] >= 400 ? $reply['http'] : 502);
+    }
+    $busy = is_array($reply['data']['phones'] ?? null) ? $reply['data']['phones'] : [];
+    a7_lead_wa_json(['ok' => true, 'phones' => $busy, 'count' => count($busy)]);
 }
 
 if ($action === 'send') {

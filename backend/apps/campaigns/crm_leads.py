@@ -47,6 +47,7 @@ _LEFT_OUT = (
     ("Opted out.", "opted out"),
     ("Broker.", "broker"),
     ("Lost.", "lost"),
+    ("Already talking to Lead AI.", "already talking to Lead AI"),
     ("Sent this template in the last 30 days.", "already sent"),
 )
 
@@ -211,6 +212,11 @@ _HONORIFICS = frozenset({
     "md", "mohd", "muhammad", "mohammad", "mohammed", "muhammed", "mohamed",
     "dr", "mr", "mrs", "ms", "miss", "engr", "eng",
 })
+# Own copy of apps.leadai.assistant.filters._NOT_NAMES portal words, plus call.
+_PORTAL_WORDS = frozenset({
+    "bayut", "property", "propertyfinder", "dubizzle", "portal", "whatsapp",
+    "call",
+})
 
 
 def _squash(value) -> str:
@@ -224,6 +230,15 @@ def _bad_greeting(text: str) -> bool:
     digits = sum(ch.isdigit() for ch in text)
     # No letters at all, or a full phone hiding in the field.
     return letters == 0 or digits >= 8
+
+
+def _portal_candidate(text: str) -> bool:
+    """First word is a portal/channel word, or the whole string is a missed call."""
+    text = _squash(text)
+    if not text or _MISSED_CALL.match(text):
+        return True
+    word = text.split()[0].casefold().rstrip(".")
+    return word in _PORTAL_WORDS
 
 
 def _after_pipe(text: str) -> str:
@@ -242,6 +257,22 @@ def _skip_honorific(text: str) -> str:
     if len(parts) >= 2 and _honorific(parts[0]) and not _bad_greeting(parts[1]):
         return parts[1]
     return text
+
+
+def _try_greeting(text: str, *, first_word: bool = False) -> str:
+    """One candidate: reject portal words, then C8 honorific, then maybe first word."""
+    text = _squash(text)
+    if not text or _portal_candidate(text) or _bad_greeting(text):
+        return ""
+    text = _skip_honorific(text)
+    if not text or _portal_candidate(text) or _bad_greeting(text):
+        return ""
+    if first_word:
+        word = text.split()[0]
+        if _portal_candidate(word) or _bad_greeting(word):
+            return ""
+        return word[:200]
+    return text[:200]
 
 
 def detail_value(row: dict, key: str) -> str:
@@ -265,39 +296,46 @@ def detail_value(row: dict, key: str) -> str:
 def lead_display_name(row: dict) -> str:
     """First name for {{1}} and ``CampaignRecipient.name``.
 
-    Use the Bitrix NAME field's first word when that word is a real name.
-    A leading Md, Mr, Dr and the other honorifics are skipped when another
-    word follows. Otherwise use the part of TITLE after the last "|". A phone number,
-    "Missed Call…", or "untitled" becomes "there". A completely blank row
-    is "" so a caller can apply its own fallback. A deal
-    whose contact name is already separate from the deal title keeps that
-    contact name when NAME itself is empty.
+    Candidates in order (C23): Bitrix NAME (``first_name`` or ``name``); the
+    part after NAME's last ``|`` when it has one; TITLE after its last ``|``
+    when it has one. A candidate whose first word is a portal/channel word
+    (bayut, property, whatsapp, call, …) is skipped. Each surviving candidate
+    goes through the C8 honorific rule. NAME uses its first usable word;
+    after-pipe / TITLE keep the person string. A phone, "Missed Call…",
+    "untitled", or nothing usable becomes "there". A completely blank row is
+    "" so a caller can apply its own fallback.
     """
     if not isinstance(row, dict):
         return _GREETING_FALLBACK
     first = _squash(row.get("first_name"))
     title = _squash(row.get("title"))
     name = _squash(row.get("name"))
-    # Nothing was supplied. Callers that already rejected a generic title
-    # (renewals "Untitled" / "Deal #39079") pass a blank and keep their own
-    # "Customer" fallback. A value that was supplied and rejected is "there".
-    if not first and not title and not name:
+    bitrix_name = first or name
+    if not bitrix_name and not title:
         return ""
-    if first:
-        parts = first.split()
-        word = parts[0]
-        if not _bad_greeting(first) and not _bad_greeting(word):
-            if len(parts) >= 2 and _honorific(word) and not _bad_greeting(parts[1]):
-                return parts[1][:200]
-            if not _honorific(word) or len(parts) == 1:
-                return word[:200]
-    if name and title and name.casefold() != title.casefold() and not _bad_greeting(name):
-        picked = _skip_honorific(_after_pipe(name))
-        if picked and not _bad_greeting(picked):
-            return picked[:200]
-    source = _skip_honorific(_after_pipe(title or name))
-    if source and not _bad_greeting(source):
-        return source[:200]
+    # Deal contact name kept when it is not the deal title.
+    if (
+        not first
+        and name
+        and title
+        and name.casefold() != title.casefold()
+    ):
+        picked = _try_greeting(name, first_word=False)
+        if picked:
+            return picked
+    if bitrix_name:
+        picked = _try_greeting(bitrix_name, first_word=True)
+        if picked:
+            return picked
+        if "|" in bitrix_name:
+            picked = _try_greeting(_after_pipe(bitrix_name), first_word=False)
+            if picked:
+                return picked
+    if title:
+        source = _after_pipe(title) if "|" in title else title
+        picked = _try_greeting(source, first_word=False)
+        if picked:
+            return picked
     return _GREETING_FALLBACK
 
 
@@ -494,6 +532,28 @@ def phones_blocked_by_registry(phones: set[str]) -> set[str]:
     return out
 
 
+def phones_in_active_lead_ai(phones: set[str]) -> set[str]:
+    """Phones that already have an active Lead AI chat on any of our numbers.
+
+    Lazy import of ``LeadAiChat`` (same pattern as ``mark_lead_ai``): 2b adds
+    fields there. Reading existing fields only.
+    """
+    if not phones:
+        return set()
+    try:
+        from apps.leadai.models import LeadAiChat
+    except ImportError:
+        return set()
+    digits = {p for p in phones if p}
+    if not digits:
+        return set()
+    found = LeadAiChat.objects.filter(
+        active=True,
+        conversation__contact__wa_id__in=list(digits),
+    ).values_list("conversation__contact__wa_id", flat=True)
+    return {str(p) for p in found if p}
+
+
 def phones_sent_same_template(template: WaTemplate, phones: set[str]) -> set[str]:
     """Phones this template already reached in the last 30 days."""
     if not phones:
@@ -539,8 +599,10 @@ def build_recipients(
         if isinstance(raw, dict) and len(_digits(raw.get("phone"))) >= 8
     }
     # Opt-out holds on every send. The 30-day template rule stays Lead AI only.
+    # C22: a phone already in an active Lead AI chat must not get another.
     blocked = phones_opted_out(phones)
     recent = phones_sent_same_template(template, phones) if lead_ai else set()
+    busy = phones_in_active_lead_ai(phones) if lead_ai else set()
 
     for raw in leads or []:
         if not isinstance(raw, dict):
@@ -565,6 +627,9 @@ def build_recipients(
         canon = _canon_phone(phone)
         if phone in blocked or (canon and canon in blocked):
             skipped.append({"id": item_id, "reason": "Opted out."})
+            continue
+        if lead_ai and (phone in busy or (canon and canon in busy)):
+            skipped.append({"id": item_id, "reason": "Already talking to Lead AI."})
             continue
         if lead_ai and phone in recent:
             skipped.append({"id": item_id, "reason": "Sent this template in the last 30 days."})

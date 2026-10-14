@@ -494,6 +494,7 @@
       ".a7-lwa-scriptwrap span{white-space:nowrap;}" +
       ".a7-lwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;" +
       "color:#1e1b4b;background:#fff;max-width:220px;}" +
+      ".a7-lwa-scriptnote{font-size:12px;color:#92400e;max-width:220px;line-height:1.3;}" +
       ".a7-lwa-send{background:#25D366;color:#fff;border:0;border-radius:8px;padding:8px 12px;" +
       "font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}" +
       ".a7-lwa-send .a7-lwa-ic{color:#fff;}" +
@@ -780,12 +781,27 @@
     [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
       scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
     });
-    scriptSelect.value = "general";
+    // C28: every Lead AI campaign Matloob sends is a shop campaign.
+    scriptSelect.value = "ic_shops";
     var scriptWrap = el("label", { className: "a7-lwa-scriptwrap" }, [
       el("span", { text: "Script" }),
       scriptSelect
     ]);
     scriptWrap.style.display = "none";
+    var scriptNote = el("div", {
+      className: "a7-lwa-scriptnote",
+      text: ""
+    });
+    scriptNote.style.display = "none";
+    function syncScriptNote() {
+      if (leadAiBox.checked && scriptSelect.value === "general") {
+        scriptNote.textContent = "This chat will not get the shops script.";
+        scriptNote.style.display = "";
+      } else {
+        scriptNote.textContent = "";
+        scriptNote.style.display = "none";
+      }
+    }
 
     function setSendLabel(text) {
       while (sendBtn.firstChild) {
@@ -811,11 +827,63 @@
       sendBtn.disabled = !canSend || !!(media && media.uploading);
     }
     applySendState();
+    function refreshLeadAiBusy() {
+      if (!leadAiBox.checked || !leads.length) {
+        leads.forEach(function (row) {
+          row.lead_ai_busy = false;
+        });
+        renderLeads();
+        return;
+      }
+      var phones = [];
+      leads.forEach(function (row) {
+        var digits = String(row.phone || "").replace(/\D/g, "");
+        if (digits.length >= 8) {
+          phones.push(digits);
+        }
+      });
+      if (!phones.length) {
+        renderLeads();
+        return;
+      }
+      var form = new URLSearchParams();
+      form.set("action", "busy");
+      form.set("sessid", bitrixSessid());
+      form.set("payload", JSON.stringify({ phones: phones }));
+      fetchJson(ENDPOINT, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString()
+      }).then(function (res) {
+        var data = parseJsonLoose(res.text) || {};
+        var busyMap = {};
+        if (res.ok && data.ok !== false) {
+          ((data.phones) || []).forEach(function (p) {
+            busyMap[String(p)] = true;
+          });
+        }
+        leads.forEach(function (row) {
+          var digits = String(row.phone || "").replace(/\D/g, "");
+          row.lead_ai_busy = !!(digits && busyMap[digits]);
+        });
+        renderLeads();
+      }).catch(function () {
+        renderLeads();
+      });
+    }
+
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.classList.toggle("is-on", leadAiBox.checked);
       scriptWrap.style.display = leadAiBox.checked ? "" : "none";
-      renderLeads();
+      if (leadAiBox.checked) {
+        scriptSelect.value = "ic_shops";
+      }
+      syncScriptNote();
+      refreshLeadAiBusy();
     });
+    scriptSelect.addEventListener("change", syncScriptNote);
 
     function currentNumber() {
       var id = numberSelect.value;
@@ -1132,6 +1200,9 @@
       if (bot === 2480) {
         return "lost";
       }
+      if (row.lead_ai_busy) {
+        return "lead_ai_busy";
+      }
       return "";
     }
 
@@ -1145,6 +1216,9 @@
       if (reason === "lost") {
         return "Lost";
       }
+      if (reason === "lead_ai_busy") {
+        return "Already talking to Lead AI";
+      }
       return "";
     }
 
@@ -1152,7 +1226,8 @@
       var order = [
         ["opted_out", "opted out"],
         ["broker", "broker"],
-        ["lost", "lost"]
+        ["lost", "lost"],
+        ["lead_ai_busy", "already talking to Lead AI"]
       ];
       var parts = [];
       var total = 0;
@@ -1178,6 +1253,7 @@
         ["Opted out.", "opted out"],
         ["Broker.", "broker"],
         ["Lost.", "lost"],
+        ["Already talking to Lead AI.", "already talking to Lead AI"],
         ["Sent this template in the last 30 days.", "already sent"]
       ];
       var counts = {};
@@ -1220,7 +1296,7 @@
       }
       var usable = 0;
       var missing = 0;
-      var leftCounts = { opted_out: 0, broker: 0, lost: 0 };
+      var leftCounts = { opted_out: 0, broker: 0, lost: 0, lead_ai_busy: 0 };
       leads.forEach(function (row) {
         var reason = leftOutReason(row);
         if (reason) {
@@ -1616,6 +1692,7 @@
         el("div", { className: "a7-lwa-actions" }, [
           leadAiToggle,
           scriptWrap,
+          scriptNote,
           el("button", { className: "a7-lwa-cancel", type: "button", text: "Cancel", onClick: closeStudio }),
           sendBtn
         ])

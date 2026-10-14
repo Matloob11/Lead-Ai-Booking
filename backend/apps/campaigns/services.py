@@ -59,8 +59,15 @@ __all__ = [
 ]
 
 def should_resend_recipient(status: str, error_detail: str = "") -> bool:
-    """Skipped rows, plus marketing-cap exhausts — not undeliverable numbers."""
+    """Skipped rows, plus marketing-cap exhausts — not undeliverable numbers.
+
+    C25: a row skipped because the phone opted out while waiting is never
+    picked again by resend-skipped.
+    """
     if status == CampaignRecipient.Status.SKIPPED:
+        note = (error_detail or "").lower()
+        if "opted out" in note:
+            return False
         return True
     if status != CampaignRecipient.Status.EXHAUSTED:
         return False
@@ -591,6 +598,19 @@ def process_recipient(recipient_id: int) -> None:
             recipient.save(update_fields=["status", "error_detail", "next_retry_at"])
             campaign = recipient.campaign
             refresh_campaign_counts(campaign)
+            return
+
+        # C25: opt-out holds at send time, not only when the list was built.
+        # One indexed registry query; no Bitrix REST per row.
+        from .crm_leads import phones_blocked_by_registry
+
+        phone_digits = "".join(ch for ch in str(recipient.phone or "") if ch.isdigit())
+        if phone_digits and phone_digits in phones_blocked_by_registry({phone_digits}):
+            recipient.status = CampaignRecipient.Status.SKIPPED
+            recipient.error_detail = "Opted out while waiting."
+            recipient.next_retry_at = None
+            recipient.save(update_fields=["status", "error_detail", "next_retry_at"])
+            refresh_campaign_counts(recipient.campaign)
             return
 
         recipient.attempt_count = (recipient.attempt_count or 0) + 1

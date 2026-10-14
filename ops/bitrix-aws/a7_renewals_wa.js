@@ -515,6 +515,7 @@
       ".a7-rwa-scriptwrap{display:inline-flex;align-items:center;gap:6px;height:36px;border:1px solid #ddd6fe;border-radius:10px;padding:0 8px;font:700 13px/1 Segoe UI,Arial,sans-serif !important;color:#5b21b6;background:#f5f3ff;}",
       ".a7-rwa-scriptwrap span{white-space:nowrap;}",
       ".a7-rwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font:600 13px/1.2 Segoe UI,Arial,sans-serif !important;color:#1e1b4b;background:#fff;max-width:220px;}",
+      ".a7-rwa-scriptnote{font:12px/1.3 Segoe UI,Arial,sans-serif !important;color:#92400e;max-width:220px;}",
       ".a7-rwa-cancel,.a7-rwa-send{height:36px;border-radius:10px;padding:0 14px;cursor:pointer;font:700 13px/1 Segoe UI,Arial,sans-serif !important;}",
       ".a7-rwa-cancel{background:#fff !important;color:#334155 !important;border:1px solid #cbd5e1 !important;}",
       ".a7-rwa-send{background:#166534 !important;color:#fff !important;border:0;}",
@@ -1355,12 +1356,27 @@
     [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
       scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
     });
-    scriptSelect.value = "general";
+    // C28: every Lead AI campaign Matloob sends is a shop campaign.
+    scriptSelect.value = "ic_shops";
     var scriptWrap = el("label", { className: "a7-rwa-scriptwrap" }, [
       el("span", { text: "Script" }),
       scriptSelect
     ]);
     scriptWrap.style.display = "none";
+    var scriptNote = el("div", {
+      className: "a7-rwa-scriptnote",
+      text: ""
+    });
+    scriptNote.style.display = "none";
+    function syncScriptNote() {
+      if (leadAiBox.checked && scriptSelect.value === "general") {
+        scriptNote.textContent = "This chat will not get the shops script.";
+        scriptNote.style.display = "";
+      } else {
+        scriptNote.textContent = "";
+        scriptNote.style.display = "none";
+      }
+    }
     function sendLabel() {
       if (!total) {
         return "Nothing to send: all left out";
@@ -1370,10 +1386,15 @@
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.className = "a7-rwa-leadai" + (leadAiBox.checked ? " is-on" : "");
       scriptWrap.style.display = leadAiBox.checked ? "" : "none";
+      if (leadAiBox.checked) {
+        scriptSelect.value = "ic_shops";
+      }
+      syncScriptNote();
       if (!busy) {
         sendBtn.textContent = sendLabel();
       }
     });
+    scriptSelect.addEventListener("change", syncScriptNote);
 
     var numberSearch = el("input", {
       className: "a7-rwa-input",
@@ -1605,6 +1626,7 @@
         el("div", { className: "a7-rwa-actions" }, [
           leadAiToggle,
           scriptWrap,
+          scriptNote,
           el("button", { className: "a7-rwa-cancel", type: "button", text: "Cancel" }),
           sendBtn
         ])

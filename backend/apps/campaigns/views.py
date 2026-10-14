@@ -8,7 +8,14 @@ from rest_framework.response import Response
 
 from apps.catalog.models import WaTemplate
 
-from .crm_leads import CrmLeadSendError, agent_for_bitrix_user, context_for_agent, send_from_leads, verify_signed_request
+from .crm_leads import (
+    CrmLeadSendError,
+    agent_for_bitrix_user,
+    context_for_agent,
+    phones_in_active_lead_ai,
+    send_from_leads,
+    verify_signed_request,
+)
 from .renewals import RenewalSendError, renewals_context, send_renewals
 from .models import Campaign
 from .serializers import serialize_campaign, serialize_recipient
@@ -201,6 +208,28 @@ def crm_leads_context(request):
         data = _signed_crm_payload(request)
         agent = agent_for_bitrix_user(data.get("bitrix_user_id"))
         return Response(context_for_agent(agent))
+    except CrmLeadSendError as exc:
+        return Response({"detail": str(exc)}, status=_crm_lead_status(exc))
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@parser_classes([JSONParser])
+@csrf_exempt
+def crm_leads_busy(request):
+    """Phones already in an active Lead AI chat (C22 preview). HMAC, no session."""
+    try:
+        data = _signed_crm_payload(request)
+        agent_for_bitrix_user(data.get("bitrix_user_id"))
+        raw = data.get("phones") or []
+        phones = {
+            "".join(ch for ch in str(p or "") if ch.isdigit())
+            for p in (raw if isinstance(raw, list) else [])
+        }
+        phones = {p for p in phones if len(p) >= 8}
+        busy = sorted(phones_in_active_lead_ai(phones))
+        return Response({"phones": busy, "count": len(busy)})
     except CrmLeadSendError as exc:
         return Response({"detail": str(exc)}, status=_crm_lead_status(exc))
 

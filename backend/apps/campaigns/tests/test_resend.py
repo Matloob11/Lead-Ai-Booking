@@ -32,3 +32,8 @@ class ResendSkippedTests(SimpleTestCase):
         self.assertFalse(should_resend_recipient("sent", ""))
         self.assertFalse(should_resend_recipient("pending", ""))
         self.assertFalse(should_resend_recipient("failed", "timeout"))
+
+    def test_opted_out_while_waiting_is_not_resent(self):
+        # C25: a row skipped for a mid-wait opt-out stays skipped.
+        self.assertFalse(should_resend_recipient("skipped", "Opted out while waiting."))
+        self.assertFalse(should_resend_recipient("skipped", "opted out"))
