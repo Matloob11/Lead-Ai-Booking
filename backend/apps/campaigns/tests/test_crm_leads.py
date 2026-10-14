@@ -1,6 +1,6 @@
 """Leads-list bulk send: HMAC, {{1}}=name, CRM lead id never becomes a Meta var."""
 
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.campaigns.crm_leads import (
     CrmLeadSendError,
@@ -111,6 +111,23 @@ class LeadDisplayNameTests(SimpleTestCase):
 
 
 class BuildRecipientsTests(SimpleTestCase):
+    def setUp(self):
+        # C31: phones_blocked_by_registry hits the opt-out table; SimpleTestCase forbids DB.
+        from unittest.mock import patch
+
+        self._registry = patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        )
+        self._bitrix_opt = patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        )
+        self._registry.start()
+        self._bitrix_opt.start()
+        self.addCleanup(self._registry.stop)
+        self.addCleanup(self._bitrix_opt.stop)
+
     def test_fills_name_as_one_and_keeps_extra(self):
         rows, skipped = build_recipients(
             template=FakeTemplate(2),
@@ -520,11 +537,6 @@ class LeadAiLeaveOutTests(SimpleTestCase):
                 )
         self.assertEqual(str(caught.exception), "1 left out: opted out 1")
 
-    def test_registry_is_empty_until_it_exists(self):
-        from apps.campaigns.crm_leads import phones_blocked_by_registry
-
-        self.assertEqual(phones_blocked_by_registry({"971501111111"}), set())
-
     def test_everyone_left_out_names_the_reasons(self):
         with self.assertRaises(CrmLeadSendError) as caught:
             self._rows([
@@ -626,4 +638,19 @@ class LeadAiLeaveOutTests(SimpleTestCase):
         self.assertEqual([row["phone"] for row in recipients], ["971552223333"])
         self.assertEqual(stats["opted_out"], 1)
         self.assertIn("1 left out: opted out 1", warnings)
+
+
+class RegistryBlockTests(TestCase):
+    """C31: phones_blocked_by_registry reads the real Lead AI opt-out table."""
+
+    def test_registry_blocks_a_recorded_phone(self):
+        from apps.campaigns.crm_leads import phones_blocked_by_registry
+        from apps.leadai.models import LeadAiOptOut
+        from apps.leadai.optout import record
+
+        self.assertEqual(phones_blocked_by_registry({"971501111111"}), set())
+        record("971501111111", reason="stop", source=LeadAiOptOut.Source.IMPORT)
+        blocked = phones_blocked_by_registry({"971501111111", "971502222222"})
+        self.assertIn("971501111111", blocked)
+        self.assertNotIn("971502222222", blocked)
 

@@ -42,14 +42,14 @@ class OptOutAtSendTests(SimpleTestCase):
         ), patch(
             "apps.campaigns.services.ensure_owner_data"
         ) as ensure, patch(
-            "apps.gateway.client.GatewayClient"
-        ) as gateway:
+            "apps.inbox.services.start_conversation"
+        ) as start:
             process_recipient(99)
 
         self.assertEqual(recipient.status, CampaignRecipient.Status.SKIPPED)
         self.assertEqual(recipient.error_detail, "Opted out while waiting.")
         ensure.assert_not_called()
-        gateway.assert_not_called()
+        start.assert_not_called()
         refresh.assert_called_once()
         # attempt_count must not move for an opt-out hold.
         self.assertEqual(recipient.attempt_count, 0)

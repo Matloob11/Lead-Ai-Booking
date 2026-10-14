@@ -1,3 +1,54 @@
+## 2026-10-14 — C32/C33/C34 Bitrix live; C31 tests written (Cursor)
+
+**C32+C33** `a7_leadai_fields.php` put live: Location/Budget/Size allow-listed for `only_if_empty` (https_url / number / text); optional `booking.crm_todo_id`. Proof lead 79631 PASS (fill+keep; reschedule ours 2311 left agent's); lead deleted; proofs stubbed. Today's booking body without those keys still 200. **C34** `a7_leadai_bot_status.php` VERSION 2: durable queue ≤3 tries / 15 min + Bitrix agent; proof 79632 fail→retry→200 then deleted. **C31** campaigns test patches written (`test_crm_leads` / `test_renewals` / `test_optout_at_send`); prove with C22–C25 deploy after "2b is live". No Django build. Requests updated for Claude.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`. Bitrix: `a7_leadai_fields.php`, `a7_leadai_bot_status.php`. Campaigns tests only (no leadai/wa.sh).
+
+---
+
+## 2026-10-14 — Playwright C28/C23/C20; C30 confirmed (Cursor)
+
+As Matloob in the live Bitrix browser (in-page send guard: only `action=send` blocked). **C28** all five popups: Lead AI ticked → Script defaults to International City shops; switching to General shows "This chat will not get the shops script."; Contacts Queue click → guard blocked=1. Shots `files/temp/c28-popups/shots/`. **C23** leads 79623/79624: preview `Hi there` / `Hi Testname` on `a7_leadai_meeting_reminder`; leads deleted; create/cleanup scripts stubbed. **C20** 2311 Leads grid: Bot Status / Shop Type Wanted / WhatsApp Opt-out visible with default columns (shot `files/temp/c20-grid/2311-shop-cols.png`). **C30** Matloob confirmed funnel defs yes. No WhatsApp sent. No Django deploy (2b BUILD LOCK).
+
+---
+
+## 2026-10-14 — C26 survival + BP235 skip; C30 funnel defs; C23/C20 CLI proofs (Cursor)
+
+C26: booked via C9, every listed edit kept meeting + single VM to-do (resp 2311) with BP 235 skip live; normal stage-10 without Bot Status still cleared + due-now to-do. Backup `/home/bitrix/a7_bp235_bak_20261014_111257`. Test leads 79619–79621 deleted; probes stubbed. C23 live PHP display: `Property Finder WhatsApp////rent/test` → Hi there; `Bayut WhatsApp | Testname` → Hi Testname. C20 user 2311 grid 23 cols + three shop fields. C30 proposed funnel defs on board (ask Matloob); `a7_c30_funnel.php` hand-check booked=22 attended=22 rented=2 lost=212. Playwright UI not run (Bitrix login page, no session). No Django build (2b not live). No WhatsApp sent.
+
+---
+
+## 2026-10-14 — Lead AI batch 2b: review fixes, not deployed (Claude Code)
+
+A review of 2b stages A and B raised 28 findings, several of them the same issue seen twice. Each was checked against the code; 25 were real and are fixed with tests (most reproduced first by a failing test). 3 need files outside `apps/leadai`. `apps.leadai` + `apps.crmlink`: **733 OK** (692 before). `makemigrations --check`: No changes; no new migration. Nothing deployed, committed or run on the server.
+
+**Fixed:**
+- **Reply caps** count replies, not rows: a type's video, photos and card are one reply, so [Book viewing] after them is answered.
+- **Follow-up sweep:** what keeps a chat not due for days (stopped/paused/handed over, registry, Template B not approved on its number, the campaign template failed, Template B as the campaign itself) is filtered in SQL, and candidates are read page by page.
+- **No credit:** a Template B or nudge refused for "Insufficient credits" is due again once credit is back.
+- **Check-back:** sent only if nothing but a "thanks" came since the yes. A chat the customer or a colleague took up again drops it, and nudges may follow.
+- **Bookings:** the C9 tool moves or closes the lead's *newest* open Viewing/Meeting to-do. It is used only while that newest one is ours; otherwise our own to-do is moved or closed with crm.activity, and nobody else's is touched. A booking whose answer was lost counts as ours and is sent again.
+- **Before any follow-up**, the Bitrix lead is read once: Handed to agent / Broker / Lost / Opted out / Opt-out Yes holds it and is applied. C12 POSTs are never retried.
+- **Inbox-wide opt-out:** bare "الغاء", "block" and "band karo" count only as the answer to a campaign template. A STOP in a transferred Lead AI chat and a Stop tap in any chat reach the registry. The back-fill reads messages from before a chat reached the Lead AI screen, and its dry run splits tapped and typed.
+- **Licence copy:** "I'll send it later" keeps the request open; a second page minutes later is no media handover.
+- **Script:** "ان شاء الله" / "السلام عليكم" and the like say nothing about the customer's script. A reply that stayed English keeps the chat English. A failed correction call no longer fails the turn.
+- **Smaller:**
+  - no nudge after two refused invitations;
+  - a failed list or media send is sent again;
+  - Resume on a spam or wrong-number stop takes the phone off the registry, and the alerts say so;
+  - odd bot-status headers get 401, not 500.
+
+**Not done (shared files):**
+- 22 `apps/campaigns` tests still fail (SimpleTestCase + the registry query): Cursor.
+- Meeting Location, Budget and Size are dropped from bookings until the C6 allow-list takes them: Cursor.
+- Media sends share worker-leadai's two slots: needs a queue or compose decision.
+
+**Not tested:** the live server, Postgres (SQL only compiled), the real model (3 new eval scenarios, 104 in all), real crm.activity calls.
+
+**Shared/touched:** this TASKS.md entry only; the rest is under `backend/apps/leadai/**`.
+
+---
+
 ## 2026-10-14 — C28 shops script default + C26 booking to-do to 2311 (Cursor)
 
 Lead AI box ticked → Script defaults to International City shops; switching to General shows one English note. Live: `a7_lead_wa.js` `1a6837ba`, `a7_renewals_wa.js` `05b13097` (GET 200). Video header still waits on template approval. C26 Q22: booking Viewing/Meeting to-do responsible is now constant **2311** in `a7_leadai_fields.php` `ccf863c4` (anonymous GET 405). Lead responsible unchanged. C22–C25 Django still waits on "2b is live". No WhatsApp sent.

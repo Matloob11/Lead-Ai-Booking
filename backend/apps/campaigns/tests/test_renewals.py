@@ -1,5 +1,7 @@
 """Renewals split: owner-only when the number matches, 300 cap, {{1}} like Leads."""
 
+from unittest.mock import patch
+
 from django.test import SimpleTestCase
 
 from apps.campaigns.renewals import RenewalSendError, build_renewal_messages, classify_deals
@@ -11,7 +13,25 @@ class FakeTemplate:
         self.requires_header_media = False
 
 
-class ClassifyTests(SimpleTestCase):
+class _RegistryPatchMixin:
+    """C31: SimpleTestCase must not hit the opt-out table via phones_opted_out."""
+
+    def setUp(self):
+        self._registry = patch(
+            "apps.campaigns.crm_leads.phones_blocked_by_registry",
+            return_value=set(),
+        )
+        self._bitrix_opt = patch(
+            "apps.campaigns.crm_leads.bitrix_opted_out_phones",
+            return_value=set(),
+        )
+        self._registry.start()
+        self._bitrix_opt.start()
+        self.addCleanup(self._registry.stop)
+        self.addCleanup(self._bitrix_opt.stop)
+
+
+class ClassifyTests(_RegistryPatchMixin, SimpleTestCase):
     def test_same_uae_number_is_owner_only(self):
         classified = classify_deals(
             [
@@ -107,7 +127,7 @@ class ClassifyTests(SimpleTestCase):
         self.assertEqual(classified["rows"][0]["owner_name"], "Customer")
 
 
-class BuildTests(SimpleTestCase):
+class BuildTests(_RegistryPatchMixin, SimpleTestCase):
     def test_blank_placeholder_uses_each_name(self):
         built = build_renewal_messages(
             deals=[
