@@ -1,3 +1,9 @@
+## 2026-10-14 — C20: Bitrix include stubs and four admin Leads grids (Cursor)
+
+Stubbed every non-live one-off under `/home/bitrix/www/local/php_interface/include` to md5 `c99f9ec7…` (67 files + bak body). Kept 8 live HR/listing includes referenced from `local/php_interface/init.php`. GET on `a7_c15_install.php` and `a7_probe_booking_bp.php` now 404. Restored Leads grid columns for users 26, 2196, 2633, 2637 from user 1's list plus the three shop fields. Left 2311 alone (Q23). Hardened `a7_c15_install.php` / `a7_c15_proof.php` with CLI guards; empty `columns` is no longer replaced by a three-column list.
+
+---
+
 ## 2026-10-14 — Review of Cursor's C15–C19; Cursor's next list C20–C30 (Claude Code)
 
 Read-only checks against HEAD, the live server and the Bitrix box. Nothing was written there.

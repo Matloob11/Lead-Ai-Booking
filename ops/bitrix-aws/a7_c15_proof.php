@@ -1,5 +1,9 @@
 <?php
-/** Count the C15 preset the way the list filter does, and the same conditions in SQL. */
+/** Count the C15 preset the way the list filter does, and the same conditions in SQL. CLI only. */
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 define('NO_KEEP_STATISTIC', true);
 define('NOT_CHECK_PERMISSIONS', true);
 $_SERVER['DOCUMENT_ROOT'] = '/home/bitrix/www';

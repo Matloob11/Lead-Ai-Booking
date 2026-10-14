@@ -1,8 +1,12 @@
 <?php
 /**
  * Shared Leads preset "IC shops — ready for Lead AI" and the three shop columns
- * on every administrator's saved Leads grid. Idempotent.
+ * on every administrator's saved Leads grid. Idempotent. CLI only.
  */
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 define('NO_KEEP_STATISTIC', true);
 define('NOT_CHECK_PERMISSIONS', true);
 $_SERVER['DOCUMENT_ROOT'] = '/home/bitrix/www';
@@ -58,9 +62,14 @@ function a7_c15_add_columns(&$node): int
     }
     foreach ($node as $key => &$value) {
         if ($key === 'columns' && is_string($value)) {
+            // Empty string means the grid's built-in defaults. Do not replace
+            // it with the three shop columns alone (C15 review / C20).
+            if ($value === '') {
+                continue;
+            }
             foreach (A7_C15_COLUMNS as $column) {
                 if (!preg_match('/(^|,)' . preg_quote($column, '/') . '(,|$)/', $value)) {
-                    $value = $value === '' ? $column : $value . ',' . $column;
+                    $value = $value . ',' . $column;
                     $n++;
                 }
             }
