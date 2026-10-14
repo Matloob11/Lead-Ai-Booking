@@ -31,7 +31,7 @@ Board tasks T18, T21–T27, T40–T44, T51, T53, T54 (statuses on SHOPS-BOT-BOAR
 - Review: 3 reviewers found 24 issues (20 fixed). A second review of the eval guards found 10 (F1–F3, F6, F7, F10 fixed and re-checked by paraphrase probes).
 - Draft eval: 141/152 (92.8%, below the gate) → 151/152 (99.3%).
 - Deployed eval 148/152 (97.4%).
-- **2a.1** (same day): `hours._HOUR_AHEAD` read "around 400 sq ft" as an approximate hour, and `_OPEN_OR_FREE` read "open my shop" as "are you open?". Both made a plain booking "no promise", so T18 never fired on a message with a size and a time. Fixed with tests. Draft 149/152 (98.0%), deployed: see below.
+- **2a.1** (same day): `hours._HOUR_AHEAD` read "around 400 sq ft" as an approximate hour, and `_OPEN_OR_FREE` read "open my shop" as "are you open?". Both made a plain booking "no promise", so T18 never fired on a message with a size and a time. Fixed with tests. Draft 149/152 (98.0%), deployed **151/152 (99.3%)** (one lang-voice-urdu flake).
 
 **Deployed:**
 - Drift check first: build context == HEAD for every file.
