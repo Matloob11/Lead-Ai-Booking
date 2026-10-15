@@ -8,6 +8,12 @@
  * a Bitrix agent. Each failure is one log line without the body. Django's
  * endpoint is idempotent, so a repeat is harmless.
  *
+ * C36: when a person moves a lead out of Not Interested / JUNK, into stage 10,
+ * or sets Meeting Date & Time, set Bot Status Handed to agent (2478) in onAfter
+ * (a follow-up Update — OnBefore cannot reliably add UF fields). C12 then posts.
+ * C6 writes stay excluded. CCrmLead::Update merges the full row into $arFields,
+ * so "field present" is not "field changed".
+ *
  * Deployed to: /home/bitrix/www/bitrix/php_interface/include/a7_leadai_bot_status.php
  * Loaded from: bitrix/php_interface/init.php
  */
@@ -21,23 +27,28 @@ define('A7_LEADAI_BOT_STATUS_LOADED', true);
 
 final class A7LeadaiBotStatus
 {
-    public const VERSION = '2';
+    public const VERSION = '6';
     public const URL = 'https://wa.srv1802669.hstgr.cloud/api/leadai/bitrix/bot-status/';
     public const LOG = '/tmp/a7_leadai_bot_status.log';
     public const QUEUE = '/home/bitrix/www/upload/a7_leadai_bot_status_queue.jsonl';
     public const MAX_TRIES = 3;
     public const WINDOW_SEC = 900;
     public const RETRY_GAP_SEC = 300;
+    public const BOT_HANDED = 2478;
+    public const MEET_FIELD = 'UF_CRM_1731838813769';
     /** @var callable|null Proof hook: fn(string $body, string $ts, string $sign, string $url): int */
     public static $sendHook = null;
-    /** @var array<int,array{bot:int,opt:int}> */
+    /** @var array<int,array{bot:int,opt:int,status:string,meet:string}> */
     private static array $before = [];
+    /** @var array<int,true> C36: person takeover — set 2478 in onAfter (UF inject in onBefore is dropped). */
+    private static array $pendingHand = [];
 
     public static function register(): void
     {
         $em = EventManager::getInstance();
-        $em->addEventHandler('crm', 'OnBeforeCrmLeadUpdate', [__CLASS__, 'onBefore']);
-        $em->addEventHandler('crm', 'OnAfterCrmLeadUpdate', [__CLASS__, 'onAfter']);
+        // Sort 10: before A7LeadStageOwner / others that may unset STATUS_ID from $arFields.
+        $em->addEventHandler('crm', 'OnBeforeCrmLeadUpdate', [__CLASS__, 'onBefore'], false, 10);
+        $em->addEventHandler('crm', 'OnAfterCrmLeadUpdate', [__CLASS__, 'onAfter'], false, 10);
         self::ensureAgent();
     }
 
@@ -70,32 +81,117 @@ final class A7LeadaiBotStatus
     {
         try {
             $id = (int)($arFields['ID'] ?? 0);
-            if ($id <= 0) {
+            if ($id <= 0 || !class_exists('CCrmLead')) {
                 return true;
             }
-            if (!array_key_exists('UF_CRM_A7_BOT_STATUS', $arFields)
-                && !array_key_exists('UF_CRM_A7_WA_OPT_OUT', $arFields)) {
-                return true;
-            }
-            if (!class_exists('CCrmLead')) {
-                return true;
-            }
+            // CCrmLead::Update merges the full row into $arFields — always snap when we have an ID.
             $res = CCrmLead::GetListEx(
                 [],
                 ['=ID' => $id, 'CHECK_PERMISSIONS' => 'N'],
                 false,
                 ['nTopCount' => 1],
-                ['ID', 'UF_CRM_A7_BOT_STATUS', 'UF_CRM_A7_WA_OPT_OUT']
+                ['ID', 'STATUS_ID', 'UF_CRM_A7_BOT_STATUS', 'UF_CRM_A7_WA_OPT_OUT', self::MEET_FIELD]
             );
             $row = $res ? $res->Fetch() : null;
+            if (!is_array($row)) {
+                return true;
+            }
             self::$before[$id] = [
-                'bot' => (int)(is_array($row) ? ($row['UF_CRM_A7_BOT_STATUS'] ?? 0) : 0),
-                'opt' => (int)(is_array($row) ? ($row['UF_CRM_A7_WA_OPT_OUT'] ?? 0) : 0),
+                'bot' => (int)($row['UF_CRM_A7_BOT_STATUS'] ?? 0),
+                'opt' => (int)($row['UF_CRM_A7_WA_OPT_OUT'] ?? 0),
+                'status' => (string)($row['STATUS_ID'] ?? ''),
+                'meet' => trim((string)($row[self::MEET_FIELD] ?? '')),
             ];
+            self::queuePersonHandoff($arFields, self::$before[$id]);
         } catch (\Throwable $e) {
             self::log('before error');
         }
         return true;
+    }
+
+    /**
+     * C36: mark a person takeover for onAfter (second Update writes 2478).
+     *
+     * @param array<string,mixed> $arFields
+     * @param array{bot:int,opt:int,status:string,meet:string} $old
+     */
+    private static function queuePersonHandoff(array $arFields, array $old): void
+    {
+        $id = (int)($arFields['ID'] ?? 0);
+        if ($id <= 0) {
+            return;
+        }
+        if ((int)($GLOBALS['A7_LEADAI_FIELDS_SAVE'] ?? 0) === $id) {
+            return;
+        }
+        if ((int)($GLOBALS['A7_LEADAI_PERSON_HANDOFF'] ?? 0) === $id) {
+            return;
+        }
+        // Full-row merges always carry Bot Status; only skip when it actually changes.
+        if (array_key_exists('UF_CRM_A7_BOT_STATUS', $arFields)
+            && (int)$arFields['UF_CRM_A7_BOT_STATUS'] !== (int)$old['bot']) {
+            return;
+        }
+        global $USER;
+        $uid = (is_object($USER) && method_exists($USER, 'GetID') && $USER->IsAuthorized())
+            ? (int)$USER->GetID()
+            : 0;
+        if ($uid <= 0) {
+            return;
+        }
+        if ((int)$old['bot'] === self::BOT_HANDED) {
+            return;
+        }
+        $hand = false;
+        if (array_key_exists('STATUS_ID', $arFields)) {
+            $newStatus = (string)$arFields['STATUS_ID'];
+            $oldStatus = (string)$old['status'];
+            if ($newStatus !== $oldStatus) {
+                $wasLost = in_array($oldStatus, ['1', 'JUNK'], true);
+                $nowLost = in_array($newStatus, ['1', 'JUNK'], true);
+                if ($wasLost && !$nowLost) {
+                    $hand = true;
+                }
+                if ($newStatus === '10') {
+                    $hand = true;
+                }
+            }
+        }
+        if (array_key_exists(self::MEET_FIELD, $arFields)) {
+            $newMeet = $arFields[self::MEET_FIELD];
+            $newMeetStr = is_object($newMeet) && method_exists($newMeet, 'toString')
+                ? (string)$newMeet->toString()
+                : trim((string)$newMeet);
+            if ($newMeetStr !== '' && $newMeetStr !== (string)$old['meet']) {
+                $hand = true;
+            }
+        }
+        if (!$hand) {
+            return;
+        }
+        self::$pendingHand[$id] = true;
+        self::log('lead=' . $id . ' c36_queue user=' . $uid . ' from_bot=' . (int)$old['bot']);
+    }
+
+    private static function applyPersonHandoff(int $leadId): void
+    {
+        if ($leadId <= 0 || !class_exists('CCrmLead')) {
+            return;
+        }
+        $GLOBALS['A7_LEADAI_PERSON_HANDOFF'] = $leadId;
+        try {
+            $crm = new CCrmLead(false);
+            $fields = ['UF_CRM_A7_BOT_STATUS' => self::BOT_HANDED];
+            $crm->Update($leadId, $fields, true, true, [
+                'CURRENT_USER' => 1,
+                'DISABLE_USER_FIELD_CHECK' => true,
+                'REGISTER_SONET_EVENT' => false,
+            ]);
+            self::log('lead=' . $leadId . ' c36_applied');
+        } catch (\Throwable $e) {
+            self::log('lead=' . $leadId . ' c36_apply_error');
+        }
+        unset($GLOBALS['A7_LEADAI_PERSON_HANDOFF']);
     }
 
     /** @param array<string,mixed> $arFields */
@@ -105,7 +201,18 @@ final class A7LeadaiBotStatus
             $id = (int)($arFields['ID'] ?? 0);
             $old = self::$before[$id] ?? null;
             unset(self::$before[$id]);
-            if ($id <= 0 || $old === null) {
+            if ($id <= 0) {
+                return;
+            }
+            if (!empty(self::$pendingHand[$id])
+                && (int)($GLOBALS['A7_LEADAI_FIELDS_SAVE'] ?? 0) !== $id
+                && (int)($GLOBALS['A7_LEADAI_PERSON_HANDOFF'] ?? 0) !== $id) {
+                unset(self::$pendingHand[$id]);
+                self::applyPersonHandoff($id);
+                // applyPersonHandoff's Update posts via C12; nothing more here.
+                return;
+            }
+            if ($old === null) {
                 return;
             }
             if ((int)($GLOBALS['A7_LEADAI_FIELDS_SAVE'] ?? 0) === $id) {

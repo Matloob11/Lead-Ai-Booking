@@ -1,3 +1,57 @@
+## 2026-10-15 — C36 BP 235 skip for 2478 + C37 browser proof; commit (Cursor)
+
+**C36 BP 235 (Matloob yes):** backup `/home/bitrix/a7_bp235_bak_20261015_132925`; skip branch now OR-matches Bot Status 2477 or 2478 XML. Prove PASS: 2478 meeting kept on edit; empty Bot Status still wiped + 1 due-now to-do; test leads deleted.
+
+**C37 browser (Matloob logged in):** Leads popup warn + Leave them out on 79710/79711 (send fetch guarded); campaigns 444 before = 444 after; leads deleted. Context summaries now pass `shops_*` flags (`a7_lead_wa.php` `d71556c1…`).
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/bitrix-aws/a7_leadai_bot_status.php`, `ops/bitrix-aws/a7_lead_wa.php`, `ops/bitrix-aws/a7_lead_wa.js`, `ops/bitrix-aws/a7_c36_bp235_skip.php`, `ops/bitrix-aws/a7_c36_bp235_prove.php`.
+
+---
+
+## 2026-10-15 — C36 Bot Status follows a person; C37 shops popup warn (Cursor)
+
+**C36 (Bitrix):** `a7_leadai_bot_status.php` VERSION 6. A person's leave from Not Interested/JUNK, enter stage 10, or set Meeting Date & Time queues Handed to agent (2478) and a follow-up Update in OnAfter (full-row merges made OnBefore UF inject unreliable). C6 still skipped. Live proof: person → bot 2478 + 1 C12 POST; C6 → 0 posts. One-off: 79382/79419/79420 → 2478 (backup `/home/bitrix/a7_c36_bak_20261015_131218`). BP 235 skip for 2478 landed after Matloob yes (see entry above).
+
+**C37 (Bitrix only, no Django):** Leads popup (`a7_lead_wa.php` / `.js` V14) with Lead AI + International City shops shows warn counts and Leave them out. Browser proof in the entry above.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/bitrix-aws/a7_leadai_bot_status.php`, `ops/bitrix-aws/a7_lead_wa.php`, `ops/bitrix-aws/a7_lead_wa.js`.
+
+---
+
+## 2026-10-15 — Lead AI batch 2d, package "Who the customer is": no customer is ever lost; the office is V03 (Claude Code)
+
+Launch review issues 7 and 8, and the "not for sale" part of 5. Matloob's rule (Q25): a shops customer who wants a flat, studio, room, BHK or villa, wants to buy or sell, or never asked about a shop is never lost.
+
+**What they get now** (new `assistant/needs.py`; `engine.untag_need` / `who_they_are` / `not_lost_for`; `shop_flow.shops_unwanted`):
+- Code detects the want in their own words. English, Roman Urdu/Hindi, Arabic, Urdu and Hindi script.
+- A shop customer's own trade and choice is no want: "I sell mobile phones", "we buy and sell", "hum kapde bechte hain", "not looking for shops near the road", "a room at the back", "my studio is in Deira", "I don't need a shop now".
+- The first reply is code's line:
+  - "Thank you for letting us know" (with "sorry for the confusion" when we misread them);
+  - "We have many options for a studio across Dubai";
+  - "Visit our office and we'll give you the best option.";
+  - two free slots, the Maps link and the pin.
+- The team is alerted (kind `wanted`, high priority: chat owner, CRM responsible, 2311) with what they want. A timeline note goes on the lead.
+- Not paused: the model's not-a-shop tag and "unclear" are not handovers.
+- Never Lost or Junk: "not interested" / "wrong number" said with a want is not an opt-out, and a later no writes no Lost.
+- Never the shop list, a shop type, the licence ask or "for yourself?". The list also never goes when the burst says no or "not now".
+- Their booking uses the general confirmation ("our specialist", no shop type, no drive). Their nudges are "to see the options". They never get Template B.
+- "we got one" / "already rented" gets the code-written second-shop question. No shops reply says "only for rent / not for sale".
+
+**Office:** `DEFAULT_OFFICE_ADDRESS` = "Russia Cluster, Building V03, Shop 20, Dubai International City". Migration `leadai.0007` (AlterField default; no SQL on PostgreSQL). The prompt says OFFICE is our office, never a shop for rent.
+
+**Defaults, one constant each:** `needs.ALERT_PRIORITY` "high", `SEND_PIN`, `NEVER_LOST`, `SEGMENTS`.
+
+**Proof:**
+- 995 tests OK locally (SQLite; 955 before). 40 are new: each launch chat's words with its rebuilt live answer (37 cases fail with the guards patched out), and shop customers' words that must stay no want.
+- `makemigrations --check`: No changes detected.
+- Eval: 19 new scenarios from chats 42 to 136 (125 in all), checked with fake answers only.
+
+**Not tested:** the real-model eval gate, PostgreSQL, the live server, Bitrix. Not deployed, not committed.
+
+**Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`.
+
+---
+
 ## 2026-10-15 — Shops: photos while a visit is pending, and no tentative from our own offer (Claude Code)
 
 Matloob's first real shops test (lead 79229, `intl_city_shops_reconnect` from the Coastline number) found a bug. The customer wrote "If possible to send me photo first" and got the model's "Photos help, but seeing 2-3 shops side by side is much easier" and two slots, not Type 2's video, photos and card.
@@ -57,6 +111,14 @@ Then 206/208 (99.0%) on the build context and 206/208 (99.0%) on the deployed im
 - the Shop media dialog in a browser.
 
 **Next (2c):** bookings send Location / Budget / Size and `crm_todo_id` (C32/C33 are live); the opt-out log masks phones; reminders and turns wait during a credit hold.
+
+---
+
+## 2026-10-14 — Format.xlsx Owner Data numbers (Cursor)
+
+Cleared the old Name/Number rows in `Format.xlsx` and wrote 1,000 numbers: Malik 1, Malik 2, Sattar and Raoof on the first four rows, then the 996 newest Owner Data cards that have a phone. Same number is not repeated. Not deployed.
+
+**Shared:** `TASKS.md`, `Format.xlsx`.
 
 ---
 

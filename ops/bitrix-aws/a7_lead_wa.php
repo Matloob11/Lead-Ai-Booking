@@ -234,6 +234,12 @@ function a7_lead_wa_summaries(array $ids, string $entity = 'lead'): array
             'phone_tail' => strlen($phone) >= 4 ? substr($phone, -4) : '',
             'bot_status' => (int)($row['bot_status'] ?? 0),
             'wa_opt_out' => (int)($row['wa_opt_out'] ?? 0),
+            // C37: shops-script warn flags (Lead AI + ic_shops popup only).
+            'property_type' => (int)($row['property_type'] ?? 0),
+            'shops_not_shop' => !empty($row['shops_not_shop']),
+            'shops_recent' => !empty($row['shops_recent']),
+            'shops_worked' => !empty($row['shops_worked']),
+            'shops_warn' => !empty($row['shops_warn']),
             'details' => is_array($row['details'] ?? null)
                 ? $row['details']
                 : a7_lead_wa_detail_pack(a7_lead_wa_display($row), $phone),
@@ -363,6 +369,57 @@ function a7_lead_wa_lead_details(array $lead, string $phone, string $name): arra
     ]);
 }
 
+function a7_lead_wa_has_open_viewing_todo(int $leadId): bool
+{
+    if ($leadId <= 0 || !class_exists('CCrmActivity')) {
+        return false;
+    }
+    $res = CCrmActivity::GetList(
+        ['ID' => 'DESC'],
+        [
+            'OWNER_TYPE_ID' => \CCrmOwnerType::Lead,
+            'OWNER_ID' => $leadId,
+            'PROVIDER_ID' => 'CRM_TODO',
+            'SUBJECT' => 'Viewing/Meeting',
+            'COMPLETED' => 'N',
+            'CHECK_PERMISSIONS' => 'N',
+        ],
+        false,
+        ['nTopCount' => 1],
+        ['ID']
+    );
+    return (bool)($res && $res->Fetch());
+}
+
+/**
+ * C37: flags for the shops-script warning (warn only; nothing is blocked).
+ *
+ * @return array{not_shop:bool,recent:bool,worked:bool}
+ */
+function a7_lead_wa_shops_flags(array $lead): array
+{
+    $prop = (int)($lead['UF_CRM_1760707292'] ?? 0);
+    // Shop (760) and Retail (12) look like shop leads; anything else does not.
+    $notShop = !in_array($prop, [760, 12], true);
+    $created = (string)($lead['DATE_CREATE'] ?? '');
+    $createdTs = $created !== '' ? (int)MakeTimeStamp($created) : 0;
+    $recent = $createdTs > 0 && $createdTs >= (time() - 7 * 86400);
+    $meet = trim((string)($lead['UF_CRM_1731838813769'] ?? ''));
+    $status = (string)($lead['STATUS_ID'] ?? '');
+    // Option Sent / Meeting Scheduled / Meeting Done — a person has been on this card.
+    $workedStage = in_array($status, ['UC_ZQMREH', '10', '11'], true);
+    $modified = (string)($lead['DATE_MODIFY'] ?? '');
+    $modTs = $modified !== '' ? (int)MakeTimeStamp($modified) : 0;
+    $recentTouch = $modTs > 0 && $modTs >= (time() - 7 * 86400);
+    $openTodo = a7_lead_wa_has_open_viewing_todo((int)($lead['ID'] ?? 0));
+    $worked = $openTodo || $meet !== '' || ($workedStage && $recentTouch);
+    return [
+        'not_shop' => $notShop,
+        'recent' => $recent,
+        'worked' => $worked,
+    ];
+}
+
 function a7_lead_wa_row(int $leadId): ?array
 {
     if ($leadId <= 0 || !class_exists('CCrmLead')) {
@@ -378,8 +435,10 @@ function a7_lead_wa_row(int $leadId): ?array
         ['nTopCount' => 1],
         [
             'ID', 'TITLE', 'NAME', 'LAST_NAME', 'SOURCE_ID', 'STATUS_ID',
+            'DATE_CREATE', 'DATE_MODIFY',
             'UF_CRM_1770537051525', 'UF_CRM_1763390179', 'UF_CRM_1731838126127',
             'UF_CRM_1756638760279', 'UF_CRM_1736306439793', 'UF_CRM_1760707563281',
+            'UF_CRM_1760707292', 'UF_CRM_1731838813769',
             'UF_CRM_A7_BOT_STATUS', 'UF_CRM_A7_WA_OPT_OUT',
         ]
     );
@@ -387,6 +446,7 @@ function a7_lead_wa_row(int $leadId): ?array
     if (!is_array($lead)) {
         return null;
     }
+    $flags = a7_lead_wa_shops_flags($lead);
     $row = [
         'id' => $leadId,
         'phone' => a7_lead_wa_phone($leadId),
@@ -396,6 +456,11 @@ function a7_lead_wa_row(int $leadId): ?array
         'last_name' => (string)($lead['LAST_NAME'] ?? ''),
         'bot_status' => (int)($lead['UF_CRM_A7_BOT_STATUS'] ?? 0),
         'wa_opt_out' => (int)($lead['UF_CRM_A7_WA_OPT_OUT'] ?? 0),
+        'property_type' => (int)($lead['UF_CRM_1760707292'] ?? 0),
+        'shops_not_shop' => !empty($flags['not_shop']),
+        'shops_recent' => !empty($flags['recent']),
+        'shops_worked' => !empty($flags['worked']),
+        'shops_warn' => !empty($flags['not_shop']) || !empty($flags['recent']) || !empty($flags['worked']),
     ];
     $row['name'] = a7_lead_wa_display($row);
     $row['details'] = a7_lead_wa_lead_details($lead, (string)$row['phone'], $row['name']);
@@ -1073,6 +1138,11 @@ function a7_lead_wa_stream_file(string $url, string $file, int $size, array $hea
 }
 
 global $USER;
+// CLI proofs can define A7_LEAD_WA_LIB_ONLY and require this file for helpers only.
+if (defined('A7_LEAD_WA_LIB_ONLY')) {
+    return;
+}
+
 if (!is_object($USER) || !$USER->IsAuthorized()) {
     a7_lead_wa_json(['ok' => false, 'error' => 'Sign in to Bitrix first.'], 401);
 }

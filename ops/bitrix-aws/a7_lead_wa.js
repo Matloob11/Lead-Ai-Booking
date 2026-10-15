@@ -13,10 +13,10 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_LEAD_WA_V13) {
+  if (window.A7_LEAD_WA_V14) {
     return;
   }
-  window.A7_LEAD_WA_V13 = true;
+  window.A7_LEAD_WA_V14 = true;
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -495,6 +495,10 @@
       ".a7-lwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;" +
       "color:#1e1b4b;background:#fff;max-width:220px;}" +
       ".a7-lwa-scriptnote{font-size:12px;color:#92400e;max-width:220px;line-height:1.3;}" +
+      ".a7-lwa-shopswarn{display:none;margin:6px 0 0;padding:8px 10px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:12px;line-height:1.35;}" +
+      ".a7-lwa-shopswarn.is-on{display:block;}" +
+      ".a7-lwa-shopswarn button{margin-left:8px;border:0;background:#9a3412;color:#fff;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;}" +
+      ".a7-lwa-shopswarn button:hover{background:#7c2d12;}" +
       ".a7-lwa-send{background:#25D366;color:#fff;border:0;border-radius:8px;padding:8px 12px;" +
       "font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}" +
       ".a7-lwa-send .a7-lwa-ic{color:#fff;}" +
@@ -705,6 +709,14 @@
     return "Customer";
   }
 
+  // C37 proof / ops: open the studio with a prepared context (send still goes through the button).
+  window.A7_LEAD_WA_open = function (ids, data) {
+    if (!ids || !ids.length || !data) {
+      return;
+    }
+    openStudio(ids, data);
+  };
+
   function openStudio(leadIds, context) {
     ensureStyles();
     closeStudio();
@@ -793,6 +805,7 @@
       text: ""
     });
     scriptNote.style.display = "none";
+    var shopsWarn = el("div", { className: "a7-lwa-shopswarn" });
     function syncScriptNote() {
       if (leadAiBox.checked && scriptSelect.value === "general") {
         scriptNote.textContent = "This chat will not get the shops script.";
@@ -801,6 +814,80 @@
         scriptNote.textContent = "";
         scriptNote.style.display = "none";
       }
+      renderShopsWarn();
+    }
+    function shopsWarnCounts() {
+      var notShop = 0;
+      var recentOnly = 0;
+      var worked = 0;
+      var warnIds = [];
+      leads.forEach(function (row) {
+        if (row.shops_not_shop) {
+          notShop += 1;
+        }
+        if (row.shops_recent && !row.shops_not_shop) {
+          recentOnly += 1;
+        }
+        if (row.shops_worked) {
+          worked += 1;
+        }
+        if (row.shops_warn || row.shops_not_shop || row.shops_recent || row.shops_worked) {
+          warnIds.push(row.id);
+        }
+      });
+      return {
+        notShop: notShop,
+        recentOnly: recentOnly,
+        worked: worked,
+        warnIds: warnIds,
+        total: leads.length
+      };
+    }
+    function renderShopsWarn() {
+      while (shopsWarn.firstChild) {
+        shopsWarn.removeChild(shopsWarn.firstChild);
+      }
+      shopsWarn.className = "a7-lwa-shopswarn";
+      if (ENTITY !== "lead" || !leadAiBox.checked || scriptSelect.value !== "ic_shops") {
+        return;
+      }
+      var c = shopsWarnCounts();
+      if (!c.notShop && !c.recentOnly && !c.worked) {
+        return;
+      }
+      var parts = [];
+      if (c.notShop) {
+        parts.push(c.notShop + " of " + c.total + " do not look like shop leads");
+      }
+      if (c.recentOnly) {
+        parts.push(c.recentOnly + " were created in the last 7 days");
+      }
+      if (c.worked) {
+        parts.push(c.worked + " are being worked by an agent");
+      }
+      shopsWarn.appendChild(document.createTextNode(parts.join(", ") + "."));
+      var leave = el("button", { type: "button", text: "Leave them out" });
+      leave.addEventListener("click", function () {
+        var drop = {};
+        c.warnIds.forEach(function (id) {
+          drop[String(id)] = true;
+        });
+        var nextLeads = [];
+        var nextIds = [];
+        leads.forEach(function (row) {
+          if (!drop[String(row.id)]) {
+            nextLeads.push(row);
+            nextIds.push(row.id);
+          }
+        });
+        leads = nextLeads;
+        leadIds = nextIds;
+        renderLeads();
+        renderShopsWarn();
+        renderPreview();
+      });
+      shopsWarn.appendChild(leave);
+      shopsWarn.className = "a7-lwa-shopswarn is-on";
     }
 
     function setSendLabel(text) {
@@ -1352,6 +1439,7 @@
       sub.textContent = bits.join(" · ");
       canSend = messaged;
       applySendState();
+      renderShopsWarn();
     }
 
     function renderNote() {
@@ -1693,6 +1781,7 @@
           leadAiToggle,
           scriptWrap,
           scriptNote,
+          shopsWarn,
           el("button", { className: "a7-lwa-cancel", type: "button", text: "Cancel", onClick: closeStudio }),
           sendBtn
         ])
