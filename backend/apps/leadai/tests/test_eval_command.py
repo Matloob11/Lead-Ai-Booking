@@ -224,6 +224,13 @@ RIGHT = {
     "shops-for-myself-list": answer("Great. What business will the shop be for?", facts={"for_client": False}),
     "shops-asks-types": answer("We have three types of shops, by size. What size do you need?"),
     "shops-photos": answer("Here are the photos of Type 1.", facts={"shop_type": "type_1"}),
+    # The first live shops test (2026-10-15): our two slots record no visit; photos asked for after them go.
+    "shops-invite-no-tentative": answer(
+        "No problem, many of our tenants open a new licence. I can hold a slot for you today at 2:30 PM or 3:00 PM — which is better?",
+        facts={"licence_kind": "new", "trade_licence": "no"},
+        invited=True,
+    ),
+    "shops-photos-after-invite": answer("Sure, here are the photos of Type 2."),
     "shops-licence-ask": answer(
         "Perfect, a DED licence works for our shops. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
         facts={"licence_kind": "ded", "trade_licence": "yes"},

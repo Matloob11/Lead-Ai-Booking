@@ -380,6 +380,7 @@ def after_model(
     booked: bool = False,
     facts=None,
     invitation: bool = False,
+    requested: bool = False,
 ) -> dict | None:
     """The step code takes instead of the model's words in a shops turn, else None.
 
@@ -393,27 +394,35 @@ def after_model(
     confirmation says to bring the licence); ``invitation``: the answer would be
     plain but for a tentative visit only its own invitation recorded (nobody asked
     to come: engine.model_step), which the licence request alone replaces, as the
-    build pack asks for the copy before it invites (eval shops-licence-ask).
+    build pack asks for the copy before it invites (eval shops-licence-ask);
+    ``requested``: the answer would be plain but for a tentative of the model's, and
+    photos, a video or the shop types are asked for (engine.model_step), which their
+    step alone replaces.
     In this order: photos or a video asked for (the type in view, else the list);
     the shop types asked for; "for myself" said now, with no size, budget or type
     to match yet (the list, once); a DED or Trakhees licence known (the copy asked
     for, once).
     """
-    if not plain and not invitation:
+    if not plain and not invitation and not requested:
         return None
     answer_facts = answer.get("facts") or {}
-    if plain:
+    if plain or requested:
         if asks_media(said):
             shop_type = type_in_view(answer_facts, known, facts)
             if not shop_type:
                 return {"kind": LIST}
-            return media_step(shop_type, typed=True, recent=media_recent, today=media_today)
-        if asks_types(said):
+            step = media_step(shop_type, typed=True, recent=media_recent, today=media_today)
+            if step is not None or plain or not invitation:
+                return step
+        elif asks_types(said):
             return {"kind": LIST}
+    if plain:
         for_me = (known or {}).get("for_client") is None and answer_facts.get("for_client") is False
         # Not when their size, budget or type already gives the one type to recommend (MATCH): that reply goes.
         if for_me and not list_sent and not asked and not answer.get("invited_to_meeting") and not type_in_view(answer_facts, known, facts):
             return {"kind": LIST}
+    if not plain and not invitation:
+        return None
     licence = answer_facts.get("licence_kind") or (known or {}).get("licence_kind")
     if licence in ("ded", "trakhees") and not licence_asked and not asked and not booked:
         return {"kind": LICENCE_ASK}

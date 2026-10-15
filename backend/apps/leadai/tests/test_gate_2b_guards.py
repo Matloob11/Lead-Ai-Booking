@@ -140,13 +140,19 @@ class ModelStepTests(SimpleTestCase):
                 self.assertIsNone(step)
                 self.assertEqual(out["appointment"]["action"], "tentative")  # theirs, or the model's words go with it
 
-    def test_no_other_step_is_taken_over_a_tentative(self):
-        # Photos asked for, or the types: only the licence request replaces a tentative (the rest as before).
-        for said in ("send photos please", "show me the options"):
+    def test_photos_or_the_types_are_taken_over_a_tentative_and_no_other_step(self):
+        # The first live shops test (2026-10-15): photos asked for, or the types, get their step over a
+        # tentative of the model's, which goes with its words (test_photos_over_tentative). Before, only the
+        # licence request replaced a tentative, so "If possible to send me photo first" got no photos.
+        offer = shop_answer("Sure. I can hold a slot for you today at 2:30 PM or 4:30 PM.", action="tentative")
+        for said, expected in (("send photos please", {"kind": shop_flow.MEDIA, "type": "type_1"}), ("show me the options", {"kind": shop_flow.LIST})):
             with self.subTest(said):
-                out, step = self.step(shop_answer("Sure. I can hold a slot for you today at 2:30 PM or 4:30 PM.", action="tentative"), said=said)
-                self.assertIsNone(step)
-                self.assertNotIn("shop_step", out)
+                out, step = self.step(offer, said=said)
+                self.assertEqual((step, out["shop_step"], out["appointment"]), (expected, expected, engine.NO_TIME))
+        # No other step: "for myself" with nothing to match is the list only in a plain answer.
+        unknown = {"property_type": "shop"}
+        out, step = self.step(shop_answer("Great. What business will the shop be for?", action="tentative", facts={"for_client": False}), said="For myself", known=unknown)
+        self.assertEqual((step, out["appointment"]["action"]), (None, "tentative"))
         out, step = self.step(shop_answer("Sure, here they are."), said="send photos please")
         self.assertEqual(step, {"kind": shop_flow.MEDIA, "type": "type_1"})  # plain, as before
 
@@ -644,13 +650,19 @@ class MustNotChangeTests(TestCase):
                 self.assertEqual(run.failures, [])
 
     def test_a_tentative_answer_where_the_licence_is_no_question_any_more(self):
+        # The model's words go. Its tentative for its own two slots records no visit (engine.own_offer),
+        # unless the customer speaks of coming ("I will bring it to the viewing"): then it stays, in their
+        # words, at no day of ours.
         offer = "No problem. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"
-        for scenario_id, facts in (("shops-licence-later", {}), ("shops-licence-send-later", {}), ("shops-invite", {"licence_kind": "new"})):
+        for scenario_id, facts, kept in (
+            ("shops-licence-later", {}, "tentative"), ("shops-licence-send-later", {}, "none"), ("shops-invite", {"licence_kind": "new"}, "none"),
+        ):
             with self.subTest(scenario_id):
                 completion = eval_answer(offer, action="tentative", place="office", date="2026-10-12", invited=True, facts=facts)
                 run, _ = run_eval(scenario_id, completion)
                 self.assertEqual(run.failures, [])
-                self.assertEqual((run.out_by, run.action, run.answer.get("shop_step")), (leadai_eval.MODEL, "tentative", None))
+                self.assertEqual((run.out_by, run.action, run.answer.get("shop_step")), (leadai_eval.MODEL, kept, None))
+                self.assertIsNone(run.answer["appointment"]["date"])
 
 
 class LatinShopsTurnTests(ShopsBase):

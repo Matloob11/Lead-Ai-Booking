@@ -79,6 +79,13 @@ user's [Yes, book a viewing] gets two free slots, [Yes, show me shops] the list.
 The nudges in a scenario's chat are assistant/nudges.py's own words, and a
 scenario's ``crm_asked`` / ``crm_notes`` become the context's LEAD FIRST ASKED
 and CRM NOTES lines exactly as lead_history.py writes them (board T28).
+
+The first live shops test (2026-10-15), mirrored the same way: the model's
+tentative for its own slot offer records no visit, or one in the customer's
+words alone (engine.own_offer, after unasked_confirm); slots offered again after
+words that turn nothing down are no new invitation (engine.reoffered, which
+settle and may_invite read); and photos or the shop types asked for get their
+step over a tentative of the model's (engine.model_step, as before).
 """
 
 from __future__ import annotations
@@ -1078,6 +1085,33 @@ TYPE_2_CARD = (
 LISTED = [SHOPS_YES, FOR_WHOM, FOR_MYSELF, SHOP_LIST]
 LICENCE_ASKED = SHOPS_MATCHED + [("customer", "DED licence, yes"), ("assistant", rules.line("licence_copy", "en"))]
 LICENCE_KNOWN = {**SHOPS_KNOWN, "licence_kind": "ded", "trade_licence": "yes"}
+# The first live shops test (2026-10-15, lead 79229), on this clock: 600 sq ft, Type 2, then "New" "One"
+# (a new licence), our two slots, "How much sqf" and the same two slots again.
+LIVE_ASKED_LICENCE = SHOPS_MATCHED[:5] + [
+    ("assistant", "A mobile shop, got it. What size do you need?"),
+    ("customer", "I need 600sqf"),
+    (
+        "assistant",
+        "600 sq ft, got it. For that size, a Type 2 shop is perfect: 600-800 sq ft, from AED 48,000 a year. Do you have a "
+        "trade licence already, or will you be opening a new one?",
+    ),
+]
+LIVE_KNOWN = {"for_client": False, "property_type": "shop", "business_activity": "mobile phone shop", "size_sqft": 600, "shop_type": "type_2"}
+LIVE_INVITE = (
+    "A Type 2 shop is great, starting from AED 48,000 a year. I can hold a viewing slot for you today at 2:30 PM or 3:00 PM "
+    "at our office. Which works better?"
+)
+LIVE_AGAIN = (
+    "A Type 2 shop ranges from 600 to 800 sq ft, starting from AED 48,000 a year. Would you like to confirm a viewing slot "
+    "today at 2:30 PM or 3:00 PM at our office?"
+)
+LIVE_INVITED = LIVE_ASKED_LICENCE + [
+    ("customer", "New"),
+    ("customer", "One"),
+    ("assistant", LIVE_INVITE),
+    ("customer", "How much sqf"),
+    ("assistant", LIVE_AGAIN),
+]
 
 SCENARIOS = [
     # A commercial tenant answers the International City shop offer ----------------------------
@@ -2031,6 +2065,33 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
+        # Live 2026-10-15 (lead 79229): the model answered "New" "One" with its own two slots and a tentative
+        # at the first, which the chat showed as "Time mentioned" and the CRM as a tentative meeting.
+        "shops-invite-no-tentative",
+        "shops: the reply that invites with two free slots records no tentative visit of its own",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=LIVE_ASKED_LICENCE,
+        facts=LIVE_KNOWN,
+        new=["New", "One"],
+        expect=[action("none"), invited(True), offers_free()],
+    ),
+    Scenario(
+        # Live 2026-10-15: "If possible to send me photo first" got the objection line and two slots, no
+        # photos: the model answered it tentative, over the tentative its own invitation had opened.
+        "shops-photos-after-invite",
+        "shops: 'send me photo first' after our two slots, a tentative open from them, sends Type 2's media and changes nothing",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=LIVE_INVITED,
+        facts={**LIVE_KNOWN, "licence_kind": "new"},
+        invites=1,
+        appointment={"status": "tentative", "starts_at": at(12, 14, 30), "note": "One"},
+        new=["If possible to send me photo first"],
+        expect=[sends_step("media", "type_2", files=True), no_booking(), action("none")],
+        words=CODE,
+    ),
+    Scenario(
         "shops-licence-ask",
         "shops: a DED licence gets the build pack's request for a copy, once, instead of the invitation",
         playbook=IC_SHOPS,
@@ -2345,6 +2406,24 @@ def agreed(scenario: Scenario) -> bool:
         visit_open=(scenario.appointment or {}).get("status") in ("tentative", "confirmed"),
         our_last=our_last(scenario),
         texts=[text for text in scenario.new if text != "[sticker]"],
+    )
+
+
+def reoffered(scenario: Scenario) -> bool:
+    """As engine._run_claimed: a shops chat whose last line of ours offered times, and the burst turns
+    nothing down (engine.reoffered): slots offered again are no new invitation."""
+    if scenario.playbook != IC_SHOPS:
+        return False
+    texts = [text for text in scenario.new if text != "[sticker]"]
+    return engine.reoffered(agreed=agreed(scenario), our_last=our_last(scenario), texts=texts)
+
+
+def said_yes(scenario: Scenario) -> bool:
+    """As engine._run_claimed: they agreed to come, or, in a shops chat whose last line of ours offered a
+    visit, a message opens with a yes (engine.opens_with_yes): own_offer keeps a tentative after it."""
+    texts = [text for text in scenario.new if text != "[sticker]"]
+    return agreed(scenario) or (
+        scenario.playbook == IC_SHOPS and engine.visit_offered(our_last(scenario)) and engine.opens_with_yes(texts)
     )
 
 
@@ -2785,8 +2864,15 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 handed_over=scenario.handed_over != "no",
             ):
                 when = None  # as live: a time nobody named or took is no booking, the two free slots go instead
+            if shops_chat and when is None and not still_invalid:
+                # As live: the model's own slot offer records no visit, or one in their words alone.
+                engine.own_offer(
+                    answer, appointment=built.appointment, said=said, words=customer_words(scenario),
+                    our_last=our_last(scenario), yes=said_yes(scenario), now=scenario.now,
+                )
         agreed_now = agreed(scenario)
-        may_invite = scenario.handed_over == "no" and not scenario.not_interested and (agreed_now or scenario.invites < 2)
+        reoffer_now = reoffered(scenario)
+        may_invite = scenario.handed_over == "no" and not scenario.not_interested and (agreed_now or reoffer_now or scenario.invites < 2)
         run.may_invite = may_invite
         if settled is None or settled.get("converted"):
             # As live, code settles the model's answer, and the deferral rule's (its other rules end the turn).
@@ -2798,6 +2884,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 list(scenario.new),
                 scenario.invites,
                 agreed=agreed_now,
+                reoffer=reoffer_now,
                 playbook=scenario.playbook,
                 address_sent=ADDRESS if built.location_sent else "",
                 slots=engine.invitation_slots(

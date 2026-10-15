@@ -1,3 +1,24 @@
+## 2026-10-15 — Shops: photos while a visit is pending, and no tentative from our own offer (Claude Code)
+
+Matloob's first real shops test (lead 79229, `intl_city_shops_reconnect` from the Coastline number) found a bug. The customer wrote "If possible to send me photo first" and got the model's "Photos help, but seeing 2-3 shops side by side is much easier" and two slots, not Type 2's video, photos and card.
+
+**Cause:** the model's own two-slot invitation (10:27 Dubai) was saved as a tentative visit: appointment 16 at 11:00, a time the customer never named, with a banner and a CRM tentative. `engine.step_plain` then blocks every shops step while a tentative is open, so the media step never ran.
+
+**Fix** (`engine.model_step`, new `own_offer` / `comes` / `reoffered`, `shop_flow.after_model`):
+- A request for photos, a video or the shop types always gets its step. A tentative already open stays as it was: no new revision, no CRM write, no alert.
+- The model's own slot offer records no tentative. A tentative is still kept when the customer named or took a time, or said they will come.
+- Slots offered again after a question do not count as a refused invitation.
+
+General chats are unchanged.
+
+**Proof:**
+- 955 tests local; the new eval scenarios shops-photos-after-invite and shops-invite-no-tentative;
+- eval gate 210/212 (99.1%) on the build context.
+
+**Still open:** appointment 16 on the test chat; cancel it in the panel ("Cancel meeting"). Not yet retested on the phone.
+
+---
+
 ## 2026-10-14 — C22–C25+C31 Django deploy; C29; C35 (Cursor)
 
 One Django deploy after 2b: gateway.0004, campaigns C22/C23/C25, credit hold C24, C31 test patches; panel credit-banner. Proofs: four services Up, sweep fresh, django-check clean; campaigns/credit tests OK; C22 live leave-out on active chat 971589763936; beat `poll-gateway-credit`; CreditState polled. C25 live STOP-while-waiting not exercised. **C29:** `credit-status` / `credit-release`; OpenWA/QR verbs and `run-probe-alots-channels.sh` gone; `ps` clean. **C35:** Redis run lock + visibility_timeout 7200; 2 tests OK; second build/up. C28 video waits APPROVED.

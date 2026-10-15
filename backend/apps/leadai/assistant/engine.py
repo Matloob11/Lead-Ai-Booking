@@ -54,7 +54,13 @@ no booking but the two free slots for it (unasked_confirm; their own hour in any
 form, a walk-in or a pick from our slots stands: their_time), and the licence copy is
 asked for even when the model's own invitation recorded a tentative visit, never
 over one in the customer's own words (model_step, wants_to_come); that request is
-answered and nudged like a question. Every chat: a deferral said
+answered and nudged like a question. A shops chat records no visit for the model's
+own slot offer: a tentative at a day and hour the customer neither gave nor took is
+none, unless they said yes or say they will come, and then it keeps their words and
+never our time (own_offer); slots offered again after words that turn nothing down
+are that same invitation, neither counted nor cut (reoffered); and a request for
+photos, a video or the shop types gets its step over a tentative that is not theirs,
+which then changes nothing (model_step, comes). Every chat: a deferral said
 with a day or an hour is still a deferral, and "How do I reach there?" once the
 location went out gets a line pointing to it; a reply not in the script the
 customer types in, English letters included, is asked for once more, and code's
@@ -828,12 +834,69 @@ def agreed_to_come(*, visit_open: bool, our_last: str, texts: list) -> bool:
     return rules.is_acceptance(said[-1]) if said else any(rules.is_acceptance(text) for text in texts)
 
 
+# The words a yes opens a message with ("Yes please, send me the location"); "ok" opens many a message
+# that agrees to nothing ("ok how much sqf"), so only alone is it a yes (rules.is_acceptance).
+_YES_FIRST = frozenset(
+    rules.normalize_text(word)
+    for word in ("yes", "yeah", "yep", "sure", "haan", "han", "ji", "jee", "نعم", "أكيد", "اكيد", "ہاں", "جی", "हाँ", "हां", "जी")
+)
+
+
+def opens_with_yes(texts) -> bool:
+    """A message of the burst is a plain yes, or opens with one ("Yes please, send me the location", "Sure,
+    where is it?", "haan ji location bhej do"): right after our offer (visit_offered), a yes to it, which
+    agreed_to_come reads only when it is the whole of their last message. ``texts``: the burst, a message
+    that is not text as ''."""
+    for text in texts or ():
+        words = rules.normalize_text(text).split()
+        if rules.is_acceptance(text) or (words and words[0] in _YES_FIRST):
+            return True
+    return False
+
+
 def visit_offered(ours: str) -> bool:
     """Our side's recent words (ours or a colleague's, never the campaign's) invited
     them or offered exact times: a visit is on the table, whatever the model flagged.
     A shops nudge invites too ("Shall I book you for this evening?"), in words
     filters.is_invitation does not read (nudges.is_nudge)."""
     return filters.is_invitation(ours) or filters.offers_time(ours) or nudges.is_nudge(ours)
+
+
+# Our offer turned down or put off, anywhere in a message: a no ("No, I told you I can't come"), "busy",
+# "not today", another day. A "no problem" says yes (hours.without_no_problem).
+_TURNS_DOWN = re.compile(
+    r"^\W*(?:no|nope|nah|nahi|nahin|nhi|nai)\b"
+    r"|\b(?:can'?t|cannot|can\s+not|won'?t|unable|busy|not\s+(?:today|tomorrow|now|this\s+week|possible|free|coming|able|interested))\b"
+    r"|\b(?:another|other|different)\s+(?:day|time)\b|\bnext\s+week\b"
+    r"|\b(?:nahi|nahin|nhi)\s+(?:aa|aana|aaunga|aa\s+sakta|aa\s+sakti|ho\s+sakta)\b|\bmasroof\b|\bmushkil\b"
+    r"|^\W*لا(?![\u0621-\u064a])|ما\s*(?:أقدر|اقدر|أستطيع|استطيع|بقدر)|مشغول|مصروف|نہیں\s*آ|नहीं\s*आ|व्यस्त",
+    re.IGNORECASE,
+)
+
+
+def turns_down(texts) -> bool:
+    """Something the customer said turns our offer down or puts it off: a no, "not now", a deferral,
+    "I can't", "busy", another day (_TURNS_DOWN). A question ("How much sqf"), a request for photos,
+    or a day asked for ("Tomorrow?") turns nothing down. ``texts``: the burst, a message that is
+    not text as ''."""
+    for text in texts or ():
+        raw = str(text or "")
+        if rules.is_refusal(raw) or rules.is_not_now(raw) or rules.is_deferral(raw) or rules.mentions_deferral(raw):
+            return True
+        if _TURNS_DOWN.search(hours.without_no_problem(raw.replace("’", "'")).strip()):
+            return True
+    return False
+
+
+def reoffered(*, agreed: bool, our_last: str, texts) -> bool:
+    """A shops chat: our last message invited them or offered times (visit_offered), and what they said
+    since turns nothing down (turns_down): slots offered now are that same invitation again, neither a
+    new one counted nor one the cap cuts (settle), live and in the eval. Invitations are counted and
+    capped as they are refused ("Invite at most twice ... After two refusals"): live, a question
+    after our own two slots ("How much sqf") made the model offer them again, and that counted as
+    the second invitation once our offer recorded no visit of its own (own_offer), so the third
+    reply lost its slots. A yes is agreed_to_come's."""
+    return not agreed and visit_offered(our_last) and not turns_down(texts)
 
 
 def deferral(said: list, *, appointment=None, offered: bool = False, invites: int = 0, quiet: bool = False) -> str:
@@ -1040,6 +1103,38 @@ def wants_to_come(said: str, now) -> bool:
     )
 
 
+# The visit words of _VISIT_WORDS that never ask for a photo: "can I see them?" and "show me" may.
+_COME_WORDS = re.compile(
+    r"\b(?:visit|come|meet|appointment|book|viewing|slot)\b|\bmil(?:na|ne|en)\b|\baa\s+(?:sakta|sakte|jaun|jaunga)"
+    r"|زيارة|أزور|ازور|أجي|اجي|موعد|معاينة|ملاقات|آ\s+سکت|आ\s+सकत",
+    re.IGNORECASE,
+)
+# A burst's clauses: a request for photos or for the shop types is one of them ("photos bhej do, shaam ko aaunga").
+_CLAUSES = re.compile(r"[.!?؟,;،\n]+|\s+(?:and|then|but|also|aur|phir)\s+", re.IGNORECASE)
+
+
+def without_requests(said: str) -> str:
+    """The burst without its requests for photos, a video or the shop types (shop_flow.asks_media,
+    asks_types), clause by clause: "If possible to send me photo first" leaves nothing, "photos bhej
+    do, shaam ko aaunga" leaves "shaam ko aaunga"."""
+    clauses = [clause.strip() for clause in _CLAUSES.split(str(said or "")) if clause and clause.strip()]
+    return " ".join(clause for clause in clauses if not (shop_flow.asks_media(clause) or shop_flow.asks_types(clause)))
+
+
+def comes(said: str, now) -> bool:
+    """They say they will (or may) come, in their own words outside a request for photos, a video or
+    the shop types (without_requests): a day or an hour of theirs in any form, a word of coming
+    (_COMING: "shaam ko aaunga", "I'll drop by", "بعد الدوام"; _COME_WORDS: "I'll come", "can I
+    visit", "book me"), or a hedge that asks nothing ("Maybe", "I'll try"). Narrower than
+    wants_to_come, which also reads any question and "see" or "show": "If possible to send me photo
+    first", "New. Is the rent yearly?" and "can I see type 2 first" say nothing of coming."""
+    words = without_requests(_GREETING.sub(" ", str(said or "").replace("’", "'")))
+    return bool(
+        _COMING.search(words) or _COME_WORDS.search(words) or hours.named_days(words, now) or hours.said_times(words)
+        or hours.hours_ahead(words) or hours.marks_hour(words) or (hours.hedged(words) and not rules.asks_question(words))
+    )
+
+
 def step_plain(answer: dict, *, still_invalid: bool, when, effective: str, quiet: bool, said: str) -> bool:
     """An answer a shops step may replace: nothing in it that must go out instead (an opt-out,
     a handover, a booking or a time to refuse, a fixed line), no person on the chat, and no
@@ -1081,11 +1176,29 @@ def model_step(
     taken over such a tentative (shop_flow.after_model). A tentative in their own words ("DED
     hai, shaam ko aaunga", "I have a DED licence, maybe 7", "ممكن أمر عليكم بعد الدوام") is
     theirs, whatever the model's words for it: it stays, with the model's reply.
+
+    Photos, a video or the shop types asked for (shop_flow.asks_media, asks_types) get their step
+    over any tentative of the model's, open visit or not, when nothing else must go instead (an
+    opt-out, a handover or a person on the chat, a booking or a time to refuse, a fixed line, a
+    taken slot, a broker: step_plain), and never over the two free slots of a yes that named no
+    time (unasked_confirm: "Yes, book me for this evening and send me photos"). Live, "If possible
+    to send me photo first" got the model's "Photos help, but seeing 2-3 shops side by side is much
+    easier" and two slots, and no photos, because the model answered it tentative (2026-10-15,
+    appointment 16, which its own invitation had opened). Unless they say they will come in words
+    of their own beside the request (comes: "photos bhej do, shaam ko aaunga", "send pics, will
+    come around 8"), or own_offer found the tentative theirs (a yes to our offer, their day or
+    hour), that tentative goes with the words the step replaces: an open visit stays exactly as it
+    was (no revision, no CRM event, no alert), and the card's [Book viewing] brings the visit back.
     """
     effective = effective_action(answer["appointment"]["action"], appointment)
     plain = step_plain(answer, still_invalid=still_invalid, when=when, effective=effective, quiet=quiet, said=said)
+    requested = (
+        not plain and effective == "tentative" and not answer.get("unasked")
+        and (shop_flow.asks_media(said) or shop_flow.asks_types(said))
+        and step_plain(answer, still_invalid=still_invalid, when=when, effective="none", quiet=quiet, said=said)
+    )
     invitation = (
-        not plain and effective == "tentative" and appointment is None and not agreed
+        not plain and effective == "tentative" and appointment is None and not agreed and not answer.get("theirs")
         and step_plain(answer, still_invalid=still_invalid, when=when, effective="none", quiet=quiet, said=said)
         and not wants_to_come(said, now)
     )
@@ -1095,6 +1208,7 @@ def model_step(
         said,
         plain=plain,
         invitation=invitation,
+        requested=requested,
         asked=customer_asks(said, now),
         list_sent=list_sent,
         licence_asked=licence_asked,
@@ -1103,7 +1217,11 @@ def model_step(
         booked=appointment is not None,
         facts=shops_facts,
     )
-    if step is not None and invitation:
+    if requested and not answer.get("theirs") and not comes(said, now):
+        # Only the model's tentative (its invitation said again, or the open visit's in words that ask for
+        # photos): it goes with the words the step replaces, so nothing is written for the visit.
+        answer["appointment"] = dict(NO_TIME)
+    elif step is not None and invitation:
         answer["appointment"] = dict(NO_TIME)  # the tentative went with the invitation the step replaces
     unasked = answer.get("unasked")
     if step is None and unasked and answer["opt_out"] == "none" and not answer["handover"]["needed"] and not answer.get("converted"):
@@ -1252,6 +1370,7 @@ def settle(
     invites: int,
     *,
     agreed: bool = False,
+    reoffer: bool = False,
     playbook: str = lane.GENERAL,
     broker_labelled: bool = False,
     address_sent: str = "",
@@ -1261,7 +1380,9 @@ def settle(
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
-    ``agreed``: the customer has agreed to come (agreed_to_come); ``playbook``:
+    ``agreed``: the customer has agreed to come (agreed_to_come); ``reoffer``: a
+    shops chat's slots offered again after words that turn our offer down in no
+    way (reoffered), which are no new invitation either; ``playbook``:
     the chat's script (lane.playbook_for); ``broker_labelled``: the chat carries
     the Broker label already, so an agent pressed Resume on it (or labelled it):
     a broker is then an ordinary handover; ``address_sent``: the office
@@ -1292,10 +1413,11 @@ def settle(
         answer["reply"], renamed = shop_flow.own_business(answer["reply"], business, " ".join(new_texts or []))
         if renamed or filled:
             trimmed.append("business")
-    if agreed:
-        # They said yes to coming: the times offered now are no new invitation,
-        # so they are neither counted nor cut (the first real chat lost its
-        # time offer to the cap below after a plain "Yes").
+    if agreed or reoffer:
+        # They said yes to coming, or turned down nothing of the times we just
+        # offered: the times offered now are no new invitation, so they are
+        # neither counted nor cut (the first real chat lost its time offer to the
+        # cap below after a plain "Yes").
         answer["invited_to_meeting"] = False
     elif invites >= 2:
         # Invited twice and refused: no third invitation, in any words.
@@ -1724,6 +1846,83 @@ def unasked_confirm(
     answer["appointment"] = {"action": "tentative", "place": "office", "date": None, "time": None, "customer_words": words_of_theirs}
     answer["unasked"] = {"start": when, "slots": slots}
     return True
+
+
+# What own_offer did to the model's tentative (the turn's "own_offer").
+OWN_DROPPED = "dropped"
+OWN_UNTIMED = "untimed"
+
+
+def own_offer(answer: dict, *, appointment, said: str, words: str = "", our_last: str = "", yes: bool = False, now=None) -> str:
+    """A shops chat's tentative visit that is only the model's own slot offer records no visit: ""
+    when the answer stays as it was, else what was done to it (live and in the eval). A tentative
+    judged theirs is marked (``answer["theirs"]``), so a request for photos with it keeps it
+    (model_step).
+
+    Live, the model answered "New" "One" (a new licence) with two slots of its own, today at 11:00
+    AM or 11:30 AM, and a tentative at 11:00 (2026-10-15, appointment 16): the chat's banner showed
+    "Time mentioned: 11:00 AM", the lead got a MEETING TENTATIVE comment and the agents an alert, for
+    a time the customer never named. Only the model's tentative office visit while none is open (an
+    open one is the model's to keep, and the deferral rule's never comes here), with nothing that
+    must go instead (a handover, a fixed line, a taken slot, an opt-out). unasked_confirm's, made of
+    a confirm of a slot nobody took, stays only after a yes or words of coming (its two free slots
+    go either way). Any other stays as it is when:
+
+    - its day and time are theirs (their_time: the hour said this burst in any form, or an answer
+      ago, or coming now); taken from us only as a yes to the one slot we offered, never as
+      "anything but a plain yes" to two (unasked_confirm's reading of a confirm): a tentative at one
+      of our slots after "How much sqf" is our offer said again;
+    - it has a day and no time, and that day is theirs (hours.named_days of what they wrote);
+    - it has neither, and the reply invites no one (a deferral said in two messages, which the
+      deferral rule leaves to the model).
+
+    Otherwise, when they said yes to our offer (``yes``: agreed_to_come, or a message that opens
+    with a yes: opens_with_yes), named the day, or say they will come (comes: "Maybe tomorrow",
+    "I'll come around 5", "shaam ko aaunga"), the visit stays tentative in their words, at no day or
+    hour of ours (OWN_UNTIMED); else it was our invitation alone: action none, the invitation kept
+    for _apply to count, and no appointment, banner, CRM tentative or alert (OWN_DROPPED).
+    ``words``: what they wrote lately (the live grounding's own); ``our_last``: our last message."""
+    proposal = answer["appointment"]
+    if appointment is not None or proposal["action"] != "tentative" or proposal.get("place") not in (None, "office"):
+        return ""
+    if answer.get("slot_taken") or answer.get("converted") or answer["opt_out"] != "none" or answer["handover"]["needed"]:
+        return ""
+    coming = yes or comes(said, now)
+    if answer.get("unasked"):
+        # unasked_confirm's visit in their words, for a confirm of a slot nobody took: theirs after a yes or
+        # words of coming ("Yes, book me for this evening"); after "New" "One" it was our own slot, and its two
+        # free slots still go (model_step), with no visit recorded.
+        if coming:
+            answer["theirs"] = True
+            return ""
+        answer["appointment"] = dict(NO_TIME)
+        return OWN_DROPPED
+    day, at = hours.parse_date(proposal.get("date")), hours.parse_time(proposal.get("time"))
+    day_theirs = day is not None and day in hours.named_days(f"{words} {said}", now)
+    if day is not None and at is not None:
+        start = dt.datetime.combine(day, at, tzinfo=hours.DUBAI)
+        single = our_last if yes and len(hours.offered_starts(our_last)) == 1 else ""
+        theirs = their_time(start, said=said, words=words, our_last=single, ours="", now=now)
+    elif day is not None:
+        theirs = day_theirs
+    else:
+        theirs = not (answer["invited_to_meeting"] or filters.offers_time(answer["reply"] or ""))
+    if theirs:
+        answer["theirs"] = True
+        return ""
+    if coming or day_theirs:
+        answer["appointment"] = {
+            "action": "tentative",
+            "place": "office",
+            "date": proposal.get("date") if day_theirs else None,
+            "time": None,
+            # Their own words for the agents, never the model's (which may name the time it picked).
+            "customer_words": (said or "").strip()[:255] or proposal.get("customer_words") or None,
+        }
+        answer["theirs"] = True
+        return OWN_UNTIMED
+    answer["appointment"] = dict(NO_TIME)
+    return OWN_DROPPED
 
 
 def asked_location(text: str, asked: str, office_address: str, maps_url: str = "") -> str:
@@ -2482,6 +2681,14 @@ def _run_claimed(
     last_ours = _last_outbound(conversation)
     our_last = transcript.outbound_text(last_ours) if last_ours is not None else ""
     ours = _our_words(rows, campaign_templates)
+    # They agreed to come (a visit open, or a plain yes to our invitation); in a shops chat, a message
+    # that opens with a yes to it is one too for own_offer, and when our last message offered times and
+    # nothing they said turns them down, slots offered again are no new invitation (reoffered).
+    texts = [(item.body or "").strip() if item.kind == "text" else "" for item in burst if item.kind != "sticker"]
+    agreed = agreed_to_come(visit_open=appointment is not None, our_last=our_last, texts=texts)
+    yes = agreed or (shops_chat and visit_offered(our_last) and opens_with_yes(texts))
+    reoffer = shops_chat and reoffered(agreed=agreed, our_last=our_last, texts=texts)
+    own = ""  # what own_offer did to the model's tentative
     # The location went out already: not again unasked, and not for a day. Asked
     # for, it goes again (a booked customer on the way, whatever the
     # confirmation carried).
@@ -2627,6 +2834,9 @@ def _run_claimed(
             our_last=our_last, ours=ours, handed_over=state.handed_over_at is not None,
         ):
             when = None  # a time nobody named or took (the nudge's "this evening"): the two free slots instead
+        if shops_chat and when is None and not still_invalid:
+            # The model's own slot offer is no visit of theirs: none recorded, or one in their words alone.
+            own = own_offer(answer, appointment=appointment, said=said_words, words=grounding[0], our_last=our_last, yes=yes, now=now)
         turn.model = completions[-1].model[:64]
         turn.calls = len(completions)
         turn.prompt_tokens = sum(c.prompt_tokens for c in completions)
@@ -2641,19 +2851,15 @@ def _run_claimed(
         for row in rows
         if row.pk not in in_hand
     ]
-    agreed = agreed_to_come(
-        visit_open=appointment is not None,
-        our_last=our_last,
-        texts=[(item.body or "").strip() if item.kind == "text" else "" for item in burst if item.kind != "sticker"],
-    )
     # A shops chat that may still be invited: the two free slots an open "when" becomes.
-    may_invite = state.handed_over_at is None and state.not_interested_at is None and (agreed or state.invites < 2)
+    may_invite = state.handed_over_at is None and state.not_interested_at is None and (agreed or reoffer or state.invites < 2)
     settle(
         answer,
         earlier,
         [transcript.inbound_text(item, heard.get(item.pk)) for item in burst],
         state.invites,
         agreed=agreed,
+        reoffer=reoffer,
         playbook=playbook,
         # Only a broker's turn asks (settle_handover never makes one).
         broker_labelled=answer["handover"]["reason"] == BROKER and conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
@@ -2734,6 +2940,10 @@ def _run_claimed(
         plan["upgraded"] = True
     if agreed:
         plan["agreed"] = True
+    if reoffer:
+        plan["reoffer"] = True
+    if own:
+        plan["own_offer"] = own  # the model's tentative for its own slots: dropped, or kept in their words alone
     if answer.get("trimmed"):
         plan["trimmed"] = answer["trimmed"]
     if answer.get("pointed"):
