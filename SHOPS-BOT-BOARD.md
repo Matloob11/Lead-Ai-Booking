@@ -80,7 +80,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 
 | # | Question | Answer |
 |---|---|---|
-| Q1 | Office address: PDF "Office #11, V03 Russia Cluster" or live "Shop 20, Building V02/V03"? | **open**: Matloob sends it (D2) |
+| Q1 | Office address: PDF "Office #11, V03 Russia Cluster" or live "Shop 20, Building V02/V03"? | **decided** (Matloob, 2026-10-15): Building **V03** (not V02). Live since 2026-10-15: "Russia Cluster, Building V03, Shop 20, Dubai International City" (`ops/wa.sh set-leadai-office-address`) |
 | Q2 | Brand | **decided: AR Properties** |
 | Q3 | Bot's name | default: no personal name ("Sara" is leadbot) |
 | Q4 | PDF rules (prices, licence copy, yourself-or-client first, two slots, broker stops the bot) | default: **shop campaigns only**; other Lead AI campaigns keep today's rules |
@@ -109,7 +109,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | # | Data | State |
 |---|---|---|
 | D1 | Shop facts final: type table; are rents per year; Type 3 cheapest 80,000; viewing hours; clusters, cheques, licences | Matloob sends |
-| D2 | Office: final address, Google Maps link, pin latitude/longitude | **Maps link and pin set live 2026-10-14**: https://maps.app.goo.gl/u7xzyea9pPLpRxBD8, pin 25.169639, 55.404667 (from the link's own redirect), via NEW `ops/wa.sh set-leadai-office`. The address text is still open (Q1) |
+| D2 | Office: final address, Google Maps link, pin latitude/longitude | **Maps link and pin set live 2026-10-14**: https://maps.app.goo.gl/u7xzyea9pPLpRxBD8, pin 25.169639, 55.404667 (from the link's own redirect), via NEW `ops/wa.sh set-leadai-office`. Address text: Building V03, Shop 20 (Q1 decided 2026-10-15) |
 | D3 | Brand + the `{{2}}` name in "this is {{2}} from {{3}}" | **AR Properties**; `{{2}}` typed per campaign: "Malik" or "Matloob" (template sample: Malik) |
 | D4 | Sending numbers | **decided**: active 971 numbers, not coexistence, not assigned: 971581058719, -720, -721, -722, -723, -724, -725, -726 (Coastline Properties / Blue Brick). 971507563104 left out: in daily use (1,755 inbound) with no templates. Only -725 has a proven inbound webhook; the other 7 have never received a message, so each gets one test message before use. `ic_shops_followup` is approved on all 8; `a7_leadai_meeting_reminder` APPROVED on all 8 (template sync 2026-10-14, T05) |
 | D5 | Media: per type 1 MP4 under 16 MB (30–60 s) + up to 6 photos; office-front photo; Type 1 walkthrough for Template A's header | **Received 2026-10-14** in `backend/Types shops/` (kept out of git). Type 1: 4 photos + MP4 4.7 MB. Type 2: 4 photos + MP4 8.9 MB. Type 3: 7 photos + MP4 4.9 MB. Office front: `office_front.jpg` (JPEG, 240 KB), received 2026-10-14. The sign on it reads "A7 Group Real Estate" while the shop campaigns say AR Properties (Q2): Matloob to confirm that is fine. Type 2 is **600-800 sq ft** (Matloob, 2026-10-14; the folder name "700 800" is not the size), as live settings already say |

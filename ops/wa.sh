@@ -67,6 +67,7 @@
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
+#   ops/wa.sh set-leadai-office-address "TEXT"  the office address text Lead AI sends
 #   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
@@ -1050,6 +1051,21 @@ case "$cmd" in
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
       -e LEADAI_OFFICE_MAPS_URL='$1' -e LEADAI_OFFICE_LAT='$2' -e LEADAI_OFFICE_LNG='$3' web python manage.py shell"
+    ;;
+
+  set-leadai-office-address)
+    # The office address text Lead AI sends in confirmations and reminders, set the
+    # way the AI settings dialog sets it and kept in the settings history. Only
+    # letters, digits, spaces and , . / # ( ) - pass, so nothing here can break
+    # the quoting below.
+    [[ $# -eq 1 ]] || die "set-leadai-office-address takes one quoted address"
+    address_ok='^[A-Za-z0-9 ,./#()-]{5,200}$'
+    [[ "$1" =~ $address_ok ]] || die "the address may hold letters, digits, spaces and , . / # ( ) - (5-200 characters)"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-leadai-office-address.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/set-leadai-office-address.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
+      -e LEADAI_OFFICE_ADDRESS='$1' web python manage.py shell"
     ;;
 
   leadai-media-import)
