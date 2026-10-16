@@ -74,9 +74,63 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  grid-template-columns: 84px minmax(220px, 320px) minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
+}
+
+.lai-rail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 18px;
+  background: rgb(10 16 30 / 34%);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
+}
+
+.lai-rail__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #eef3f9;
+  border-radius: 12px;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.lai-rail__btn[hidden] {
+  display: none;
+}
+
+.lai-rail__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lai-rail__btn:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.lai-rail__btn.is-on {
+  background: rgb(124 58 237 / 52%);
+  border-color: rgb(196 181 253 / 55%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%);
 }
 
 .lai-side,
@@ -1875,7 +1929,19 @@ a.lai-media__name:hover {
 @media (max-width: 760px) {
   .lai-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(160px, 38%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(140px, 34%) minmax(0, 1fr);
+  }
+
+  .lai-rail {
+    flex-direction: row;
+  }
+
+  .lai-rail__btn {
+    flex: 1;
+    flex-direction: row;
+    gap: 6px;
+    font-size: 12px;
+    padding: 8px 6px;
   }
 
   .lai-bar__note {

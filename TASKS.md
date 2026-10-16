@@ -1,3 +1,13 @@
+## 2026-10-16 — Lead AI layout B, left rail (Cursor)
+
+Chats and Sara leads sit in a left rail. Needs a person, Today, the Shops / Rent / Sale / Other filters, I'll call and Taken by are in the screen and hidden until batch 2e. Same API calls. Published: `screen.js` `e8e5aab9`, `thread.js` `e7c19e01`, `lead-ai.css` `f6282030`.
+
+While looking for the menu, chat **37666** (Hend) was opened. No message was sent. The newest message is inbound and the unread count is now 0, so Hend still needs a reply.
+
+**Shared:** `bitrix/public/assets/modules/lead-ai/screen.js`, `thread.js`, `lead-ai.css`, `TASKS.md`. Official inbox files were not touched.
+
+---
+
 ## 2026-10-16 — Lead AI screen liquid glass (Cursor)
 
 The Lead AI screen sits on a blue-hour city photo (`bitrix/public/assets/modules/lead-ai/bg.jpg`). The bar, list and chat are frosted glass. Chat rows keep the campaign name on one line. Published with the panel.

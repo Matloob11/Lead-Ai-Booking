@@ -732,7 +732,18 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
           el("span.lai-appt__when", { title: confirmed && when ? "Dubai time" : null }, [main]),
         ]),
         el("div.lai-appt__lines", {}, lines),
+        // Filled when the agent desk ships. Hidden, and not wired to a request.
+        el("span.lai-appt__taken", { hidden: true }, [
+          "Taken by ",
+          el("span.lai-appt__taken-name", {}, [""]),
+        ]),
       ]),
+      el("button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-appt__call", {
+        type: "button",
+        hidden: true,
+        disabled: true,
+        title: "Opens when the agent desk ships",
+      }, ["I'll call"]),
       el("button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-appt__cancel", {
         type: "button",
         title: "Cancel this meeting. No reminder goes out for it.",

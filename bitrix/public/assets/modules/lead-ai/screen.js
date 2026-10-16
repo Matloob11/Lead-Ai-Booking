@@ -97,8 +97,22 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     }, 250),
   });
-  const tabChats = el("button.lai-tab", { type: "button", onclick: () => setTab("chats") }, ["Chats"]);
-  const tabSara = el("button.lai-tab", { type: "button", onclick: () => setTab("sara") }, ["Sara leads"]);
+  const tabChats = railButton("chats", "messageSquare", "Chats");
+  const tabSara = railButton("sara", "users", "Sara leads");
+  // Agent desk (batch 2e). Present so the rail has their place, and hidden
+  // until that batch turns them on. They do not load a list.
+  const needsButton = el("button.lai-rail__btn", {
+    type: "button",
+    hidden: true,
+    disabled: true,
+    title: "Opens when the agent desk ships",
+  }, [icon("bell", { size: 16 }), el("span.lai-rail__label", {}, ["Needs a person"])]);
+  const todayButton = el("button.lai-rail__btn", {
+    type: "button",
+    hidden: true,
+    disabled: true,
+    title: "Opens when the agent desk ships",
+  }, [icon("clock", { size: 16 }), el("span.lai-rail__label", {}, ["Today"])]);
   const brokersButton = el("button.lai-filter", {
     type: "button",
     "aria-pressed": "false",
@@ -110,7 +124,21 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   }, ["Brokers"]);
-  const filters = el("div.lai-filters", {}, [brokersButton]);
+  // Same hold as the rail's desk views: the track filters wait for ?track=.
+  const deskFilter = (label) => el("button.lai-filter", {
+    type: "button",
+    hidden: true,
+    disabled: true,
+    title: "Opens when the agent desk ships",
+    "aria-pressed": "false",
+  }, [label]);
+  const filters = el("div.lai-filters", {}, [
+    brokersButton,
+    deskFilter("Shops"),
+    deskFilter("Rent"),
+    deskFilter("Sale"),
+    deskFilter("Other"),
+  ]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -135,8 +163,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       ]),
     ]),
     el("div.lai-body", {}, [
+      el("nav.lai-rail", { "aria-label": "Lead AI views" }, [tabChats, needsButton, todayButton, tabSara]),
       el("aside.lai-side", {}, [
-        el("div.lai-tabs", {}, [tabChats, tabSara]),
         search,
         filters,
         listNode,
@@ -215,6 +243,13 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       const id = window.a7wa?.getActiveConversationId?.();
       if (id) inbox.messages(id, { limit: 1 }).catch(() => {});
     }
+  }
+
+  function railButton(tab, glyph, label) {
+    return el("button.lai-rail__btn", {
+      type: "button",
+      onclick: () => setTab(tab),
+    }, [icon(glyph, { size: 16 }), el("span.lai-rail__label", {}, [label])]);
   }
 
   function setTab(tab) {
