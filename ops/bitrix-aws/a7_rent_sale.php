@@ -150,6 +150,10 @@ class A7RentSale
     {
         $ct = array_key_exists(self::SRC_CLIENT_TYPE, $fields) ? $fields[self::SRC_CLIENT_TYPE] : ($old['ct'] ?? null);
         $of = array_key_exists(self::SRC_OFFERING, $fields) ? $fields[self::SRC_OFFERING] : ($old['ofr'] ?? null);
+        // C39: a C6 write that already set Rent/Sale is left as sent.
+        if ((int)($GLOBALS['A7_LEADAI_FIELDS_SAVE'] ?? 0) > 0 && array_key_exists(self::FIELD, $fields)) {
+            return;
+        }
         $label = self::derive($ct, $of);
         if ($label === null) {
             return;

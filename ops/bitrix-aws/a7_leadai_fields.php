@@ -61,7 +61,17 @@ function a7_leadai_fields_safe(string $text, int $limit): string
 function a7_leadai_fields_allow(): array
 {
     return [
-        'UF_CRM_LEAD_1737031634747' => [2467 => true],
+        'UF_CRM_LEAD_1737031634747' => [2467 => true, 804 => true, 805 => true],
+        'UF_CRM_A7_RENT_SALE' => [2443 => true, 2444 => true, 2445 => true],
+        'UF_CRM_1731838126127' => [26 => true, 27 => true],
+        'UF_CRM_1756638760279' => [1220 => true, 972 => true],
+        'UF_CRM_A7_CLUSTERS' => 'text',
+        'UF_CRM_A7_TIMELINE' => 'text',
+        'UF_CRM_A7_FULL_NAME' => 'text',
+        'UF_CRM_A7_BALCONY' => [2501 => true, 2502 => true, 2503 => true],
+        'UF_CRM_A7_VACANT_RENTED' => [2504 => true, 2505 => true, 2506 => true],
+        'UF_CRM_A7_PAYMENT' => [2507 => true, 2508 => true],
+        'UF_CRM_A7_OCCUPANCY' => [2509 => true, 2510 => true, 2511 => true, 2512 => true],
         'UF_CRM_A7_AI_BUSINESS_ACTIVITY' => 'text',
         'UF_CRM_A7_AI_TRADE_LICENSE_STATUS' => [2159 => true, 2160 => true, 2455 => true, 2456 => true, 2457 => true],
         'UF_CRM_1731838813769' => 'datetime',
@@ -240,8 +250,22 @@ if (array_key_exists('booking', $in) && $in['booking'] !== null) {
     $meeting = null;
     if ($event !== 'cancelled') {
         $meeting = a7_leadai_fields_datetime((string)($in['booking']['meeting_at'] ?? ''));
-        $mode = $in['booking']['mode'] ?? null;
-        if ($meeting === null || (int)$mode !== 42) {
+        // C40: Offline 42 or Online 43. No todo_user_id, no meet_url.
+        if (array_key_exists('todo_user_id', $in['booking']) || array_key_exists('meet_url', $in['booking'])) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+        }
+        $mode = (int)($in['booking']['mode'] ?? 0);
+        if ($meeting === null || !in_array($mode, [42, 43], true)) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+        }
+        $subject = (string)($in['booking']['todo_subject'] ?? 'Viewing/Meeting');
+        if (!in_array($subject, ['Viewing/Meeting', 'Sales call'], true)) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
+        }
+    } else {
+        $mode = 42;
+        $subject = (string)($in['booking']['todo_subject'] ?? '');
+        if ($subject !== '' && !in_array($subject, ['Viewing/Meeting', 'Sales call'], true)) {
             a7_leadai_fields_json(['ok' => false, 'error' => 'Bad booking.'], 400);
         }
     }
@@ -250,13 +274,28 @@ if (array_key_exists('booking', $in) && $in['booking'] !== null) {
     $booking = [
         'event' => $event,
         'meeting' => $meeting,
+        'mode' => $mode,
+        'subject' => $subject,
         'crm_todo_id' => $crmTodoId > 0 ? $crmTodoId : null,
     ];
     if ($event !== 'cancelled') {
         $writes['UF_CRM_1731838813769'] = ['datetime' => $meeting];
-        $writes['UF_CRM_1731838790184'] = 42;
+        $writes['UF_CRM_1731838790184'] = $mode;
         $writes['UF_CRM_A7_BOT_STATUS'] = 2477;
     }
+}
+
+$plainTodo = null;
+if (array_key_exists('todo', $in) && $in['todo'] !== null) {
+    if (!is_array($in['todo']) || $booking !== null) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Bad to-do.'], 400);
+    }
+    $todoSubject = a7_leadai_fields_safe((string)($in['todo']['subject'] ?? ''), 120);
+    $todoAt = a7_leadai_fields_datetime((string)($in['todo']['deadline'] ?? ''));
+    if ($todoSubject === '' || $todoAt === null) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Bad to-do.'], 400);
+    }
+    $plainTodo = ['subject' => $todoSubject, 'deadline' => $todoAt];
 }
 
 $lostIn = $in['lost'] ?? null;
@@ -277,6 +316,13 @@ if ($lostIn !== null) {
 }
 if ($booking !== null && $lostStatus !== null) {
     a7_leadai_fields_json(['ok' => false, 'error' => 'A booking cannot also mark the lead lost.'], 400);
+}
+$emailIn = '';
+if (array_key_exists('email', $in) && $in['email'] !== null && $in['email'] !== '') {
+    $emailIn = trim((string)$in['email']);
+    if (!filter_var($emailIn, FILTER_VALIDATE_EMAIL)) {
+        a7_leadai_fields_json(['ok' => false, 'error' => 'Bad email.'], 400);
+    }
 }
 $extraComment = '';
 if (array_key_exists('comment', $in) && $in['comment'] !== null && $in['comment'] !== '') {
@@ -328,6 +374,12 @@ foreach ($writes as $code => $value) {
     $bookingForces = ($booking !== null && $booking['event'] !== 'cancelled'
         && in_array($code, ['UF_CRM_1731838813769', 'UF_CRM_1731838790184', 'UF_CRM_A7_BOT_STATUS'], true));
     if (!$bookingForces && isset($onlySet[$code]) && !a7_leadai_fields_empty($item->get($code))) {
+        $skipped[] = $code;
+        continue;
+    }
+    // C39: 804/805 never replace Broker (2467), even without only_if_empty.
+    if ($code === 'UF_CRM_LEAD_1737031634747' && in_array((int)$value, [804, 805], true)
+        && (int)$item->get($code) === 2467) {
         $skipped[] = $code;
         continue;
     }
@@ -384,6 +436,30 @@ if ($updated !== []) {
     a7_leadai_fields_json(['ok' => false, 'error' => 'Bitrix did not save the fields.'], 502);
 }
 
+if ($emailIn !== '' && class_exists('CCrmFieldMulti')) {
+    $hasEmail = \CCrmFieldMulti::GetList([], [
+        'ENTITY_ID' => 'LEAD',
+        'ELEMENT_ID' => $leadId,
+        'TYPE_ID' => 'EMAIL',
+    ])->Fetch();
+    if ($hasEmail) {
+        $skipped[] = 'email';
+    } else {
+        $fm = new \CCrmFieldMulti();
+        $added = $fm->Add([
+            'ENTITY_ID' => 'LEAD',
+            'ELEMENT_ID' => $leadId,
+            'TYPE_ID' => 'EMAIL',
+            'VALUE_TYPE' => 'WORK',
+            'VALUE' => $emailIn,
+        ]);
+        if (!$added) {
+            a7_leadai_fields_json(['ok' => false, 'error' => 'Could not save the email.'], 502);
+        }
+        $updated[] = 'email';
+    }
+}
+
 if ($licenseFileId > 0) {
     // The CRM item save drops a file id. The column write does not start BP 235.
     \Bitrix\Main\Application::getConnection()->queryExecute(
@@ -434,45 +510,56 @@ if ($extraComment !== '') {
     a7_leadai_fields_comment($leadId, $extraComment);
 }
 
-function a7_leadai_fields_open_todo(int $leadId): int
+function a7_leadai_fields_subject_sql(string $subject): string
 {
+    if ($subject === '') {
+        return "a.SUBJECT IN ('Viewing/Meeting','Sales call')";
+    }
+    $safe = str_replace(["\\", "'"], '', $subject);
+    return "a.SUBJECT='" . $safe . "'";
+}
+
+function a7_leadai_fields_open_todo(int $leadId, string $subject = ''): int
+{
+    $sub = a7_leadai_fields_subject_sql($subject);
     $row = \Bitrix\Main\Application::getConnection()->query(
         "SELECT a.ID FROM b_crm_act a
          JOIN b_crm_act_bind b ON b.ACTIVITY_ID=a.ID
          WHERE b.OWNER_TYPE_ID=1 AND b.OWNER_ID={$leadId}
-           AND a.PROVIDER_ID='CRM_TODO' AND a.SUBJECT='Viewing/Meeting' AND a.COMPLETED='N'
+           AND a.PROVIDER_ID='CRM_TODO' AND {$sub} AND a.COMPLETED='N'
          ORDER BY a.ID DESC LIMIT 1"
     )->fetch();
     return is_array($row) ? (int)$row['ID'] : 0;
 }
 
-/** Open Viewing/Meeting to-do by id on this lead, or 0 if missing/closed/wrong. */
-function a7_leadai_fields_todo_if_open(int $leadId, int $todoId): int
+/** Open viewing or sales-call to-do by id on this lead, or 0 if missing/closed/wrong. */
+function a7_leadai_fields_todo_if_open(int $leadId, int $todoId, string $subject = ''): int
 {
     if ($todoId <= 0) {
         return 0;
     }
+    $sub = a7_leadai_fields_subject_sql($subject);
     $row = \Bitrix\Main\Application::getConnection()->query(
         "SELECT a.ID FROM b_crm_act a
          JOIN b_crm_act_bind b ON b.ACTIVITY_ID=a.ID
          WHERE b.OWNER_TYPE_ID=1 AND b.OWNER_ID={$leadId}
            AND a.ID={$todoId}
-           AND a.PROVIDER_ID='CRM_TODO' AND a.SUBJECT='Viewing/Meeting' AND a.COMPLETED='N'
+           AND a.PROVIDER_ID='CRM_TODO' AND {$sub} AND a.COMPLETED='N'
          LIMIT 1"
     )->fetch();
     return is_array($row) ? (int)$row['ID'] : 0;
 }
 
-/** Prefer crm_todo_id when it is still our open Viewing/Meeting; else newest open. */
-function a7_leadai_fields_resolve_todo(int $leadId, ?int $want): int
+/** Prefer crm_todo_id when it is still our open to-do; else newest open of that subject. */
+function a7_leadai_fields_resolve_todo(int $leadId, ?int $want, string $subject = ''): int
 {
     if ($want !== null && $want > 0) {
-        $hit = a7_leadai_fields_todo_if_open($leadId, $want);
+        $hit = a7_leadai_fields_todo_if_open($leadId, $want, $subject);
         if ($hit > 0) {
             return $hit;
         }
     }
-    return a7_leadai_fields_open_todo($leadId);
+    return a7_leadai_fields_open_todo($leadId, $subject);
 }
 
 function a7_leadai_fields_todo_window(string $meeting): array
@@ -483,16 +570,17 @@ function a7_leadai_fields_todo_window(string $meeting): array
     return [$start->toString(), $end->toString()];
 }
 
-function a7_leadai_fields_plan_todo(int $leadId, int $responsible, string $meeting, ?int $wantTodo = null): int
+function a7_leadai_fields_plan_todo(int $leadId, int $responsible, string $meeting, ?int $wantTodo = null, string $subject = 'Viewing/Meeting'): int
 {
     [$start, $end] = a7_leadai_fields_todo_window($meeting);
-    $existing = a7_leadai_fields_resolve_todo($leadId, $wantTodo);
+    $existing = a7_leadai_fields_resolve_todo($leadId, $wantTodo, $subject);
     $fields = [
         'DEADLINE' => $start,
         'START_TIME' => $start,
         'END_TIME' => $end,
         'RESPONSIBLE_ID' => $responsible,
         'COMPLETED' => 'N',
+        'SUBJECT' => $subject,
     ];
     if ($existing > 0) {
         $ok = \CCrmActivity::Update($existing, $fields, false, false, ['REGISTER_SONET_EVENT' => false]);
@@ -505,8 +593,8 @@ function a7_leadai_fields_plan_todo(int $leadId, int $responsible, string $meeti
         'TYPE_ID' => 6,
         'PROVIDER_ID' => 'CRM_TODO',
         'PROVIDER_TYPE_ID' => 'TODO',
-        'SUBJECT' => 'Viewing/Meeting',
-        'DESCRIPTION' => 'Viewing/Meeting',
+        'SUBJECT' => $subject,
+        'DESCRIPTION' => $subject,
         'DESCRIPTION_TYPE' => 2,
         'DIRECTION' => 0,
         'PRIORITY' => 1,
@@ -532,8 +620,9 @@ if ($booking !== null) {
     // C33: optional booking.crm_todo_id targets exactly that open to-do.
     $responsible = 2311;
     $wantTodo = isset($booking['crm_todo_id']) ? (int)$booking['crm_todo_id'] : null;
+    $subject = (string)($booking['subject'] ?? 'Viewing/Meeting');
     if ($booking['event'] === 'cancelled') {
-        $open = a7_leadai_fields_resolve_todo($leadId, $wantTodo);
+        $open = a7_leadai_fields_resolve_todo($leadId, $wantTodo, $subject);
         if ($open > 0) {
             $fields = ['COMPLETED' => 'Y'];
             $ok = \CCrmActivity::Update($open, $fields, false, false, ['REGISTER_SONET_EVENT' => false]);
@@ -547,9 +636,20 @@ if ($booking !== null) {
             $leadId,
             $responsible,
             (string)$booking['meeting'],
-            $wantTodo
+            $wantTodo,
+            $subject !== '' ? $subject : 'Viewing/Meeting'
         );
     }
+}
+
+if ($plainTodo !== null) {
+    $todoId = a7_leadai_fields_plan_todo(
+        $leadId,
+        2311,
+        (string)$plainTodo['deadline'],
+        null,
+        (string)$plainTodo['subject']
+    );
 }
 
 a7_leadai_fields_json([

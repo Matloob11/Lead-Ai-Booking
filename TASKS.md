@@ -1,3 +1,19 @@
+## 2026-10-16 — C38 field map, C42 listings, C40 calls, C39 residential fields (Cursor)
+
+**C38.** Lead field map on the board. `a7group-` refs: 10,470 leads (4,903 International City). Written on create by user 1 from Bayut / Property Finder / Dubizzle. Listing URL is `UF_CRM_1760707550978`. Online meeting mode is enum **43**.
+
+**C42.** No Bitrix entity stores the listings. Note in `files/temp/c42/README.txt`. Portal connectors only stamp the ref onto leads.
+
+**C40.** Booking accepts mode 42 or 43, subject Viewing/Meeting or Sales call, owner always 2311. Plain `todo` action. 2477 relabelled "Booked (viewing or call)" (XML unchanged). Proof PASS, lead 79750 deleted.
+
+**C39.** Seven residential fields (ids 2674–2680) on the Lead AI form section. C6 allow-list plus email-if-empty. Rent/Sale derive does not overwrite a C6 write. Proof PASS, lead 79752 deleted.
+
+**Not started:** C41 (ships with 2e). No `backend/apps/leadai` edits.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/bitrix-aws/a7_leadai_fields.php`, `ops/bitrix-aws/a7_rent_sale.php`, `ops/bitrix-aws/a7_c38_field_map.php`, `ops/bitrix-aws/a7_c39_fields.php`, `ops/bitrix-aws/a7_c39_proof.php`, `ops/bitrix-aws/a7_c40_proof.php`, `ops/bitrix-aws/a7_c42_find.php`.
+
+---
+
 ## 2026-10-16 — D11 residential photos reviewed; D11–D13 back in the Data table (Claude Code)
 
 - Looked at all 25 photos Matloob put in `backend/Types shops/` (7 folders, no videos). All are JPEG or PNG under 5 MB, so `shop_media.check_file` takes them as they are.
@@ -6,6 +22,160 @@
 - Nothing is imported. The library takes studio and 1BR only from batch 2e slice E (migration 0009).
 - Board fix: `board_2e.py` put D11–D13 after the last line starting `| D`, which was "Dubizzle…" in the C19 source table. They now sit under D10.
 - Nothing ran on the server. This was a look at the files and a board edit.
+
+---
+
+## 2026-10-16 — Lead AI batch 2d, package "Facts, slots and booking": no fact SHOP FACTS lacks, valid slots, same-day windows booked, the honest price line (Claude Code)
+
+Launch review issues 5, 6, 12, 13, 16, 17, 22 and 24. New `assistant/claims.py` and `assistant/offers.py`; hooks in `engine.py`, `hours.py`, `filters.py`, `shop_flow.py`, `shops.py`, `rules.py`, `people.py`, the shops prompt (SHOPS_SYSTEM only) and the eval.
+
+**Facts** (issue 5; chats 96, 91, 59, 78):
+- A shops reply never says a shop's building, unit, floor or side, that a food business is allowed, that a unit is for sale, the deposit or another cost (service charge, DEWA, parking, fit-out, VAT, units left), unless SHOP FACTS or our campaign says it. Our office's address is never a shop's location.
+- A claim on something they asked becomes "Good question — I'll have our agent confirm that for you at the viewing." in their language, and their question is noted for the viewing.
+- Commission is Matloob's line (Q24): "We charge the normal commission. Please come and see the shops first, then we will discuss the details." Never "no commission", never a figure.
+- "rent security" is the deposit, a must-answer question (chat 59).
+- The size and price table goes once per chat, unless they ask for the figures (issue 16, chat 91).
+
+**Slots** (issue 17; chats 100, 59, 62, 96, 88, 91, 81):
+- Every slot is an hour ahead at least, an hour from the other, never past. That holds for code's pairs and for the model's own times (`offers.fix_times` puts the two nearest valid free slots in their place).
+- A time the customer named stays unless it has passed. A discovery question asked before the times keeps its place, as it would beside valid times.
+
+**Same-day window** (issue 6; chat 96): "barah saadhay barah baje ja ke check kar loon ga" or "I will come at 12-12:30" books the window's start when it is free, else the next free half hour in it (`engine.book_window`, shops only). Not for a hedge, another day, a window that has passed, or a chat a person has.
+
+**Price** (issue 12; chats 59, 100):
+- "cheaper", "too expensive", "higher than others" get code's line: "I understand. Our lowest is Type 1, from AED 33,000 a year (400-550 sq ft), payable in 1 to 4 cheques. Would that size work for you?"
+- A budget below that, or the objection again: told so honestly and offered a colleague. Their yes hands over (`customer_asked_human`).
+- "discount", "best price" and "negotiate" keep the discount line.
+
+**Taps with words** (issue 13; chats 81, 88): the tap keeps its step (the for-whom question, a type's media, the list, [Book viewing]'s slots), and the typed words are answered first.
+
+**Invitations** (issues 22 and 24; chats 62, 81, 88, 91, 96, 119):
+- Before a second invitation: the business, then the licence (`engine.discovery_first`).
+- Code's two slots count as an invitation. One cut as a second question does not, and takes our link with it ("Preferable Location - France" asks for no location).
+- Our location goes labelled: "Our office location: <link>", in six languages, every playbook.
+
+**Defaults, one constant each:**
+- `hours.OFFER_LEAD` 60 min, `MIN_GAP` 60 min, `WINDOW_MAX` 1 h.
+- `engine.WINDOW_PLAYBOOKS` shops only.
+- `claims.PRICE_LINE` True, `BUDGET_FLOOR` AED 1,000, `COLLEAGUE_HANDOVER` customer_asked_human.
+
+**General playbook:** the 60-minute lead and the one-hour gap for taken-slot alternatives, the location label, the cut invitation, and no "Which is better?" left once its invitation is cut (same bugs). Nothing else changes.
+
+**Resumed run (two earlier runs of this package were cut off).** Their work was kept. Every live reply of the export was then replayed through `engine.settle`, and the guards were probed. Six faults were found and fixed:
+- chat 42's "Wat is 33000/year" lost its whole answer to the table cut: their own figures, or the rent's period, now count as asking (`claims.asks_figures`);
+- chat 59 got "Good question …" twice: no second deferral when the reply defers already, and an "ok" alone never gets one;
+- "Yes, Shop 20 is open until 7:30 PM" read as a shop's location: our office's own unit is ours;
+- "We're open until 7:30 PM" at 7 PM became two slots tomorrow: our opening hours are no offer (`offers.states_hours`);
+- after two invitations the build pack's slot line names no visit word, so it went (and code even rewrote it): a slot of ours goes now, unless the time is theirs or they ask to come (`offers.pushes_visit`);
+- "Which is better?" / "Kya yeh waqt … theek hai?" was left with no offer before it (`filters.drop_invitations`).
+
+**Proof:**
+- 1187 tests OK locally (SQLite; 1107 before the package). `test_facts_slots_booking.py` holds 80 of them, from the launch chats' own words and live answers. The earlier run's 30 guard-off cases all still fail; each new case shows its fault with the fix patched out.
+- 14 new eval scenarios (150 in all), `shops-figures-asked-42` among them. Each passes with the live answer and fails without its guard.
+- Replays of the live replies:
+  - time guard: 13 had a past, too-soon or half-hour-apart slot, and all now offer valid ones;
+  - claims guard: exactly the 5 live claims (59 deposit, 91 food use, 96 location three times) over all 163 sentences of ours, with the office as V03 and as the live V02/V03.
+- `makemigrations --check`: No changes detected. No migration.
+
+**Not tested:** the real-model eval gate, PostgreSQL, the live server, worker-leadai, Bitrix, WhatsApp. Not deployed, not committed.
+
+**Not done here:**
+- the voice download retry (apps/gateway);
+- `starts_at` kept across revisions (a revision without a time may be them taking it back);
+- `hot_lead` stays the model's flag (a same-day booking gets the high "Visit soon" alert);
+- repeats of a MATCH or a slot pair;
+- the facts.notes cleanup (issue 15);
+- [Not now] tapped with typed words (the model answers; the follow-ups read their words).
+
+**Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`. A deploy rebuilds all four app services.
+
+---
+
+## 2026-10-16 — Lead AI batch 2d, package "Silence, caps and people": the reply cap frees, calls and must-answer questions reach a person (Claude Code)
+
+Launch review issues 2, 3, 4, 14, 18 and 21. New `assistant/caps.py` and `assistant/people.py`; hooks in `engine.py`, `alerts.py`, `tasks.py`, `crm.py`, the shops prompt and the eval.
+
+**The reply cap** (chats 78, 91):
+- A shops chat may send 12 replies an hour and 30 a day. A general chat keeps 6 and 20.
+- A capped shops message is answered once the cap frees: the sweep (`tasks._answer_capped`) queues the chat's newest capped message, and its turn takes the same row up and answers the whole burst, however old it is. Not when anyone wrote since, nor in a stopped, paused or transferred chat.
+- A shops chat's cap alert is high priority and reaches 2311 too. It says when the assistant answers by itself, with their words, the lead and the chat.
+
+**People:**
+- A call is never promised a time (chat 88). Code writes the reply: the request passed on with the time they gave, or "What time suits you for the call?". The handover alert and a new "CUSTOMER ASKED FOR A CALL" timeline note carry the time. Every playbook.
+- While a person has the chat (every playbook):
+  - a goodbye gets nothing (chat 57);
+  - a chase ("will i get any call??", "no one called", "hello?") gets an apology and an urgent alert again;
+  - a call's time is passed on with its own alert;
+  - anything else gets the holding line, which in a shops chat now says "our agent".
+- A shops handover nobody answered in 30 minutes of office time gets one more alert to the chat's people and 2311 (`people.escalate_waiting`).
+- Shops must-answer questions go to a person before any visit, with the questions listed, never "at the viewing" (chats 95, 91, 78): gas, chimney, exhaust, grease trap, NOC, Municipality, drainage, power load, Ejari, deposit, VAT, total upfront or breakdown, fit-out period, contract. Commission alone stays Matloob's own line (Q24).
+- A STOP as the first answer (chat 112): the responsible lookup runs first, and alerts raised before it was known reach the lead's owner once it is (`alerts.reach_responsible`). A shops opt-out alert reaches 2311 too and says not to message them again.
+- No reply sends the customer to contact a colleague (chat 114) or promises a call. A shops handover reply asks nothing more (chat 105). An apology may repeat.
+
+**Defaults, one constant each:**
+- `caps.SHOPS_PER_HOUR` 12, `SHOPS_PER_DAY` 30, `REQUEUE_PLAYBOOKS` shops only, `ALERT_PRIORITY` high.
+- `people.ESCALATE_AFTER` 30 office minutes, `ESCALATE_PLAYBOOKS` shops only, `MUST_ANSWER_COMMISSION` False.
+
+**Proof:**
+- 1107 tests OK locally (SQLite; 1050 before). `test_silence_caps_people.py` holds 57 of them, from the launch chats' own words and the live answers. The new cases fail with the guards patched out.
+- Replay of all 32 launch chats' messages:
+  - must-answer questions only in 95, 91 and 78;
+  - a call request only in 88's; a chase only in 88's "will i get any call??";
+  - a promise of a call only in 88's reply; a colleague chase only in 114's.
+- Six new eval scenarios (136 in all). They pass with the live answers and fail without the guards.
+- `makemigrations --check`: No changes detected. No migration.
+
+**Not tested:** the real-model eval gate, PostgreSQL (the new queries were only compiled for it), the live server, worker-leadai, Bitrix, WhatsApp. Not deployed, not committed.
+
+**Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`.
+
+---
+
+## 2026-10-16 — Lead AI batch 2d, package "Follow-ups": no push after a no, a "Not now", a rented shop or an open question; tentatives lapse (Claude Code)
+
+Launch review issues 9, 11 and 23. An earlier run of this package was stopped half-way; its uncommitted work in the same files was kept, reviewed and finished here.
+
+**Who gets no nudge, Template B or check-back** (`followups.holds`, which reads the chat from its newest campaign template or Template B):
+- anyone who said no to our offer;
+- anyone who said "Not now", whether or not they answered the check-back question;
+- anyone who rented a shop elsewhere, until they say yes to a second one;
+- anyone whose message is waiting for the reply cap;
+- handed over, paused or stopped, as before.
+
+A no or a "Not now" is taken back only by a later yes to an offer of ours, a template's yes tap, or a day or time they name to come.
+
+**Other follow-up rules:**
+- Someone who wants no shop to rent never gets Template B or the check-back. Their nudges are "to see the options".
+- If our for-whom question is still open, the nudge asks it again.
+- If our last words left their question to a colleague, no nudge goes. The chat owner and list 2311 get "… is waiting for an answer" with their words, once.
+- A no in other words to the second-shop question closes the lead as Lost "already rented" (`engine.second_shop_no`; chat 63: "if anything will let you know").
+- An unanswered check-back question gets nothing (`CHECK_BACK_SILENCE`).
+
+**Tentatives** (`tasks._lapse_shops_tentatives`, shops chats only):
+- With no time: lapses 24 h after they last spoke of it.
+- With a time: lapses an hour after that time, and an hour after their last word on it.
+- Status done, history "lapsed" with why, nothing sent to the customer.
+- An alert goes only when the visit was theirs. General chats keep 7 days.
+
+**Defaults, one constant each:**
+- `followups.CHECK_BACK_SILENCE` None. `SILENCE_IS_YES` sends Template B in 30 days; `SILENCE_IS_LOST` closes the lead as Lost.
+- `CHECK_BACK_SILENT_FOR` 30 days.
+- `tasks.TIMELESS_TENTATIVE_LAPSES` 24 h, `PAST_TENTATIVE_LAPSES` 1 h.
+
+**Proof:**
+- 1050 tests OK locally (SQLite; 995 after the "Who the customer is" package). `test_follow_up_holds.py` holds 55 of them, built from the launch chats' own words. The new cases fail against the previous code.
+- Replay of all 32 launch chats' real messages at the moment the live nudge went:
+  - 44, 49, 50, 107, 132, 98: the options nudge;
+  - 59, 95: an alert instead of a nudge;
+  - 78, 103: the for-whom question again;
+  - 68, 87: nothing.
+  - Tentatives: 100, 96 and 88 lapse on time with an alert; 59 and 62 lapse without one.
+- New eval scenario `shops-nudge-ok-100` with chat 100's "Ok". It fails with the live answer.
+- `makemigrations --check`: No changes detected. No migration.
+
+**Not tested:** the real-model eval gate, PostgreSQL (the new queries were only compiled for it), the live server, Bitrix. Not deployed, not committed.
+
+**Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`.
 
 ---
 
