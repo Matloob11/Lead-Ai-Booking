@@ -1,3 +1,15 @@
+## 2026-10-16 — Lead AI media library from A7's portal listings; 2e spec and board revised for Q36, no named agent and the agent desk (Claude Code)
+
+- **Library (D11, Q36):** A7's 36 International City listings collected: 34 from Property Finder (search limited to International City, broker id 8580, all four categories) and 2 Bayut-only (Nimble; all 144 Bayut listings swept). 294 JPEG photos, each listing with its listing.json, in `backend/Types shops/Portal listings/` (gitignored). Every photo was reviewed by eye (4 agents) and every hash pair checked. 7 sets built in `backend/Types shops/Residential sets/` (5 studio, 2 1BR): no person, no third-party mark, no building outside; set.json per set, README.txt for Matloob.
+- **Matloob's 25 photos traced:** France = 1891 studio, Spain = 1722 studio, Morocco = 1713/1727 studios, Greece and Russia = 1618 1BR (Greece K16). The China and England ones are on neither portal.
+- **Coverage:** Bitrix leads carry the listing ref a7group-NNNN in `UF_CRM_1760707563281`. In the last 30 days 81% of International City studio leads have their own listing's set; 1BR leads mostly get the default set (only 1618 is live).
+- **Findings:** A7 reuses photos across listings in different clusters (Q36, decided: same-type photos, never exact). 7 of 9 residential listings say unfurnished while their photos show furniture. Live studio rents are 29,000 and 32,000 against the 30,000-33,000 default (Q41). Greece shops are listed but missing from shops_facts (Q42). 14 shops are for sale with no sale facts (Q43). Only 2311 and four admin accounts can see Lead AI chats today (Q37, T100).
+- **Spec and board:** the 2e spec has its 36 named-agent places changed, a new §2.12 agent desk, §4 media rewritten for the library and a §2.2 live price check. The board has new defaults for Q31, Q32 and Q35, new rows Q37-Q43, rewritten T90-T103 rows, D11-D13 updated, a risk bullet, and a Requests line asking Cursor to fix C40's "Q21". Two agents wrote it, a critic checked it, 16 fixes were applied, and D11/D13 were corrected by hand.
+- **Not done:** nothing imported (slice E: migration 0009, the import, the pick by listing ref, captions, the panel module). No server or code change. Not tested: the bot sending a set, which cannot happen before slice E.
+- **Shared files:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, the 2e spec.
+
+---
+
 ## 2026-10-16 — Lead AI layout B, left rail (Cursor)
 
 Chats and Sara leads sit in a left rail. Needs a person, Today, the Shops / Rent / Sale / Other filters, I'll call and Taken by are in the screen and hidden until batch 2e. Same API calls. Published: `screen.js` `e8e5aab9`, `thread.js` `e7c19e01`, `lead-ai.css` `f6282030`.
