@@ -1,3 +1,11 @@
+## 2026-10-16 — Lead AI screen liquid glass (Cursor)
+
+The Lead AI screen sits on a blue-hour city photo (`bitrix/public/assets/modules/lead-ai/bg.jpg`). The bar, list and chat are frosted glass. Chat rows keep the campaign name on one line. Published with the panel.
+
+**Shared:** `bitrix/public/assets/modules/lead-ai/lead-ai.css`, `bitrix/public/assets/modules/lead-ai/bg.jpg`, `TASKS.md`.
+
+---
+
 ## 2026-10-16 — C38 field map, C42 listings, C40 calls, C39 residential fields (Cursor)
 
 **C38.** Lead field map on the board. `a7group-` refs: 10,470 leads (4,903 International City). Written on create by user 1 from Bayut / Property Finder / Dubizzle. Listing URL is `UF_CRM_1760707550978`. Online meeting mode is enum **43**.
