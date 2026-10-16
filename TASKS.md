@@ -1,3 +1,14 @@
+## 2026-10-16 — D11 residential photos reviewed; D11–D13 back in the Data table (Claude Code)
+
+- Looked at all 25 photos Matloob put in `backend/Types shops/` (7 folders, no videos). All are JPEG or PNG under 5 MB, so `shop_media.check_file` takes them as they are.
+- What they show: Russia, Greece and England are 1BR (own bedroom, hall, kitchen hatch). Morocco, China, France and Spain are named 1BHK but show studios. Russia's 3 photos are the same shots as Greece 02–04. Every photo carries an A7 Group Real Estate watermark (the shop photos carry none), while the bot says AR Properties (Q29).
+- Asked Matloob five things (board D11): studio or 1BHK, which cluster the Russia/Greece flat is in, exact or standard label, the watermark, and the Spain photos with people and a trolley in them.
+- Nothing is imported. The library takes studio and 1BR only from batch 2e slice E (migration 0009).
+- Board fix: `board_2e.py` put D11–D13 after the last line starting `| D`, which was "Dubizzle…" in the C19 source table. They now sit under D10.
+- Nothing ran on the server. This was a look at the files and a board edit.
+
+---
+
 ## 2026-10-15 — C36 BP 235 skip for 2478 + C37 browser proof; commit (Cursor)
 
 **C36 BP 235 (Matloob yes):** backup `/home/bitrix/a7_bp235_bak_20261015_132925`; skip branch now OR-matches Bot Status 2477 or 2478 XML. Prove PASS: 2478 meeting kept on edit; empty Bot Status still wiped + 1 due-now to-do; test leads deleted.

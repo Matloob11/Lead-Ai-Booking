@@ -130,6 +130,9 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | D8 | Test phones | Matloob gives them when Claude asks at test time |
 | D9 | Match table (size / budget → type) | default: by size range; by budget, under 48k → Type 1, 48k–80k → Type 2, 80k+ → Type 3 |
 | D10 | Closed dates (public holidays) | Matloob sends |
+| D11 | Studio and 1BR photos and videos, in folders like the shops ones: per type and cluster, 1 MP4 (H.264, under 16 MB, 30-60 s) and up to 6 photos; for each, whether it shows the exact unit (with its listing ref), a matching unit in the same building, or a standard layout | **Photos received 2026-10-16** in `backend/Types shops/`: 25 photos in 7 folders, no videos, all JPEG or PNG under 5 MB (`check_file` takes both). Claude looked at every one: Russia, Greece and England show a 1BR (own bedroom, hall, kitchen hatch); Morocco, China, France and Spain are named 1BHK but show studios (bed, sofa and table in one room, kitchenette by the door). Open, asked 2026-10-16: (1) are those four studios; (2) Russia's 3 photos are the same shots as Greece 02-04, so which cluster is that flat in; (3) exact unit (with listing ref) or standard layout (default standard; England's 5 look like 2-3 different flats); (4) every photo carries the A7 Group Real Estate watermark while the bot says AR Properties (Q29); (5) Spain 1 and 2 show people and a hand trolley. Videos optional |
+| D12 | The rent agent and the sales agent: name, Bitrix user id, WhatsApp number (if customers may get it, Q31), working days and hours; the sales agent's Google account e-mail for Meet | Matloob sends |
+| D13 | Not blocking: where the available studios and 1BRs are listed (Bitrix Availability / Owner Data, a portal feed, or Excel) with type, cluster, rent or price, vacant or rented, balcony, listing ref and Trakheesi permit. Until then the bot gives ranges only and never says a unit is available | Matloob tells |
 
 ---
 
@@ -463,9 +466,6 @@ Read-only Bitrix SQL (`NAME LIKE '%|%'`). Counts are for the **NAME** field only
 | Property Finder… | 1039 |
 | Bayut… | 714 |
 | Dubizzle… | 18 |
-| D11 | Studio and 1BR photos and videos, in folders like the shops ones: per type and cluster, 1 MP4 (H.264, under 16 MB, 30-60 s) and up to 6 photos; for each, whether it shows the exact unit (with its listing ref), a matching unit in the same building, or a standard layout | Matloob sends |
-| D12 | The rent agent and the sales agent: name, Bitrix user id, WhatsApp number (if customers may get it, Q31), working days and hours; the sales agent's Google account e-mail for Meet | Matloob sends |
-| D13 | Not blocking: where the available studios and 1BRs are listed (Bitrix Availability / Owner Data, a portal feed, or Excel) with type, cluster, rent or price, vacant or rented, balcony, listing ref and Trakheesi permit. Until then the bot gives ranges only and never says a unit is available | Matloob tells |
 | other `\|` | 68 |
 
 **Correction (2026-10-14 review):** customers never see the piped contacts. All 1,771 have no phone, and each is the contact of an Owner Data "Availability" card, whose popup greets from the card title. The phones that are exposed: ~1,650 leads and 87 contacts whose NAME is "Property Finder WhatsApp////…" with no pipe (greeted "Property"), and 89 Owner Data cards whose title has no pipe (the whole title goes into `{{1}}`). C1 uses NAME's first word whenever it is usable, and reads TITLE after the last `|` only when NAME is empty or unusable. Fix: C23.
