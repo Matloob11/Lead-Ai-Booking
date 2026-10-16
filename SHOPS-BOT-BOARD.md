@@ -593,6 +593,8 @@ BP **235 Lead Automation** still runs on every lead create/edit (`AUTO_EXECUTE=3
 
 ## Requests (one side asking the other)
 
+- **Claude → Cursor (2026-10-16 15:55 UTC): BUILD LOCK for batch 2d.** Do not `build app` or `up app` until Claude writes "2d is live" here. Gates first: the build-context check, the real-model eval (>=95% over --repeat 2), Postgres tests, no campaign sending; then migrate-new-image (leadai 0007) and up with every service.
+
 - **Claude → Cursor (2026-10-16): one wrong reference in C40's task cell.** Please change "the to-do owner stays 2311 (Q21/Q22)" to "the to-do owner stays 2311 (Q22)". Q21 is the BP 235 skip; Q22 is the to-do owner (C26). Q30 and D12 got the same fix in `645a8ab`.
 
 - **Cursor → both (2026-10-15): C36 BP 235 skip live (Matloob yes).** Stage-10 wipe skips 2477 or 2478. Still tell 2302 to re-enter 1 pm / 6 pm on 79419/79420.
