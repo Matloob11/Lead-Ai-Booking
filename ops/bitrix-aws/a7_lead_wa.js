@@ -13,10 +13,12 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_LEAD_WA_V14) {
+  if (window.A7_LEAD_WA_V16) {
     return;
   }
-  window.A7_LEAD_WA_V14 = true;
+  window.A7_LEAD_WA_V16 = true;
+  // C41 mixed popup. Stays false until Claude writes "2e is live".
+  var C41_MIXED_LIVE = false;
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -499,6 +501,8 @@
       ".a7-lwa-shopswarn.is-on{display:block;}" +
       ".a7-lwa-shopswarn button{margin-left:8px;border:0;background:#9a3412;color:#fff;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;}" +
       ".a7-lwa-shopswarn button:hover{background:#7c2d12;}" +
+      ".a7-lwa-daywarn{display:none;margin:6px 0 0;padding:8px 10px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:12px;line-height:1.35;}" +
+      ".a7-lwa-daywarn.is-on{display:block;}" +
       ".a7-lwa-send{background:#25D366;color:#fff;border:0;border-radius:8px;padding:8px 12px;" +
       "font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}" +
       ".a7-lwa-send .a7-lwa-ic{color:#fff;}" +
@@ -790,7 +794,7 @@
       className: "a7-lwa-script",
       title: "Which script the assistant follows in these chats"
     });
-    [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
+    [["general", "General"], ["ic_shops", C41_MIXED_LIVE ? "International City — all" : "International City shops"]].forEach(function (pair) {
       scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
     });
     // C28: every Lead AI campaign Matloob sends is a shop campaign.
@@ -806,6 +810,8 @@
     });
     scriptNote.style.display = "none";
     var shopsWarn = el("div", { className: "a7-lwa-shopswarn" });
+    var dayWarn = el("div", { className: "a7-lwa-daywarn" });
+    var daySeq = 0;
     function syncScriptNote() {
       if (leadAiBox.checked && scriptSelect.value === "general") {
         scriptNote.textContent = "This chat will not get the shops script.";
@@ -843,12 +849,71 @@
         total: leads.length
       };
     }
+    function isShopLead(row) {
+      var kind = Number(row.property_type || 0);
+      return kind === 760 || kind === 12;
+    }
+    function isStudioOr1br(row) {
+      var beds = String((row.details && row.details.bedrooms) || "").toLowerCase();
+      return beds === "0 b/r" || beds === "1 b/r" || beds.indexOf("studio") !== -1;
+    }
     function renderShopsWarn() {
       while (shopsWarn.firstChild) {
         shopsWarn.removeChild(shopsWarn.firstChild);
       }
       shopsWarn.className = "a7-lwa-shopswarn";
       if (ENTITY !== "lead" || !leadAiBox.checked || scriptSelect.value !== "ic_shops") {
+        return;
+      }
+      if (C41_MIXED_LIVE && selected && selected.name === "intl_city_property_reconnect") {
+        var shop = 0;
+        var studio = 0;
+        var other = 0;
+        var worked = 0;
+        var leaveIds = [];
+        leads.forEach(function (row) {
+          if (isShopLead(row)) {
+            shop += 1;
+          } else if (isStudioOr1br(row)) {
+            studio += 1;
+          } else {
+            other += 1;
+          }
+          if (row.shops_worked) {
+            worked += 1;
+          }
+          if (row.shops_worked || row.shops_recent) {
+            leaveIds.push(row.id);
+          }
+        });
+        shopsWarn.appendChild(document.createTextNode(
+          "Shop " + shop + " · Studio/1BR " + studio + " · Other " + other +
+          " · " + worked + " being worked by an agent."
+        ));
+        if (leaveIds.length) {
+          var mixedLeave = el("button", { type: "button", text: "Leave them out" });
+          mixedLeave.addEventListener("click", function () {
+            var drop = {};
+            leaveIds.forEach(function (id) {
+              drop[String(id)] = true;
+            });
+            var nextLeads = [];
+            var nextIds = [];
+            leads.forEach(function (row) {
+              if (!drop[String(row.id)]) {
+                nextLeads.push(row);
+                nextIds.push(row.id);
+              }
+            });
+            leads = nextLeads;
+            leadIds = nextIds;
+            renderLeads();
+            renderShopsWarn();
+            renderPreview();
+          });
+          shopsWarn.appendChild(mixedLeave);
+        }
+        shopsWarn.className = "a7-lwa-shopswarn is-on";
         return;
       }
       var c = shopsWarnCounts();
@@ -985,11 +1050,15 @@
     function templatesForNumber() {
       var num = currentNumber();
       var waba = num && num.waba_business_id;
-      if (!waba) {
-        return templates;
-      }
-      return templates.filter(function (t) {
+      var rows = !waba ? templates : templates.filter(function (t) {
         return !t.waba_business_id || t.waba_business_id === waba;
+      });
+      // Until 2e is live the assistant treats every campaign template as a shops one.
+      if (C41_MIXED_LIVE) {
+        return rows;
+      }
+      return rows.filter(function (t) {
+        return t.name !== "intl_city_property_reconnect";
       });
     }
 
@@ -1442,6 +1511,49 @@
       renderShopsWarn();
     }
 
+    function renderDayWarn() {
+      var seq = ++daySeq;
+      while (dayWarn.firstChild) {
+        dayWarn.removeChild(dayWarn.firstChild);
+      }
+      dayWarn.className = "a7-lwa-daywarn";
+      if (!selected || !/marketing/i.test(selected.category || "")) {
+        return;
+      }
+      var num = currentNumber();
+      var from = num && num.phone_number ? String(num.phone_number) : "";
+      var form = new URLSearchParams();
+      form.set("action", "marketing-day");
+      form.set("sessid", bitrixSessid());
+      form.set("template", selected.name || "");
+      form.set("from", from);
+      fetchJson(ENDPOINT, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form.toString()
+      }).then(function (res) {
+        if (seq !== daySeq) {
+          return;
+        }
+        var data = parseJsonLoose(res.text) || {};
+        if (!res.ok || data.ok === false) {
+          return;
+        }
+        var sent = Number(data.sent || 0);
+        var next = sent + (canSend || 0);
+        if (!(sent > 100 || next > 100)) {
+          return;
+        }
+        dayWarn.appendChild(document.createTextNode(
+          "This number already has " + sent + " sends of this marketing template today. " +
+          "This queue would make it " + next + ". That is above 100 in a day. You can still send."
+        ));
+        dayWarn.className = "a7-lwa-daywarn is-on";
+      }).catch(function () {});
+    }
+
     function renderNote() {
       if (selected && /marketing/i.test(selected.category || "")) {
         note.textContent =
@@ -1451,6 +1563,7 @@
         note.textContent = "";
         note.style.display = "none";
       }
+      renderDayWarn();
     }
 
     function renderPreview() {
@@ -1782,6 +1895,7 @@
           scriptWrap,
           scriptNote,
           shopsWarn,
+          dayWarn,
           el("button", { className: "a7-lwa-cancel", type: "button", text: "Cancel", onClick: closeStudio }),
           sendBtn
         ])

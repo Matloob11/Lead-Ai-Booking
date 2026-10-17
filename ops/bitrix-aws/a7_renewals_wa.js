@@ -9,10 +9,12 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_RENEWALS_WA_V6) {
+  if (window.A7_RENEWALS_WA_V8) {
     return;
   }
-  window.A7_RENEWALS_WA_V6 = true;
+  window.A7_RENEWALS_WA_V8 = true;
+  // C41 mixed popup. Stays false until Claude writes "2e is live".
+  var C41_MIXED_LIVE = false;
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -498,6 +500,8 @@
       ".a7-rwa-chip{border:1px solid #e2e8f0 !important;background:#fff !important;color:#334155 !important;border-radius:99px;padding:4px 10px;font:700 12px/1 Segoe UI,Arial,sans-serif !important;cursor:pointer;}",
       ".a7-rwa-chip.is-on{background:#166534 !important;color:#fff !important;border-color:#166534 !important;}",
       ".a7-rwa-note{font-size:12px;color:#92400e;background:#fffbeb;border-radius:10px;padding:8px 10px;}",
+      ".a7-rwa-daywarn{display:none;margin:8px 0 0;padding:8px 10px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:12px;line-height:1.35;}",
+      ".a7-rwa-daywarn.is-on{display:block;}",
       ".a7-rwa-err{font-size:12px;color:#b91c1c;min-height:0;}",
       ".a7-rwa-empty{padding:12px 10px;color:#64748b;font-size:12px;}",
       ".a7-rwa-phone{flex:1;min-height:220px;border:8px solid #e2e8f0;border-radius:28px;background:#efeae2;overflow:hidden;display:flex;flex-direction:column;}",
@@ -645,6 +649,72 @@
     var sub = el("div", { className: "a7-rwa-sub" });
     var err = el("div", { className: "a7-rwa-err" });
     var note = el("div", { className: "a7-rwa-note" });
+    var dayWarn = el("div", { className: "a7-rwa-daywarn" });
+    var daySeq = 0;
+    function renderDayWarn() {
+      var seq = ++daySeq;
+      while (dayWarn.firstChild) {
+        dayWarn.removeChild(dayWarn.firstChild);
+      }
+      dayWarn.className = "a7-rwa-daywarn";
+      if (!tenantPicker || !ownerPicker) {
+        return;
+      }
+      var num = currentNumber();
+      var from = num && num.phone_number ? String(num.phone_number) : "";
+      var jobs = [];
+      [["tenant", tenantPicker, tenantCount], ["owner", ownerPicker, ownerCount]].forEach(function (pair) {
+        var picked = pair[1].selected();
+        if (!picked || !/marketing/i.test(picked.category || "")) {
+          return;
+        }
+        jobs.push({ name: picked.name || "", batch: Number(pair[2] || 0), side: pair[0] });
+      });
+      if (!jobs.length || !from) {
+        return;
+      }
+      Promise.all(jobs.map(function (job) {
+        var form = new URLSearchParams();
+        form.set("action", "marketing-day");
+        form.set("sessid", bitrixSessid());
+        form.set("template", job.name);
+        form.set("from", from);
+        return fetchJson(UPLOAD_ENDPOINT, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString()
+        }).then(function (res) {
+          var data = parseJsonLoose(res.text) || {};
+          return { job: job, sent: res.ok && data.ok !== false ? Number(data.sent || 0) : 0, ok: res.ok && data.ok !== false };
+        });
+      })).then(function (rows) {
+        if (seq !== daySeq) {
+          return;
+        }
+        var lines = [];
+        rows.forEach(function (row) {
+          if (!row.ok) {
+            return;
+          }
+          var next = row.sent + row.job.batch;
+          if (row.sent > 100 || next > 100) {
+            lines.push(
+              row.job.side + ": " + row.sent + " sends of " + row.job.name +
+              " today, this queue would make it " + next
+            );
+          }
+        });
+        if (!lines.length) {
+          return;
+        }
+        dayWarn.appendChild(document.createTextNode(
+          "Above 100 marketing sends in a day from this number. " + lines.join(". ") + ". You can still send."
+        ));
+        dayWarn.className = "a7-rwa-daywarn is-on";
+      }).catch(function () {});
+    }
     var phoneChat = el("div", { className: "a7-rwa-screen" });
     var phoneHead = el("div", { className: "a7-rwa-phone-bar" });
     var previewRole = tenantCount ? "tenant" : "owner";
@@ -726,11 +796,15 @@
 
     function templatesForNumber() {
       var num = currentNumber();
-      if (!num || !num.waba_business_id) {
-        return templates;
-      }
-      return templates.filter(function (t) {
+      var rows = !num || !num.waba_business_id ? templates : templates.filter(function (t) {
         return !t.waba_business_id || String(t.waba_business_id) === String(num.waba_business_id);
+      });
+      // Until 2e is live the assistant treats every campaign template as a shops one.
+      if (C41_MIXED_LIVE) {
+        return rows;
+      }
+      return rows.filter(function (t) {
+        return t.name !== "intl_city_property_reconnect";
       });
     }
 
@@ -1319,6 +1393,7 @@
         ? "Marketing templates share Meta’s daily cap per customer. An undelivered send is usually that cap."
         : "";
       note.style.display = marketing ? "" : "none";
+      renderDayWarn();
     }
 
     function renderCap() {
@@ -1353,7 +1428,7 @@
       className: "a7-rwa-script",
       title: "Which script the assistant follows in these chats"
     });
-    [["general", "General"], ["ic_shops", "International City shops"]].forEach(function (pair) {
+    [["general", "General"], ["ic_shops", C41_MIXED_LIVE ? "International City — all" : "International City shops"]].forEach(function (pair) {
       scriptSelect.appendChild(el("option", { value: pair[0], text: pair[1] }));
     });
     // C28: every Lead AI campaign Matloob sends is a shop campaign.
@@ -1608,7 +1683,8 @@
           filterRow,
           peopleBox,
           err,
-          note
+          note,
+          dayWarn
         ]),
         tenantPicker.box,
         ownerPicker.box,

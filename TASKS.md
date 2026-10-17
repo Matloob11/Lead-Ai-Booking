@@ -1,3 +1,72 @@
+## 2026-10-17 — 2e test leads for Matloob (Cursor)
+
+Three Bitrix leads for the live 2e test. Nothing was sent. The phone is not written here. Delete the leads after Matloob's test, when Claude says so.
+
+- 79815 studio rent, send from 971581058719. Ref a7group-1726, Property Finder link, bedrooms 26, Apartment, Rent 2443, International City, England, source Bayut WhatsApp.
+- 79816 one-bedroom sale, send from 971581058720. Ref a7group-1618, bedrooms 27, Apartment, Sale 2444, International City, Greece, source Property Finder WhatsApp.
+- 79817 shop, send from 971581058721. Property Type Shop 760, Rent 2443, International City, no listing ref.
+
+Duplicate copies 79818 and 79819 were deleted. The creator scripts on the server are stubbed.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`. Lead AI panel files were not touched.
+
+---
+
+## 2026-10-17 — C41 hides intl_city_property_reconnect until 2e (Cursor)
+
+While `C41_MIXED_LIVE` is false, that template is left out of the template list in the lead, deal, contact and Owner Data popups and in the renewals popup. Turning the flag on brings it back with the "International City — all" label and the Shop / Studio/1BR / Other breakdown. Until then the assistant would treat it as a shops template.
+
+**Proof:** live Leads popup on a sending number, every send blocked. The list had 5 templates and `intl_city_property_reconnect` was not one of them. The Script label was still "International City shops". No send ran. Live md5: lead JS `86185762ac881dd1218529c0fa807460`, renewals JS `e1a75bf6eaffa6ef5754f415ae55c83d`. Other Owner Data campaigns were sending in the same minutes (476–479); this session did not create one.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `a7_renewals_wa.js`, `SHOPS-BOT-BOARD.md`, `TASKS.md`.
+
+---
+
+## 2026-10-17 — Lead AI batch 2d is live (Claude Code)
+
+- **Deployed** `e867e4b` at 08:12 UTC: build of every service, `migrate-new-image` (leadai 0007, the V03 office default), `up app`. No campaign was sending.
+- **Proof:** Postgres tests on the new image (1314 leadai, 118 crmlink, OK); all four services Up, worker-leadai included; the sweep ran at 08:12:58; `django-check` "No changes detected"; the live image's 95 leadai files equal the repo; `probe-leadai-turn` 19/19; real-model eval on the build context 331/340 and on the deployed image 332/340 (97.6%), model-written 155/160 (96.9%). No live chat holds for_client true unhanded (the broker backstop has nothing to catch up).
+- **Logs after up:** no error in web, beat or worker-leadai. worker shows two older warnings unrelated to 2d: an inbound media filelink answering 401 (retried) and the Alots panel session keepalive failing (session expired?).
+- **Known follow-ups** (fail every repeat in the eval): shops-gate-half-hour, shops-invitation-cut-88, review-why-did-you-call. Carried into 2e.
+- **Shared files:** `SHOPS-BOT-BOARD.md` (2d is live, lock released), `TASKS.md`.
+
+---
+
+## 2026-10-17 — T73 weekly funnel, WhatsApp half: `ops/wa.sh probe-leadai-funnel` (Claude Code)
+
+New read-only probe `ops/catalog/probe-leadai-funnel.py` and the verb `probe-leadai-funnel [--weeks N]` (1-26, default 8) in `ops/wa.sh`, next to `probe-leadai-turn`. It runs in the `web` container inside one transaction set READ ONLY and rolled back. Output is counts only: no phone numbers, names or message text.
+
+Rows are per ISO week (Asia/Dubai) of the campaign message, for ic_shops, general and total. Columns: sent, delivered, read, failed, replied, booked, handovers, opt_outs, median_answer_min, answered. Each chat event is counted on the campaign message it follows, until the next Lead AI campaign message to that chat. The definitions are in the file header.
+
+**Live (2026-10-17 11:40 Dubai, `--weeks 6`):** everything falls in 2026-W42 (campaigns 395, 448, 449).
+- Total: 112 sent, 103 delivered, 76 read, 11 failed (2 refused by the gateway, 9 failed by Meta), 35 replied, 0 booked (5 tentative visits, none confirmed), 6 handovers (5 by the assistant, 1 from Bitrix), 2 opt-outs, median answer 0.3 min (18 s) over 34 chats.
+- ic_shops: 96 / 89 / 64 / 8, replied 33.
+- general (campaign 395): 16 / 14 / 12 / 3, replied 2 (1 of them an auto-reply).
+
+**Proof:**
+- An independent SQL query on live gave the same replied, answered, median, handovers, opt-outs and booked figures, and the recipient/message breakdown gives the same sent/delivered/read/failed.
+- A synthetic local check (scratchpad `funnel/check_funnel.py`, Django 5.2.5 on SQLite) covers 4 campaigns, multi-send chats and every exclusion; all hand-worked lines matched. It caught all 10 broken copies of the probe (`funnel/mutants.py`).
+
+**Not tested on live data:** a chat getting a second Lead AI campaign message (no live chat has had one) and a confirmed visit (none exist yet). Only the synthetic check exercises those two paths.
+
+**Shared:** `ops/wa.sh` (one usage line and the verb only), `TASKS.md`. Nothing under `backend/`, no commit.
+
+---
+
+## 2026-10-17 — C41 popup warning above 100 marketing sends (Cursor)
+
+The five CRM popups warn when one MARKETING template from one number is already over 100 sends today, or this queue would take it over 100. The count is unique To numbers on today's WhatsApp timeline comments (Dubai midnight). The send button is never disabled (Q7). Excel campaigns that do not write that comment are not in the count; a failed count shows no warning.
+
+The Script label "International City — all" and the intl_city_property_reconnect breakdown (Shop / Studio/1BR / Other / being worked, Leave them out only for worked or recent) are in the popup JS behind `C41_MIXED_LIVE = false`. They stay off until Claude writes "2e is live". A shops template still uses the C37 warning.
+
+`intl_city_property_reconnect` is APPROVED on 8 WABAs. On a sending number it appears in the Leads popup. It does not appear on a number whose WABA does not have it. `crm_leads.py` was not changed: the image cannot be rebuilt while the build lock is on.
+
+**Proof:** CLI lead 79799, two comments with the same To counted as 1, a different template counted apart, then the comments and the lead were deleted (`C41_PROOF_OK`). The proof file on the server is stubbed. Live Leads popup, every send blocked: the over-100 line appeared and the button stayed "Nothing to send: all left out" (that lead is opted out). Campaigns 452→452, recipients 22604→22604. Live md5: lead JS `52d673709ac8aa28256fca93f6b79330`, lead PHP `af4235013c70d64dd49cc6b01647a0ce`, renewals JS `523817b24c6c378ef3a4513d5dcbb20d`.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `a7_lead_wa.php`, `a7_renewals_wa.js`, `a7_c41_proof.php`, `SHOPS-BOT-BOARD.md`, `TASKS.md`. Not touched: `bitrix/public/assets/modules/lead-ai/*`, `crm_leads.py`.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2e: the real-model gate's round 2 absorbed by code (Claude Code)
 
 Branch `leadai-2e` in the worktree `a7-2e-worktree`, on `3f7ba05`. Not pushed, not deployed. Round 2 ran on the server's build context at `3f7ba05`: 559 of 574 runs passed (97.4%), and 291 of 304 runs of the model's own words (95.7%). The gate failed only on its rule that every CODE, money and policy scenario must pass every run. Each failure is fixed for its own cause, and each fix has a test that fails when the fix is switched off. `test_gate_2e_round2.py` holds the round-2 answers.

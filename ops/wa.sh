@@ -36,6 +36,7 @@
 #   ops/wa.sh migrate-new-image           the same, from the image just built, before `up`
 #   ops/wa.sh leadai-tests                Lead AI tests in the new image, throwaway test DB, nothing leaves
 #   ops/wa.sh probe-leadai-turn           3 real assistant turns on live data + key, rolled back, nothing sent
+#   ops/wa.sh probe-leadai-funnel [--weeks N]  weekly Lead AI funnel, WhatsApp side (T73): counts only, read-only
 #   ops/wa.sh leadai-eval [--only ID] [--repeat N] [--show] [--list]  the prompt vs the real model, scripted chats
 #   ops/wa.sh leadai-eval-draft [same]      the same on the pushed build context (beat), before a build
 #   ops/wa.sh django-check                the two checks CLAUDE.md requires
@@ -782,6 +783,26 @@ case "$cmd" in
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-leadai-funnel)
+    # Read-only (board T73, the WhatsApp half of the weekly funnel): per ISO week (Asia/Dubai), per
+    # playbook and in total, Lead AI campaign messages sent / delivered / read / failed, and the chats
+    # that replied, booked a visit, were handed over or opted out, with the median minutes from their
+    # first reply to our first answer. Counts only; one READ ONLY transaction, rolled back. Optional
+    # --weeks N, 1-26 (default 8).
+    weeks=8
+    if [[ $# -eq 2 && "$1" == "--weeks" ]]; then
+      [[ "$2" =~ ^([1-9]|1[0-9]|2[0-6])$ ]] || die "--weeks takes 1 to 26"
+      weeks="$2"
+    elif [[ $# -ne 0 ]]; then
+      die "probe-leadai-funnel takes no arguments, or --weeks N (1-26)"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-funnel.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-funnel.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e LEADAI_FUNNEL_WEEKS='$weeks' web python manage.py shell"
     ;;
 
   credit-status)
