@@ -1,3 +1,16 @@
+## 2026-10-17 — Lead AI 2e, lane FOLLOW-UPS: the deployed 2d gate's three failing-every-repeat scenarios, absorbed by code (Claude Code)
+
+Worktree `a7-2e-wt-fu`, branch `leadai-2e-fu`, on slice A (d9155bc). Committed there only: not merged, not pushed, not deployed.
+
+- **shops-gate-half-hour** ("Can I come today at 4:30?" got "The closest available slot is 4:00 PM or 5:00 PM" and a tentative for today with no hour, both runs): FREE SLOTS lists starts an hour apart, so the half hour looked taken. T18 (`engine.upgrade_exact_time`) now books their own hour when the model kept their day with no hour, or at the slot beside it, and offered only the slots either side of it (`engine.passed_over_hour`). Another event's hour ("My shop closes at 10, I can come tomorrow") is never read as the visit's.
+- **shops-invitation-cut-88** (launch chat 88's "Preferable Location - France / Size - 400sqft" invited with two slots and our location, both runs): `engine.licence_first` asks the licence before the FIRST invitation whatever the business (a later one still asks the business first: `discovery_first`), and reads "where we are" with `offers.asks_where_we_are` ("Preferable Location" asks nothing). It never asks anyone who wants no shop to rent: a need known, a home or a purchase recorded, or a need said now (2e's rent and sale tracks among them).
+- **review-why-did-you-call** (handed over as "unclear" with "Our specialist will reply here ...", both runs): `engine.settle_handover` drops that sentence together with the handover (`engine.who_we_are_reply`). A `customer_asked_human` for the same words is dropped too (`engine.WHO_WE_ARE_HANDOVERS`). A reply that only promises still hands over. `settle` now adds its own `trimmed` marks to settle_handover's instead of replacing them.
+- **Proof:** suite 1536 OK on SQLite (1507 before). 28 new tests in `test_deployed_gate_2d.py` use the deployed runs' own answers, and 6 earlier tests were changed for the replaced behaviour (`test_gate_review_2d`, `test_eval_guards`, `test_facts_slots_booking`). Every fix switched off fails its tests (scratchpad `fu/mutate.py`, 7 mutations). The 2d eval logs hold 14 failing runs of these three scenarios (12 distinct answers). Every one of those answers, replayed through the eval with the fake model, now passes. `makemigrations --check`: No changes detected. No migration, no new hook (the eval calls the same functions).
+- **Not tested:** the real-model eval on these files, PostgreSQL, the live server.
+- **Shared files touched:** `assistant/engine.py` (settle_handover, licence_first, settle, upgrade_exact_time, and the new passed_over_hour and who_we_are_reply); `leadai_eval.py` (docstring and three scenario comments only); the tests above; TASKS.md.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
 
 - **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.

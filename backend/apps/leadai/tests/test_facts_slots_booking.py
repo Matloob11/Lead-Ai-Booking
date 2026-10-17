@@ -89,6 +89,13 @@ def uncounted_rewrite():
         yield
 
 
+@contextmanager
+def licence_first_and_cut_off():
+    """Neither the licence asked before the first invitation (engine.licence_first) nor the invitation cut (offers.invitation_cut)."""
+    with patch.object(engine, "licence_first", return_value=False), patch.object(offers, "invitation_cut", return_value=False):
+        yield
+
+
 class Base(ShopsBase):
     """The tests' shops chat, its Maps link and pin set as live, the alerts listed to Matloob (2311)."""
 
@@ -776,11 +783,14 @@ class InvitationCountTests(Base):
 
     def test_chat_88_an_invitation_cut_as_a_second_question_is_none_and_takes_our_link(self):
         # Turn 82 (10:33): the licence question, then the slots cut as a second question, counted, and the bare
-        # link under the licence question (180113). His words alone here (the tap beside them: TapTurnTests).
+        # link under the licence question (180113). His words alone here (the tap beside them: TapTurnTests). Since the
+        # deployed gate engine.licence_first asks the licence before this first invitation (test_deployed_gate_2d): the cut
+        # is the backstop wherever it stands aside, as it did here before (patched out).
         self.at_clock(10, 33)
         self.set_state(facts={"for_client": False, "property_type": "shop", "shop_type": "type_1", "size_sqft": 400})
         message = self.inbound("Preferable Location - France (P24 P23 P26 P22)\nSize - 400sqft")
-        outcome, _, _, _ = self.turn(message, [shop_answer(leadai_eval.MATCH_88, invited=True, share_location=True)])
+        with patch.object(engine, "licence_first", return_value=False):
+            outcome, _, _, _ = self.turn(message, [shop_answer(leadai_eval.MATCH_88, invited=True, share_location=True)])
         self.assertEqual(
             self.body(outcome),
             "For a shop in France cluster, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED or Trakhees licence, "
@@ -906,7 +916,9 @@ LAUNCH_SCENARIOS = {
     "shops-cheaper-100": without(claims, "price_turn", ""),
     "shops-tap-and-question-81": without(engine, "tap_with_words", ""),
     "shops-tap-type-with-words-88": without(engine, "tap_with_words", ""),
-    "shops-invitation-cut-88": without(offers, "invitation_cut", False),
+    # The live answer asked the licence and pushed two slots: engine.licence_first asks it first since the deployed gate, and
+    # the cut is its backstop, so the scenario fails with both off only.
+    "shops-invitation-cut-88": lambda: licence_first_and_cut_off(),
     "shops-table-repeat-91": without(claims, "drop_table_repeat", False),
     "shops-discovery-second-invite-62": without(engine, "discovery_first", False),
     "shops-new-one-62": without(offers, "fix_times", False),

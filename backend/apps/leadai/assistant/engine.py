@@ -884,6 +884,23 @@ def first_discount_question(earlier: list) -> bool:
     return True
 
 
+# What answer["trimmed"] says when a reply to "Who is this?" lost its promise of a colleague's reply (settle_handover).
+COLLEAGUE_REPLY = "colleague_reply"
+# The model's handovers that a burst asking only who we are takes off (settle_handover): it asks for nobody. The 2d gate's
+# runs of review-why-did-you-call handed "Who is this? Why did you call me?" over as "unclear" ("Our specialist will reply
+# here to assist you further") and as "customer_asked_human" ("A team member can assist you here if you want").
+WHO_WE_ARE_HANDOVERS = ("unclear", "customer_asked_human")
+
+
+def who_we_are_reply(reply: str) -> str:
+    """The reply to "Who is this? Why did you call me?" without its sentences that say a colleague will reply to them
+    (people.says_colleague_replies), '' when nothing else is left: settle_handover takes the model's handover off such a
+    burst (WHO_WE_ARE_HANDOVERS), so no colleague is told. The deployed gate's eval review-why-did-you-call, both runs: "This
+    is A7 Real Estate regarding shops for rent in International City near Dragon Mart. Our specialist will reply here to
+    assist you further." handed over as "unclear" goes as its first sentence, handed to nobody."""
+    return " ".join(sentence for sentence in people.sentences(reply) if not people.says_colleague_replies(sentence))
+
+
 def _settle_shops_handover(answer: dict, earlier: list, new_texts: list | None) -> dict:
     """A shops chat quotes the rents, so a price question is never a handover there; a
     discount is: not the first time (our agent discusses the best price at the
@@ -909,19 +926,30 @@ def settle_handover(
     question is renewal_terms; the first price question is no handover; asking
     for the price again after our answer is one (with the holding line, never
     a second copy of the deflection). A shops chat has its own (discounts).
-    Every playbook: an "unclear" for a burst that only asks who we are or why we
-    wrote (rules.asks_who_we_are: "Who is this? Why did you call me?") is none;
-    both prompts answer it with the company and the campaign, and it asks for
-    nobody (eval review-why-did-you-call: handed over in one run of two). Unless
-    the reply says a colleague will reply to them (people.says_colleague_replies:
-    "Our specialist will reply here to assist you further", the gate's fresh run):
-    without the handover no colleague is told, so it stays; nor after two
-    invitations (``invites``), where both prompts hand the chat over as "unclear"."""
+    Every playbook: an "unclear" or a "customer_asked_human" (WHO_WE_ARE_HANDOVERS)
+    for a burst that only asks who we are or why we wrote (rules.asks_who_we_are:
+    "Who is this? Why did you call me?") is none; both prompts answer it with the
+    company and the campaign, and it asks for nobody (eval review-why-did-you-call:
+    handed over in one run of two, then as "customer_asked_human" too). A reply
+    that says a colleague will reply to them (people.says_colleague_replies: "Our
+    specialist will reply here to assist you further") loses that sentence with the
+    handover: without it no colleague is told, so nobody would reply (the deployed
+    gate's eval, both runs: who_we_are_reply). Only while the reply has words of its
+    own left (who we are); a reply that only promises the colleague keeps the
+    handover, and so does any reply after two invitations (``invites``), where both
+    prompts hand the chat over as "unclear". answer["trimmed"] then names
+    COLLEAGUE_REPLY (the English gloss no longer holds)."""
     if (
-        answer["handover"]["needed"] and answer["handover"]["reason"] == "unclear" and invites < 2
-        and rules.asks_who_we_are(new_texts) and not people.says_colleague_replies(answer["reply"])
+        answer["handover"]["needed"] and answer["handover"]["reason"] in WHO_WE_ARE_HANDOVERS and invites < 2
+        and rules.asks_who_we_are(new_texts)
     ):
-        answer["handover"] = {"needed": False, "reason": None}
+        promised = people.says_colleague_replies(answer["reply"])
+        kept = who_we_are_reply(answer["reply"]) if promised else answer["reply"]
+        if not promised or kept:
+            answer["handover"] = {"needed": False, "reason": None}
+            if promised:
+                answer["reply"] = kept
+                answer["trimmed"] = [*(answer.get("trimmed") or []), COLLEAGUE_REPLY]
     if shops_chat:
         return _settle_shops_handover(answer, earlier, new_texts)
     handover = answer["handover"]
@@ -1666,20 +1694,31 @@ def _inviting(sentence: str) -> bool:
     return filters.offers_time(sentence) or filters.is_open_when(sentence) or filters.is_invitation(sentence)
 
 
-def licence_first(answer: dict, known: dict, earlier: list, new_texts: list, now=None) -> bool:
+def licence_first(answer: dict, known: dict, earlier: list, new_texts: list, now=None, *, invites: int = 0) -> bool:
     """A shops reply that invites while the licence, the build pack's next discovery
     item, is still unknown, rewritten to ask it (rules "ask_licence"), without the
     location the invitation would have carried; True when it was.
 
     The build pack: business, size or budget, licence, then the viewing (SHOPS_SYSTEM's
     THE VIEWING says the same; the model invited instead in eval shops-35283, after
-    "I have vape business."). Only for a known end user whose business (known, or
-    answering our question about it) and size or budget are known, while no slot is
-    on the table, our last line did not ask about the licence already (no loop on an
-    answer the model could not read), and the customer's own words this time neither
-    ask anything nor ask to come, see or book, nor name a day or an hour: those
-    still get the invitation straight away. ``known``: the chat's facts before the
-    turn; ``earlier``: the conversation before the burst, as (author, text).
+    "I have vape business."). Only for a known end user whose size or budget is known,
+    while no slot is on the table, our last line did not ask about the licence already
+    (no loop on an answer the model could not read), and the customer's own words this
+    time neither ask anything nor ask to come, see or book, nor ask where we are, nor
+    name a day or an hour: those still get the invitation straight away. ``known``: the
+    chat's facts before the turn; ``earlier``: the conversation before the burst, as
+    (author, text); ``invites``: INVITES SO FAR.
+
+    The first invitation waits for the licence whatever the business (discovery_first:
+    it may go at once when a location is asked for, or a size and a licence are known);
+    a later one asks the business first (discovery_first), so only a later one needs
+    the business known here (recorded, or answering our question about it). Where we
+    are is asked in so many words only (offers.asks_where_we_are, as
+    location_invitation reads it). The deployed gate's eval shops-invitation-cut-88,
+    both runs: launch chat 88's "Preferable Location - France (P24 P23 P26 P22) / Size
+    - 400sqft", his business and licence never asked, got "Type 1 is perfect ... I can
+    hold a slot for you today at 12:00 PM or 1:00 PM" with our location under it: the
+    word "Location" read as asking where we are, and the business unknown.
     """
     known = known or {}
     facts = dict(known)
@@ -1688,19 +1727,22 @@ def licence_first(answer: dict, known: dict, earlier: list, new_texts: list, now
     last = ours[-1] if ours else ""
     if facts.get("for_client") is not False or facts.get("licence_kind") or facts.get("trade_licence"):
         return False
-    if needs.of(known) is not None:
-        return False  # someone who wants no shop to rent is never asked for a shop licence (who_they_are)
+    if needs.of(known) is not None or needs.wants_no_shop(facts) or needs.detect(new_texts or []) is not None:
+        # Someone who wants no shop to rent, known, recorded now (a home, to buy or to sell) or said now, is never asked for a
+        # shop licence (who_they_are; batch 2e's rent and sale tracks, whose budget is a rent's or a price).
+        return False
     if not (facts.get("size_sqft") or facts.get("budget_aed")):
         return False
-    # The business: recorded, or what they answer now to our question about it (size or budget known before).
+    # The business, for a later invitation: recorded, or what they answer now to our question about it (size or budget
+    # known before). The first one waits for the licence alone.
     answering_business = bool(_BUSINESS_WORDS.search(last)) and bool(known.get("size_sqft") or known.get("budget_aed"))
-    if not (facts.get("business_activity") or answering_business):
+    if invites and not (facts.get("business_activity") or answering_business):
         return False
     if filters.offers_time(last) or _LICENCE_WORDS.search(last):
         return False
     said = " ".join(new_texts or [])
     if (
-        rules.asks_question(said) or filters.asks_for_location(said) or filters.asks_the_way(said) or _VISIT_WORDS.search(said)
+        rules.asks_question(said) or offers.asks_where_we_are(new_texts) or filters.asks_the_way(said) or _VISIT_WORDS.search(said)
         or hours.named_days(said, now) or hours.named_times(said)
     ):
         return False
@@ -1999,7 +2041,7 @@ def settle(
         shops_chat and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
         and not answer["handover"]["needed"] and not agreed
     )
-    if plain_shops and licence_first(answer, facts or {}, earlier, new_texts, now):
+    if plain_shops and licence_first(answer, facts or {}, earlier, new_texts, now, invites=invites):
         trimmed.append("licence_first")
     elif plain_shops and (reoffer or invites < 2) and discovery_first(answer, facts or {}, earlier, new_texts, invites, agreed=agreed, now=now):
         trimmed.append("discovery")
@@ -2034,7 +2076,8 @@ def settle(
     if pointed:
         answer["pointed"] = pointed
     if trimmed:
-        answer["trimmed"] = trimmed
+        # After settle_handover's own (COLLEAGUE_REPLY), never in its place.
+        answer["trimmed"] = [*(answer.get("trimmed") or []), *trimmed]
         if not answer["reply"]:
             answer["send"] = False
     handover = answer["handover"]
@@ -2303,9 +2346,15 @@ def upgrade_exact_time(
     fixed line. Never while a person has the chat (``handed_over``) or after a
     colleague's message (``agent_last``): their plan is not overridden. Returns
     the checked start, with the answer changed to a confirm; else None, untouched.
+
+    A tentative on their day with no hour, or at the slot beside theirs, is their own
+    hour all the same when the reply offered only the slots either side of it
+    (passed_over_hour: "Can I come today at 4:30?" got "The closest available slot is
+    4:00 PM or 5:00 PM" and a tentative for today with no hour, in every run of the
+    deployed gate's eval shops-gate-half-hour).
     """
     proposal = answer["appointment"]
-    if proposal["action"] != "tentative" or not proposal.get("date") or not proposal.get("time"):
+    if proposal["action"] != "tentative" or not proposal.get("date"):
         return None
     # A fixed line, someone outside our segments, a handover in this answer or a call (_code_may_act).
     if proposal.get("place") not in (None, "office") or not _code_may_act(answer, said):
@@ -2315,14 +2364,21 @@ def upgrade_exact_time(
         return None
     if hours.no_promise(said) or rules.mentions_deferral(said):
         return None
-    day, at = hours.parse_date(proposal["date"]), hours.parse_time(proposal["time"])
+    day, at = hours.parse_date(proposal["date"]), hours.parse_time(proposal.get("time"))
     days, times = hours.named_days(said, now), hours.named_times(said)
     # One day and one hour: "Wednesday at 5 or 6" or "Tuesday or Wednesday at 5" is a choice, not a booking.
     one_day = len({value for value in days if value - dt.timedelta(days=7) not in days}) == 1
-    if day is None or at is None or day not in days or not one_day or times != {at}:
+    if day is None or day not in days or not one_day:
         return None
-    # Checked with the model's own place: an owner's time with none is refused (no_place).
     upgraded = {**proposal, "action": "confirm"}
+    if at is None or times != {at}:
+        # No hour of the model's, or one beside theirs: their own, when the reply offered only the slots either side of it,
+        # with their own words for the agents (as own_time), never the model's (which may name the time it picked).
+        at = passed_over_hour(answer, said, day, at, now)
+        if at is None:
+            return None
+        upgraded.update(time=f"{at:%H:%M}", customer_words=(said or "").strip()[:255] or proposal.get("customer_words"))
+    # Checked with the model's own place: an owner's time with none is refused (no_place).
     try:
         start = check_proposal(
             upgraded, appointment, now, closed_dates, grounding=grounding, segment=answer["segment"], taken=taken, said=said
@@ -2334,6 +2390,35 @@ def upgrade_exact_time(
         return None  # the time already booked, said again: nothing to send
     answer["appointment"] = {**upgraded, "place": "office"}
     return start
+
+
+def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | None, now) -> dt.time | None:
+    """The one hour of their own that a tentative on their day (``day``) left out (``model_at`` None) or put beside it,
+    when the reply offers only the slots either side of it; else None (upgrade_exact_time books it when it is free).
+
+    FREE SLOTS lists starts an hour apart, so a half hour they ask for looks taken to the model: the deployed gate's eval
+    shops-gate-half-hour answered "Can I come today at 4:30?" with "The closest available slot is 4:00 PM or 5:00 PM" (or
+    "4:00 PM today" alone) and a tentative for today with no hour, in every run. Their hour is the one their words say as
+    an hour (hours.spoken_times: never a bare number, "slot 2"); every other start the reply names (offers.offered: their
+    own may be named, as taken) is on their day within half an hour of it, and the model's own hour, if any, is beside it
+    too. So the hour of something else in their words is never read as the visit's: "My shop closes at 10, I can come
+    tomorrow" answered with tomorrow's 11:00 AM or 5:00 PM offers more than the slots beside 10."""
+    spoken = hours.spoken_times(said)
+    if len(spoken) != 1:
+        return None
+    theirs = next(iter(spoken))
+    start = dt.datetime.combine(day, theirs, tzinfo=hours.DUBAI)
+    if model_at is not None and abs(dt.datetime.combine(day, model_at, tzinfo=hours.DUBAI) - start) > hours.SLOT:
+        return None
+    others = {
+        dt.datetime.combine(on, at, tzinfo=hours.DUBAI)
+        for _, days, times in offers.offered(answer["reply"] or "", now)
+        for on in days
+        for at in times
+    } - {start}
+    if not others or any(slot.date() != day or abs(slot - start) > hours.SLOT for slot in others):
+        return None
+    return theirs
 
 
 def own_time(

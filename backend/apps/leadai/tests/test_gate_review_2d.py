@@ -7,7 +7,8 @@ Each fix is proved with the words that went wrong and fails with it switched off
 - B. needs.wants_another: "Sorry, I already rented another shop" and "we don't need another one" want no shop of ours;
   "one more please", with no verb of wanting, still does;
 - C. engine.settle_handover keeps the "unclear" of a "Who is this?" reply that says a colleague will reply, and after two
-  invitations; the eval fails such a promise with nothing handed over;
+  invitations; the eval fails such a promise with nothing handed over (since the deployed gate, only a reply that says
+  nothing else keeps it: one with words of its own loses the promise and the handover, test_deployed_gate_2d);
 - D. claims: the hourly claim in its other words, and a reply it empties gets code's slots from their hour (hourly_slots);
   the launch gate's proof that the owner's line never goes over code's slots, held with hourly_slots off;
 - E. engine.location_invitation: only words that ask where we are ("Location of the shops?" does), never with a plan of
@@ -324,21 +325,33 @@ class WhoWeAreReviewTests(SimpleTestCase):
         engine.settle_handover(answer_, [], new, **kwargs)
         return answer_["handover"]
 
-    def test_the_unclear_stays_when_the_reply_says_a_colleague_will_reply(self):
+    def test_the_unclear_stays_while_the_reply_only_says_a_colleague_will_reply(self):
+        # The deployed gate's fix (test_deployed_gate_2d): a reply with words of its own loses the promise and the handover.
         self.assertTrue(people.says_colleague_replies(FRESH_2))
-        self.assertEqual(self.settled(FRESH_2, ["Who is this? Why did you call me?"]), {"needed": True, "reason": "unclear"})
+        self.assertEqual(self.settled(FRESH_2, ["Who is this? Why did you call me?"]), {"needed": False, "reason": None})
         self.assertTrue(self.settled("Our team will reply here shortly.", ["Why do you keep calling me?"])["needed"])
         self.assertFalse(self.settled(WHO_REPLY, ["Who is this? Why did you call me?"])["needed"])  # nothing promised: none
         self.assertFalse(people.says_colleague_replies("Our specialist can explain more if you visit our office."))
         # After two invitations both prompts hand the chat over as "unclear": it stays.
         self.assertTrue(self.settled(WHO_REPLY, ["Who is this?"], invites=2)["needed"])
+        self.assertTrue(self.settled(FRESH_2, ["Who is this?"], invites=2)["needed"])
+        with patch.object(engine, "who_we_are_reply", return_value=""):
+            self.assertEqual(self.settled(FRESH_2, ["Who is this? Why did you call me?"]), {"needed": True, "reason": "unclear"})  # the review's
         with patch.object(people, "says_colleague_replies", return_value=False):
             self.assertFalse(self.settled(FRESH_2, ["Who is this? Why did you call me?"])["needed"])  # the gate's fix
 
 
 class WhoWeAreReviewTurnTests(GeneralBase):
-    def test_the_promise_goes_with_a_handover_and_its_alert(self):
-        outcome, _, _, _ = self.turn(self.inbound("Who is this? Why did you call me?"), [shop_answer(FRESH_2, segment="other", handover="unclear")])
+    def test_a_reply_that_only_promises_goes_with_a_handover_and_its_alert(self):
+        promise = "Our specialist will reply here to assist you further."
+        outcome, _, _, _ = self.turn(self.inbound("Who is this? Why did you call me?"), [shop_answer(promise, segment="other", handover="unclear")])
+        self.assertEqual(self.body(outcome), promise)
+        self.assertIsNotNone(self.state().handed_over_at)
+        self.assertEqual(LeadAiAlert.objects.filter(kind="handover").count(), 1)
+
+    def test_the_promise_went_with_a_handover_and_its_alert_before_the_deployed_gates_fix(self):
+        with patch.object(engine, "who_we_are_reply", return_value=""):
+            outcome, _, _, _ = self.turn(self.inbound("Who is this? Why did you call me?"), [shop_answer(FRESH_2, segment="other", handover="unclear")])
         self.assertEqual(self.body(outcome), FRESH_2)
         self.assertIsNotNone(self.state().handed_over_at)
         self.assertEqual(LeadAiAlert.objects.filter(kind="handover").count(), 1)
@@ -354,11 +367,15 @@ class WhoWeAreReviewTurnTests(GeneralBase):
 class WhoWeAreReviewEvalTests(SimpleTestCase):
     def test_the_fresh_runs_fail_as_the_model_answered_them(self):
         fresh_2 = eval_answer(FRESH_2, segment="other", handover="unclear")
-        self.assertIn("handover unclear, expected none", run_eval("review-why-did-you-call", fresh_2).failures)
-        self.assertIn(
-            "handover customer_asked_human, expected none",
-            run_eval("review-why-did-you-call", eval_answer(FRESH_1, segment="other", handover="customer_asked_human")).failures,
-        )
+        # The deployed gate's fix takes the promise off with the handover (test_deployed_gate_2d); before it, it stayed.
+        self.assertEqual(run_eval("review-why-did-you-call", fresh_2).failures, [])
+        with patch.object(engine, "who_we_are_reply", return_value=""):
+            self.assertIn("handover unclear, expected none", run_eval("review-why-did-you-call", fresh_2).failures)
+        # A "customer_asked_human" for it is taken off the same way since the deployed gate (engine.WHO_WE_ARE_HANDOVERS).
+        fresh_1 = eval_answer(FRESH_1, segment="other", handover="customer_asked_human")
+        self.assertEqual(run_eval("review-why-did-you-call", fresh_1).failures, [])
+        with patch.object(engine, "WHO_WE_ARE_HANDOVERS", ("unclear",)):
+            self.assertIn("handover customer_asked_human, expected none", run_eval("review-why-did-you-call", fresh_1).failures)
         # The gate's fix took the "unclear" off and the run passed: the check now fails what went out with nothing behind it.
         with patch.object(people, "says_colleague_replies", return_value=False):
             failures = run_eval("review-why-did-you-call", fresh_2).failures
