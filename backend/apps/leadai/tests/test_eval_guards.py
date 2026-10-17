@@ -424,8 +424,9 @@ class TakenEvalTests(TestCase):
 class LicenceFirstTests(SimpleTestCase):
     def settle(self, reply=VAPE_INVITE, known=VAPE_KNOWN, earlier=ASKED_BUSINESS, said="I have vape 💨 business.", playbook=lane.IC_SHOPS, **extra):
         facts = extra.pop("facts", {"business_activity": "vape"})
+        invites = extra.pop("invites", 0)
         out = normal(shop_answer(reply, invited=extra.pop("invited", True), facts=facts, **extra), True)
-        return engine.settle(out, earlier, [said], extra.get("invites", 0), playbook=playbook, address_sent=ADDRESS, now=NOW, facts=known)
+        return engine.settle(out, earlier, [said], invites, playbook=playbook, address_sent=ADDRESS, now=NOW, facts=known)
 
     def test_the_35283_reply_asks_the_licence_and_keeps_its_reaction_and_match(self):
         out = self.settle()
@@ -449,7 +450,11 @@ class LicenceFirstTests(SimpleTestCase):
             "who it is for unknown": {"known": {**VAPE_KNOWN, "for_client": None}},
             "a broker": {"known": {**VAPE_KNOWN, "for_client": True}},
             "no size or budget": {"known": {"for_client": False}},
-            "size only from this answer, business unknown": {"known": {"for_client": False}, "facts": {"size_sqft": 450}},
+            # A later invitation asks the business first (discovery_first); the first waits for the licence whatever the
+            # business (the deployed gate's fix, test_deployed_gate_2d).
+            "size only from this answer, business unknown, a later invitation": {
+                "known": {"for_client": False}, "facts": {"size_sqft": 450}, "invites": 1,
+            },
             "a question": {"said": "I have vape business. Can I see the shops?"},
             "asks to see": {"said": "Vape business, I want to see the shops"},
             "names a day": {"said": "Vape business, tomorrow"},

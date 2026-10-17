@@ -199,6 +199,15 @@ went to the chat already, and when; ``unit_library``: the sets, UNIT_LIBRARY by 
 holds them, since the eval never reads the database) and outgoing reports the photos as "[N photos of the same type of
 ...; caption: ...]" between the model's statements and the question after them. Right after engine.bare_need_reply,
 shop_buyer.settle gives a shop buyer no figure, and their price question code's answer (engine.not_a_shop_text).
+
+Batch 2d's deployed gate (2026-10-17: the three scenarios that failed every repeat on the live image), mirrored the same way
+with no call of its own, since run_once calls the same functions: T18 (engine.upgrade_exact_time) books their own hour when
+the model kept their day with no hour, or at the slot beside it, and its reply offered only the slots either side of it
+(engine.passed_over_hour: FREE SLOTS lists starts an hour apart, so "Can I come today at 4:30?" looked taken;
+shops-gate-half-hour); engine.licence_first asks the licence before the first invitation whatever the business, and reads
+where we are in so many words only (offers.asks_where_we_are: chat 88's "Preferable Location - France" asks nothing;
+shops-invitation-cut-88); engine.settle_handover takes an "unclear" or a "customer_asked_human" off "Who is this? Why did you
+call me?", with the reply's sentence that says a colleague will reply (engine.who_we_are_reply; review-why-did-you-call).
 """
 
 from __future__ import annotations
@@ -4244,7 +4253,8 @@ SCENARIOS = [
     ),
     Scenario(
         # Live (turn 82, reply 180113): the slots cut as a second question were counted, and our Maps link went bare
-        # under the licence question ("Preferable Location - France" asked for no location).
+        # under the licence question ("Preferable Location - France" asked for no location). The deployed gate (both runs):
+        # no licence question at all, two slots and our location; engine.licence_first asks it before the first invitation.
         "shops-invitation-cut-88",
         "launch chat 88's typed words alone: the licence question goes, the slots it pushed out are no invitation, no location under it",
         playbook=IC_SHOPS,
@@ -4452,6 +4462,8 @@ SCENARIOS = [
         loose=("action",),
     ),
     Scenario(
+        # The deployed gate (both runs): handed over as "unclear" with "Our specialist will reply here ..."; the sentence goes
+        # with the handover now (engine.who_we_are_reply), and a "customer_asked_human" for it too (WHO_WE_ARE_HANDOVERS).
         "review-why-did-you-call",
         "'Who is this? Why did you call me?' asks who we are: never a call request handed over",
         new=["Who is this? Why did you call me?"],
@@ -4566,7 +4578,8 @@ SCENARIOS = [
     ),
     Scenario(
         # "Our office slots start on the hour, so please choose 4:00 PM or 5:00 PM.": claims cut it whole, and the turn went
-        # unanswered as "no reply needed".
+        # unanswered as "no reply needed". The deployed gate (both runs): "The closest available slot is 4:00 PM or 5:00 PM"
+        # and a tentative for today with no hour; T18 books their 4:30 PM now (engine.passed_over_hour).
         "shops-gate-half-hour",
         "shops: 'Can I come today at 4:30?' is booked at 4:30 PM or offered it, never told our slots start on the hour",
         playbook=IC_SHOPS,
