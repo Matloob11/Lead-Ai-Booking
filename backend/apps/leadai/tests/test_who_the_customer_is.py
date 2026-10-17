@@ -28,6 +28,7 @@ from django.test import SimpleTestCase, override_settings
 from apps.inbox.models import Message
 from apps.leadai import followups, tasks
 from apps.leadai.assistant import crm, crm_fields, engine, needs, nudges, prompt, rules, schema, shop_flow
+from apps.leadai.assistant import residential
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import DEFAULT_OFFICE_ADDRESS, LeadAiAlert, LeadAiAppointment, LeadAiCrmField, LeadAiSettings, LeadAiTurn
 from apps.leadai.tests.test_assistant import NOW, fake_send_text
@@ -319,6 +320,7 @@ class NotAShopBase(ShopsBase):
 
 
 class NotAShopTurnTests(NotAShopBase):
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_44_gets_the_owners_line_our_location_the_pin_and_the_teams_alert(self):
         message = self.inbound("I need an apartment studio")
         live = shop_answer(
@@ -348,6 +350,7 @@ class NotAShopTurnTests(NotAShopBase):
         actions = self.actions(message)
         self.assertEqual((actions["who"], actions["need"], actions["invited_to_meeting"]), ("not_a_shop", "home", True))
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_136_an_unclear_handover_is_dropped_and_capitals_get_a_sorry(self):
         self.inbound("AM NOT LOOKING FOR SHOPS", seconds_ago=40)
         message = self.inbound("AM LOOKING FOR STUDIO APARTMENTS", seconds_ago=30)
@@ -393,6 +396,7 @@ class NotAShopTurnTests(NotAShopBase):
         self.assertEqual(self.fields(), [])  # no Bot Status Lost and no move to Not Interested
         note_delay.assert_called_once()
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_a_want_said_with_not_interested_or_wrong_number_is_never_lost(self):
         # "not interested" alone would be code's opt-out before any model; said with a want it waits.
         self.inbound("I need a studio", seconds_ago=40)
@@ -403,6 +407,7 @@ class NotAShopTurnTests(NotAShopBase):
         self.assertIsNone(self.state().not_interested_at)
         self.assertFalse(LeadAiCrmField.objects.filter(field=crm_fields.LOST).exists())
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_a_wrong_number_with_a_want_is_none_and_without_one_stays(self):
         outcome, calls, _, _ = self.turn(self.inbound("Wrong number, need a flat"), [shop_answer("Sorry.", opt_out="wrong_number")])
         self.assertEqual(len(calls), 1)
@@ -438,6 +443,7 @@ class NotAShopTurnTests(NotAShopBase):
         self.assertEqual(self.body(outcome), f"{line('We have many other options across Dubai too, not only shops.')}\nOur office location: {MAPS}")
         self.assertEqual(self.actions(message)["need_tag"], "other_area")
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_68_not_now_then_a_studio(self):
         self.turn(self.tap("Not now", seconds_ago=60), [])
         self.assertIsNotNone(self.state().followup_asked_at)
@@ -492,6 +498,7 @@ class AlreadyRentedTests(NotAShopBase):
 
 
 class NotAShopVisitTests(NotAShopBase):
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_their_yes_books_an_office_visit_in_words_about_no_shop(self):
         self.set_state(facts={"need": "home", "wanted": "a studio", "property_type": "studio"}, invites=1)
         self.ours(line("We have many options for a studio across Dubai."), minutes_ago=5)
@@ -601,10 +608,15 @@ class OfficeAddressTests(SimpleTestCase):
 
 # G. The eval's launch scenarios hold because of these guards -----------------------------------------------
 
+# The launch customers still on 2d's path: someone who wants a room, to buy, or never asked about a shop (the other track),
+# and a shop customer. The studio and one-bedroom seekers are the rent flow's since batch 2e (REROUTED: test_residential_turns).
 LAUNCH_SCENARIOS = (
-    "shops-want-studio-44", "shops-want-1bhk-49", "shops-no-shop-room-50", "shops-studio-monthly-57", "shops-we-got-one-63",
-    "shops-not-now-studio-68", "shops-never-asked-98", "shops-studio-balcony-107", "shops-did-not-ask-114",
-    "shops-asked-for-studio-132", "shops-buyer-42", "shops-buyer-not-lost-42", "shops-residential-room-105", "shops-studio-capitals-136",
+    "shops-no-shop-room-50", "shops-we-got-one-63", "shops-never-asked-98", "shops-did-not-ask-114", "shops-buyer-42",
+    "shops-buyer-not-lost-42", "shops-residential-room-105",
+)
+REROUTED = (
+    "shops-want-studio-44", "shops-want-1bhk-49", "shops-studio-monthly-57", "shops-not-now-studio-68", "shops-studio-balcony-107",
+    "shops-asked-for-studio-132", "shops-studio-capitals-136",
 )
 
 
@@ -632,10 +644,12 @@ class EvalLaunchTests(SimpleTestCase):
             for scenario_id in LAUNCH_SCENARIOS:
                 with self.subTest(scenario_id):
                     self.assertNotEqual(self.run_scenario(scenario_id).failures, [])
-            # Live these got the shop types list (132's "No I didn't ask..." is held by the decline guard alone).
-            for scenario_id in ("shops-want-studio-44", "shops-want-1bhk-49", "shops-studio-balcony-107", "shops-we-got-one-63"):
-                with self.subTest(scenario_id):
-                    self.assertEqual((self.run_scenario(scenario_id).answer.get("shop_step") or {}).get("kind"), shop_flow.LIST)
+            # Live these got the shop types list (132's "No I didn't ask..." is held by the decline guard alone); the studio and
+            # one-bedroom seekers on 2d's own path (the rent flow off).
+            with patch.object(residential, "RENT_LIVE", False):
+                for scenario_id in ("shops-want-studio-44", "shops-want-1bhk-49", "shops-studio-balcony-107", "shops-we-got-one-63"):
+                    with self.subTest(scenario_id):
+                        self.assertEqual((self.run_scenario(scenario_id).answer.get("shop_step") or {}).get("kind"), shop_flow.LIST)
 
 
 def filters_carries(text: str) -> bool:
@@ -650,5 +664,5 @@ class LaunchWordsTests(SimpleTestCase):
         self.assertEqual(words["shops-no-shop-room-50"], ["No shop", "Looking for a room"])
         self.assertEqual(words["shops-buyer-not-lost-42"], ["Sorry nobody\nI want to purchase shop"])
         self.assertEqual(words["shops-studio-capitals-136"], ["AM NOT LOOKING FOR SHOPS", "AM LOOKING FOR STUDIO APARTMENTS"])
-        for scenario_id in LAUNCH_SCENARIOS:
+        for scenario_id in (*LAUNCH_SCENARIOS, *REROUTED):
             self.assertTrue(re.search(r"-\d+$", scenario_id), scenario_id)

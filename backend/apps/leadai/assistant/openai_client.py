@@ -34,6 +34,8 @@ TRANSCRIBE_MAX_BYTES = 2 * 1024 * 1024  # about ten minutes of WhatsApp voice
 CACHE_KEY = "leadai-v2"
 # The shops playbook's own static prompt is cached apart from the general one.
 SHOPS_CACHE_KEY = "leadai-shops-v1"
+# ... and the residential one (batch 2e: a rent, sale or not-known chat of the International City campaign, prompt.RES_SYSTEM).
+RES_CACHE_KEY = "leadai-res-v1"
 CONNECT_TIMEOUT = 5.0
 RETRY_PAUSE = 2.0
 # Below this, a call cannot finish before the turn's deadline: it is not made.

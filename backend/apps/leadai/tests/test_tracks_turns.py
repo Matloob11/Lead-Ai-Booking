@@ -23,6 +23,7 @@ from apps.catalog.models import WaTemplate
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai import ic_templates
 from apps.leadai.assistant import rules, tracks
+from apps.leadai.assistant import residential
 from apps.leadai.models import DEFAULT_RESIDENTIAL_FACTS, LeadAiChatState, LeadAiSettings
 from apps.leadai.tests.test_assistant import NOW, answer
 from apps.leadai.tests.test_lead_context import CONTEXT, LEAD, READ, ROW
@@ -47,6 +48,7 @@ class ShadowTrackTests(NotAShopBase):
         self.assertEqual((state.track, state.unit, state.track_changed_at), ("shop", "", NOW))
         self.assertEqual(self.actions(message)["track"], {"track": "shop", "unit": "", "reason": tracks.WORDS})
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_2ds_studio_seeker_is_the_rent_track_and_still_gets_2ds_line(self):
         # Launch chat 44, exactly as test_who_the_customer_is replays it: the same words go out.
         message = self.inbound("I need an apartment studio")

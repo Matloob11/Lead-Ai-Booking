@@ -188,6 +188,7 @@ from . import (
     openai_client,
     people,
     prompt,
+    residential,
     reminders,
     rules,
     schema,
@@ -1153,6 +1154,7 @@ def shops_rule(
     end_user: bool = False,
     template_kind: str = ic_templates.SHOP,
     mixed: str = "",
+    track: str | None = None,
 ) -> str:
     """Which of the shops rules settles this burst without the model, else ''.
 
@@ -1183,17 +1185,24 @@ def shops_rule(
     tracks.first_yes of the chat's track, the opener for the studio or one-bedroom
     the lead asked about (MIXED_YES), "What are you looking for ...?", the shops'
     own rules for a shop chat, or nothing (the model) for a need the chat knows.
+
+    ``track``: the chat's track (tracks.decide, batch 2e). On the rent, sale and
+    not-known tracks (residential.live_track) only the rules of every track apply
+    (spam, the check-back, "Not now", the mixed template's yes): never the shops'
+    for-whom line, their second-shop no, nor a known end user's shop step (spec
+    §1.4.2). None: a caller that names no track, as before.
     """
     words = (text or "").strip()
     if quiet or not single or not words:
         return ""
+    shop_rules = track is None or not residential.live_track(track)
     if not tapped and not meeting_open and _discovery_facts(facts) < 2 and rules.looks_like_spam(words):
         return SPAM_RULE
     if followup_open:
         if rules.is_acceptance(words):
             return CHECK_BACK_YES
         return CHECK_BACK_NO if rules.is_refusal(words) else ""
-    if rented_open and (rules.is_refusal(words) or second_shop_no(words)):
+    if shop_rules and rented_open and (rules.is_refusal(words) or second_shop_no(words)):
         return RENTED_NO
     if ((tapped and not meeting_open) or not visit_on_table) and rules.is_not_now(words):
         return NOT_NOW
@@ -1202,6 +1211,8 @@ def shops_rule(
         and (rules.is_positive_tap(words) or rules.is_acceptance(words))
     ):
         return f"{MIXED_YES}:{mixed}" if mixed else ""
+    if not shop_rules:
+        return ""
     if first_answer and not for_client_known and (rules.is_positive_tap(words) or rules.is_acceptance(words)):
         return FOR_WHOM
     if first_answer and tapped and end_user and not meeting_open and rules.is_positive_tap(words):
@@ -1875,6 +1886,8 @@ def settle(
     shops_facts=None,
     office_address: str = "",
     crm_notes: str = "",
+    residential: bool = False,
+    residential_facts=None,
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
@@ -1900,6 +1913,9 @@ def settle(
     ``office_address``: our office's (a reply may give it as ours, never as a shop's). ``crm_notes``: the old lead's
     CRM notes as the context showed them, whose figures a shops reply never quotes (lead_history.drop_quoted); a
     location asked for gets code's invitation with ``slots`` when the reply has none (location_invitation).
+    ``residential``: a shops chat on the rent, sale or not-known track (batch 2e): none of the shops' own guards (the
+    business, SHOP FACTS' claims and table, the licence and discovery steps); its notes, budget, quoted CRM notes,
+    repeats (code's residential lines kept), slots and times as a shops chat's; residential.settle then cuts the rest.
     What is cut or rewritten in the reply is listed in ``answer["trimmed"]``, so
     its English gloss no longer holds; ``answer["broker"]`` asks _apply to label
     and pause the chat; ``answer["pointed"]`` says the reply now points to the
@@ -1920,7 +1936,20 @@ def settle(
     if written in ("ar", "ur", "hi") and answer["language"] != written:
         answer["language"] = written
     trimmed = []
-    if shops_chat and answer["reply"] and not answer.get("converted"):
+    if shops_chat and residential and answer["reply"] and not answer.get("converted"):
+        # The rent flow: the old lead's CRM notes are never quoted, as in a shops chat; the residential facts are ours.
+        from . import residential as res_facts
+
+        theirs = "\n".join(
+            [
+                *(text for author, text in earlier if author in ("customer", "campaign", "agent")), *(new_texts or []),
+                res_facts.facts_block("rent", "", (), residential_facts), res_facts.facts_block("sale", "", (), residential_facts),
+            ]
+        )
+        answer["reply"], quoted = lead_history.drop_quoted(answer["reply"], crm_notes, theirs)
+        if quoted:
+            trimmed.append(lead_history.QUOTED)
+    elif shops_chat and answer["reply"] and not answer.get("converted"):
         # Board T56: the prompt's old MATCH example ("For a mobile shop, Type 1 is perfect") went to
         # a vape shop. A recommendation names the customer's own business, or none (never a home: crm_facts).
         business = answer["facts"].get("business_activity") or (facts or {}).get("business_activity") or ""
@@ -1986,17 +2015,18 @@ def settle(
         # chat 114's second reply lost its "Sorry for the confusion.": people.is_apology).
         answer["reply"], repeated = filters.drop_repeats(
             answer["reply"], [text for author, text in earlier if author == "assistant"],
-            keep=lambda sentence: shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence),
+            keep=lambda sentence: shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence)
+            or (residential and _residential_line(sentence)),
         )
         if repeated:
             trimmed.append("repeat")
-    if shops_chat and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
+    if shops_chat and not residential and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
         answer, [text for author, text in earlier if author == "assistant"], new_texts, shop_facts
     ):
         # Launch review issue 16: the size and price table our messages gave already, said again unasked.
         trimmed.append(claims.TABLE)
     plain_shops = (
-        shops_chat and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
+        shops_chat and not residential and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
         and not answer["handover"]["needed"] and not agreed
     )
     if plain_shops and licence_first(answer, facts or {}, earlier, new_texts, now):
@@ -2125,6 +2155,7 @@ def ask_model(
     customer_script: str = "",
     name: str = "",
     need_segment: str = "",
+    residential: bool = False,
 ):
     """(answer, validated time, completions, rejection reason, still_invalid).
 
@@ -2149,7 +2180,9 @@ def ask_model(
     (script.has_script). ``need_segment``: a shops customer who wants no shop to rent
     (needs.py; said now, or known) is in this segment whenever the model says "other", so
     their booking is never _shape's "holding" (the owner's rule: they are invited and booked
-    like anyone).
+    like anyone). ``residential``: a rent, sale or not-known chat of the International City
+    campaign (batch 2e): RES_SCHEMA and its own prompt cache key (the caller passes RES_SYSTEM),
+    its segment forced by the track (``need_segment``).
 
     A slot another client has is offered around by code (``answer["slot_taken"]``,
     shops.slot_taken with ``alternatives``) when the answer keeps the visit
@@ -2160,15 +2193,18 @@ def ask_model(
     """
     codes = codes if codes is not None else []
     alternatives = alternatives if alternatives is not None else []
-    answer_schema = schema.schema_for(shops_chat)
-    cache_key = openai_client.SHOPS_CACHE_KEY if shops_chat else openai_client.CACHE_KEY
+    answer_schema = schema.schema_for(shops_chat, residential)
+    if residential:
+        cache_key = openai_client.RES_CACHE_KEY
+    else:
+        cache_key = openai_client.SHOPS_CACHE_KEY if shops_chat else openai_client.CACHE_KEY
     messages = [{"role": "system", "content": system}, {"role": "user", "content": context}]
     completions = []
     first = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
     completions.append(first)
 
     def shaped(data) -> dict:
-        normal = schema.normalize(data, shops=shops_chat)
+        normal = schema.normalize(data, shops=shops_chat, residential=residential)
         if need_segment and normal["segment"] == "other":
             normal["segment"] = need_segment
         return _shape(normal)
@@ -2212,7 +2248,7 @@ def ask_model(
             answer["script_fix"] = "failed"
             return answer
         completions.append(again)
-        fixed = schema.normalize(again.data, shops=shops_chat)
+        fixed = schema.normalize(again.data, shops=shops_chat, residential=residential)
         if fixed["send"] and fixed["reply"] and script.has_script(fixed["reply"], customer_script, name):
             answer["reply"], answer["reply_en"] = fixed["reply"], fixed["reply_en"]
             # The language its words are written in: an English-letter reply is never "ar".
@@ -2959,6 +2995,96 @@ def bare_need_reply(answer: dict, need, slots=(), *, invites: int = 0, misread: 
     return True
 
 
+# Batch 2e slice B: the rent flow on the engine's side (assistant/residential.py holds its facts, words and guards) ----------
+
+# The rule name of the rent flow's words before any model (shops_rule_name "res_rule:<kind>").
+RES_RULE = "res_rule"
+
+
+def _residential_line(sentence: str) -> bool:
+    return residential.is_fixed_line(sentence)
+
+
+def residential_plain(
+    said: str, now, *, words=(), agreed: bool = False, appointment_open: bool = False, handed_over: bool = False
+) -> bool:
+    """A burst code may answer with the rent flow's opener, with no model (spec §1.4.3): no question, no time or day, no
+    location or way asked, no wish to come, no call or person asked for, no complaint, no broker's words; no yes to our
+    invitation, no visit open, no person on the chat (live and in the eval). ``words``: the burst as engine.need_texts
+    reads it (``said`` when none)."""
+    return not (
+        agreed or appointment_open or handed_over or customer_asks(said, now) or wants_to_come(said, now) or people.asks_for_call(said)
+        or residential.needs_model(list(words) or [said])
+    )
+
+
+def residential_rule(
+    decision, facts, burst, said, heard, now, *, entered: bool, agreed: bool = False, appointment_open: bool = False,
+    handed_over: bool = False, ours: int = 0, closed_dates=(), taken=(), talked_shops: bool = False,
+) -> dict | None:
+    """The rent flow's words before any model, else None (residential.pre_model_rule, with the burst read as the engine
+    reads it): a voice note nobody could hear, an ID, IBAN or card number typed, the opener of a track just entered, the
+    neutral invitation after a second unclear answer on the not-known track."""
+    items = said or burst
+    words = need_texts(items, heard)
+    joined = " ".join(transcript.inbound_text(item, (heard or {}).get(item.pk)) for item in items)
+    typed = [item.body or "" for item in items if item.kind == "text"]
+    unheard = bool(items) and all(item.kind == "audio" and not (heard or {}).get(item.pk) for item in items)
+    plain = residential_plain(joined, now, words=words, agreed=agreed, appointment_open=appointment_open, handed_over=handed_over)
+    return residential.pre_model_rule(
+        decision, facts, words=words, typed=typed, unheard=unheard and not handed_over, entered=entered, plain=plain, ours=ours,
+        slots=lambda: hours.offer_pair(now, closed_dates, taken), handed_over=handed_over, talked_shops=talked_shops,
+    )
+
+
+def residential_switch(answer: dict, before, after, facts: dict, texts, said: str, now, closed_dates=(), taken=(), invites: int = 0) -> str:
+    """The model's tag moved a residential chat to another track (spec §1.4.5, §1.5): the new track's words are code's.
+    A shop: "Sure! We have shops in International City too." with the shops' for-whom question, or the shop types list
+    once we know who it is for; anything else: 2d's office invitation (_not_a_shop_line) with the want recorded; a rent or
+    sale track: its opener. Never with a handover of the model's (residential.settle answers that). Returns what it did."""
+    if after is None or before is None or after.track == before.track or answer["handover"]["needed"] or answer["opt_out"] != "none":
+        return ""
+    if answer.get("broker"):
+        return ""
+    known = {**(facts or {}), **{key: value for key, value in answer["facts"].items() if value not in (None, "", [])}}
+    for_client_known = known.get("for_client") is not None
+    answer["appointment"] = dict(NO_TIME)
+    if after.track == tracks.SHOP:
+        if for_client_known:
+            answer["shop_step"] = {"kind": shop_flow.LIST}
+            answer["step_words"] = residential.switch_shop_text(answer["language"], ask_for_whom=False)
+            answer["converted"] = "res_switch_shop"
+            answer.pop("res_line", None)
+        else:
+            residential.code_line({"kind": "res_switch_shop", "ask_for_whom": True}, answer)
+        return "shop"
+    if after.track == tracks.OTHER:
+        need = needs.detect(texts) or needs.from_reason("wrong_need", answer["facts"]) or needs.Need(needs.OTHER)
+        answer["facts"][needs.NEED] = need.kind
+        answer["facts"][needs.WANTED] = needs.summary(need, known)
+        answer["need_words"] = " ".join(str(text or "") for text in texts or ())[:200]
+        slots = shops.yes_slots(said, "", now, closed_dates, taken)
+        _not_a_shop_line(answer, need, () if invites >= NOT_A_SHOP_INVITES else slots, sorry=False, ask=invites < NOT_A_SHOP_INVITES)
+        return "other"
+    if after.track in (tracks.RENT, tracks.SALE):
+        residential.code_line(residential.opener_spec(after, known, sorry=after.sorry), answer)
+        return after.track
+    return ""
+
+
+def residential_slots_step(answer: dict) -> dict | None:
+    """The rent flow's only step: code's two free slots for a confirm of a time nobody named (unasked_confirm) or a plain
+    yes to our nudge (nudge_yes), as model_step sends them in a shops chat; never a shop step."""
+    unasked = answer.get("unasked") or answer.get("nudge_yes")
+    if not unasked or answer["opt_out"] != "none" or answer["handover"]["needed"] or answer.get("converted"):
+        return None
+    step = {"kind": shop_flow.SLOTS, "slots": list(unasked["slots"])}
+    if unasked.get("again"):
+        step["again"] = True
+    answer["shop_step"] = step
+    return step
+
+
 def asked_location(text: str, asked: str, office_address: str, maps_url: str = "") -> str:
     """What code's own slots (shop_flow.slots_text) go out with when the customer asked for the
     location in the same burst ("Yes please, send me the location"): the Maps link, else the
@@ -3055,8 +3181,12 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "", re
     opt = _burst_opt_out(burst, meeting_open=_open_appointment(conversation) is not None, shops_chat=playbook == lane.IC_SHOPS)
     if opt and playbook == lane.IC_SHOPS and not_lost_for(opt, need_texts(_said(burst) or burst)):
         opt = None  # they want something else: never lost or junk (who_they_are answers them)
+    deletion = False
+    if not opt and playbook == lane.IC_SHOPS and residential.RENT_LIVE and residential.asks_deletion(" ".join(need_texts(_said(burst) or burst))):
+        # "Delete my data" (PDPL, batch 2e spec §6.3): a stop on every number, res_deleted, and the admins told.
+        opt, deletion = rules.STOP_ALL, True
     if opt:
-        return _rule_opt_out(message, conversation, chat, state, settings_row, burst, opt, playbook=playbook)
+        return _rule_opt_out(message, conversation, chat, state, settings_row, burst, opt, playbook=playbook, deletion=deletion)
 
     if not answers:
         return _skip("assistant switched off")
@@ -3262,9 +3392,13 @@ def _send(conversation, text: str, turn, extra: dict | None = None):
 # Opt-outs ------------------------------------------------------------------------------
 
 
-def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind: str, *, playbook: str = lane.GENERAL) -> Outcome:
+def _rule_opt_out(
+    message, conversation, chat, state, settings_row, burst, kind: str, *, playbook: str = lane.GENERAL, deletion: bool = False,
+) -> Outcome:
     """A STOP, wrong number or "not interested" found by code: recorded whatever the
-    assistant's state; the polite line only when the assistant may speak now."""
+    assistant's state; the polite line only when the assistant may speak now.
+    ``deletion``: they asked us to delete their data (batch 2e, PDPL): a stop on every
+    number, the admins alerted (data_deletion), and res_deleted as the line."""
     turn = _claim(message)
     if turn is None:
         return _skip("already handled")
@@ -3272,8 +3406,13 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
     # reminder or later reply reaches them, but nobody is alerted about a chat
     # the assistant is not part of.
     answers = settings_row.answers(conversation.contact.wa_id)
-    recorded = record_opt_out(conversation, kind, by="rule", quiet=not answers, words=_their_words(burst), playbook=playbook)
-    actions = {"opt_out": kind, "by": "rule"}
+    if deletion:
+        _deletion_alert(conversation, chat, _their_words(burst))
+    recorded = record_opt_out(
+        conversation, kind, by="rule", quiet=not answers, words=_their_words(burst), playbook=playbook,
+        reason="asked to delete their data" if deletion else "",
+    )
+    actions = {"opt_out": kind, "by": "rule", **({"deletion": True} if deletion else {})}
     if not recorded:
         return _finish(turn, Outcome(LeadAiTurn.Status.SKIPPED, f"opt-out ({kind}) already recorded", actions=actions))
     campaign_templates = transcript.campaign_template_ids(conversation)
@@ -3291,7 +3430,8 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
     # The line follows the script they type in ("توقف" after an English chat is answered in Arabic; T19).
     language = script.follow(language, script.customer_script([item.body or "" for item in burst if item.kind == "text"]))
     try:
-        sent = _send(conversation, rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS), turn)
+        words_out = residential.line("res_deleted", language) if deletion else rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS)
+        sent = _send(conversation, words_out, turn)
     except SoftTimeLimitExceeded:
         raise
     except Exception as exc:  # noqa: BLE001 - the opt-out is recorded either way
@@ -3303,8 +3443,31 @@ def _rule_opt_out(message, conversation, chat, state, settings_row, burst, kind:
 STOP_KINDS = (rules.STOP_ALL, rules.WRONG_NUMBER, rules.SPAM)
 
 
+def _deletion_alert(conversation, chat, words: str) -> None:
+    """A customer asked us to delete their data (PDPL, batch 2e spec §6.3): the panel admins hear it (data_deletion), so a
+    person deletes their details from the CRM and the inbox; the assistant has stopped on every number."""
+    who = _who(conversation)
+    lines = [
+        f"{who} (WhatsApp +{conversation.contact.wa_id}) asked us to delete their data.",
+        people.words_line(residential.mask(words)),
+        "The assistant stopped in this chat and the phone is on the opt-out registry: no campaign on any number reaches it. "
+        "Please delete their details from Bitrix and the inbox as the company's process requires.",
+    ]
+    alerts.raise_alert(
+        kind="data_deletion",
+        conversation=conversation,
+        priority="high",
+        title=f"{who} asked us to delete their data"[:200],
+        text="\n".join(line for line in lines if line),
+        dedupe_key=f"data_deletion:{conversation.pk}",
+        crm_url=_crm_url(chat),
+        admins=True,
+    )
+
+
 def record_opt_out(
-    conversation, kind: str, *, by: str, quiet: bool = False, words: str = "", playbook: str | None = None, reason: str = ""
+    conversation, kind: str, *, by: str, quiet: bool = False, words: str = "", playbook: str | None = None, reason: str = "",
+    lost_ok: bool = False,
 ) -> bool:
     """Record a customer's opt-out once; True only the first time. Sends nothing.
 
@@ -3373,7 +3536,9 @@ def record_opt_out(
         # always; the lead moves to its lost stage only when nobody works it and it has no open to-do (assistant/lost.py,
         # decided when the rows are posted: launch review issue 1).
         writes = crm_fields.opt_out_writes(kind, reason or words)
-        if kind == rules.NOT_INTERESTED and needs.NEVER_LOST and needs.wants_no_shop(state.facts):
+        # The rent and sale tracks follow the shops' lost rule (Q10, batch 2e): their no is Lost like a shop customer's.
+        residential_no = lost_ok or (residential.RENT_LIVE and state.track in (tracks.RENT, tracks.SALE))
+        if kind == rules.NOT_INTERESTED and needs.NEVER_LOST and needs.wants_no_shop(state.facts) and not residential_no:
             # The owner's rule (2026-10-15): a customer who wants no shop to rent is never Lost. Their no
             # stops the invitations here; the lead stays open in Bitrix for the team's other options. Read as the
             # follow-ups read it (needs.wants_no_shop: facts.need, or intent buy or sell, or a home as property_type):
@@ -3471,12 +3636,16 @@ def _opt_out(turn, conversation, chat, state, kind: str, language: str, answer: 
     sent = None
     if kind != rules.SPAM:
         try:
-            sent = _send(conversation, rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS), turn)
+            # The rent flow's own words for a place rented elsewhere (residential.settle: res_already_rented).
+            words_out = residential.line(answer["opt_out_line"], language) if answer.get("opt_out_line") else ""
+            sent = _send(conversation, words_out or rules.line_for(kind, language, shops=playbook == lane.IC_SHOPS), turn)
         except SoftTimeLimitExceeded:
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("Lead AI opt-out line failed on conversation %s: %s", conversation.pk, exc)
-    record_opt_out(conversation, kind, by=by, words=words, playbook=playbook, reason=answer.get("lost_reason") or "")
+    record_opt_out(
+        conversation, kind, by=by, words=words, playbook=playbook, reason=answer.get("lost_reason") or "", lost_ok=bool(answer.get("lost_ok"))
+    )
     actions = {"opt_out": kind, "by": by}
     if answer.get("rule"):
         actions["rule"] = answer["rule"]
@@ -3694,6 +3863,7 @@ def _shops_rule_for(
         end_user=facts.get("for_client") is False,
         template_kind=template_kind,
         mixed=mixed,
+        track=decision.track if decision is not None else None,
     )
     return rule, shops_language(text, tapped, state.language), _their_words(burst)
 
@@ -3843,6 +4013,25 @@ def _run_claimed(
             conversation, state, burst, said, appointment, last_ours, campaign_templates,
             licence_alone=licence_alone, licence_reply=licence_reply, template_kind=template_kind, decision=decision,
         )
+    # Batch 2e slice B, the rent flow (assistant/residential.py): a rent, sale or not-known chat takes the residential path,
+    # with its own rules before the model (residential_rule), prompt, schema, context, guards, full-name gate and lines.
+    res = shops_chat and decision is not None and residential.live_track(decision.track)
+    res_decision = decision  # the track the residential path was chosen for (the model's tag may move it: res_switch)
+    res_spec = None  # the rent flow's words before any model (residential_rule)
+    if res and not shops_rule_name and not licence_reply:
+        ours_sent = sum(1 for row in rows if row.direction == Message.Direction.OUTBOUND and transcript.who(row, campaign_templates) == "assistant")
+        spec = residential_rule(
+            decision, facts, burst, said, heard, now, entered=(state.track or "") != decision.track,
+            agreed=agreed, appointment_open=appointment is not None, handed_over=state.handed_over_at is not None,
+            ours=ours_sent, closed_dates=settings_row.closed_dates, taken=taken,
+            # We talked shops to them already (a shops template's chat with a reply of ours): the opener apologises.
+            talked_shops=template_kind == ic_templates.SHOP and (state.track or "") in ("", tracks.SHOP) and ours_sent > 0,
+        )
+        if spec:
+            shops_rule_name = f"{RES_RULE}:{spec['kind']}"
+            rule_language = shops_language(_their_words(burst, heard), False, state.language)
+            shops_words = _their_words(burst, heard)
+            res_spec = spec
     deferred = "" if shops_rule_name or licence_reply else deferral(
         [(item.body or "") if item.kind == "text" else "" for item in said],
         appointment=appointment,
@@ -3851,7 +4040,12 @@ def _run_claimed(
         # A person has the chat, they declined, or they are no customer of ours.
         quiet=state.handed_over_at is not None or state.not_interested_at is not None or segment == "other",
     )
-    if shops_rule_name:
+    if shops_rule_name.startswith(f"{RES_RULE}:"):
+        # The rent flow's own words before any model (residential_rule): an opener, a document or voice-note line, the
+        # neutral invitation; shaped like the model's answer, so the same path sends and stores it.
+        answer = residential.rule_answer(res_spec, rule_language, decision, facts=facts, words=words_now)
+        when, completions, rejected, still_invalid = None, [], "", False
+    elif shops_rule_name:
         # The shops playbook's fixed words (the yes, "Not now", the check-back's
         # answer, a no after "already rented"), and its steps (a tap on the shop
         # types list or a type's card, the licence copy arriving): settled like a
@@ -3882,6 +4076,14 @@ def _run_claimed(
         # a failure leaves them out and never stops the turn.
         history = lead_history.lines(*lead_history.for_turn(conversation, chat, state, now)) if shops_chat else []
         greeted = _customer_name(conversation, facts)
+        res_context = None
+        if res:
+            # The rent flow's block (spec §2.3): the lead context is read for it (once per chat, lead_context.for_turn).
+            lead_now = track_inputs["lead"].get()
+            res_context = residential.context(
+                settings_row, decision.track, decision.unit, decision.clusters, now, taken, lead=lead_now,
+                full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment),
+            )
         context = prompt.context_message(
             now=now,
             closed_dates=settings_row.closed_dates,
@@ -3900,10 +4102,11 @@ def _run_claimed(
             new_lines=[transcript.line(item, campaign_templates, heard.get(item.pk)) for item in burst],
             map_link=bool(settings_row.office_maps_url),
             location_sent=location,
-            shops=shops.context(settings_row, facts, now, taken, history=history) if shops_chat else None,
+            shops=shops.context(settings_row, facts, now, taken, history=history) if shops_chat and not res else None,
+            residential=res_context,
         )
         answer, when, completions, rejected, still_invalid = ask_model(
-            prompt.system_prompt(playbook),
+            prompt.system_prompt(playbook, residential=res),
             context,
             appointment,
             now,
@@ -3919,13 +4122,15 @@ def _run_claimed(
             # While a person has the chat the model's words never go out (the holding line does).
             customer_script=customer_script if state.handed_over_at is None else "",
             name=greeted,
-            need_segment=needs.SEGMENTS[need_seen.kind] if need_seen is not None else "",
+            need_segment=residential.segment_of(decision.track) if res else (needs.SEGMENTS[need_seen.kind] if need_seen is not None else ""),
+            residential=res,
         )
         if (licence_media is not None or licence_page) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
             answer["handover"] = {"needed": False, "reason": None}  # the photo is the licence we asked for
         if shops_chat:
-            # A customer who wants no shop to rent is tagged, never handed over (the owner's rule).
-            need = untag_need(answer, facts, words_now)
+            # A customer who wants no shop to rent is tagged, never handed over (the owner's rule). Not on the residential
+            # path: its handovers are the rent flow's own (residential.settle), and its need tag is never one.
+            need = untag_need(answer, facts, words_now) if not res else None
             # A broker is never served as an end user (Q11; the launch gate's eval shops-broker: facts.for_client true and
             # no handover): handed over as the model's own tag would be, before anything else reads the answer. Not in a
             # chat that carries the Broker label already (Resume AI): one query, asked only when it would act. In a chat a
@@ -3939,6 +4144,11 @@ def _run_claimed(
             decision = tracks.decide(
                 words=words_now, facts=facts, model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **track_inputs
             )
+            if res and residential_switch(
+                answer, res_decision, decision, facts, words_now, said_words, now, settings_row.closed_dates, taken, state.invites,
+            ):
+                # The model's tag moved the chat (spec §1.4.5): the new track's words are code's, and no time of the model's.
+                when, still_invalid = None, False
         if shops_chat and not still_invalid:
             # Their own exact day and hour, which the model confirmed at another time ("4:30 PM today is fine" booked at 4:00 PM).
             mine = own_time(
@@ -4027,7 +4237,19 @@ def _run_claimed(
         office_address=settings_row.office_address,
         # The old lead's notes as the context showed them (lead_history.for_turn keeps them on the state).
         crm_notes=(state.lead_notes or "") if shops_chat else "",
+        residential=res,
+        residential_facts=settings_row.residential_facts,
     )
+    if res and not shops_rule_name and not deferred:
+        # The rent flow's guards (spec §2.9, hook point 7): figures by unit and deal, code's commission and VAT lines, no
+        # shop words, no availability or booking claimed, no document asks, no screening; and its special cases' lines.
+        res_cut = residential.settle(
+            answer, earlier, [transcript.inbound_text(item, heard.get(item.pk)) for item in burst], track=decision.track,
+            unit=decision.unit, clusters=decision.clusters, facts=facts, residential_facts=settings_row.residential_facts,
+            shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid,
+        )
+        # 2d's facts.need and facts.wanted stay set on the rent and sale tracks (followups.holds, the nudges, panel_note).
+        residential.record_need(answer, facts, decision, words_now)
     if licence_media is not None:
         answer["licence"] = "received"
         answer["licence_media"] = licence_media
@@ -4037,7 +4259,7 @@ def _run_claimed(
     who = ""
     need_slots = ()
     misread = False
-    if shops_chat and not shops_rule_name and not deferred:
+    if shops_chat and not res and not shops_rule_name and not deferred:
         # Who the customer is: someone who wants no shop to rent gets the owner's line (never the shop
         # list, never lost), someone who rented one already the second-shop question (who_they_are).
         wants = need is not None or needs.of(facts) is not None
@@ -4058,10 +4280,12 @@ def _run_claimed(
         # person before any visit; no reply sends them to chase a colleague. Live and in the eval.
         acted = people.settle(
             answer, words_now, said_words, shops_chat=shops_chat, when=when, still_invalid=still_invalid,
-            quiet=state.handed_over_at is not None, need=need or (needs.of({**facts, **answer["facts"]}) if shops_chat else None),
+            quiet=state.handed_over_at is not None,
+            # The residential path sets a need, so its charge questions are answered, never handed over (spec §1.4.7).
+            need=need or (needs.of({**facts, **answer["facts"]}) if shops_chat else None) or (residential.RES_NEED if res else None),
             now=now,
         )
-    if shops_chat and not shops_rule_name and not deferred and bare_need_reply(
+    if shops_chat and not res and not shops_rule_name and not deferred and bare_need_reply(
         # The chat's want as this turn leaves it (who_they_are wrote it when it replaced the one known), else the one said now.
         answer, needs.of({**facts, **answer["facts"]}) or need, need_slots, invites=state.invites, misread=misread,
         plain=not (state.handed_over_at is not None or when is not None or still_invalid or appointment is not None),
@@ -4069,7 +4293,7 @@ def _run_claimed(
         # The cuts left them an apology or nothing (review 2d: chat 114's "Sorry for the confusion."): the owner's line.
         who = WHO_NOT_A_SHOP
     priced = tapped = ""
-    if shops_chat and not shops_rule_name and not deferred:
+    if shops_chat and not res and not shops_rule_name and not deferred:
         # The price (launch review issue 12): a price objection, or a budget below our lowest, gets code's honest line.
         priced = claims.price_turn(
             answer, words_now, facts, our_last=our_last, sent=[text for author, text in earlier if author == "assistant"],
@@ -4084,7 +4308,10 @@ def _run_claimed(
             media_recent=_media_recent(conversation, now), media_today=_media_today(conversation, now),
             closed_dates=settings_row.closed_dates, taken=taken,
         )
-    if shops_chat and not answer.get("shop_step") and not shops_rule_name and not deferred:
+    if res and not answer.get("shop_step") and not shops_rule_name and not deferred:
+        # The rent flow takes no shop step: only code's two free slots for a time nobody named (unasked_confirm, nudge_yes).
+        residential_slots_step(answer)
+    elif shops_chat and not answer.get("shop_step") and not shops_rule_name and not deferred:
         # The shops list, a type's media or the licence request, in place of the model's words (shop_flow),
         # or the two free slots for a time nobody named (unasked_confirm).
         model_step(
@@ -4170,8 +4397,11 @@ def _run_claimed(
         plan["broker_backstop"] = brokered  # a broker the model served as an end user, handed over by code (brokers.py)
     if decision is not None:
         plan["track"] = decision.as_dict()  # the chat's track and unit as code decided them (batch 2e, tracks.py; shadow)
-    # Their words, for the alerts a person must act on (a handover, a chase, a call's time).
-    answer["their_words"] = _their_words(burst, heard)
+    # Their words, for the alerts a person must act on (a handover, a chase, a call's time); in a shops chat an Emirates ID,
+    # an IBAN or a card number in them is masked (PDPL, batch 2e spec §6.3), and so it is in the facts this turn stores.
+    answer["their_words"] = residential.mask(_their_words(burst, heard)) if shops_chat else _their_words(burst, heard)
+    if shops_chat and isinstance(answer.get("facts"), dict):
+        residential.mask_facts(answer["facts"])
     # Lines code writes follow the script the customer types in (T19): "توقف" or a booking
     # after an English chat gets Arabic words, and a booking after "ان شاء الله" in an English
     # chat English ones, whatever language the model named.
@@ -4236,6 +4466,22 @@ def _run_claimed(
 
     # What happens, and the words ---------------------------------------------------------
     language = line_language
+    # The rent and sale tracks book under the customer's full name (spec §2.6): their words, the lead's NAME and LAST_NAME,
+    # or a bare name right after our ask; a time held for it is booked once it comes, and a no keeps it for our agent.
+    res_book = res and decision is not None and decision.track in (tracks.RENT, tracks.SALE)
+    full_name = ""
+    if res_book:
+        name_step = residential.name_turn(
+            answer, facts, track_inputs["lead"].get(), held=residential.held_of(appointment),
+            asked=last_ours is not None and transcript.payload(last_ours).get("res_step") == residential.FULL_NAME_STEP,
+            texts=words_now, said=said_words, when=when, still_invalid=still_invalid, rule=bool(shops_rule_name or deferred), now=now,
+            closed_dates=settings_row.closed_dates, taken=taken,
+        )
+        full_name = name_step.full_name
+        if name_step.when is not None:
+            when = name_step.when
+        if name_step.kind:
+            plan["full_name"] = name_step.kind
     action = effective_action(answer["appointment"]["action"], appointment)
     if action == "reschedule" and when is not None and confirmed and appointment.starts_at == when:
         action = "reconfirm"  # the time already booked: said again, nothing moves
@@ -4243,6 +4489,12 @@ def _run_claimed(
         action = "reschedule_requested"
     elif action == "running_late" and when is not None and confirmed and appointment.starts_at == when:
         action = "on_time"
+    if res_book and action == "confirm" and when is not None and not full_name:
+        # A booking with no full name is none (brief Part 5, step 5): the time is held as a tentative, so no other chat takes
+        # it, and code asks for the name. Before _slot_gone: nothing is booked yet.
+        residential.hold_for_name(answer, when)
+        plan["full_name"] = "asked"
+        when, action = None, "tentative"
     if action in ("confirm", "reschedule") and when is not None:
         # One client per slot, looked at again under the office lock (held until the
         # booking is stored): another chat may have booked it while the model thought.
@@ -4260,7 +4512,10 @@ def _run_claimed(
     merged = _merge_facts(facts, answer["facts"])
     name = _customer_name(conversation, merged)
     rows_context = _context_words(rows, campaign_msg, burst, heard, facts, campaign_templates)
-    if shops_chat:
+    if res:
+        # A residential reply may quote that track's and unit's figures only (spec §2.9.1).
+        rows_context = f"{rows_context} {residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters)}"
+    elif shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
     maps = settings_row.office_maps_url
@@ -4274,10 +4529,18 @@ def _run_claimed(
     media_files = True  # False: its card alone (its files went out today)
     list_step = False  # the shop types list goes out instead of a text
     step_marker = ""  # a shops step our message is (payload "shop_step"), read back by a later turn
+    res_step = ""  # the rent flow's step our message is (payload "res_step": the full-name ask), read back by the next turn
     model_words = False  # the model's own words go out (not a line code writes)
     pin_now = False  # our office's pin follows the reply (a booking, or the not-a-shop line)
 
     def booking_text(rescheduled: bool) -> str:
+        if res_book:
+            # The rent viewing's (or the sale office meeting's) confirmation, under their full name (spec §2.7).
+            return residential.confirmation(
+                language, when, kind=residential.VISIT, full_name=full_name or residential.full_name_known(merged, track_inputs["lead"].get()),
+                unit=decision.unit, clusters=decision.clusters, office_address=settings_row.office_address, maps_url=maps,
+                track=decision.track, rescheduled=rescheduled,
+            )
         if shops_chat and needs.of(merged) is None:
             # The build pack's confirmation: date, time, shop type, place, who they meet, what to bring.
             return shops.confirmation(
@@ -4386,6 +4649,21 @@ def _run_claimed(
         # The mixed template's first yes from a lead whose studio or one-bedroom we know (batch 2e, tracks.first_yes):
         # code's opener, in the language code writes in.
         text = tracks.open_lead_text(language, answer["open_lead"].get("unit", ""), answer["open_lead"].get("clusters") or ())
+    elif answer.get("res_line"):
+        # The rent flow's lines (residential.render): an opener, the full-name ask or hold, the handover, a special case's.
+        spec = answer["res_line"]
+        text = residential.render(
+            spec, language, now=now, office_address=settings_row.office_address, maps_url=maps, facts=settings_row.residential_facts,
+        )
+        if spec.get("kind") == "res_full_name":
+            res_step = residential.FULL_NAME_STEP
+        holding = spec.get("kind") == "res_handover"
+        if spec.get("location") and not location:
+            if maps and maps not in text:
+                appended = maps
+            elif not maps and not filters.carries_location(text, settings_row.office_address):
+                appended = settings_row.office_address
+            pin_now = needs.SEND_PIN
     elif answer.get("converted"):
         # A fixed line, never the model's words: a confirmation the office could
         # not take (_shape, written as a confirmation), a deferral, a shops broker,
@@ -4429,7 +4707,13 @@ def _run_claimed(
                 plan["invited_to_meeting"] = True
     else:
         if answer["send"]:
-            text, filtered = filters.clean_reply(answer["reply"], rows_context)
+            if res:
+                # Two questions at most on the rent and sale tracks, and amounts checked from 100 up (spec §1.4.9).
+                text, filtered = filters.clean_reply(
+                    answer["reply"], rows_context, max_questions=residential.max_questions(decision.track), amount_floor=residential.AMOUNT_FLOOR,
+                )
+            else:
+                text, filtered = filters.clean_reply(answer["reply"], rows_context)
             model_words = bool(text)
             gloss = bool(text) and not filtered and not answer.get("trimmed")
             if filtered:
@@ -4521,6 +4805,8 @@ def _run_claimed(
             extra["booking"] = booking
         if step_marker:
             extra["shop_step"] = step_marker
+        if res_step:
+            extra["res_step"] = res_step
         if list_step:
             from .. import shop_media
 
@@ -4820,7 +5106,8 @@ def _apply(
                 current.starts_at = start
                 current.customer_name = name[:200]
                 current.mobile = conversation.contact.wa_id[:32]
-                current.details = _details(facts)
+                # A time held for the full name keeps its marks while it stays a tentative (residential.held_details).
+                current.details = {**_details(facts), **(residential.held_details(current.details) if not is_new else {})}
                 current.log("tentative", note=note, place=place, start=start.isoformat() if start else None)
                 current.save()
                 crm_event = "tentative"
@@ -4879,8 +5166,16 @@ def _apply(
             if {k: v for k, v in _details(facts).items() if k in keys} != {
                 k: v for k, v in (current.details or {}).items() if k in keys
             }:
-                current.details = _details(facts)
+                current.details = {**_details(facts), **residential.held_details(current.details)}
                 current.save(update_fields=["details", "updated_at"])
+        if shops_chat and current is not None and current.pk and current.status == LeadAiAppointment.Status.TENTATIVE:
+            # The rent flow's full-name hold (spec §2.6): the tentative that keeps their time from other chats, how often we
+            # asked, and their no (the team is alerted: Needs a person on the Lead AI screen until the hold lapses).
+            if residential.mark_hold(current, answer, now, sent=sent):
+                current.save(update_fields=["details", "updated_at"])
+                if answer.get("name_refused"):
+                    done["name_refused"] = True
+                    _name_hold_alert(conversation, chat, current, name, facts)
 
         hot = bool(
             crm_event == "confirmed"
@@ -5275,6 +5570,29 @@ def _handover_alert(
         title=f"{who}: {HANDOVER_TEXT.get(reason, 'needs a person')}",
         text="\n".join(lines),
         dedupe_key=f"handover:{conversation.pk}:{moment}",
+        crm_url=_crm_url(chat),
+    )
+
+
+def _name_hold_alert(conversation, chat, appointment, name: str, facts: dict) -> None:
+    """A rent or sale customer wants a time and will not give their full name (spec §2.6): no booking, the time is held,
+    and a person confirms it with them (high priority, the chat's people and the Lead AI alert list)."""
+    who = name or "A Lead AI customer"
+    when = hours.describe(appointment.starts_at) if appointment.starts_at else "a time"
+    lines = [
+        f"{who} (WhatsApp +{conversation.contact.wa_id}) wants {when} and gave no full name, so the assistant did not book it.",
+        *people.where_lines(conversation, chat),
+        *_detail_lines(facts),
+        "The time is held for them (no other chat can take it) until the hold lapses. Please confirm it with them in the chat.",
+    ]
+    alerts.raise_alert(
+        kind="tentative",
+        conversation=conversation,
+        appointment=appointment,
+        priority="high",
+        title=f"{who} wants {when}: no full name yet"[:200],
+        text="\n".join(line for line in lines if line),
+        dedupe_key=f"name_hold:{conversation.pk}:{appointment.pk}",
         crm_url=_crm_url(chat),
     )
 

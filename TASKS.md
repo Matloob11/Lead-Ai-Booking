@@ -1,3 +1,41 @@
+## 2026-10-17 — Lead AI batch 2e slice B: the rent flow (Claude Code)
+
+Branch `leadai-2e` in the worktree `a7-2e-worktree`, on slice A (d9155bc). RENT lane of the parallel 2e build. Committed in the worktree only: not merged, not pushed, not deployed.
+
+- **`assistant/residential.py`** (new):
+  - the residential facts as spec §2.2 has them: `validate`, `facts_of`, the bands (studio rent AED 29,000–33,000, average 31,000 per Q41; the European one-bedroom band; Morocco's studio sale band), the charges, `known_amounts`;
+  - code's lines in six languages: the openers (`res_open_rent`, `res_open_sale`, `res_open_lead`), `confirmation(kind="visit"|"call")`, our rental or sales team's handover line, the commission and VAT lines;
+  - the full-name gate: a booking with no full name holds the time and asks; the name books it; a refusal keeps the hold for our agent with an alert; an unanswered hold lapses after 30 minutes;
+  - PDPL: an Emirates ID, IBAN or card number is masked and answered with `res_no_documents`; "delete my data" stops every number and alerts the admins;
+  - `settle` with spec §2.9's guards: figures by unit and deal, commission and VAT only in code's words, no shop words, no unit ever "available", no "booked/sent" claim, no document or bank ask, no screening, at most two questions, amounts checked from 100 up.
+- **Special cases:** paying now gets the official process and a handover; nobody's phone number is ever given (Q38: our team replies in this chat, with the office address and Maps link); "already rented" is Lost "rented elsewhere"; a request for a call is never turned into a handover.
+- **Prompt and schema:** `RES_SYSTEM` with the rent and sale sections as the spec words them, `RES_SCHEMA` with `need_tag`, cache key `leadai-res-v1`, `prompt.residential_lines`.
+- **Engine:** one named call per hook in `engine.py` (`residential_rule`, `residential_switch`, `residential_slots_step`, `residential.settle`, `residential.name_turn`, `residential.hold_for_name`, `_name_hold_alert`, `_deletion_alert`). The shops-only rules (rented-no, for-whom, the tap steps) stay on the shop track. `RENT_LIVE` is the kill switch.
+- **Panel:** `lead-ai/residential.js` adds the fieldset "International City — studios and one-bedrooms" to AI settings, and a read-only section for anyone who cannot edit. There are no agent fields (Q30). Styles are `lai-res-` in `lead-ai.css`, and `screen.js` gets one-line hooks beside the shops ones.
+- **Tests:** 79 new tests (`test_residential.py` 43, `test_residential_turns.py` 36). 17 tests from 2d are pinned with `RENT_LIVE` off: they test the shops answer to a studio seeker, which is now the rent flow. The eval mirrors the engine, with 36 new `shops-res-*` scenarios and 17 launch scenarios re-routed to the rent opener.
+- **No migration:** `residential_facts` is slice A's 0008, and the hold's marks live in the appointment's `details`.
+
+**Proof:**
+- Full local suite: 1586 tests OK (SQLite; `apps.leadai apps.crmlink`).
+- Every guard switched off fails its test: 32 of 32 (scratchpad `rent_guards_off.py`).
+- `makemigrations --check`: No changes detected.
+- Panel: 35 checks pass in headless Chromium (untouched form sends nothing, an edit sends the whole object, error routing, markup shown as text), and the payload it sends passes the server's `residential.validate` with no errors.
+
+**Not tested:**
+- the real-model eval: `RES_SYSTEM` has never been sent to the model;
+- PostgreSQL, the live server, Bitrix and WhatsApp;
+- the panel inside Bitrix.
+
+**Left for the merge or other lanes:**
+- alert title prefixes (DESK, T100), `crm.DETAIL_LABELS`, and wiring `residential.summary_lines` into alerts;
+- the C40 Bitrix to-do on a deletion request;
+- a check-back yes sending the mixed template;
+- the sale flows (SALE).
+
+**Shared:** `engine.py`, `filters.py`, `schema.py`, `prompt.py`, `openai_client.py`, `views.py`, `tasks.py`, `leadai_eval.py`, `test_eval_command.py`, five 2d test files, `screen.js`, `lead-ai.css`, TASKS.md. A deploy rebuilds all four app services, `worker-leadai` included.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
 
 - **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.

@@ -38,6 +38,7 @@ from apps.campaigns.models import CampaignRecipient
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai import bitrix_status, followups, lane, optout, tasks
 from apps.leadai.assistant import crm, crm_facts, crm_fields, engine, filters, hours, lost, needs, people, rules
+from apps.leadai.assistant import residential
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import LeadAiAlert, LeadAiChat, LeadAiChatState, LeadAiCrmField, LeadAiSettings, LeadAiTurn
 from apps.leadai.tests.test_assistant import NOW, _outbound, fake_send_text
@@ -95,6 +96,7 @@ class PinIsNoLastWordTests(ReviewBase):
         self.assertEqual(self.outbound()[-1][0], Message.Kind.LOCATION)  # the pin is the newest message of ours
         return outcome
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_136_ok_to_the_owners_line_is_answered(self):
         self.owners_line_136()
         for word in ("OK", "Sure", "theek hai"):
@@ -105,6 +107,7 @@ class PinIsNoLastWordTests(ReviewBase):
                 self.assertEqual(outcome.reason, "")  # live: "an acknowledgement needs no answer", and nothing more ever went
                 self.assertEqual(len(calls), 1)
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_an_ok_to_a_booking_and_its_pin_still_needs_no_answer(self):
         self.set_state(facts={"need": "home", "wanted": "a studio", "property_type": "studio"}, invites=1)
         self.ours(f"{THANKS} We have many options for a studio across Dubai. {VISIT} {TWO_SLOTS_NOW}", minutes_ago=5)
@@ -115,6 +118,7 @@ class PinIsNoLastWordTests(ReviewBase):
         outcome, calls, _, _ = self.turn(self.inbound("ok", seconds_ago=20), [shop_answer("See you!")])
         self.assertEqual((outcome.reason, calls), ("an acknowledgement needs no answer", []))
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_a_yes_to_the_owners_line_is_a_yes_to_its_slots(self):
         self.owners_line_136()
         self.assertTrue(engine.visit_offered(engine.transcript.outbound_text(engine._last_outbound(self.conversation))))
@@ -125,6 +129,7 @@ class PinAndTheNudgeTests(ReviewBase):
         super().setUp()
         self.queued = self.stub("apps.leadai.tasks.send_follow_up.delay")
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_44_the_options_nudge_follows_the_owners_line_and_its_pin(self):
         message = self.inbound("I need an apartment studio")
         live = shop_answer(
@@ -358,6 +363,7 @@ class NeedTurnTests(ReviewBase):
         self.assertIn("Call asked for: the time in their words below", alert.text)
         self.assertIn("Their words: I am looking for a studio, call me at 5 pm", alert.text)
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_68_not_shops_keeps_the_studio_and_asks_no_business(self):  # replay-want-downgraded
         self.inbound("Actually i was looking for a studio", seconds_ago=40)
         first = self.inbound("Actually i was looking for a studio", seconds_ago=33)
@@ -377,6 +383,7 @@ class NeedTurnTests(ReviewBase):
         self.assertEqual(body, line("We have many options for a studio across Dubai.", sorry=True, slots=""))
         self.assertEqual(self.state().invites, 1)
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_chat_114_an_apology_alone_becomes_the_owners_line(self):  # replay-bare-apology-left
         self.set_state(facts={"need": "never_asked", "wanted": "no shop (never asked about one)"}, invites=1)
         first = line("We have many other options across Dubai too, not only shops.", sorry=True)
@@ -436,6 +443,7 @@ class NeedTurnTests(ReviewBase):
         alert = self.alerts_of("wanted")[-1]
         self.assertIn("They also sent a photo, document, contact or location", alert.text)
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_a_request_for_a_person_still_hands_them_over(self):
         self.set_state(facts={"need": "home", "wanted": "a studio"})
         self.turn(self.inbound("I need a studio, I want to talk to a person"), [shop_answer("Sure.", handover="customer_asked_human")])
@@ -764,6 +772,7 @@ class EvalReviewScenarioTests(SimpleTestCase):
 
 
 class UntestedGuardsTests(ReviewBase):
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_a_first_answer_in_capitals_gets_its_apology(self):  # regressions-F9: needs.misread
         self.assertTrue(needs.misread(["I NEED A STUDIO FLAT"]))
         outcome, _, _, _ = self.turn(self.inbound("I NEED A STUDIO FLAT"), [shop_answer("Sure.", segment="residential_tenant")])

@@ -23,6 +23,7 @@ exactly as it was, so a general chat's request does not change.
 from __future__ import annotations
 
 import copy
+import re
 
 LANGUAGES = ("en", "ar", "ur_latin", "ur", "hi_latin", "hi", "other")
 SEGMENTS = (
@@ -279,8 +280,180 @@ def _shops_schema() -> dict:
 SHOPS_SCHEMA = _shops_schema()
 
 
-def schema_for(shops: bool) -> dict:
+# The residential answer (batch 2e, spec Appendix B) ------------------------------------------------------------------
+# A rent, sale or not-known chat of the International City campaign (assistant/residential.py): SHOPS_SCHEMA without the
+# shop facts, with what the rental brief collects (occupancy, balcony, clusters, the full name, the buyer's questions),
+# the model's need_tag (never a handover: code reads it, tracks.decide), and two more handovers (meet_at_building,
+# complex_occupancy). SCHEMA and SHOPS_SCHEMA stay exactly as they were.
+
+RES_OCCUPANCY = ("myself", "family", "company_staff", "sharing")  # there is no "bachelor" (brief rule 7)
+RES_OCCUPANCY_STATUS = ("vacant", "tenanted", "either")
+BALCONY = ("yes", "no", "either")
+CONTRACT = ("individual", "company")
+PURPOSE = ("investment", "personal")
+NEED_TAGS = ("wants_shop", "wants_rent", "wants_buy", "other_need", "other_area")
+RES_HANDOVER_REASONS = (*HANDOVER_REASONS, "meet_at_building", "complex_occupancy")
+RES_PLACES = ("office", "call")
+FULL_NAME_MAX = 80
+CLUSTERS_MAX = 5
+CLUSTER_MAX = 40
+OCCUPANTS_MAX = 50
+RES_TEXT_FACTS = ("customer_name", "property_type", "community", "bedrooms", "move_in", "buy_timeline")
+RES_NUMBER_FACTS = ("budget_aed", "occupants")
+RES_BOOL_FACTS = ("for_client", "abroad", "in_dubai", "cluster_flexible", "already_rented")
+RES_ENUM_FACTS = {
+    "intent": INTENTS,
+    "budget_basis": BUDGET_BASIS,
+    "payment": PAYMENT,
+    "occupancy": RES_OCCUPANCY,
+    "occupancy_status": RES_OCCUPANCY_STATUS,
+    "balcony": BALCONY,
+    "contract": CONTRACT,
+    "purpose": PURPOSE,
+}
+RES_FACT_KEYS = (
+    "customer_name",
+    "full_name",
+    "intent",
+    "for_client",
+    "abroad",
+    "in_dubai",
+    "property_type",
+    "bedrooms",
+    "community",
+    "clusters",
+    "cluster_flexible",
+    "balcony",
+    "budget_aed",
+    "budget_basis",
+    "payment",
+    "occupancy",
+    "occupants",
+    "contract",
+    "move_in",
+    "occupancy_status",
+    "buy_timeline",
+    "purpose",
+    "email",
+    "already_rented",
+    "notes",
+)
+_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[a-z]{2,}$")
+
+
+def _res_schema() -> dict:
+    node = copy.deepcopy(SHOPS_SCHEMA)
+    shops_facts = node["properties"]["facts"]["properties"]
+    properties = {
+        "customer_name": _text("The customer's name as they gave it, else null."),
+        "full_name": {
+            "type": ["string", "null"],
+            "description": "Their full name (first and last) exactly as they wrote it in this chat, at most 80 characters; "
+            "never from CUSTOMER NAME or LEAD CONTEXT; else null.",
+        },
+        "intent": _enum(INTENTS),
+        "for_client": _bool("True if they look for a client of theirs (a broker or an agent), false if for themselves, null until they say."),
+        "abroad": _bool("True if they are outside the UAE or cannot visit, else null."),
+        "in_dubai": _bool("True if they are in Dubai now, false if they are coming from abroad, else null."),
+        "property_type": _text("studio, 1BR, apartment, ... in English, else null."),
+        "bedrooms": _text("Number of bedrooms as said, else null."),
+        "community": _text("The area or community they want, else null."),
+        "clusters": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The International City clusters they want, by name (\"Spain\"); [] when none.",
+        },
+        "cluster_flexible": _bool("True if any cluster is fine for them, else null."),
+        "balcony": _enum(BALCONY, "yes, no or either, as they said; else null."),
+        "budget_aed": _number("Their own budget in AED as a number, never one of our prices; else null."),
+        "budget_basis": _enum(BUDGET_BASIS),
+        "payment": _enum(PAYMENT),
+        "occupancy": _enum(RES_OCCUPANCY, "myself, family, company_staff or sharing, as they said; else null."),
+        "occupants": _number("How many people would stay, as a number; else null."),
+        "contract": _enum(CONTRACT, "individual or company: whose name the contract would be in; else null."),
+        "move_in": _text("When they plan to move in, e.g. 'next month', else null."),
+        "occupancy_status": _enum(RES_OCCUPANCY_STATUS, "A buyer's choice: a vacant unit, a tenanted (rented) one, or either; else null."),
+        "buy_timeline": _text("How soon a buyer plans to buy, e.g. 'within 3 months', else null."),
+        "purpose": _enum(PURPOSE, "A buyer's purpose: investment or personal use; else null."),
+        "email": _text("An e-mail address only when they give one, else null; never ask for it."),
+        "already_rented": _bool("True if they already rented or found a place, else null."),
+        "notes": shops_facts["notes"],
+    }
+    node["properties"]["facts"]["properties"] = {key: properties[key] for key in RES_FACT_KEYS}
+    node["properties"]["facts"]["required"] = list(RES_FACT_KEYS)
+    node["properties"]["handover"]["properties"]["reason"] = _enum(RES_HANDOVER_REASONS)
+    node["properties"]["appointment"]["properties"]["place"] = _enum(RES_PLACES)
+    # The model's tag for what the customer wants, right after the facts: code reads it (tracks.decide), never a handover.
+    ordered = {}
+    for key, value in node["properties"].items():
+        ordered[key] = value
+        if key == "facts":
+            ordered["need_tag"] = _enum(
+                NEED_TAGS,
+                "What they say they want when it is not the TRACK's: wants_shop, wants_rent, wants_buy, other_need (a bigger "
+                "home, a villa, a room or bed space, selling or letting their own, buying a shop) or other_area; else null.",
+            )
+    node["properties"] = ordered
+    node["required"] = [key for key in ordered]
+    return node
+
+
+RES_SCHEMA = _res_schema()
+
+
+def schema_for(shops: bool, residential: bool = False) -> dict:
+    if residential:
+        return RES_SCHEMA
     return SHOPS_SCHEMA if shops else SCHEMA
+
+
+def _clusters(value) -> list[str]:
+    """The clusters a residential answer recorded: short names, letters and spaces only, at most CLUSTERS_MAX, each once."""
+    items = value if isinstance(value, list) else []
+    out: list[str] = []
+    for item in items:
+        text = _clean(item, CLUSTER_MAX) if isinstance(item, str) else None
+        if text and re.fullmatch(r"[^\W\d_][^\W\d_ '\-]*", text) and text.casefold() not in {name.casefold() for name in out}:
+            out.append(text)
+    return out[:CLUSTERS_MAX]
+
+
+def _full_name(value):
+    text = _clean(value, FULL_NAME_MAX + 1)
+    if not text or len(text) > FULL_NAME_MAX or any(ch.isdigit() for ch in text) or "@" in text:
+        return None
+    return text
+
+
+def _email(value):
+    text = str(value or "").strip().lower()
+    return text if _EMAIL.match(text) else None
+
+
+def _normalize_res_facts(facts_in: dict) -> dict:
+    facts = {}
+    for key in RES_FACT_KEYS:
+        value = facts_in.get(key)
+        if key == "notes":
+            facts[key] = _notes(value)
+        elif key == "clusters":
+            facts[key] = _clusters(value)
+        elif key == "full_name":
+            facts[key] = _full_name(value)
+        elif key == "email":
+            facts[key] = _email(value)
+        elif key in RES_TEXT_FACTS:
+            facts[key] = _clean(value)
+        elif key in RES_NUMBER_FACTS:
+            number = _number_value(value)
+            if key == "occupants" and number is not None and (number > OCCUPANTS_MAX or not float(number).is_integer()):
+                number = None
+            facts[key] = number
+        elif key in RES_BOOL_FACTS:
+            facts[key] = value if isinstance(value, bool) else None
+        else:
+            facts[key] = _enum_value(value, RES_ENUM_FACTS[key])
+    return facts
 
 
 def _notes(value) -> list[str]:
@@ -328,10 +501,11 @@ def _number_value(value):
     return number if 0 < number < 1e12 else None
 
 
-def normalize(data: dict, shops: bool = False) -> dict:
+def normalize(data: dict, shops: bool = False, residential: bool = False) -> dict:
     """The model's answer with every value cleaned, bounded and checked.
 
-    ``shops``: the answer follows SHOPS_SCHEMA (a shops chat).
+    ``shops``: the answer follows SHOPS_SCHEMA (a shops chat); ``residential``: RES_SCHEMA (a rent, sale or not-known chat
+    of the International City campaign, batch 2e), whose answer also carries ``need_tag``.
     """
     data = data if isinstance(data, dict) else {}
     facts_in = data.get("facts") if isinstance(data.get("facts"), dict) else {}
@@ -339,41 +513,45 @@ def normalize(data: dict, shops: bool = False) -> dict:
     keys, texts, bools, enums = (
         (SHOPS_FACT_KEYS, SHOPS_TEXT_FACTS, SHOPS_BOOL_FACTS, SHOPS_ENUM_FACTS) if shops else (FACT_KEYS, TEXT_FACTS, BOOL_FACTS, ENUM_FACTS)
     )
-    for key in keys:
-        value = facts_in.get(key)
-        if shops and key == "notes":
-            facts[key] = _notes(value)
-        elif key in texts:
-            facts[key] = _clean(value)
-        elif key in NUMBER_FACTS:
-            facts[key] = _number_value(value)
-        elif key in bools:
-            facts[key] = value if isinstance(value, bool) else None
-        else:
-            facts[key] = _enum_value(value, enums[key])
+    if residential:
+        facts = _normalize_res_facts(facts_in)
+    else:
+        for key in keys:
+            value = facts_in.get(key)
+            if shops and key == "notes":
+                facts[key] = _notes(value)
+            elif key in texts:
+                facts[key] = _clean(value)
+            elif key in NUMBER_FACTS:
+                facts[key] = _number_value(value)
+            elif key in bools:
+                facts[key] = value if isinstance(value, bool) else None
+            else:
+                facts[key] = _enum_value(value, enums[key])
 
     appointment_in = data.get("appointment") if isinstance(data.get("appointment"), dict) else {}
     action = _enum_value(appointment_in.get("action"), ACTIONS) or "none"
     appointment = {
         "action": action,
-        "place": _enum_value(appointment_in.get("place"), PLACES),
+        "place": _enum_value(appointment_in.get("place"), RES_PLACES if residential else PLACES),
         "date": _clean(appointment_in.get("date"), 10),
         "time": _clean(appointment_in.get("time"), 5),
         "customer_words": _clean(appointment_in.get("customer_words"), 255),
     }
 
     handover_in = data.get("handover") if isinstance(data.get("handover"), dict) else {}
-    reason = _enum_value(handover_in.get("reason"), SHOPS_HANDOVER_REASONS if shops else HANDOVER_REASONS)
+    reasons = RES_HANDOVER_REASONS if residential else (SHOPS_HANDOVER_REASONS if shops else HANDOVER_REASONS)
+    reason = _enum_value(handover_in.get("reason"), reasons)
     needed = handover_in.get("needed") is True
     send = data.get("send") is not False
     reply = str(data.get("reply") or "").strip() if send else ""
-    return {
+    answer = {
         "language": _enum_value(data.get("language"), LANGUAGES) or "en",
         "segment": _enum_value(data.get("segment"), SEGMENTS) or "other",
         "facts": facts,
         "appointment": appointment,
         "handover": {"needed": needed, "reason": reason if needed else None},
-        "opt_out": _enum_value(data.get("opt_out"), SHOPS_OPT_OUT if shops else OPT_OUT) or "none",
+        "opt_out": _enum_value(data.get("opt_out"), SHOPS_OPT_OUT if (shops or residential) else OPT_OUT) or "none",
         "hot_lead": data.get("hot_lead") is True,
         "invited_to_meeting": data.get("invited_to_meeting") is True,
         "share_office_location": data.get("share_office_location") is True,
@@ -381,3 +559,8 @@ def normalize(data: dict, shops: bool = False) -> dict:
         "reply_en": str(data.get("reply_en") or "").strip()[:REPLY_MAX],
         "reply": reply,
     }
+    if residential:
+        tag = _enum_value(data.get("need_tag"), NEED_TAGS)
+        if tag:
+            answer["need_tag"] = tag
+    return answer

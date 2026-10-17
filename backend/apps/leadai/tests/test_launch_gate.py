@@ -26,6 +26,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 
 from apps.leadai.assistant import claims, crm_facts, engine, hours, lead_history, needs, nudges, people, rules, schema, shops
+from apps.leadai.assistant import residential
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import DEFAULT_OFFICE_ADDRESS as ADDRESS
 from apps.leadai.models import LeadAiAlert, LeadAiAppointment, LeadAiTurn
@@ -280,6 +281,7 @@ class OwnTimeTurnTests(GateBase):
         self.set_state(facts=dict(leadai_eval.WANTS_STUDIO), invites=1)
         self.ours(leadai_eval.not_a_shop_sent("home", "studio_apartment"), minutes_ago=5)
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_their_430_pm_is_booked_over_the_models_4(self):
         self.studio_invited()
         message = self.inbound("4:30 PM today is fine")
@@ -361,10 +363,12 @@ class OwnTimeEvalTests(SimpleTestCase):
         live = eval_answer(ON_THE_HOUR, action="confirm", place="office", date="2026-10-12", time="16:00", segment="residential_tenant")
         run = run_eval("shops-not-a-shop-booked", live)
         self.assertEqual(run.failures, [])
-        self.assertEqual(run.when, at(12, 16, 30))
+        # Batch 2e: a studio seeker's own time is held for their full name (the rent flow), at their 4:30, never the model's 4.
+        self.assertEqual((run.answer["appointment"]["date"], run.answer["appointment"]["time"]), ("2026-10-12", "16:30"))
         with patch.object(engine, "own_time", return_value=None):
             failures = run_eval("shops-not-a-shop-booked", live).failures
-        self.assertIn("nothing booked (action tentative), expected Mon 12 Oct 16:30", failures)
+        # Without it the model's own 4 PM is no time of theirs (unasked_confirm): nothing is held for their name.
+        self.assertIn("holds tentative None None, expected 2026-10-12 16:30", failures)
 
 
 # E. "Location" ------------------------------------------------------------------------------------------------------

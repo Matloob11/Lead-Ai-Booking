@@ -29,6 +29,7 @@ from django.test import SimpleTestCase, override_settings
 
 from apps.leadai import lane
 from apps.leadai.assistant import claims, crm_facts, engine, hours, lead_history, needs, nudges, offers, people, rules, schema, shops
+from apps.leadai.assistant import residential
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import DEFAULT_OFFICE_ADDRESS as ADDRESS
 from apps.leadai.models import LeadAiAlert, LeadAiAppointment
@@ -466,6 +467,7 @@ class OwnersLineNeverOverCodesSlotsTests(ShopsBase):
         self.assertEqual(self.body(self.studio_said_430()), FROM_430)
         self.assertFalse(LeadAiAppointment.objects.filter(status=LeadAiAppointment.Status.CONFIRMED).exists())
 
+    @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_without_the_guard_the_owners_line_went_over_them(self):
         with patch.object(engine, "bare_need_reply", side_effect=blind_bare_need_reply):
             body = self.body(self.studio_said_430())

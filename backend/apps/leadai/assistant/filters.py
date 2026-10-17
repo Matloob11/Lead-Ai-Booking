@@ -66,11 +66,15 @@ def numbers_in(text: str) -> list[tuple[int, bool]]:
     return out
 
 
-def _invented_amount(sentence: str, known: set[int]) -> bool:
-    """A price-like number the customer, the campaign or a colleague never wrote."""
+AMOUNT_FLOOR = 1000
+
+
+def _invented_amount(sentence: str, known: set[int], floor: int = AMOUNT_FLOOR) -> bool:
+    """A price-like number the customer, the campaign or a colleague never wrote; ``floor``: the smallest amount checked
+    (batch 2e's residential replies check from 100, so an invented "Ejari AED 250" goes too)."""
     priced = bool(_PRICE_WORDS.search(sentence))
     for value, scaled in numbers_in(sentence):
-        if (scaled or (priced and value >= 1000)) and value not in known:
+        if (scaled or (priced and value >= floor)) and value not in known:
             return True
     return False
 
@@ -84,13 +88,15 @@ def _strip_phones(text: str) -> str:
     return _PHONE.sub(lambda m: "" if len(_digits(m.group(0))) >= PHONE_DIGITS else m.group(0), text)
 
 
-def clean_reply(reply: str, context_text: str) -> tuple[str, list[str]]:
+def clean_reply(reply: str, context_text: str, *, max_questions: int = 1, amount_floor: int = AMOUNT_FLOOR) -> tuple[str, list[str]]:
     """The reply made safe to send, and notes on what was removed (for the turn log).
 
     ``context_text`` is everything the customer, the campaign and our
     colleagues wrote (never the assistant's own replies): an amount found
     there may be repeated, in any form ("40k" covers "AED 40,000"); any other
-    price-like number takes its sentence with it.
+    price-like number takes its sentence with it. ``max_questions``: questions a
+    reply may ask (two on batch 2e's rent and sale tracks, spec §1.3); ``amount_floor``:
+    the smallest price-like amount checked (100 there, spec §2.4).
     """
     notes: list[str] = []
     text = (reply or "").replace("’", "'")
@@ -112,7 +118,7 @@ def clean_reply(reply: str, context_text: str) -> tuple[str, list[str]]:
         sentence = sentence.strip()
         if not sentence:
             continue
-        if _invented_amount(sentence, known):
+        if _invented_amount(sentence, known, amount_floor):
             notes.append("amount")
             continue
         if _HUMAN_CLAIM.search(sentence):
@@ -121,13 +127,13 @@ def clean_reply(reply: str, context_text: str) -> tuple[str, list[str]]:
         kept.append(sentence)
     # The owner's style: one question per reply. A second one is nearly always
     # "which day and time?" after an invitation, and waits for the answer.
-    single, asked = [], False
+    single, asked = [], 0
     for sentence in kept:
         if any(mark in sentence for mark in QUESTION_MARKS):
-            if asked:
+            if asked >= max(1, max_questions):
                 notes.append("second_question")
                 continue
-            asked = True
+            asked += 1
         single.append(sentence)
     text = " ".join(single)
     text = re.sub(r"[ \t]{2,}", " ", text).strip()

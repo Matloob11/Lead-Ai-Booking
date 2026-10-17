@@ -553,6 +553,95 @@ RIGHT = {
     "shops-track-continuity-448": booked("2026-10-12", "17:00"),
     "shops-track-villa-jvc": answer("Great! What business will the shop be for?"),
     "shops-track-2br": answer("Great! What business will the shop be for?"),
+    # Batch 2e slice B, the rent flow (spec §8): code's openers and lines are never asked; the model's answers as the rent
+    # flow writes them (RES_SCHEMA's facts: answer() adds the keys it is given).
+    "shops-res-114-apartment-rent": answer("", send=False),
+    "shops-res-urdu-voice-flats-119": answer("", send=False),
+    "shops-res-448-how-much": answer(
+        "Studios in International City are generally around AED 29,000–33,000 a year. Would you like to see one?",
+        segment="residential_tenant",
+    ),
+    "shops-res-broker": answer("", handover="broker_or_for_client", segment="residential_tenant", facts={"for_client": True}),
+    "shops-res-for-myself": answer(
+        "Perfect. Do you prefer a balcony, and when are you planning to move?", segment="residential_tenant", facts={"for_client": False}
+    ),
+    "shops-res-cluster-unknown": answer(
+        "Great. Studios are generally around AED 29,000–33,000 a year. Any cluster you prefer, or are you flexible?",
+        segment="residential_tenant",
+        facts={"balcony": "yes", "move_in": "next month"},
+    ),
+    "shops-res-any-cluster": answer(
+        "Perfect, that gives us more options. I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?",
+        segment="residential_tenant",
+        invited=True,
+        facts={"cluster_flexible": True},
+    ),
+    "shops-res-company-staff": answer(
+        "No problem, I'll check which options suit you. Would the contract be in your name or the company's?",
+        segment="residential_tenant",
+        facts={"occupancy": "company_staff", "occupants": 4},
+    ),
+    "shops-res-invitation-two-slots": answer(
+        "Perfect. Our agent will meet you at our office in Russia Cluster and take you to the available apartments. I can hold a slot "
+        "for you today at 3:00 PM or 5:00 PM — which is better?",
+        segment="residential_tenant",
+        invited=True,
+        facts={"occupancy": "myself"},
+    ),
+    "shops-res-name-gate-new": booked("2026-10-12", "18:00", segment="residential_tenant"),
+    "shops-res-full-name-given": answer("", send=False, segment="residential_tenant", facts={"full_name": "Ahmed Khan"}),
+    "shops-res-full-name-refused": answer("It is only for the booking.", segment="residential_tenant"),
+    "shops-res-crm-full-name-booked": booked("2026-10-12", "16:00", segment="residential_tenant"),
+    "shops-res-move-another-time": booked("2026-10-14", "18:00", segment="residential_tenant"),
+    "shops-res-handover": answer("Sure.", handover="customer_asked_human", segment="residential_tenant"),
+    "shops-res-deposit": answer(
+        "Normally the security deposit in International City is around AED 2,500–3,000, depending on the owner and the unit. It's "
+        "refundable at the end of the tenancy, subject to the apartment's condition.",
+        segment="residential_tenant",
+    ),
+    "shops-res-ejari-dewa": answer(
+        "Ejari is AED 350, and we handle the registration for you. DEWA takes a refundable deposit of around AED 2,000 for an "
+        "apartment, plus a small connection fee.",
+        segment="residential_tenant",
+    ),
+    "shops-res-documents": answer(
+        "Usually your passport, UAE residence visa and Emirates ID. Our agent collects them in person.", segment="residential_tenant"
+    ),
+    "shops-res-chiller-cheques": answer(
+        "It depends on the building: chiller is included in many International City buildings, and our agent confirms it for the "
+        "unit. Usually 1 to 4 cheques, depending on the owner.",
+        segment="residential_tenant",
+    ),
+    "shops-res-commission-first": answer("Sure.", segment="residential_tenant"),
+    "shops-res-commission-figure": answer("", send=False, segment="residential_tenant"),
+    "shops-res-commission-1br": answer("", send=False, segment="residential_tenant"),
+    "shops-res-commission-shop-to-rent": answer("", send=False, segment="residential_tenant"),
+    "shops-res-vat-on-rent": answer("No, there is no VAT on the rent.", segment="residential_tenant"),
+    "shops-res-vat-and-deposit": answer(
+        "Normally the security deposit in International City is around AED 2,500–3,000, depending on the owner and the unit.",
+        segment="residential_tenant",
+    ),
+    "shops-res-discount-once": answer(
+        "The final price depends on the owner and the cheques. Our agent can discuss the best offer with you at the viewing.",
+        segment="residential_tenant",
+    ),
+    "shops-res-pay-deposit-now": answer("Sure!", segment="residential_tenant"),
+    "shops-res-emirates-id-sent": answer("", send=False),
+    "shops-res-delete-my-data": answer("", send=False),
+    "shops-res-owner-number": answer("Sorry, we cannot share that.", segment="residential_tenant"),
+    "shops-res-injection-discount": answer(
+        "Sorry, I can't do that. Our agent can discuss the best offer with you at the viewing.", segment="residential_tenant"
+    ),
+    "shops-res-system-injection": answer(
+        "Studios in International City are generally around AED 29,000–33,000 a year.", segment="residential_tenant"
+    ),
+    "shops-res-book-9pm-sunday": answer(
+        "Our office is closed on Sunday. I can hold a slot for you tomorrow at 11:00 AM or 5:00 PM — which is better?",
+        segment="residential_tenant",
+    ),
+    "shops-res-arabic-spain": answer("", send=False),
+    "shops-res-hindi-studio": answer("", send=False),
+    "shops-res-mixed-studio-answer": answer("", send=False),
 }
 
 
@@ -679,17 +768,24 @@ class EvalCommandTests(TestCase):
             sorted(settled),
             [
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
-                "shops-a-yes-known", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
+                "shops-a-yes-known", "shops-asked-for-studio-132", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
                 # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
                 "shops-book-tap", "shops-licence-copy", "shops-licence-second-page",
                 # Batch 2e: the mixed template's first answer, "Not now" and "Stop messages" are code's.
-                "shops-mixed-not-now", "shops-mixed-stop", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic", "shops-mixed-yes-buyer-lead",
-                "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead", "shops-mixed-yes-studio-lead",
-                "shops-mixed-yes-tap",
-                "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no", "shops-not-now-yes",
-                "shops-other-types-tap", "shops-rented-no", "shops-rented-reach-out-63", "shops-rented-soft-no-63", "shops-spam", "shops-stop",
-                "shops-track-shop-yes", "shops-type-tap",
-                "shops-type-tap-again", "shops-yes-tap", "stop-all", "stop-arabic-after-english", "wrong-number",
+                "shops-mixed-not-now", "shops-mixed-stop", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic",
+                "shops-mixed-yes-buyer-lead", "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead",
+                "shops-mixed-yes-studio-lead", "shops-mixed-yes-tap", "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no",
+                "shops-not-now-studio-68", "shops-not-now-yes", "shops-other-types-tap", "shops-rented-no",
+                "shops-rented-reach-out-63", "shops-rented-soft-no-63",
+                # Batch 2e slice B: the rent flow's opener of a track entered, a voice note nobody heard, a document number, "delete
+                # my data": code's, before any model (the launch's studio seekers among them).
+                "shops-res-114-apartment-rent", "shops-res-arabic-spain", "shops-res-delete-my-data", "shops-res-emirates-id-sent",
+                "shops-res-hindi-studio", "shops-res-mixed-studio-answer", "shops-res-urdu-voice-flats-119",
+                "shops-spam", "shops-stop", "shops-studio-balcony-107", "shops-studio-capitals-136", "shops-studio-monthly-57",
+                "shops-studio-not-interested", "shops-track-1br-near-my-shop", "shops-track-englund-1bhk-49", "shops-track-from-china",
+                "shops-track-one-bed", "shops-track-room-and-hall-arabic", "shops-track-shop-yes", "shops-type-tap", "shops-type-tap-again",
+                "shops-want-1bhk-49", "shops-want-flat-arabic", "shops-want-flat-roman-urdu", "shops-want-studio-44",
+                "shops-yes-tap", "stop-all", "stop-arabic-after-english", "wrong-number",
             ],
         )
         # The fake answers in English, so a customer who types Arabic, Urdu or Devanagari script
@@ -705,7 +801,7 @@ class EvalCommandTests(TestCase):
             sorted(corrected),
             [
                 "lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english",
-                "shops-arabic", "shops-track-room-and-hall-arabic", "shops-want-flat-arabic",
+                "shops-arabic",
             ],
         )
         self.assertEqual(model.call_count, total - len(settled) + len(corrected))

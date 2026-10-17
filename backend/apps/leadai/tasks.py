@@ -437,6 +437,9 @@ def _close_past_appointments() -> None:
 # Why a shops chat's tentative visit lapsed (its history's "lapsed" entry).
 LAPSED_NO_TIME = "no time agreed"
 LAPSED_TIME_PASSED = "its time passed"
+# Batch 2e: a time held for the customer's full name (residential.hold_for_name) that nobody answered lapses this long after
+# our ask (residential.NAME_HOLD_LAPSES); one they refused it for stays until its time passes, for our agent to confirm.
+LAPSED_NO_NAME = "no full name given"
 
 
 def _lapse_shops_tentatives(now) -> None:
@@ -458,11 +461,14 @@ def _lapse_shops_tentatives(now) -> None:
     shops_chats = sorted(pk for pk, playbook in lane.playbooks(chats).items() if playbook == lane.IC_SHOPS)
     if not shops_chats:
         return
+    from .assistant import residential
+
     candidates = (
         tentative.filter(conversation_id__in=shops_chats)
         .filter(
             Q(starts_at__isnull=True, created_at__lt=now - TIMELESS_TENTATIVE_LAPSES)
             | Q(starts_at__isnull=False, starts_at__lt=now - PAST_TENTATIVE_LAPSES)
+            | Q(**{f"details__{residential.HELD_FOR_NAME}": True}, updated_at__lt=now - residential.NAME_HOLD_LAPSES)
         )
         .order_by("pk")
         .values_list("pk", flat=True)[:LAPSE_PAGE]
@@ -486,7 +492,12 @@ def _last_said(row) -> dt.datetime:
 
 def _lapse_why(row, now) -> str:
     """Why this tentative lapses now, else '' (it stays). One with a time also waits an hour after they last
-    spoke of it: "I'm on my way" said after its time is no visit to drop."""
+    spoke of it: "I'm on my way" said after its time is no visit to drop. A time held for the full name that nobody
+    answered lapses NAME_HOLD_LAPSES after our ask (batch 2e, residential.held_lapsed)."""
+    from .assistant import residential
+
+    if residential.held_lapsed(row, now):
+        return LAPSED_NO_NAME
     if row.starts_at is not None:
         passed = row.starts_at < now - PAST_TENTATIVE_LAPSES and _last_said(row) < now - PAST_TENTATIVE_LAPSES
         return LAPSED_TIME_PASSED if passed else ""
@@ -550,7 +561,9 @@ def _lapsed_alert(row, why: str) -> None:
     who = row.customer_name or conversation.contact.display_name or "A Lead AI customer"
     what = {"call": "call", "customer_property": "viewing"}.get(row.place, "visit")
     words = (row.customer_words or row.note or "").strip()
-    if why == LAPSED_TIME_PASSED:
+    if why == LAPSED_NO_NAME:
+        reason = f"They did not give their full name for {hours.describe(row.starts_at)}, so the slot it was held in is free again."
+    elif why == LAPSED_TIME_PASSED:
         reason = f"Its time, {hours.describe(row.starts_at)}, has passed with nothing confirmed."
     else:
         reason = f"No day and time were agreed in the {int(TIMELESS_TENTATIVE_LAPSES.total_seconds() // 3600)} hours since they said it."

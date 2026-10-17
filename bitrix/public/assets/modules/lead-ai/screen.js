@@ -24,6 +24,7 @@ import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
 import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
 import { shopsForm, shopsValues } from "./shops.js";
+import { residentialForm, residentialValues } from "./residential.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
 const PAGE = 40;
@@ -839,6 +840,8 @@ function formSection(data, { onSaved, onClose }) {
   const save = el("button.lai-btn.lai-btn--primary", { type: "submit" }, ["Save"]);
   // The shops playbook's facts, brand and viewing agent (shops.js).
   const shopsPart = shopsForm(data);
+  // The studios and one-bedrooms facts (residential.js).
+  const residentialPart = residentialForm(data);
 
   const splitList = (text, pattern) =>
     String(text || "")
@@ -882,6 +885,7 @@ function formSection(data, { onSaved, onClose }) {
     const alertIds = splitList(fields.alert_bitrix_user_ids.input.value, /[\s,;]+/);
     if (!sameList(alertIds, (data.alert_bitrix_user_ids || []).map(String))) out.alert_bitrix_user_ids = alertIds;
     Object.assign(out, shopsPart.changes());
+    Object.assign(out, residentialPart.changes());
     return out;
   }
 
@@ -890,6 +894,7 @@ function formSection(data, { onSaved, onClose }) {
     if (save.disabled) return;
     for (const key of Object.keys(fields)) clearError(key);
     shopsPart.clearErrors();
+    residentialPart.clearErrors();
     setNote("");
     const payload = changes();
     if (!Object.keys(payload).length) {
@@ -911,7 +916,7 @@ function formSection(data, { onSaved, onClose }) {
             if (!first) first = fields[key].input;
             continue;
           }
-          const input = shopsPart.showError(key, String(message));
+          const input = shopsPart.showError(key, String(message)) || residentialPart.showError(key, String(message));
           if (input && !first) first = input;
         }
       }
@@ -984,6 +989,7 @@ function formSection(data, { onSaved, onClose }) {
     ),
     el("div.lai-set__hint", {}, [`Now: ${alertRecipientsText(data)}.`]),
     shopsPart.node,
+    residentialPart.node,
     note,
     el("div.lai-set__actions", {}, [
       el("button.lai-btn.lai-btn--ghost", { type: "button", onclick: () => onClose() }, ["Close"]),
@@ -1045,6 +1051,7 @@ function openSettingsDialog() {
     } else {
       parts.push(valuesSection(data));
       if (data.shops_facts) parts.push(section("International City shops", shopsValues(data)));
+      if (data.residential_facts) parts.push(section("International City — studios and one-bedrooms", residentialValues(data)));
       if (data.can_disable) parts.push(stopSection(data, (next) => saved(next, { assistant_enabled: false })));
       else parts.push(el("p.lai-set__note", {}, ["Only a panel admin can change these settings."]));
     }

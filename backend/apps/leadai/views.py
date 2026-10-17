@@ -38,7 +38,7 @@ from apps.inbox.serializers import serialize_conversation
 from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
-from .assistant import hours, openai_client, shops
+from .assistant import hours, openai_client, residential, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
@@ -484,6 +484,8 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "alert_recipients": _alert_recipients(row),
         # The shops playbook: what it may quote, the brand it speaks for, who a booked client meets.
         "shops_facts": shops.facts_of(row.shops_facts),
+        # Batch 2e: what the International City studios and one-bedrooms may quote (rent and sale bands, the charges).
+        "residential_facts": residential.facts_of(row.residential_facts),
         "brand_name": shops.brand_of(row),
         "viewing_agent_name": shops.agent_of(row),
         "paused_until": _iso(row.paused_until),
@@ -721,6 +723,12 @@ def assistant_settings(request):
             errors.update(problems)
         else:
             change("shops_facts", facts)
+    if "residential_facts" in data:
+        facts, problems = residential.validate(data.get("residential_facts"))
+        if problems:
+            errors.update(problems)
+        else:
+            change("residential_facts", facts)
     if "brand_name" in data:
         brand, error = shops.clean_text(data.get("brand_name"), shops.BRAND_MAX)
         if error or not brand:
