@@ -606,6 +606,22 @@ def wants_office(said: str) -> bool:
     return bool(_OFFICE.search(words)) and not _CALL.search(words)
 
 
+def keep_call(proposal: dict, appointment, said: str, places) -> bool:
+    """A booked (or held) sales call moved to another time stays a call (the CRM review of batch 2e: a move whose place was
+    null, or "office" as RES_SYSTEM's BOOKING line once said, turned the call into an office visit: the office pool, Mode
+    42, a "Viewing/Meeting" to-do, no I'll call, the office reminder): the proposal's place is the call's own, unless their
+    words ask for our office (wants_office). Live (engine.ask_model, before the booking is checked) and in the eval. True
+    when it changed the proposal."""
+    if calls.PLACE not in tuple(places or ()) or not calls.is_sales_call(appointment):
+        return False
+    if (proposal or {}).get("action") not in ("confirm", "reschedule") or proposal.get("place") == calls.PLACE:
+        return False
+    if proposal.get("place") not in (None, "", calls.OFFICE) or wants_office(said):
+        return False
+    proposal["place"] = calls.PLACE
+    return True
+
+
 def asks_media(said: str) -> bool:
     """Photos or a video asked for, in their typed words (shop_flow.asks_media): a buyer gets none first (§3.2)."""
     return shop_flow.asks_media(shop_flow.typed_words(said))
@@ -680,6 +696,24 @@ CALL_AGAIN_LINE = {
     "hi_latin": "Call ke liye aapko kaunsa time behtar rahega: {slots}?",
     "hi": "कॉल के लिए आपको कौन सा समय बेहतर रहेगा: {slots}?",
 }
+# Photos asked for with a call or a meeting booked already (batch 2e review: a second call was offered): no slots, the
+# booked time named instead, after the media line (a call) or in place of it (an office meeting).
+CALL_BOOKED_LINE = {
+    "en": "Your call with our sales team is booked {when}.",
+    "ar": "مكالمتك مع فريق المبيعات لدينا محجوزة {when}.",
+    "ur_latin": "Hamari sales team ke saath aap ki call {when} ke liye book hai.",
+    "ur": "ہماری سیلز ٹیم کے ساتھ آپ کی کال {when} کے لیے بک ہے۔",
+    "hi_latin": "Hamari sales team ke saath aapki call {when} ke liye book hai.",
+    "hi": "हमारी सेल्स टीम के साथ आपकी कॉल {when} के लिए बुक है।",
+}
+MEETING_MEDIA_LINE = {
+    "en": "Sure! Our agent will go through the best options for your budget with you at your meeting {when}, so we share the right units instead of sending everything.",
+    "ar": "بالتأكيد! سيعرض عليك وكيلنا أفضل الخيارات ضمن ميزانيتك خلال موعدك {when}، حتى نشاركك الوحدات المناسبة بدلاً من إرسال كل شيء.",
+    "ur_latin": "Zaroor! Hamare agent {when} ki meeting mein aap ke budget ke mutabiq behtareen options aap ke saath dekhenge, taake hum sab kuch bhejne ke bajaye sahi units share karein.",
+    "ur": "ضرور! ہمارے ایجنٹ {when} کی میٹنگ میں آپ کے بجٹ کے مطابق بہترین آپشنز آپ کے ساتھ دیکھیں گے، تاکہ ہم سب کچھ بھیجنے کے بجائے صحیح یونٹس شیئر کریں۔",
+    "hi_latin": "Zaroor! Hamare agent {when} ki meeting mein aapke budget ke hisaab se best options aapke saath dekhenge, taaki hum sab kuch bhejne ke bajaye sahi units share karein.",
+    "hi": "ज़रूर! हमारे एजेंट {when} की मीटिंग में आपके बजट के हिसाब से सबसे अच्छे विकल्प आपके साथ देखेंगे, ताकि हम सब कुछ भेजने के बजाय सही यूनिट्स शेयर करें।",
+}
 CALL_TAKEN_LINE = {
     "en": "Sorry, that time is already booked for another call.",
     "ar": "عذراً، هذا الوقت محجوز لمكالمة أخرى.",
@@ -729,7 +763,15 @@ def text(spec: dict, language: str, now) -> str:
     again = bool((spec or {}).get("again"))
     price = str((spec or {}).get("price") or "")
     offer = slots_line(lang, slots, now, office=office, again=again) if slots else ""
-    if kind == BUYER_MEDIA:
+    booked = (spec or {}).get("booked")
+    if kind == BUYER_MEDIA and booked:
+        # A call or a meeting booked already: its time, never two more slots.
+        when = shops.slots_phrase([dt.datetime.fromisoformat(booked)], now, lang)
+        if (spec or {}).get("booked_place") == calls.PLACE:
+            parts = [price, BUYER_MEDIA_LINE[lang], CALL_BOOKED_LINE[lang].format(when=when)]
+        else:
+            parts = [price, MEETING_MEDIA_LINE[lang].format(when=when)]
+    elif kind == BUYER_MEDIA:
         parts = [price, BUYER_MEDIA_LINE[lang], offer]
     elif kind == ABROAD:
         parts = [price, ABROAD_LINE[lang], offer]
@@ -807,7 +849,7 @@ def _only_code_commission(reply: str, line: str) -> tuple[str, bool]:
     """The reply with only code's commission line (residential.commission_answer's, ``line``): every other sentence of the
     model's that speaks of commission cut, and the line before the reply's first question when they asked. (reply, changed)."""
     sentences = filters.split_sentences(reply)
-    kept = [sentence for sentence in sentences if not residential.asks_commission([sentence]) or sentence == line]
+    kept = [sentence for sentence in sentences if not residential.speaks_commission(sentence) or sentence == line]
     cut = len(kept) != len(sentences)
     if line and line not in kept:
         for index, sentence in enumerate(kept):
@@ -884,6 +926,7 @@ def settle(
     still_invalid: bool = False,
     quiet: bool = False,
     may_invite: bool = True,
+    appointment=None,
 ) -> str:
     """The sale track's steps on the model's answer, in place of 2d's who_they_are (live and in the eval, with the same
     values). Returns what was done ('' for nothing).
@@ -891,7 +934,8 @@ def settle(
     ``facts``: the chat's facts before this turn; ``texts``: their words in the burst (engine.need_texts); ``said``: the
     burst as one string; ``earlier``: the conversation before it, (author, text); ``office_taken`` / ``call_taken``: the
     other chats' open office visits and calls; ``unit`` / ``clusters``: the track's (tracks.decide); ``may_invite``: the
-    chat may still be invited (two refusals end the offers)."""
+    chat may still be invited (two refusals end the offers); ``appointment``: the chat's open call or meeting, whose time
+    a photo request is pointed to instead of two more slots (batch 2e review: a second call was offered)."""
     record_need(answer, facts, unit)
     if not plain(answer, when=when, still_invalid=still_invalid, quiet=quiet):
         return ""
@@ -924,7 +968,15 @@ def settle(
         _code_line(answer, {"kind": ABROAD, "slots": pair, "price": price}, invited=bool(pair))
         return ABROAD
     if asks_media(said):
-        # No media to a buyer first (§3.2): res_buyer_media and two free call slots.
+        # No media to a buyer first (§3.2): res_buyer_media and two free call slots; with a call or a meeting open, its time
+        # instead (a confirmed one named, a held one neither named nor offered again).
+        open_at = getattr(appointment, "starts_at", None) if appointment is not None else None
+        if open_at is not None:
+            spec = {"kind": BUYER_MEDIA, "slots": [], "price": price}
+            if getattr(appointment, "status", "") == "confirmed":
+                spec.update(booked=open_at.isoformat(), booked_place=calls.PLACE if calls.is_sales_call(appointment) else calls.OFFICE)
+            _code_line(answer, spec, invited=False)
+            return BUYER_MEDIA
         call_pair = calls.offer(now, closed_dates, call_taken) if may_invite else []
         _code_line(answer, {"kind": BUYER_MEDIA, "slots": call_pair, "price": price}, invited=bool(call_pair))
         return BUYER_MEDIA
@@ -973,18 +1025,6 @@ def settle(
     answer["send"] = bool(answer["reply"])
     answer["trimmed"] = [*(answer.get("trimmed") or []), *done]
     return ",".join(done)
-
-
-def booking_text(
-    language: str, start, *, call: bool, facts: dict, lead=None, unit: str = "", clusters=(), office_address: str = "", maps_url: str = "",
-    rescheduled: bool = False,
-) -> str:
-    """A buyer's booking message (spec §3.3, §2.7): a call (res_call_booked) or an office meeting, under their full name
-    (residential.confirmation on the sale track, as engine._run_claimed's booking_text writes it)."""
-    return residential.confirmation(
-        language, start, kind=residential.CALL if call else residential.VISIT, full_name=residential.full_name_known(facts, lead),
-        unit=unit, clusters=clusters, office_address=office_address, maps_url=maps_url, track=residential.SALE, rescheduled=rescheduled,
-    )
 
 
 def mark_hold(row, answer: dict) -> None:

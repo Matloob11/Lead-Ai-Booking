@@ -212,7 +212,10 @@ class ForTurnTests(ShopsBase):
 
     def test_an_unexpected_error_is_a_failed_read_too(self):
         with patch(READ, side_effect=KeyError("fields")):
-            context, _ = self.read_context()
+            try:
+                context, _ = self.read_context()
+            except KeyError:  # a failure, never an error: the guard switched off must FAIL this test (the 2e eval review, E11)
+                self.fail("an unexpected error escaped the lead read")
         self.assertEqual(context, {})
         self.assertEqual(self.state().lead_context_tries, 1)
 

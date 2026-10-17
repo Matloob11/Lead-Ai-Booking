@@ -123,12 +123,22 @@ _NOUN_PATTERNS = (
     ("bedroom", re.compile(r"(एक|वन|दो|तीन|[0-9])\s*बेड\s*रूम")),
     ("studio_apartment", re.compile(r"\bstudio\s+(?:apartments?|flats?|units?|rooms?)\b|\b(?:apartment|flat)\s+studio\b")),
     ("studio", re.compile(r"\bstudios?\b")),
-    # Never the building a shop is in: "under an apartment building", "a flats building", "near the villas".
-    ("apartment", re.compile(r"\bapartments?\b(?!\s+(?:building|buildings|block|blocks|complex|tower|towers|area|community))|\bapt\b")),
+    # Never the building a shop is in: "under an apartment building", "a flats building", "near the villas"; nor the homes
+    # above it ("apartments above the shop?": batch 2e review, a shop customer's question about the building).
+    (
+        "apartment",
+        re.compile(
+            r"\bapartments?\b(?!\s+(?:building|buildings|block|blocks|complex|tower|towers|area|community|above|upstairs|over\s+the|on\s+top))|\bapt\b"
+        ),
+    ),
+    # Never "flat" the adjective (batch 2e review: "Is the rent flat or negotiable?", "Can you give it flat 30k?", "30k flat
+    # final": _FLAT_ADJECTIVE_BEFORE reads the words before it), nor the flats above a shop ("flats above the shop?").
     (
         "flat",
         re.compile(
-            r"\bflats?\b(?!\s*(?:rate|fee|fees|price|amount|discount|percent|%|\d+\s*%|screen|roof|surface|floor|building|buildings|block|area))"
+            r"\bflats?\b(?!\s*(?:rate|fee|fees|price|amount|discount|percent|%|\d+\s*%|screen|roof|surface|floor|building|buildings|block|area"
+            r"|final\b|fixed\b|negotiable\b|or\s+negotiable\b|(?:aed\s*|dhs?\s*)?\d[\d,.]*\s*k?\s+(?:final|fixed|only|last|negotiable)\b"
+            r"|above\b|upstairs\b|over\s+the\b|on\s+top\b))"
         ),
     ),
     ("villa", re.compile(r"\bvillas?\b(?!\s+(?:area|community|compound))")),
@@ -161,6 +171,23 @@ _NOUN_PATTERNS = (
     ("room", re.compile(r"(?:غرفة|غرفه|غرف)(?!\s*(?:تخزين|اجتماعات|اجتماع|عرض|تبريد))")),
     ("villa", re.compile(r"فيلا|فلة|فلل")),
     ("house", re.compile(r"(?:بيت|منزل)\s*(?:للإيجار|للايجار|للعائلة|عائلي)|(?:أبحث|ابحث|أدور|ادور|أبي|ابي|أبغى|ابغى|أريد|اريد)\s+(?:عن\s+)?(?:بيت|منزل)")),
+)
+# "flat" the adjective, read in the words before it: an amount or the rent/price it describes ("30k flat", "the rent flat").
+_FLAT_ADJECTIVE_BEFORE = re.compile(
+    r"(?:\b\d[\d,.]*\s*k|\b\d{3,}[\d,]*|\b(?:aed|dhs?)\s*\d[\d,.]*\s*k?"
+    r"|\b(?:the|your|this|that)\s+(?:rent|price|rate|amount|cost|fee)(?:\s+(?:is|be))?|\b(?:rent|price|rate|amount|cost|fee)\s+(?:is|be)"
+    r"|\b(?:give|make|keep|do)\s+(?:it|me|us))\s+$"
+)
+# A shop customer's room in the shop (batch 2e review): "Does it have a small room inside?", "is there a room for my staff to
+# sleep?": part of the shop, unless a wish for a home comes before it (_HOME_WISH: "I need a room for my staff").
+_SHOP_ROOM = re.compile(
+    r"\brooms?\s+inside\b|\brooms?\s+(?:for|to)\s+(?:(?:my|our|the)\s+)?(?:staff|workers?|employees?|labou?rs?|sleep|sleeping|rest|change|pray)\b"
+    r"|\bsleeping\s+rooms?\b"
+)
+_HOME_WISH = re.compile(
+    r"\b(?:need|needs|needed|want|wants|wanted|looking\s+for|look\s+for|searching\s+for|search\s+for|require|required|interested\s+in"
+    r"|asked\s+for|asking\s+for|ask\s+for|enquir\w*|inquir\w*|prefer|chahiye|chaiye|chahie|chahye)\b"
+    r"|أريد|اريد|أبحث|ابحث|أبغى|ابغى|محتاج|چاہیے|ڈھونڈ|चाहिए|ढूंढ|ढूँढ"
 )
 # A room that is no home: a store room, a showroom, room for the stock.
 _NOT_A_HOME_ROOM = re.compile(
@@ -226,6 +253,12 @@ _STUDIO_FOR_BUSINESS = re.compile(
 )
 
 
+def wishes(text: str) -> bool:
+    """Their words carry a wish (need, want, looking for, asked for, chahiye, أريد ...), not said with a no before it."""
+    flat = _flat(text)
+    return any(not _NEGATED.search(flat[: match.start()]) for match in _HOME_WISH.finditer(flat))
+
+
 def _home_noun(text: str) -> str:
     """The home they want, as a noun key ("studio", "bhk:1", "room"), else ''."""
     for key, pattern in _NOUN_PATTERNS:
@@ -235,6 +268,10 @@ def _home_noun(text: str) -> str:
             if key == "room" and _NOT_A_HOME_ROOM.search(text[max(0, match.start() - 16) : match.end() + 24]):
                 continue
             before = text[: match.start()]
+            if key == "room" and _SHOP_ROOM.search(text[max(0, match.start() - 10) : match.end() + 30]) and not _HOME_WISH.search(before):
+                continue  # "Does it have a small room inside?", "a room for my staff to sleep?": the shop's own room
+            if key == "flat" and _FLAT_ADJECTIVE_BEFORE.search(before):
+                continue  # "the rent flat or negotiable?", "30k flat final": flat the adjective
             owned = _NOUN_OWNED.search(before) and not _NOUN_WANTED_AFTER.match(text, match.end())
             if _NOUN_NEGATED.search(before) or _NOUN_PLACE.search(before) or owned:
                 continue  # "a shop, not a studio"; "near the apartments"; "my studio is in Deira"
@@ -278,12 +315,17 @@ _TRADING = re.compile(
 )
 _PROPERTY = (
     r"(?:shops?|units?|propert(?:y|ies)|flats?|studios?|villas?|apartments?|houses?|homes?|offices?|lands?|plots?|townhouses?|"
-    r"penthouses?|warehouses?|buildings?|real\s+estate|\d?\s*-?\s*bhk|commercial|retail|space)\b"
+    r"penthouses?|warehouses?|buildings?|real\s+estate|\d?\s*-?\s*bhk|commercial|retail|space"
+    # A bedroom count is a home too (batch 2e review: "I want to buy a one-bedroom", "I want to purchase 1BR flat", "1BR, to
+    # buy" were read as a home to rent, and a buyer was told the rent).
+    r"|(?:(?:\d|one|two|three|four|five|single|double|ek)\s*-?\s*)?(?:bed\s*rooms?|bedrooms?|br|b/r)|(?:\d|one|ek)\s*-?\s*bed)\b"
     # Never what is in it: "buy the shop furniture", "sell my shop stock"; nor goods named after a home ("I want to sell
     # home appliances", "home made food": review 2d).
     r"(?!\s+(?:furniture|fixtures?|fittings?|stock|goods|equipment|items?|products?|licen[cs]es?|photos?|pictures?|pics|keys?|deposit|"
     r"things|materials?|supplies|interior|decor|signs?|signboards?|boards?|shel(?:f|ves)|racks?|counters?|business|"
-    r"appliances?|electronics|accessories|textiles|made|based|delivery|services?|care|cleaning|food|kitchen\s+items?)\b)"
+    r"appliances?|electronics|accessories|textiles|made|based|delivery|services?|care|cleaning|food|kitchen\s+items?"
+    # "I want to buy a bedroom set" (a bedroom with no count is furniture's as often as a home's).
+    r"|sets?|sheets?|linens?|covers?)\b)"
 )
 _FILL = (
     r"(?:(?:a|an|the|this|that|these|those|one|some|any|your|ur|small|big|large|new|ready|good|cheap|nice|second|another|"
@@ -306,7 +348,8 @@ _BUY = re.compile(
     rf"|\b{_WISH}\s+(?:to\s+|in\s+|of\s+|for\s+|on\s+)?(?:buy|buying|purchase|purchasing){_TAIL}"
     # "Is it for sale?", "shops for sale", "a shop for purchase", "a shop to buy" (never "for rent or for sale?", a question)
     r"|(?<!\brent\sor\s)\bfor\s+(?:sale|purchase|buying)\b(?!\s+or\s+(?:for\s+)?(?:rent|lease)\b)"
-    rf"|\b{_PROPERTY}\s+to\s+(?:buy|purchase)\b"
+    # "a studio to buy", and as an answer to our "a studio or a one-bedroom, to rent or to buy?": "studio, to buy", "buy, 1BR"
+    rf"|\b{_PROPERTY}\s*[,/-]?\s*to\s+(?:buy|purchase)\b|\b(?:buy|buying|purchase|purchasing)\s*[,/-]\s*{_FILL}{_PROPERTY}"
     # "Do you sell shops?", "are you selling?"
     rf"|\b(?:do|does|are|is|can|could|will|would)\s+(?:you|u|ya|they|these|those|the\s+shops?|this|it)\s+(?:\w+\s+)?(?:sell|selling)"
     rf"(?:{_TAIL}|\s+(?:me\s+)?{_FILL}{_PROPERTY})"
@@ -317,7 +360,7 @@ _BUY = re.compile(
     rf"|\b(?:invest|investing)\s+(?:in\s+|on\s+)?{_FILL}{_PROPERTY}|\b{_WISH}\s+(?:to\s+|in\s+)?(?:invest|investing)(?=\s*$|\s*[.!?,;:])"
     r"|\bfor\s+investment\b|\binvestment\s+purpose|\bas\s+(?:an\s+)?investment\b|\bfreehold\b"
     # Roman Urdu / Hindi: "shop kharidni hai", "dukaan khareedni hai", "kharidna hai" (never "shop nahi kharidni")
-    r"|\b(?:shops?|dukaa?n\w*|flats?|ghar|makaa?n|property|villa|plot|zameen|office|apartment|studio)\s+"
+    r"|\b(?:shops?|dukaa?n\w*|flats?|ghar|makaa?n|property|villa|plot|zameen|office|apartment|studio|(?:\d\s*-?\s*)?(?:bhk|br|bed\s*rooms?|bedrooms?))\s+"
     r"(?:(?!(?:nahi|nahin|nhi|nai|na|mat)\b)\w+\s+)?kh[ae]+r[ie]+d\w*(?!\s+(?:nahi|nahin|nhi|nai)\b)"
     r"|^\W*(?:mujhe\s+|muje\s+|hume\s+|humein\s+|hamein\s+|main\s+|mein\s+|hum\s+)?kh[ae]+r[ie]+d(?:na|ni|ne)\s+(?:hai|hain|chahta|chahti|chahte|chahiye)\b"
     # Urdu, Devanagari: "دکان خریدنی ہے", "दुकान खरीदनी है"

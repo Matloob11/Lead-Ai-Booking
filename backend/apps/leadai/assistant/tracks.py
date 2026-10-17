@@ -243,10 +243,40 @@ def _name_of(token: str, names: tuple) -> str:
     return ""
 
 
+# A cluster they turn down ("I dont want China cluster", "Not Spain cluster"), read past the words between ("don't want any").
+_NEGATORS = frozenset({"not", "no", "dont", "don", "never", "nahi", "nahin", "without", "except", "avoid", "exclude", "excluding", "besides"})
+_BETWEEN = frozenset({"in", "the", "a", "an", "any", "want", "like", "need", "prefer", "t", "really", "at", "for"})
+
+
+def _turned_down(tokens, index: int) -> bool:
+    for back in range(index - 1, max(-1, index - 5), -1):
+        word = tokens[back]
+        if word in _NEGATORS:
+            return True
+        if word not in _BETWEEN:
+            return False
+    return False
+
+
+# Words that name where we meet, never the cluster they want ("see you at the Russia cluster", "on my way to Russia cluster").
+_MEETING_WORDS = (("see", "you"), ("meet", "you"), ("meet", "at"), ("my", "way"))
+
+
+def _our_office(tokens, index: int) -> bool:
+    """The cluster names our office's place ("the Russia cluster office", "your office in Russia Cluster", "see you at the
+    Russia cluster at 5"), not theirs."""
+    after = [word for word in tokens[index + 1 : index + 3] if not _CLUSTER_WORD.match(word)]
+    before = tokens[max(0, index - 2) : index]
+    near = tokens[max(0, index - 5) : index]
+    meeting = any(tuple(near[at : at + 2]) in _MEETING_WORDS for at in range(len(near) - 1))
+    return (bool(after) and after[0] in ("office", "offices")) or "office" in before or "offices" in before or meeting
+
+
 def clusters_in(texts, names: tuple = DEFAULT_CLUSTERS) -> tuple:
     """The clusters their words name as a place: the word "cluster" with it ("Englund x cluster"), a building code
     after it ("Spain T07"), or "in / at / near" before it in words about a home or International City ("a studio in
-    France"); never where someone is from ("I am from China"). In order, each once."""
+    France"); never where someone is from ("I am from China"), never one they turn down ("I dont want China cluster"),
+    and never our office's place ("see you at the Russia cluster office": the CRM review of batch 2e). In order, each once."""
     found = []
     for text in texts or ():
         flat = _flat(text)
@@ -262,6 +292,8 @@ def clusters_in(texts, names: tuple = DEFAULT_CLUSTERS) -> tuple:
                 name = _name_of(_ADJECTIVES[token], names)
             of_the = before == "the" and index > 1 and tokens[index - 2] == "of"  # "Mall of the Emirates"
             if not name or (after[:1] and after[0] in _NOT_A_CLUSTER_AFTER) or of_the:
+                continue
+            if _turned_down(tokens, index) or _our_office(tokens, index):
                 continue
             if any(_CLUSTER_WORD.match(word) for word in after) or (after and _BUILDING.match(after[0])):
                 found.append(name)
@@ -389,15 +421,62 @@ _RENT_WORD = re.compile(
     r"\b(?:rent|rental|renting|lease|leasing|kiraya|kiraye|kiraaya|kiraye\s?pe|kiray[ae]?\s+par)\b"
     r"|إيجار|ايجار|استئجار|للإيجار|للايجار|کرایہ|کرائے|किराया|किराए|किराये"
 )
+# A rent word that is no wish to rent a home (batch 2e review): a buyer's words about the unit's income or tenant, or a no.
+# "No, not for rent", "the rental yield", "rent it out", "lease it out", "a rented unit", "how much rent can I get from it".
+_RENT_NOT_A_WISH = re.compile(
+    r"\bnot\s+(?:for|to|on)\s+(?:rent|lease)\b|\bnot\s+(?:rent|renting|leasing)\b|\bno\s+(?:rent|renting|rental)\b"
+    r"|\b(?:rent|rental)\s+(?:yield|yields|income|return|returns|roi|potential|value)\b|\brental\s+investment\b"
+    r"|\b(?:rent|lease|let)\s+(?:it|them|the\s+(?:unit|studio|flat|apartment|property))\s+out\b|\b(?:rent|rents|renting|lease|leasing|let|letting)\s+out\b"
+    r"|\b(?:rented|tenanted|leased)\s+(?:one|unit|units|studio|flat|apartment|property)\b|\b(?:already|currently)\s+(?:rented|tenanted|leased)\b"
+    r"|\b(?:earn|earns|fetch|fetches|generate|generates)\s+(?:\w+\s+){0,3}?(?:rent|rental)\b"
+    r"|\b(?:rent|rental)\s+(?:can|will|would|could|does|do)\s+(?:i|we|it|you|they)\b|\bwhat\s+(?:is\s+the\s+|would\s+be\s+the\s+)?rent\s+(?:on|for)\s+it\b"
+)
+# An explicit wish to rent (what switches a stored sale track to rent): "I want to rent instead", "looking to rent", "rent,
+# not buy", "for rent", "kiraye pe chahiye", "أريد استئجار".
+_RENT_WISH = re.compile(
+    r"\b(?:want|wants|wanted|wanna|need|needs|looking|look|searching|prefer|planning|plan|interested|like|would\s+like|rather)\b"
+    r"(?:\s+\w+){0,3}?\s+(?:to\s+rent|to\s+lease|for\s+rent|on\s+rent|in\s+renting|renting|a\s+rental|leasing)\b"
+    r"|\b(?:rent|renting|lease)\s+(?:it\s+)?instead\b|\binstead\s+(?:i\s+(?:want|need)\s+to\s+)?(?:rent|lease)\b|\brather\s+(?:rent|lease)\b"
+    r"|\b(?:rent|renting)\s*,?\s+(?:not|no|instead\s+of)\s+(?:to\s+)?(?:buy|buying|purchase|sale)\b"
+    r"|\b(?:not|no)\s+(?:to\s+)?(?:buy|buying|purchase|sale)\s*,?\s+(?:but\s+)?(?:to\s+)?(?:rent|renting|lease)\b"
+    r"|^\W*(?:(?:a|for|to)\s+)?(?:rent|renting|rental|lease)(?:\s+(?:please|pls|only|it))?\W*$"
+    r"|\b(?:studio|flat|apartment|one[\s-]?bedroom|1\s*-?\s*br|1\s*-?\s*bhk|unit)\s+(?:for|to|on)\s+rent\b"
+    r"|\bkiray[ae]?\s+(?:pe|par|pr)\s+(?:chahiye|chaiye|lena|leni|lene)\b|\bkiraye?\s+(?:ka|ke\s+liye)\b"
+    r"|(?:أريد|اريد|أبغى|ابغى|أبي|ابي|أبحث\s+عن|ابحث\s+عن)\s+(?:\S+\s+){0,2}?(?:إيجار|ايجار|استئجار|للإيجار|للايجار)"
+    r"|کرائے\s+(?:پر|پہ)\s+(?:چاہیے|لینا)|किराए\s+(?:पर|पे)\s+(?:चाहिए|लेना)"
+)
 
 
 def said_rent(words) -> bool:
-    """An explicit rent word ("rent", "kiraya", "إيجار", "lease"): it decides rent over a sale lead."""
-    return any(_RENT_WORD.search(_flat(text)) for text in words or ())
+    """An explicit rent word ("rent", "kiraya", "إيجار", "lease"): it decides rent over a sale lead. Never a rent word that
+    wishes no rent ("not for rent", "the rental yield", "rent it out", "a rented unit": _RENT_NOT_A_WISH)."""
+    return any(_RENT_WORD.search(_RENT_NOT_A_WISH.sub(" ", _flat(text))) for text in words or ())
+
+
+def wants_rent(words) -> bool:
+    """An explicit wish to rent ("I want to rent instead", "looking to rent", "rent, not buy"): on a stored sale track only
+    this switches the chat to rent (batch 2e review: "No, not for rent. Vacant, own use", "Rented one is fine, I will lease
+    it out anyway" and "What is the rental yield?" answer the sale flow's own question)."""
+    return any(_RENT_WISH.search(_RENT_NOT_A_WISH.sub(" ", _flat(text))) for text in words or ())
 
 
 _OTHER_NOUNS = ("villa", "townhouse", "penthouse", "house", "room", "bed_space", "accommodation")
 _FLAT_NOUNS = ("apartment", "flat", "home", "bhk")
+
+
+def home_wished(words) -> bool:
+    """Their words wish for the home they name ("I need a flat", "I asked for a studio", "kamra chahiye"), or are no more
+    than a home said alone ("Studio", "a 1BR please"): what a shop customer's words must do before the shop track moves
+    (batch 2e review: "Is the rent flat or negotiable?", "Does it have a small room inside?" named no home they want)."""
+    for text in words or ():
+        flat = _flat(text)
+        if not flat:
+            continue
+        if needs.wishes(flat):
+            return True
+        if "?" not in flat and "؟" not in flat and len(flat.split()) <= 4:
+            return True
+    return False
 
 
 def _lead_home(context: dict) -> tuple | None:
@@ -408,6 +487,20 @@ def _lead_home(context: dict) -> tuple | None:
         return context.get("deal") or "", unit
     if context.get("property") == "apartment" and unit in (None, ""):
         return context.get("deal") or "", ""
+    return None
+
+
+def _known_home(facts, lead, *, stored: str, template_kind: str) -> Decision | None:
+    """The home the chat is on already when they say they never asked about a shop ("Not shops", "No shop!"): its stored
+    rent or sale track, or 2d's home or purchase it knows (facts.need), kept with an apology; None when there is none
+    (batch 2e review: chats 68 and 132's follow-ups pushed studio seekers onto 2d's other track)."""
+    if stored in (RENT, SALE):
+        return Decision(stored, deal=stored, deal_from=STORED, reason=STORED, sorry=True)
+    had = needs.of(facts)
+    if had is not None and had.kind in (needs.HOME, needs.BUY):
+        known = from_need(had, facts, lead, stored=stored, template_kind=template_kind)
+        if known.track in (RENT, SALE):
+            return dataclasses.replace(known, reason=FACTS, sorry=True)
     return None
 
 
@@ -428,7 +521,9 @@ def from_need(need, facts=None, lead=None, *, rent_said: bool = False, stored: s
     - to buy a studio, a one-bedroom, a flat; or to buy with no noun on a residential lead or chat or a template that is
       no shops one: sale (other until SALE_LIVE). To buy a shop, or with no noun on a shops template: other (2d);
     - to sell or let their own: other;
-    - "I never asked about a shop": rent or sale from a residential lead context, with an apology, else other.
+    - "I never asked about a shop": the chat's own rent or sale track, or 2d's home or purchase it knows (facts.need), with
+      an apology (batch 2e review: "Not shops" after the opener pushed a studio seeker off the rent flow); else rent or sale
+      from a residential lead context, with an apology, else other.
 
     ``lead`` may be a callable: it is asked only when the deal or the never-asked need depends on it."""
     lead = _Lead.of(lead)
@@ -439,6 +534,9 @@ def from_need(need, facts=None, lead=None, *, rent_said: bool = False, stored: s
     if need.kind == needs.SELL:
         return Decision(OTHER, unit)
     if need.kind == needs.NEVER_ASKED:
+        known = _known_home(facts, lead, stored=stored, template_kind=template_kind)
+        if known is not None:
+            return known
         home = _lead_home(lead.get())
         if home is not None:
             return _home(home[0], home[1], deal_from=LEAD if home[0] else "", reason=LEAD, sorry=True)
@@ -525,6 +623,7 @@ def decide(
     model_tag: str = "",
     fresh=None,
     clusters=None,
+    shop_tap: bool = False,
 ) -> Decision:
     """The chat's track and unit after this burst (the module note's five steps).
 
@@ -532,7 +631,9 @@ def decide(
     the facts the model recorded in this turn, if it answered; ``stored`` / ``stored_unit``: state.track and state.unit;
     ``lead``: the lead context, or a callable that reads it; ``template_kind``: ic_templates.kind of the campaign template
     the chat answers; ``first_answer``: nothing of ours since that template; ``model_tag``: the model's need tag
-    (answer["need_tag"]); ``clusters``: International City's cluster names (cluster_names)."""
+    (answer["need_tag"]); ``clusters``: International City's cluster names (cluster_names); ``shop_tap``: the burst is taps
+    on our shop types list or a type's card (engine.flow_taps): a shop wish in so many words (spec §1.4.2: those taps are
+    the shop track's only, so one on another track switches it to shop, never a shop step there)."""
     texts = [str(text) for text in words or () if str(text or "").strip()]
     facts = {key: value for key, value in (facts or {}).items() if value not in (None, "", [])}
     fresh = {key: value for key, value in (fresh or {}).items() if value not in (None, "", [])}
@@ -541,14 +642,22 @@ def decide(
     lead = _Lead.of(lead)
     stored = stored if stored in TRACKS else UNKNOWN
     stored_unit = stored_unit if stored_unit in (STUDIO, ONE_BR, TWO_PLUS) else ""
-    rent_said = said_rent(texts)
+    # On a stored sale track only an explicit wish to rent switches it (batch 2e review: the sale flow's own question "Do
+    # you prefer a rented unit or a vacant one?" is answered with rent words); elsewhere a rent word decides rent.
+    rent_said = wants_rent(texts) if stored == SALE else said_rent(texts)
     kwargs = {"stored": stored, "template_kind": template_kind}
     decision = None
     sorry = False
 
     # 1. Their own words in this burst.
     need = needs.detect(texts) if texts else None
-    if wants_shop(texts):
+    if need is not None and need.kind == needs.HOME and stored == SHOP and not home_wished(texts):
+        # A shop customer's words that only name a home ("Is the rent flat or negotiable?", "flats above the shop?", "a room
+        # for my staff"): no wish for one, so the shop track stays (batch 2e review).
+        need = None
+    if shop_tap:
+        decision = Decision(SHOP, reason=WORDS)
+    elif wants_shop(texts):
         home, home_first = _home_besides_shop(texts)
         if home is None:
             decision = Decision(SHOP, reason=WORDS)
@@ -618,7 +727,9 @@ def decide(
     found = clusters_in(texts, names)
     if not found:
         found = clusters_in([str(known.get("community") or "")], names)
-    if not found and decision.track in (RENT, SALE) and lead.loaded:
+    if not found and decision.track in (RENT, SALE) and lead.loaded and _lead_home(lead.get()) is not None:
+        # Only a lead about an apartment: an old shop enquiry's cluster is no home's (batch 2e review: a France Cluster shop
+        # lead's "I need a 1BR" got the European band, and a Morocco shop lead's buyer Morocco's studio price).
         cluster = lead.get().get("cluster")
         found = (cluster,) if isinstance(cluster, str) and cluster in names else ()
     switched = bool(stored) and decision.track != stored and decision.track != UNKNOWN

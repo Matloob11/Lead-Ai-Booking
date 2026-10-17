@@ -38,7 +38,7 @@ from apps.campaigns.models import CampaignRecipient
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai import bitrix_status, followups, lane, optout, tasks
 from apps.leadai.assistant import crm, crm_facts, crm_fields, engine, filters, hours, lost, needs, people, rules
-from apps.leadai.assistant import residential
+from apps.leadai.assistant import residential, tracks
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import LeadAiAlert, LeadAiChat, LeadAiChatState, LeadAiCrmField, LeadAiSettings, LeadAiTurn
 from apps.leadai.tests.test_assistant import NOW, _outbound, fake_send_text
@@ -761,7 +761,8 @@ class EvalReviewScenarioTests(SimpleTestCase):
             # "need one more" is read twice over now: as a want of one more, and as "one more" alone (the gate's review).
             ("shops-review-rented-one-more", [patch.object(needs, "_WANTS_MORE", never), patch.object(needs, "_ONE_MORE_ALONE", never)]),
             ("shops-review-buyer-no-rent-42", [patch.object(needs, "_RENT_TALK", never)]),
-            ("shops-review-studio-not-shops-68", [patch.object(needs, "replaces", return_value=True)]),
+            # Batch 2e: the rent track keeps the studio the chat knows (tracks._known_home); 2d's needs.replaces is off its path.
+            ("shops-review-studio-not-shops-68", [patch.object(tracks, "_known_home", return_value=None)]),
         ):
             with self.subTest(scenario_id):
                 self.assertEqual(self.run_scenario(scenario_id, RIGHT[scenario_id]).failures, [])

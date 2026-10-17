@@ -199,9 +199,15 @@ class ResidentialWritesTests(SimpleTestCase):
         self.assertEqual(text({"clusters": [], "cluster_flexible": True}), "Any (flexible)")
         self.assertEqual(text({"clusters": ["Morocco"], "cluster_flexible": True}), "Morocco (flexible)")
         self.assertEqual(text({"community": "Spain Cluster"}), "Spain")
-        # "I need room / 1bhk Englund x cluster" (launch chat 49): their own words, read by code, beat the model's facts.
+        # "I need room / 1bhk Englund x cluster" (launch chat 49): their own words, read by code, when the facts name no cluster.
         self.assertEqual(text({"community": "England"}, "I need room\n1bhk Englund x cluster"), "England")
-        self.assertEqual(text({"clusters": ["France"]}, "actually Persia cluster is better"), "Persia")
+        # The CRM review of batch 2e: the model's facts.clusters is the source; words fill in only when it names none, and
+        # never our office's cluster nor one they turn down.
+        self.assertEqual(text({"clusters": ["Persia"]}, "actually Persia cluster is better"), "Persia")
+        self.assertEqual(text({"clusters": ["Spain"]}, "Ok see you at the Russia cluster office at 5"), "Spain")
+        self.assertEqual(text({}, "Ok see you at the Russia cluster office at 5"), "")
+        self.assertEqual(text({}, "I dont want China cluster"), "")
+        self.assertEqual(text({}, "Not Spain cluster, I want England cluster"), "England")
         # "I am from China, I need a studio": a nationality is never a cluster, in their words or the model's community.
         self.assertEqual(text({"community": "China"}, "I am from China, I need a studio"), "")
         self.assertEqual(text({"community": "International City"}), "")
@@ -404,7 +410,11 @@ class WriteTests(CrmWritesBase):
         self.assertFalse(F.holds({F.FIELD_RENT_SALE: ""}, rent))
         self.assertTrue(F.holds({F.FIELD_RENT_SALE: "2443", F.FIELD_CLIENT_TYPE: ""}, client))
         self.assertFalse(F.holds({F.FIELD_RENT_SALE: "", F.FIELD_CLIENT_TYPE: ""}, client))
+        # An unread lead holds nothing we know of, and so its Client Type waits for a read (the CRM review of batch 2e: posted
+        # unread, a7_rent_sale.php derived Rent/Sale from it over an agent's value).
         self.assertFalse(F.holds(None, client))
+        self.assertTrue(F.waits_for_read(None, client))
+        self.assertFalse(F.waits_for_read(None, rent))
         self.assertEqual(F.differences({F.FIELD_RENT_SALE: ["2444"]}, [rent]), [rent])
         self.assertEqual(F.differences({F.FIELD_RENT_SALE: "2443"}, [rent]), [])
         self.assertEqual(F.differences({F.FIELD_RENT_SALE: "2445"}, [rent]), [])

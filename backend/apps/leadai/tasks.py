@@ -783,7 +783,10 @@ def _book(appointment, crm_id: int, event: str, decision: str, stamp: str, extra
         return True, ""  # done before (a task delivered twice): its comment went with it
     try:
         # A buyer's sales call owns a "Sales call" to-do (C40): only those are the booking action's to move or close.
-        todos = crm.open_meeting_todos(crm_id, calls.todo_subject(appointment, crm.TODO_SUBJECT))
+        subject = calls.todo_subject(appointment, crm.TODO_SUBJECT)
+        todos = crm.open_meeting_todos(crm_id, subject)
+        if appointment.crm_todo_id and appointment.crm_todo_id not in todos:
+            _close_other_subject(appointment, crm_id, subject)
     except Exception:
         _undo_step(appointment, step)
         raise
@@ -828,6 +831,25 @@ def _book(appointment, crm_id: int, event: str, decision: str, stamp: str, extra
         except crm_fields.FieldsError as exc:
             logger.warning("Lead AI could not close the viewing to-do of appointment %s: %s", appointment.pk, exc)
     return True, ""
+
+
+def _close_other_subject(appointment, crm_id: int, subject: str) -> None:
+    """The booking changed place (a sales call moved to the office, or a visit to a call): the to-do ours under the other
+    subject is closed first, by its id (C33, the tool's cancel), so it never stays open at the old time, and no
+    "Viewing/Meeting" or "Sales call" to-do of ours is left for a later move to mistake for a person's (the CRM review of
+    batch 2e). crm_todo_id is cleared: the booking then plans the new subject's own."""
+    from .assistant import calls, crm, crm_fields
+    from .models import LeadAiAppointment
+
+    other = crm.TODO_SUBJECT if subject == calls.TODO_SUBJECT else calls.TODO_SUBJECT
+    if appointment.crm_todo_id not in crm.open_meeting_todos(crm_id, other):
+        return
+    answer = crm_fields.post({"lead_id": int(crm_id), "booking": {"event": "cancelled", "todo_subject": other, "crm_todo_id": int(appointment.crm_todo_id)}})
+    if not answer.get("ok"):
+        logger.warning("Lead AI could not close the %s to-do %s of appointment %s: %s", other, appointment.crm_todo_id, appointment.pk, answer.get("error"))
+        return
+    LeadAiAppointment.objects.filter(pk=appointment.pk).update(crm_todo_id=None)
+    appointment.crm_todo_id = None
 
 
 def _book_around(appointment, crm_id: int, event: str, decision: str, stamp: str, own, extra: list, comment_for) -> bool:
@@ -1144,6 +1166,14 @@ def write_crm_fields(self, row_ids) -> None:
     LeadAiCrmField.objects.filter(pk__in=[row.pk for row in live]).update(retry_at=now + CRM_CATCH_UP_EVERY)
     # What the lead holds now: a value it has already is not written again (no edit, no change-log line).
     current = lost.read_lead(lead_id)
+    # A Client Type is never posted while the lead's Rent/Sale is unknown (a failed read): a7_rent_sale.php would derive
+    # Rent/Sale from it over an agent's value. It stays unsent, due again with the sweep (crm_fields.waits_for_read).
+    waiting = [row for row in live if crm_fields.waits_for_read(current, row)]
+    if waiting:
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in waiting]).update(error=crm_fields.WAITS_FOR_READ)
+        live = [row for row in live if row not in waiting]
+        if not live:
+            return
     touch = lost.touch_of(current, now, lost.system_users()) if current else None
     if touch:
         # A person's touch this read shows: our write is about to hide it (it writes as user 1), so a later "no" must
@@ -1164,6 +1194,12 @@ def write_crm_fields(self, row_ids) -> None:
     # Batch 2e: a Rent/Sale, Client Type or Bedrooms the lead holds otherwise than the customer now says is left as it is,
     # and its timeline says so, once (crm_fields.held_notes; spec §5).
     note = crm_fields.held_notes(current, held)
+    # C39's own fields a person changed on the lead since this chat last wrote them: left as they are, the timeline told once.
+    edited = [row for row in live if crm_fields.person_edited(current, row)]
+    if edited:
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in edited]).update(sent_at=now, error=crm_fields.HELD_PERSON, retry_at=None)
+        note = "\n".join(part for part in (note, crm_fields.person_note(current, [row for row in edited if not row.attempts])) if part)
+        live = [row for row in live if row not in edited]
     # A shops "no": its lost stage only for a lead nobody is working, with no open to-do (assistant/lost.py).
     moves = [row for row in live if row.field == crm_fields.LOST]
     kept: dict[int, str] = {}
@@ -1202,7 +1238,7 @@ def write_crm_fields(self, row_ids) -> None:
     LeadAiCrmField.objects.filter(pk__in=ids).update(attempts=F("attempts") + 1)
     body = crm_fields.body_for(posting, lead_id=lead_id)
     if comment:
-        body["comment"] = comment
+        body["comment"] = "\n".join(part for part in (body.get("comment"), comment) if part)
     try:
         answer = crm_fields.post(body)
     except crm_fields.FieldsError as exc:
@@ -1415,6 +1451,7 @@ FIELD_NAMES = {
     "email": "E-mail",
     "lost": "the move to a lost stage",
     "license_file": "the trade licence copy (it is in the chat)",
+    "todo": "the to-do to delete the customer's data (PDPL)",
 }
 
 

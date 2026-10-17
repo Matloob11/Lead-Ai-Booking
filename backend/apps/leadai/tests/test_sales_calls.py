@@ -319,7 +319,11 @@ class CallPoolTests(NotAShopBase):
         with self.assertRaises(hours.SlotError) as refused:
             engine.check_proposal(dict(proposal), None, NOW)
         self.assertEqual(refused.exception.code, "not_office")
-        self.assertEqual(engine.check_proposal(dict(proposal), None, NOW, places=calls.PLACES), at(12, 17))
+        try:
+            booked = engine.check_proposal(dict(proposal), None, NOW, places=calls.PLACES)
+        except hours.SlotError as call_refused:  # a failure, never an error (the 2e eval review, E11)
+            self.fail(f"a call on the sale track was refused: {call_refused.code}")
+        self.assertEqual(booked, at(12, 17))
 
     def test_one_call_per_slot_and_no_office_slot(self):
         proposal = {"action": "confirm", "place": "call", "date": "2026-10-12", "time": "17:00", "customer_words": "5 pm"}
@@ -425,7 +429,7 @@ class FullNameTests(SimpleTestCase):
             "Perfect, Ahmed Khan! Your meeting is confirmed ✅\nDate: Monday 19 October\nTime: 4:00 PM\nPlace: Russia Cluster, Building V03\nhttps://maps.x/y\n"
             "Our agent will meet you at the office. See you soon!",
         )
-        self.assertEqual(sales.booking_text("en", at(19, 16), call=True, facts=NAMED), residential.confirmation("en", at(19, 16), kind="call", full_name="Ahmed Khan"))
+        # (sales.booking_text, the SALE stand-in's own, is gone: engine._run_claimed's booking_text writes residential.confirmation.)
 
 
 # G. A buyer's turn, end to end ------------------------------------------------------------------------------------------
@@ -604,7 +608,10 @@ class CallCrmTests(RcBase):
         )
         self.assertEqual(crm.booking_body(555, appointment, "cancelled")["booking"], {"event": "cancelled", "todo_subject": "Sales call"})
         visit = LeadAiAppointment(status="confirmed", place="office", starts_at=at(13, 17), details={})
-        self.assertEqual(crm.booking_body(555, visit, "confirmed")["booking"], {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42})
+        self.assertEqual(
+            crm.booking_body(555, visit, "confirmed")["booking"],
+            {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42, "todo_subject": "Viewing/Meeting"},
+        )
 
     def test_a_calls_booking_moves_only_a_sales_call_todo_never_a_persons_viewing(self):
         bitrix = SubjectBitrix(todos={700: todo("2026-10-15T15:00:00+04:00")})  # a person's open "Viewing/Meeting"

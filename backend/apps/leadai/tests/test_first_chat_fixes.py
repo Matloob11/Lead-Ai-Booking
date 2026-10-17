@@ -66,6 +66,8 @@ class FirstChatBase(Base):
         LeadAiChatState.objects.filter(pk=state.pk).update(**fields)
 
     def body(self, outcome):
+        # No reply sent is a failure, never an error: a guard switched off must FAIL its tests (the 2e eval review, E11).
+        self.assertIsNotNone(outcome.reply_message_id, "no reply was sent")
         return Message.objects.get(pk=outcome.reply_message_id).body
 
     def actions(self, message):

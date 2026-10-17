@@ -716,6 +716,42 @@ RIGHT = {
     "shops-buyer-no-figure": answer(
         "Our shops are in Russia and England Cluster, from 400 sq ft. Small shops are AED 33,000 a year.", segment="buyer"
     ),
+    # The 2e reviews of 2026-10-17: what a right answer looks like (code's own, before any model, for those it settles).
+    "shops-mixed-buy-one-bedroom": answer("", send=False),
+    "shops-mixed-one-bedroom-comma-to-buy": answer("", send=False),
+    "shops-mixed-studio-comma-to-buy": answer("", send=False),
+    "shops-sale-not-for-rent": answer(
+        "Got it, a vacant unit for your own use.", segment="buyer", facts={"occupancy_status": "vacant", "purpose": "personal"}
+    ),
+    "shops-res-booked-got-location": answer(
+        "Nothing special — our agent will meet you at the office and take you to the available apartments.", segment="residential_tenant"
+    ),
+    "shops-res-name-insha-allah": answer("", send=False, segment="residential_tenant"),
+    "shops-mixed-not-known-booking": booked("2026-10-12", "17:00", segment="residential_tenant"),
+    "shops-res-broker-books": booked(
+        "2026-10-12", "18:00", segment="residential_tenant", handover="broker_or_for_client", facts={"for_client": True, "full_name": "Ahmed Khan"}
+    ),
+    "shops-res-not-shops-after-opener": answer("Sorry for the confusion! Are you looking for yourself or for a client?", segment="residential_tenant"),
+    "shops-rent-flat-or-negotiable": answer("The final price depends on the owner. Our agent can discuss it with you at the viewing."),
+    "shops-shop-lead-wants-1br": answer("", send=False),
+    "shops-res-yes-to-shops-template": answer("Great! Are you looking for yourself or for a client?", segment="residential_tenant"),
+    "shops-res-book-tap-template-b": answer(
+        "Great! Our agent will meet you at our office in Russia Cluster and take you to the available apartments. I can hold a slot for "
+        "you today at 3:00 PM or 5:00 PM — which is better?",
+        segment="residential_tenant", invited=True,
+    ),
+    "shops-res-old-list-tap": answer("", send=False),
+    "shops-sale-move-call": answer("", action="reschedule", place=None, date="2026-10-12", time="18:00", segment="buyer"),
+    "shops-res-move-no-full-name": booked("2026-10-14", "18:00", segment="residential_tenant"),
+    "shops-sale-price-and-call-no-name": answer(
+        "Studios in International City are generally around AED 330,000–350,000.", handover="call_requested", segment="buyer"
+    ),
+    "shops-res-monthly-figure": answer("Studios here are around AED 29,000–33,000 a year, so roughly AED 2,500 a month.", segment="residential_tenant"),
+    "shops-res-commission-how-much-exactly": answer("It's usually 5% of the annual rent.", segment="residential_tenant"),
+    "shops-sale-photos-call-booked": answer("Sure, here are the photos.", segment="buyer"),
+    "shops-res-who-will-meet-me": answer(
+        "Our agent will meet you at our office in Russia Cluster and take you to the available apartments.", segment="residential_tenant"
+    ),
 }
 
 
@@ -849,7 +885,8 @@ class EvalCommandTests(TestCase):
                 "shops-crm-rent-studio-spain",
                 "shops-licence-copy", "shops-licence-second-page",
                 # Batch 2e: the mixed template's first answer, "Not now" and "Stop messages" are code's.
-                "shops-mixed-not-now", "shops-mixed-stop", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic",
+                "shops-mixed-buy-one-bedroom", "shops-mixed-not-now", "shops-mixed-one-bedroom-comma-to-buy", "shops-mixed-stop",
+                "shops-mixed-studio-comma-to-buy", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic",
                 "shops-mixed-yes-buyer-lead", "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead",
                 "shops-mixed-yes-studio-lead", "shops-mixed-yes-tap", "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no",
                 "shops-not-now-studio-68", "shops-not-now-yes", "shops-other-types-tap", "shops-rented-no",
@@ -857,9 +894,13 @@ class EvalCommandTests(TestCase):
                 # Batch 2e slice B: the rent flow's opener of a track entered, a voice note nobody heard, a document number, "delete
                 # my data": code's, before any model (the launch's studio seekers among them).
                 "shops-res-114-apartment-rent", "shops-res-arabic-spain", "shops-res-delete-my-data", "shops-res-emirates-id-sent",
-                "shops-res-hindi-studio", "shops-res-mixed-studio-answer", "shops-res-urdu-voice-flats-119",
+                "shops-res-hindi-studio", "shops-res-mixed-studio-answer", "shops-res-old-list-tap", "shops-res-urdu-voice-flats-119",
+                # Launch chat 68's "Not shops" after 2d recorded its studio: the rent track keeps it, code's opener apologises.
+                "shops-review-studio-not-shops-68",
                 # Batch 2e slice C on the residential path: a buyer's first plain message gets code's res_open_sale.
                 "shops-sale-first-message",
+                # A shop lead's "I need a 1BR": International City's band, never the old shop enquiry's cluster's.
+                "shops-shop-lead-wants-1br",
                 "shops-spam", "shops-stop", "shops-studio-balcony-107", "shops-studio-capitals-136", "shops-studio-monthly-57",
                 "shops-studio-not-interested", "shops-track-1br-near-my-shop", "shops-track-englund-1bhk-49", "shops-track-from-china",
                 "shops-track-one-bed", "shops-track-room-and-hall-arabic", "shops-track-shop-yes", "shops-type-tap", "shops-type-tap-again",

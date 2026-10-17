@@ -46,7 +46,7 @@ class ShadowTrackTests(NotAShopBase):
         self.assertEqual((len(calls), self.body(outcome)), (1, reply))
         state = self.state()
         self.assertEqual((state.track, state.unit, state.track_changed_at), ("shop", "", NOW))
-        self.assertEqual(self.actions(message)["track"], {"track": "shop", "unit": "", "reason": tracks.WORDS})
+        self.assertEqual(self.actions(message).get("track"), {"track": "shop", "unit": "", "reason": tracks.WORDS})  # missing: a failure (E11)
 
     @patch.object(residential, "RENT_LIVE", False)  # 2d's own path (batch 2e's rent flow off: its kill switch)
     def test_2ds_studio_seeker_is_the_rent_track_and_still_gets_2ds_line(self):

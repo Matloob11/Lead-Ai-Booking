@@ -339,8 +339,10 @@ class SpecialTurnTests(RentBase):
         self.assertEqual((calls, self.body(outcome)), ([], residential.line("res_deleted", "en")))
         self.assertEqual(self.state().stop_reason, "stop_all")
         self.assertTrue(optout.is_blocked(self.contact.wa_id))
-        alert = LeadAiAlert.objects.get(kind="data_deletion")
-        self.assertEqual(alert.agent, self.admin)
+        # The panel admins hear it, and so do the chat's own people (the CRM review of batch 2e: 2311 never did).
+        alerted = set(LeadAiAlert.objects.filter(kind="data_deletion").values_list("agent", flat=True))
+        self.assertIn(self.admin.pk, alerted)
+        self.assertGreater(len(alerted), 1)
 
     def test_rented_elsewhere_is_lost_on_the_rent_track(self):
         self.rent()

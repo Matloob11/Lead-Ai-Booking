@@ -290,6 +290,10 @@ Quote the CHARGE LINES only, in the customer's language (the deposit, Ejari, DEW
     + _shops_section("BOOKING")
     .replace("the date, time, shop type, place and what to bring", "the date, time, place and our office's location")
     .replace('a call is "call" and only ever "tentative".', 'a call is "call": only ever "tentative", but for the sale track\'s 5-minute call.')
+    .replace(
+        'When you confirm or reschedule with a date and time (place "office")',
+        'When you confirm or reschedule with a date and time (place "office"; place "call" for a sales call, and a booked call moved stays "call")',
+    )
     + """
 - place is "office" for a meeting at our office, or "call" for a 5-minute call with our sales team on the sale track only (the system books the call slot). A viewing at a building is never booked.
 - The system asks for the full name before it books: record full_name exactly as the customer writes it, and email only when they give one; never ask for an e-mail.

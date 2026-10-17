@@ -861,7 +861,8 @@ class CrmTests(TestCase):
             body,
             {
                 "lead_id": 555,
-                "booking": {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42},
+                # The subject always named (the CRM review of batch 2e: never the tool's newest to-do of either subject).
+                "booking": {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42, "todo_subject": "Viewing/Meeting"},
                 "fields": {crm.FIELD_ACTIVITY: "vape (shop)", crm.FIELD_LICENCE: 2159},
                 "only_if_empty": [crm.FIELD_ACTIVITY, crm.FIELD_LICENCE],
                 "comment": "MEETING CONFIRMED",
@@ -872,7 +873,7 @@ class CrmTests(TestCase):
         self.assertEqual(crm.booking_body(1, self.appointment(licence_kind="trakhees", trade_licence="yes"), "rescheduled")["fields"], {crm.FIELD_LICENCE: 2456})
         self.assertNotIn("fields", crm.booking_body(1, self.appointment(), "rescheduled"))
         # A cancel carries no time or fields; a long comment is cut to what the tool keeps.
-        self.assertEqual(crm.booking_body(1, self.appointment(trade_licence="yes"), "cancelled", "x" * 1500), {"lead_id": 1, "booking": {"event": "cancelled"}, "comment": "x" * 1000})
+        self.assertEqual(crm.booking_body(1, self.appointment(trade_licence="yes"), "cancelled", "x" * 1500), {"lead_id": 1, "booking": {"event": "cancelled", "todo_subject": "Viewing/Meeting"}, "comment": "x" * 1000})
         self.assertEqual((crm.todo_of({"todo_id": 7}), crm.todo_of({"todo_id": None}), crm.todo_of({})), (7, None, None))
 
     def test_stage_decisions(self):
@@ -932,7 +933,9 @@ class CrmSyncTests(Base):
         self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
         self.assertEqual(len(posted), 1)
         body = posted[0]
-        self.assertEqual((body["lead_id"], body["booking"]), (555, {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42}))
+        self.assertEqual(
+            (body["lead_id"], body["booking"]), (555, {"event": "confirmed", "meeting_at": "2026-10-13T17:00:00+04:00", "mode": 42, "todo_subject": "Viewing/Meeting"})
+        )
         self.assertIn("MEETING CONFIRMED", body["comment"])
         self.assertIn("moved this lead to Meeting/Viewing Scheduled", body["comment"])
         self.appointment.refresh_from_db()
@@ -955,7 +958,11 @@ class CrmSyncTests(Base):
         self.sync(revision=1)
         LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(starts_at=TUESDAY_5PM + dt.timedelta(days=1))
         methods, _, readback, posted = self.sync(stage="10", event="rescheduled", revision=2, todos=[901])
-        self.assertEqual(posted[0]["booking"], {"event": "rescheduled", "meeting_at": "2026-10-14T17:00:00+04:00", "mode": 42})
+        # Our own to-do by its id (C33), so the tool moves exactly that one (the CRM review of batch 2e).
+        self.assertEqual(
+            posted[0]["booking"],
+            {"event": "rescheduled", "meeting_at": "2026-10-14T17:00:00+04:00", "mode": 42, "todo_subject": "Viewing/Meeting", "crm_todo_id": 901},
+        )
         self.assertIn("MEETING RESCHEDULED", posted[0]["comment"])
         self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
         readback.assert_not_called()  # the stage was 10 already
@@ -973,7 +980,7 @@ class CrmSyncTests(Base):
         LeadAiAppointment.objects.filter(pk=self.appointment.pk).update(status="cancelled")
         self.appointment.refresh_from_db()
         methods, _, _, posted = self.sync(stage="10", event="cancelled", revision=2, todos=[901])
-        self.assertEqual(posted[0]["booking"], {"event": "cancelled"})
+        self.assertEqual(posted[0]["booking"], {"event": "cancelled", "todo_subject": "Viewing/Meeting", "crm_todo_id": 901})
         self.assertIn("MEETING CANCELLED", posted[0]["comment"])
         self.assertEqual(methods, ["crm.lead.get", "crm.activity.list"])
         self.appointment.refresh_from_db()

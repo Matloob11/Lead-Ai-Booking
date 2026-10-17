@@ -68,6 +68,7 @@ test_residential_crm): one it does not know refuses the whole batch.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import hmac
 import json
@@ -183,6 +184,26 @@ _WANTS = {
 }
 HELD_OTHER = "Not sent: the lead holds another value; its timeline says what the customer wants."
 HELD_FOR_RENT_SALE = "Not sent: the lead has a Rent/Sale, which a Client Type would change (a7_rent_sale.php derives it)."
+# The CRM review of batch 2e: a Client Type posted while the lead could not be read (a 429, the limiter) made
+# a7_rent_sale.php derive Rent/Sale over an agent's value. It waits, unsent, for a read that shows the lead's Rent/Sale
+# (the sweep sends it again: tasks._retry_crm_fields).
+WAITS_FOR_READ = "Waiting for the lead to be read: a Client Type is sent only once the lead's Rent/Sale is known."
+# C39's own fields a person edited on the lead since this chat last wrote them (the lead's value is neither ours nor the new
+# one): left as they are, and the lead's timeline says what the customer now says, once (person_note).
+OWN_FIELDS = (FIELD_CLUSTERS, FIELD_BALCONY, FIELD_TIMELINE, FIELD_FULL_NAME, FIELD_OCCUPANCY, FIELD_VACANT_RENTED, FIELD_PAYMENT)
+HELD_PERSON = "Not sent: a person changed this field on the lead since our last write; its timeline says what the customer now says."
+_OWN_LABELS = {
+    FIELD_CLUSTERS: ("Clusters", {}),
+    FIELD_TIMELINE: ("Timeline", {}),
+    FIELD_FULL_NAME: ("Full name", {}),
+    FIELD_BALCONY: ("Balcony", {2501: "Yes", 2502: "No", 2503: "Either"}),
+    FIELD_VACANT_RENTED: ("Vacant or rented", {2504: "Vacant", 2505: "Rented", 2506: "Either"}),
+    FIELD_PAYMENT: ("Payment", {2507: "Cash", 2508: "Mortgage"}),
+    FIELD_OCCUPANCY: ("Occupancy", {2509: "Myself", 2510: "Family", 2511: "Company staff", 2512: "Sharing"}),
+}
+# Not a field: a plain to-do for 2311 (C40's "todo" action), with its deadline in the row's payload; never beside a booking.
+TODO = "todo"
+DELETION_TODO = "Delete customer data (PDPL)"
 
 # The Lead fields tool's allow-list (ops/bitrix-aws/a7_leadai_fields.php, a7_leadai_fields_allow; C3, C6, C32, C39): every
 # code a body may name, with its enum ids or the kind of value it takes. test_residential_crm holds this to the PHP.
@@ -301,6 +322,20 @@ def opt_out_writes(kind: str, reason: str = "") -> list:
     return []
 
 
+def deletion_writes(now, closed_dates=()) -> list:
+    """[(field, value, payload)] for a customer who asked us to delete their data (spec §2.10, §6.3: a C40 to-do for 2311):
+    a plain to-do due at the office's next free half hour, with the reason on the lead's timeline (pure; tested)."""
+    from . import hours
+
+    slots = hours.free_slots(now, closed_dates, (), count=1)
+    deadline = (slots[0] if slots else now + dt.timedelta(hours=1)).astimezone(hours.DUBAI)
+    comment = (
+        "The customer asked us on WhatsApp to delete their data (PDPL). The assistant stopped and their number is on the "
+        "opt-out registry. Please delete their details as the company's process requires."
+    )
+    return [(TODO, DELETION_TODO, {"deadline": deadline.isoformat(), "comment": comment})]
+
+
 def residential_writes(facts, track: str, unit: str = "", *, words: str = "", besides=()) -> list:
     """[(field, value, payload)] of a studio or one-bedroom chat's own lead fields (batch 2e spec §5; pure, tested).
 
@@ -402,15 +437,17 @@ def _cluster_name(item, names) -> str:
 
 def clusters_text(facts: dict, words: str = "", names=tracks.DEFAULT_CLUSTERS) -> str:
     """The clusters they want, as C39's Clusters field keeps them: "England, France", "Spain (flexible)", "Any
-    (flexible)", else ''. Only International City's own names, never a nationality or another area: the ones their own
-    words name this turn as a place (``words``, read by code: tracks.clusters_in, "1bhk Englund x cluster" England, "I am
-    from China" none), else the facts' clusters (RES_SCHEMA), else the community the model recorded when it names one as
-    a place ("Spain Cluster"; never a bare "China", which may be where they are from)."""
-    found = list(tracks.clusters_in([words], names)) if str(words or "").strip() else []
+    (flexible)", else ''. Only International City's own names, never a nationality or another area: the facts' clusters
+    (RES_SCHEMA, the model's reading of what they want), else the ones their own words name this turn as a place
+    (``words``, read by code: tracks.clusters_in, "1bhk Englund x cluster" England, "I am from China" none, never our
+    office's own cluster nor one they turn down: the CRM review of batch 2e, "see you at the Russia cluster office" wrote
+    Russia over Spain), else the community the model recorded when it names one as a place ("Spain Cluster"; never a bare
+    "China", which may be where they are from)."""
     given = facts.get("clusters")
-    if not found:
-        items = given if isinstance(given, (list, tuple)) else re.split(r"[,;/&]|\band\b|\bor\b", str(given or ""))
-        found = list(dict.fromkeys(name for name in (_cluster_name(item, names) for item in items) if name))
+    items = given if isinstance(given, (list, tuple)) else re.split(r"[,;/&]|\band\b|\bor\b", str(given or ""))
+    found = list(dict.fromkeys(name for name in (_cluster_name(item, names) for item in items) if name))
+    if not found and str(words or "").strip():
+        found = list(tracks.clusters_in([words], names))
     if not found and not given:
         found = list(tracks.clusters_in([str(facts.get("community") or "")], names))
     flexible = facts.get("cluster_flexible") is True
@@ -554,14 +591,81 @@ def _has_email(current: dict) -> bool:
     return str(current.get("HAS_EMAIL") or "").upper() == "Y"
 
 
+def waits_for_read(current: dict | None, row) -> bool:
+    """A Client Type while the lead could not be read (``current`` None: a 429, the limiter): never posted then, since the
+    lead's Rent/Sale is not known, and a7_rent_sale.php would derive Rent/Sale from it over an agent's value; it stays
+    unsent for the sweep, which reads the lead again (the CRM review of batch 2e; pure, tested)."""
+    return not isinstance(current, dict) and row.field == FIELD_CLIENT_TYPE
+
+
+def _values(value) -> set[str]:
+    """A lead field's value as the strings it holds (an enum list, or one value)."""
+    if isinstance(value, (list, tuple)):
+        return {str(item).strip() for item in value if not _blank(item)}
+    return {str(value).strip()} if not _blank(value) else set()
+
+
+def ours_before(row):
+    """The value Lead AI last wrote to this field of the lead before ``row`` (posted, or found there already), else None:
+    from any of its chats with the lead (one lead answered on two of our numbers), so a value another chat of ours wrote is
+    never taken for a person's."""
+    return (
+        LeadAiCrmField.objects.filter(
+            lead_id=row.lead_id, field=row.field, pk__lt=row.pk, sent_at__isnull=False, error__in=("", HELD_ALREADY),
+        )
+        .order_by("-pk")
+        .values_list("value", flat=True)
+        .first()
+    )
+
+
+def edited_by_person(current: dict | None, row, ours) -> bool:
+    """One of C39's own fields (OWN_FIELDS) the lead holds with a value that is neither this row's nor the one this chat
+    last wrote (``ours``, None when it never did): a person typed it, and our write would replace it (the CRM review of
+    batch 2e: an agent's "1 December, confirmed by phone" went under the customer's "mid-November"; pure, tested)."""
+    if not isinstance(current, dict) or row.field not in OWN_FIELDS or row.field not in current:
+        return False
+    held = _values(current.get(row.field))
+    if not held or str(row.value).strip() in held:
+        return False
+    return ours is None or str(ours).strip() not in held
+
+
+def person_edited(current: dict | None, row) -> bool:
+    """edited_by_person, with the value Lead AI last wrote (ours_before) read only when the lead holds another value of one
+    of C39's own fields (one query, for the rare row that needs it)."""
+    if not isinstance(current, dict) or row.field not in OWN_FIELDS or row.field not in current:
+        return False
+    held = _values(current.get(row.field))
+    if not held or str(row.value).strip() in held:
+        return False
+    return edited_by_person(current, row, ours_before(row))
+
+
+def person_note(current: dict | None, rows) -> str:
+    """The lead's timeline line for edited_by_person's rows ('' for none; the tool puts "Lead AI: " before it): "The customer
+    now says Timeline: mid-November, but the lead says 1 December, confirmed by phone, which a person set; it was left as it
+    is." (pure)."""
+    says = []
+    for row in rows:
+        name, labels = _OWN_LABELS.get(row.field, (row.field, {}))
+        ours = labels.get(int(row.value), row.value) if str(row.value).isdigit() else row.value
+        theirs = ", ".join(sorted(labels.get(int(value), value) if value.isdigit() else value for value in _values((current or {}).get(row.field))))
+        says.append(f"{name}: {ours}, but the lead says {theirs}")
+    if not says:
+        return ""
+    left = "it was left as it is" if len(says) == 1 else "these were left as they are"
+    return f"The customer now says {'; '.join(says)}, which a person set; {left}."
+
+
 def holds(current: dict | None, row) -> bool:
     """The lead holds this row's value already (``current``: crm.lead.get's answer, None when it could not be read):
     posting it would edit the field to what it is, and the lead's change log would get a line for nothing (launch
     review issue 26). A field written only while the lead's own is empty holds whenever it has one; an e-mail whenever
     the lead has one (the tool adds one only then); a Client Type whenever the lead has a Rent/Sale (a7_rent_sale.php
-    derives Rent/Sale from a Client Type written without it, over what an agent chose). Never the lost move, nor a
-    licence copy (pure; tested)."""
-    if not isinstance(current, dict) or row.field in (LOST, LICENCE_FILE):
+    derives Rent/Sale from a Client Type written without it, over what an agent chose). Never the lost move, a licence
+    copy, nor a to-do (pure; tested)."""
+    if not isinstance(current, dict) or row.field in (LOST, LICENCE_FILE, TODO):
         return False
     if row.field == EMAIL:
         return _has_email(current)
@@ -648,6 +752,12 @@ def body_for(rows, lead_id=None) -> dict:
             continue
         if row.field == EMAIL:
             body[EMAIL] = row.value  # a key of the body, not a field (C39)
+            continue
+        if row.field == TODO:
+            # C40's plain to-do for 2311 (a deletion request): its subject and deadline, its reason on the timeline.
+            body["todo"] = {"subject": row.value, "deadline": str((row.payload or {}).get("deadline") or "")}
+            if (row.payload or {}).get("comment"):
+                body["comment"] = "\n".join(part for part in (body.get("comment"), str(row.payload["comment"])) if part)
             continue
         # Enum ids and amounts go as numbers; a text field as the text it is, digits and all (TEXT_FIELDS).
         value = int(row.value) if row.field not in TEXT_FIELDS and row.value.isdigit() else row.value

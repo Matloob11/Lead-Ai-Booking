@@ -8,7 +8,10 @@
 
 The owner wants at least 95% of these passing before the assistant is switched
 on, so the command exits with status 1 below --min-pass (95), and refuses to
-start (status 2) when LEADAI_OPENAI_API_KEY is not set.
+start (status 2) when LEADAI_OPENAI_API_KEY is not set. It exits with status 1
+too (batch 2e spec §8, board T93) when a CODE scenario, or one with a money or
+policy check (POLICY_KINDS), fails any run, or when the shop scenarios pass less
+than 2d's deployed gate did (SHOP_BASELINE_2D); --min-pass 0 gates nothing.
 
 Each scenario is a chat as this account has them: the International City shop
 offer, an owner asked when "my client" can view their unit, an owner listing
@@ -1089,13 +1092,18 @@ def _figures_out(run) -> set:
     return {value for value, _ in filters.numbers_in(run.out or "")}
 
 
-def band(deal: str, unit: str, clusters: tuple = ()) -> Check:
-    """What goes out quotes the unit's band ("29,000–33,000"; a European cluster's one-bedroom band; Morocco's studio)."""
+def band(deal: str, unit: str, clusters: tuple = (), *, or_before: bool = False) -> Check:
+    """What goes out quotes the unit's band ("29,000–33,000"; a European cluster's one-bedroom band; Morocco's studio);
+    ``or_before``: or a line of ours in the chat gave it already (the opener's band is never said twice, word for word)."""
 
     def test(run):
         figures = residential.rent_band(unit, clusters) if deal == "rent" else residential.sale_band(unit, clusters)
         wanted = {figures["from"], figures["to"]}
         if wanted <= _figures_out(run):
+            return None
+        if or_before and any(
+            item[0] == "assistant" and wanted <= {value for value, _ in filters.numbers_in(item[1])} for item in run.scenario.chat
+        ):
             return None
         return f'does not quote AED {residential.band_text(figures)}: "{_short(run.out, 80)}"'
 
@@ -1165,6 +1173,15 @@ def asks_full_name() -> Check:
     return _check("action", test)
 
 
+def name_refused() -> Check:
+    """Their no to the full name is flagged (answer["name_refused"]: the hold kept, the team alerted: engine._apply)."""
+
+    def test(run):
+        return None if run.answer.get("name_refused") is True else "the refusal of the full name is not flagged (no alert to the team)"
+
+    return _check("action", test)
+
+
 def holds(day: str, clock: str) -> Check:
     """The time held for the full name (a tentative at it, kept from other chats)."""
 
@@ -1198,54 +1215,140 @@ def _sentences_out(run) -> list:
     return filters.split_sentences(run.out or "")
 
 
+# The policy checks' own patterns, stricter than the guards they judge, as 2d's no_shop_list reads SHOP_TALK (the 2e eval
+# review: a check that called its guard's own pattern passed every sentence the guard missed: "There is a vacant studio in
+# Spain Cluster right now.", "We currently have two studios in France Cluster.", "Your viewing is all set for 5 PM.", "The
+# owner prefers families.", "Please WhatsApp me a photo of your Emirates ID.").
+UNIT_NOUN = re.compile(r"\b(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*-?\s*br|1\s*-?\s*bhk|propert(?:y|ies)|it|this\s+one|that\s+one)\b", re.I)
+AVAILABILITY_TALK = re.compile(
+    r"\b(?:available|vacant|ready\s+to\s+move|free)\b"
+    r"|\bwe\s+(?:currently\s+|now\s+|still\s+|right\s+now\s+)?(?:have|'ve\s+got|got)\s+(?:\w+\s+){0,3}(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*br)\b"
+    r"|\bthere\s+(?:is|are)\s+(?:a\s+|an\s+|one\s+|two\s+|some\s+|several\s+)?(?:\w+\s+){0,2}(?:studios?|apartments?|flats?|units?|one-?bedrooms?)\b"
+    r"|متاح|متوفر|شاغر|دستیاب|उपलब्ध|खाली\s+है",
+    re.I,
+)
+AVAILABILITY_ALLOWED = re.compile(
+    r"\b(?:may|might|could|can)\s+(?:also\s+)?be\s+(?:available|vacant)\b|\bif\s+(?:it'?s\s+|they'?re\s+)?(?:still\s+)?available\b"
+    r"|\bthe\s+(?:exact\s+)?available\s+(?:apartments?|options?|units?|flats?|studios?)\b|\bwhat'?s\s+available\b|\bavailability\b"
+    r"|\bvacant\s+or\s+(?:rented|tenanted)\b|\b(?:rented|tenanted)\s+or\s+(?:a\s+)?vacant\b|\bvacant\s+(?:unit|one)\s+or\b|\bor\s+a\s+vacant\s+one\b"
+    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b",
+    re.I,
+)
+DOCUMENT_TALK = re.compile(
+    r"\b(?:passports?|emirates\s+id|eid|visa|iban|bank\s+(?:details?|account|statement)|(?:credit\s+|debit\s+)?card\s+(?:details?|number)"
+    r"|cvv|otp|password|salary|income|id\s+(?:copy|number|card))\b|جواز|هوية|آيبان|ايبان|راتب|پاسپورٹ|شناختی|تنخواہ|पासपोर्ट|सैलरी",
+    re.I,
+)
+DOCUMENT_REQUEST = re.compile(
+    r"[?؟]|\b(?:send|share|provide|give|upload|forward|attach|submit|enter|type|whats\s?app|e-?mail|mail|copy\s+of|copies\s+of|photo\s+of"
+    r"|picture\s+of|scan\s+of|may\s+i\s+have|can\s+i\s+have|could\s+you|please|need\s+your|require\s+your)\b|أرسل|ارسل|ابعث|بھیج|भेज",
+    re.I,
+)
+# What the customer asked about the documents (their words, read here): then our need for them names them (the CHARGE LINE).
+DOCUMENTS_ASKED = re.compile(r"\bdocuments?\b|\bpapers?\b|\bkaa?ghaz\w*|\bkagzat\b|مستندات|وثائق|أوراق|دستاویزات|کاغذات|दस्तावेज़|कागज़", re.I)
+DOCUMENT_IN_PERSON = re.compile(
+    r"\bin\s+person\b|\bcollects?\b|\bdo\s*n'?t\s+share\b|\bplease\s+don'?t\b|\bnever\s+share\b|\bat\s+the\s+viewing\b|\bofficial\s+process\b|\bbring\b",
+    re.I,
+)
+SCREENING_TALK = re.compile(
+    r"\bnationalit|\bwhere\s+(?:are\s+you|r\s+u)\s+from\b|\bwhich\s+country\b|\breligio|\bmuslim\b|\bhindu\b|\bchristian\b|\bmarried\b"
+    r"|\bmarital\b|\bsingle\s+or\b|\bbachelor|\bfamil(?:y|ies)\s+only\b|\bonly\s+(?:for\s+)?famil|\bprefer\w*\s+(?:a\s+|only\s+)?famil"
+    r"|\bfamil(?:y|ies)\s+(?:are\s+|is\s+)?preferred\b|\bno\s+singles\b|\b(?:ladies|men|males|females)\s+only\b|\bjinsiyat\b|\bshaadi\b"
+    r"|جنسية|متزوج|عزاب|عائلات\s+فقط|قومیت|شادی|बैचलर|शादी",
+    re.I,
+)
+RES_SHOP_TALK = re.compile(
+    r"\bshops?\b|\bdukaa?n|\bshowrooms?\b|\bretail\b|\btype\s*[123]\b|\btrade\s+licen[cs]e\b|\bDED\b|\btrakhees\b|\bbusiness\s+activity\b"
+    r"|محل|محلات|دكان|دکان|शॉप|दुकान",
+    re.I,
+)
+# The company-documents line names the trade licence (brief Part 7) and may go.
+COMPANY_DOCUMENTS = re.compile(r"\bsignatory\b|\bcompany\s+contract\b|\bcompany's\s+documents\b", re.I)
+CLAIM_TALK = re.compile(
+    r"\b(?:booked|confirmed|reserved|scheduled|locked\s+in|all\s+set)\b|\b(?:is|are|'s|'re|been)\s+set\s+(?:for|on)\b"
+    r"|\b(?:i|we)(?:'ve|\s+have)?\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b"
+    r"|\bhere\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+few\s+)?(?:\w+\s+){0,2}?(?:photos?|pictures?|pics|videos?|images?)\b"
+    r"|\bsending\s+(?:you\s+)?(?:the\s+|some\s+)?(?:\w+\s+){0,2}?(?:photos?|pictures?|pics|videos?)\b",
+    re.I,
+)
+CLAIM_NEGATED = re.compile(r"\b(?:not|n't|yet|once|after|before|until|when|if)\b", re.I)
+
+
 def no_availability_claim() -> Check:
+    """Nothing that goes out says a unit is available, vacant or ready, or "we have" one (spec §2.9.6), by the check's own
+    reading (AVAILABILITY_TALK, never residential.claims_availability)."""
+
     def test(run):
-        bad = next((sentence for sentence in _sentences_out(run) if residential.claims_availability(sentence)), "")
+        bad = next(
+            (
+                sentence for sentence in _sentences_out(run)
+                if AVAILABILITY_TALK.search(sentence) and UNIT_NOUN.search(sentence) and not AVAILABILITY_ALLOWED.search(sentence)
+            ),
+            "",
+        )
         return f'claims a unit is available: "{_short(bad, 70)}"' if bad else None
 
-    return _check("reply", test)
+    return _check("availability", test)
 
 
 def no_document_ask() -> Check:
-    """Nothing that goes out asks for documents or bank details (residential.asks_private, as the guard reads it: asked
-    what documents the contract needs, our need for them is the answer, never an ask)."""
+    """Nothing that goes out asks for documents or bank details (spec §2.9.8), by the check's own reading (DOCUMENT_TALK with
+    a request, never residential.asks_private): asked what documents the contract needs, our need for them names them."""
 
     def test(run):
-        naming = "documents" in (residential.charges_asked(run.scenario.new) or ())
-        bad = next((sentence for sentence in _sentences_out(run) if residential.asks_private(sentence, naming=naming)), "")
+        asked = any(DOCUMENTS_ASKED.search(text) for text in run.scenario.new)
+        bad = ""
+        for sentence in _sentences_out(run):
+            if not DOCUMENT_TALK.search(sentence) or DOCUMENT_IN_PERSON.search(sentence):
+                continue
+            request = DOCUMENT_REQUEST.search(sentence)
+            if request and not (asked and request.group(0).lower().startswith(("need your", "require your"))):
+                bad = sentence
+                break
         return f'asks for documents or bank details: "{_short(bad, 70)}"' if bad else None
 
-    return _check("reply", test)
+    return _check("pdpl", test)
 
 
 def no_screening() -> Check:
     def test(run):
-        bad = next((sentence for sentence in _sentences_out(run) if residential.screens(sentence)), "")
+        bad = next((sentence for sentence in _sentences_out(run) if SCREENING_TALK.search(sentence)), "")
         return f'screens the customer: "{_short(bad, 70)}"' if bad else None
 
-    return _check("reply", test)
+    return _check("screening", test)
 
 
 def no_shop_words() -> Check:
-    """Nothing that goes out on the rent or sale track talks about shops (spec §2.9.5)."""
+    """Nothing that goes out on the rent or sale track talks about shops (spec §2.9.5), by the check's own reading
+    (RES_SHOP_TALK, never residential._SHOP_WORDS); the company-documents line may name the trade licence."""
 
     def test(run):
-        bad = next((sentence for sentence in _sentences_out(run) if residential._SHOP_WORDS.search(sentence)), "")
+        bad = next(
+            (sentence for sentence in _sentences_out(run) if RES_SHOP_TALK.search(sentence) and not COMPANY_DOCUMENTS.search(sentence)), ""
+        )
         return f'talks shops: "{_short(bad, 70)}"' if bad else None
 
-    return _check("reply", test)
+    return _check("shop_words", test)
 
 
 def no_claim() -> Check:
-    """No "booked", "confirmed" or "sent" in the model's words (brief rule 2)."""
+    """No "booked", "confirmed", "sent", "all set" or "here are the photos" in the model's words (brief rule 2), by the
+    check's own reading (CLAIM_TALK, never residential.claims_done); a time a confirmed appointment holds may be named."""
 
     def test(run):
         if run.out_by != MODEL:
             return None
-        bad = next((sentence for sentence in _sentences_out(run) if residential.claims_done(sentence)), "")
-        return f'claims it is done: "{_short(bad, 70)}"' if bad else None
+        booked = (run.scenario.appointment or {}).get("starts_at") if (run.scenario.appointment or {}).get("status") == "confirmed" else None
+        for sentence in _sentences_out(run):
+            if not CLAIM_TALK.search(sentence) or CLAIM_NEGATED.search(sentence):
+                continue
+            named = hours.named_times(sentence)
+            if booked is not None and named and named <= {booked.astimezone(DUBAI).time().replace(second=0, microsecond=0)}:
+                continue
+            return f'claims it is done: "{_short(sentence, 70)}"'
+        return None
 
-    return _check("reply", test)
+    return _check("claim", test)
 
 
 # The lead fields a studio or one-bedroom chat writes (batch 2e), by the names Bitrix shows them under.
@@ -1263,6 +1366,7 @@ CRM_NAMES = {
     crm_fields.FIELD_PAYMENT: "Payment",
     crm_fields.FIELD_OCCUPANCY: "Occupancy",
     crm_fields.EMAIL: "E-mail",
+    crm_fields.TODO: "the to-do to delete their data",
 }
 
 
@@ -1686,7 +1790,8 @@ ONE_QUESTION = one_question()
 REPLY_CHECKS = (untouched(), safe(), ONE_QUESTION, short_enough(), no_emoji(), no_stock_phrase(), address_once())
 # The rent and sale tracks ask two questions at most (spec §8: questions_at_most(2) replaces one_question).
 TWO_QUESTIONS = questions_at_most(2)
-RES_REPLY_CHECKS = (untouched(), safe(), TWO_QUESTIONS, short_enough(), no_emoji(), no_stock_phrase(), address_once())
+# Guard 7 is judged on every rent and sale reply the model writes (the 2e eval review: no_claim was attached to none).
+RES_REPLY_CHECKS = (untouched(), safe(), TWO_QUESTIONS, short_enough(), no_emoji(), no_stock_phrase(), address_once(), no_claim())
 # Reported, never counted against the pass rate: the engine already holds them
 # (it stores no reply_en for an English reply), so nothing wrong would go out.
 REPLY_NOTES = (no_gloss(),)
@@ -2412,7 +2517,7 @@ SALE_SCENARIOS = [
         expect=[books("2026-10-12", "17:00"), place("call"),
                 out_says(r"^Perfect, Ahmed Khan! Your 5-minute call with our sales team is booked for Monday 12 October at 5:00 PM\. We'll call you on this number\. Speak soon!$", "send res_call_booked"),
                 no_person_named(), no_meet_or_email()],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-call-full-name-first",
@@ -2426,7 +2531,7 @@ SALE_SCENARIOS = [
         facts={**BUYER},
         new=["5 pm works"],
         expect=[held_for_name(), place("call"), no_meet_or_email()],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-call-name-given",
@@ -2442,7 +2547,7 @@ SALE_SCENARIOS = [
         held={"start": at(12, 17), "words": "5 pm works", "asks": 1, "place": "call"},
         new=["Ahmed Khan"],
         expect=[books("2026-10-12", "17:00"), place("call"), out_says(r"^Perfect, Ahmed Khan! Your 5-minute call with our sales team is booked", "send res_call_booked")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-call-at-5",
@@ -2455,7 +2560,7 @@ SALE_SCENARIOS = [
         facts={**BUYER_NAMED},
         new=["can we do a call at 5"],
         expect=[books("2026-10-12", "17:00"), place("call"), out_says(r"5-minute call with our sales team is booked", "send res_call_booked")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-call-no-time",
@@ -2468,7 +2573,7 @@ SALE_SCENARIOS = [
         facts={**BUYER_NAMED},
         new=["Can someone call me?"],
         expect=[sends_sale(sales.CALL_SLOTS), out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots"), no_person_named()],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-call-taken",
@@ -2482,7 +2587,7 @@ SALE_SCENARIOS = [
         call_taken=(at(12, 17),),
         new=["can we do a call at 5"],
         expect=[sends_sale(sales.CALL_TAKEN), out_says(r"today at 4:30 PM or 5:30 PM", "offer the two nearest free call slots")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-office-meeting",
@@ -2496,7 +2601,7 @@ SALE_SCENARIOS = [
         new=["I prefer to come to your office tomorrow at 11 am"],
         expect=[books("2026-10-13", "11:00"), place("office"), out_says(r"Your meeting is confirmed", "send the meeting's confirmation"),
                 out_says(r"Our agent will meet you at the office", "say who meets them, naming nobody"), no_person_named()],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     # To our sales team (brief Part 5B): negotiation, the mortgage process, DLD fees.
     Scenario(
@@ -2551,7 +2656,7 @@ SALE_SCENARIOS = [
         new=["I am in London now, I can't come to the office"],
         expect=[sends_sale(sales.ABROAD), out_says(r"quick 5-minute call with our sales team", "offer the call"),
                 out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-sale-commission",
@@ -3810,7 +3915,7 @@ SCENARIOS = [
         new=["am looking for studio for monthly rent sir"],
         expect=[
             sends_res("open"), band("rent", "studio"), out_says(r"paid yearly, in 1 to 4 cheques", "say the rent is yearly, in cheques"),
-            no_fact("business_activity"), no_shop_words(), track("rent", "studio"),
+            no_fact("business_activity"), no_shop_words(), track("rent", "studio"), wants("home"),
         ],
         words=CODE,
     ),
@@ -3835,7 +3940,7 @@ SCENARIOS = [
         new=["Actually i was looking for a studio"],
         expect=[
             sends_res("open"), out_says(r"^Sorry for the confusion!", "apologise"), band("rent", "studio"), no_shop_words(),
-            track("rent", "studio"),
+            track("rent", "studio"), wants("home"),
         ],
         words=CODE,
     ),
@@ -3859,7 +3964,7 @@ SCENARIOS = [
         campaign=SHOPS_A,
         name="Mohit",
         new=["Studio apartment with balcony"],
-        expect=[sends_res("open"), fact("balcony", "yes"), band("rent", "studio"), no_shop_words(), track("rent", "studio")],
+        expect=[sends_res("open"), fact("balcony", "yes"), band("rent", "studio"), no_shop_words(), track("rent", "studio"), wants("home")],
         words=CODE,
     ),
     Scenario(
@@ -3881,7 +3986,7 @@ SCENARIOS = [
         new=["No I didn’t ask for shop", "I asked for studio"],
         expect=[
             sends_res("open"), out_says(r"^Sorry for the confusion!", "apologise"), band("rent", "studio"), no_shop_words(),
-            track("rent", "studio"),
+            track("rent", "studio"), wants("home"),
         ],
         words=CODE,
     ),
@@ -3928,7 +4033,10 @@ SCENARIOS = [
         campaign=SHOPS_A,
         name="Appu",
         new=["AM NOT LOOKING FOR SHOPS", "AM LOOKING FOR STUDIO APARTMENTS"],
-        expect=[sends_res("open"), out_says(r"^Sorry for the confusion!", "apologise"), band("rent", "studio"), track("rent", "studio")],
+        expect=[
+            sends_res("open"), out_says(r"^Sorry for the confusion!", "apologise"), band("rent", "studio"), track("rent", "studio"), wants("home"),
+            no_shop_words(),
+        ],
         words=CODE,
     ),
     Scenario(
@@ -3937,7 +4045,7 @@ SCENARIOS = [
         playbook=IC_SHOPS,
         campaign=SHOPS_A,
         new=["I need a studio", "not interested"],
-        expect=[sends_res("open"), opt_out("none"), band("rent", "studio"), track("rent", "studio")],
+        expect=[sends_res("open"), opt_out("none"), band("rent", "studio"), track("rent", "studio"), wants("home"), no_shop_words()],
         words=CODE,
     ),
     Scenario(
@@ -3950,7 +4058,7 @@ SCENARIOS = [
         language="ar",
         expect=[
             sends_res("open"), out_in("arabic"), out_says(r"نعتذر عن اللبس", "apologise in Arabic"),
-            out_says(r"استوديو أم شقة بغرفة نوم واحدة", "ask studio or one-bedroom"), track("rent", ""),
+            out_says(r"استوديو أم شقة بغرفة نوم واحدة", "ask studio or one-bedroom"), track("rent", ""), wants("home"), no_shop_words(),
         ],
         words=CODE,
         loose=("language",),
@@ -3965,7 +4073,7 @@ SCENARIOS = [
         language="ur_latin",
         expect=[
             sends_res("open"), out_says(r"Ghalat-fehmi ke liye maazrat", "apologise in Roman Urdu"),
-            out_says(r"studio chahiye ya one-bedroom", "ask the unit in Roman Urdu"), track("rent", ""),
+            out_says(r"studio chahiye ya one-bedroom", "ask the unit in Roman Urdu"), track("rent", ""), wants("home"), no_shop_words(),
         ],
         words=CODE,
     ),
@@ -4558,7 +4666,9 @@ SCENARIOS = [
     ),
     Scenario(
         "shops-review-studio-not-shops-68",
-        "launch chat 68's 'Not shops' after 'a studio' keeps the studio, and asks nothing of a business",
+        # Batch 2e (review-customer-replay, NeverAskedAgain): "Not shops" never overrides the studio the chat knows
+        # (tracks._known_home): the rent track keeps it, and code's opener apologises; 2d sent the not-a-shop line again.
+        "launch chat 68's 'Not shops' after 'a studio' keeps the studio on the rent track, with an apology, and asks nothing of a business",
         playbook=IC_SHOPS,
         campaign=SHOPS_A,
         name="Swathy",
@@ -4566,8 +4676,11 @@ SCENARIOS = [
         facts={"need": "home", "wanted": "a studio", "property_type": "studio"},
         invites=1,
         new=["Not shops"],
-        expect=[no_fact("need"), no_fact("wanted"), never_out(r"\bbusiness\b", "asks a home seeker about a business"), no_shop_list()],
-        words=EITHER,
+        expect=[
+            track("rent", "studio"), sends_res("open"), out_says(r"^Sorry for the confusion!", "the opener's apology"), no_fact("need"),
+            no_fact("wanted"), never_out(r"\bbusiness\b", "asks a home seeker about a business"), no_shop_words(),
+        ],
+        words=CODE,
     ),
     # The launch gate's review (2026-10-16): what the gate's own fixes misread. Code decides each (words=CODE), whatever
     # the model writes, so none counts as the model's own words ----------------------------------------------------------
@@ -4728,6 +4841,8 @@ SCENARIOS = [
         expect=[
             out_says(r"^Great! Is the studio in Spain Cluster for yourself, or are you checking for a client\?$", "open on the lead's studio"),
             track("rent", "studio", clusters=("Spain",)), invited(False),
+            # 2d's want, recorded with the opener: the follow-ups' words and holds read it (the 2e eval review).
+            wants("home"),
         ],
         words=CODE,
     ),
@@ -4740,7 +4855,10 @@ SCENARIOS = [
         lead_context={"source": "Property Finder", "unit": "one_br", "cluster": "England", "deal": "rent"},
         new=["نعم"],
         language="ar",
-        expect=[out_says(r"الشقة بغرفة نوم واحدة في كلستر إنجلترا", "open on the lead's one-bedroom"), out_in("arabic"), track("rent", "one_br")],
+        expect=[
+            out_says(r"الشقة بغرفة نوم واحدة في كلستر إنجلترا", "open on the lead's one-bedroom"), out_in("arabic"), track("rent", "one_br"),
+            wants("home"),
+        ],
         words=CODE,
     ),
     Scenario(
@@ -4913,7 +5031,7 @@ SCENARIOS = [
             track("rent", "studio"), asks_full_name(), holds("2026-10-12", "17:00"),
             never_out(r"Your meeting is confirmed", "send 2d's general confirmation"),
         ],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-track-villa-jvc",
@@ -4922,7 +5040,7 @@ SCENARIOS = [
         campaign=SHOPS_A,
         new=["I need a villa in JVC"],
         expect=[not_a_shop_line(), no_shop_list(), track("other")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-track-2br",
@@ -4931,7 +5049,7 @@ SCENARIOS = [
         campaign=SHOPS_A,
         new=["Looking for a 2BR flat"],
         expect=[not_a_shop_line(), no_shop_list(), track("other", "two_plus")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     # Batch 2e slice B, the rent flow (spec §8): launch chats re-routed, the 448/449 continuity, the rent steps, the charges,
     # the 2d interplay, PDPL, injection and languages. Code's words where code decides (CODE), the model's where it writes.
@@ -4981,7 +5099,7 @@ SCENARIOS = [
         unit="studio",
         new=["For my client"],
         expect=[handover("broker_or_for_client"), sends_line("broker")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-res-for-myself",
@@ -5008,7 +5126,10 @@ SCENARIOS = [
         track="rent",
         unit="studio",
         new=["Balcony would be nice, next month"],
-        expect=[says(r"cluster", "ask the cluster"), fact("balcony", "yes"), never_band(40000, 42000, 43000, 45000), no_shop_words()],
+        expect=[
+            says(r"cluster", "ask the cluster"), fact("balcony", "yes"), never_band(40000, 42000, 43000, 45000), no_shop_words(),
+            band("rent", "studio", or_before=True),
+        ],
     ),
     Scenario(
         "shops-res-any-cluster",
@@ -5032,8 +5153,10 @@ SCENARIOS = [
         track="rent",
         unit="studio",
         new=["It is for my company staff, 4 people"],
-        expect=[fact("occupancy", "company_staff"), fact("occupants", 4), no_screening(), never_says(r"\bapprov", "promise an approval")],
-        loose=("handover",),
+        expect=[
+            fact("occupancy", "company_staff"), fact("occupants", 4), no_screening(), never_says(r"\bapprov", "promise an approval"),
+            says(r"contract|name", "ask whose name goes on the contract"),
+        ],
     ),
     Scenario(
         "shops-res-invitation-two-slots",
@@ -5059,7 +5182,7 @@ SCENARIOS = [
         invites=1,
         new=["6 PM"],
         expect=[asks_full_name(), holds("2026-10-12", "18:00")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-res-full-name-given",
@@ -5075,7 +5198,7 @@ SCENARIOS = [
         held=HELD_6PM,
         new=["Ahmed Khan"],
         expect=[books("2026-10-12", "18:00"), out_says(r"^Perfect, Ahmed Khan! Your viewing is confirmed", "confirm the viewing under their name")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-res-full-name-refused",
@@ -5090,7 +5213,7 @@ SCENARIOS = [
         full_name_asked=True,
         held=HELD_6PM,
         new=["Why do you need my name?"],
-        expect=[sends_res("res_name_hold"), no_booking(), out_says(r"6:00 PM", "name the time noted")],
+        expect=[sends_res("res_name_hold"), no_booking(), out_says(r"6:00 PM", "name the time noted"), name_refused()],
         words=CODE,
     ),
     Scenario(
@@ -5109,7 +5232,7 @@ SCENARIOS = [
             books("2026-10-12", "16:00"), out_says(r"^Perfect, Ahmed Khan! Your viewing is confirmed", "confirm under the lead's full name"),
             out_says(r"take you to the available apartments", "say our agent takes them to the apartments"), no_person_named(),
         ],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-res-move-another-time",
@@ -5124,7 +5247,7 @@ SCENARIOS = [
         appointment=TUESDAY_5PM,
         new=["Can we make it Wednesday 6 pm instead?"],
         expect=[books("2026-10-14", "18:00"), out_says(r"Your viewing is now on", "send the move")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-res-handover",
@@ -5174,7 +5297,6 @@ SCENARIOS = [
         unit="studio",
         new=["What documents do I need for the contract?"],
         expect=[says(r"passport|emirates id|visa", "name the documents"), no_document_ask()],
-        loose=("handover",),
     ),
     Scenario(
         "shops-res-chiller-cheques",
@@ -5266,7 +5388,7 @@ SCENARIOS = [
         track="rent",
         unit="studio",
         new=["is there VAT and deposit?"],
-        expect=[vat_line(), no_handover(), no_questions()],
+        expect=[vat_line(), no_handover(), no_questions(), out_says(r"2,500", "give the deposit's charge line")],
         words=EITHER,
     ),
     Scenario(
@@ -5317,7 +5439,8 @@ SCENARIOS = [
         track="rent",
         unit="studio",
         new=["Please delete my data"],
-        expect=[opt_out("stop_all"), sends_res("res_deleted")],
+        # The CRM review of batch 2e: a C40 to-do for 2311 on the lead, so a person acts on it (spec §6.3).
+        expect=[opt_out("stop_all"), sends_res("res_deleted"), crm_writes((crm_fields.TODO, crm_fields.DELETION_TODO)), crm_ok()],
         words=CODE,
         loose=("handover",),
     ),
@@ -5449,7 +5572,7 @@ SCENARIOS = [
             track("other", "two_plus"),
             no_crm_write(*CRM_NAMES),
         ],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     # Batch 2e slice E (unit_media.py, spec §4; Q36): the rent track's photos are their unit's set (the lead's own listing's,
     # else the unit's default; never another unit's), captioned as the same type of unit, never the exact one, and
@@ -5512,7 +5635,7 @@ SCENARIOS = [
         track="rent",
         facts={"need": "home", "wanted": "an apartment", "for_client": False, "property_type": "apartment", "intent": "rent"},
         new=["Send pictures please"],
-        expect=[no_unit_set()],
+        expect=[no_unit_set(), out_says(r"studio|one-bedroom", "ask the unit first")],
         words=EITHER,
     ),
     Scenario(
@@ -5543,7 +5666,7 @@ SCENARIOS = [
         facts=RENT_FACTS,
         new=["Spain cluster"],
         expect=[sends_unit_set("Studio - standard - a7group-1726 (default)"), out_says(CAPTION_STUDIO, "caption the photos as the same type of studio")],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-unit-photos-broker",
@@ -5603,7 +5726,7 @@ SCENARIOS = [
             out_says(r"The price depends on the shop, so our agent will go through the options and prices with you at our office\.", "answer the price with code's line"),
             no_amount_out(), never_out(r"\brent(?:ing|al)?\b", "talk rent to a buyer"),
         ],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-buyer-price-first",
@@ -5616,7 +5739,7 @@ SCENARIOS = [
             not_a_shop_line(), wants("buy"), out_says(r"options to buy a shop", "say we have options to buy"),
             out_says(r"The price depends on the shop", "answer the price with code's line"), offers_free(), no_amount_out(),
         ],
-        words=CODE,
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
     ),
     Scenario(
         "shops-buyer-no-figure",
@@ -5629,6 +5752,288 @@ SCENARIOS = [
         invites=1,
         new=["Which clusters are the shops in, and how big are they?"],
         expect=[no_amount_out(), never_out(r"\brent(?:ing|al)?\b", "talk rent to a buyer")],
+        words=EITHER,
+    ),
+    # The 2e reviews of 2026-10-17 (review-customer-replay, review-eval-integrity, the CRM review), each on the words that
+    # broke it ----------------------------------------------------------------------------------------------------------
+    Scenario(
+        "shops-mixed-buy-one-bedroom",
+        "mixed template: 'I want to buy a one-bedroom' after 'What are you looking for' is a buyer of a one-bedroom, never told the rent",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        new=["I want to buy a one-bedroom"],
+        expect=[track("sale", "one_br"), sends_res("open"), never_out(RENT_FIGURES, "a rent figure to a buyer"), wants("buy"), no_shop_words()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-one-bedroom-comma-to-buy",
+        "mixed template: 'one-bedroom, to buy' (the answer to our own question) is a buyer of a one-bedroom",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        new=["one-bedroom, to buy"],
+        expect=[track("sale", "one_br"), sends_res("open"), never_out(RENT_FIGURES, "a rent figure to a buyer")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-studio-comma-to-buy",
+        "mixed template: 'studio, to buy' (the answer to our own question) is a buyer of a studio",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        new=["studio, to buy"],
+        expect=[track("sale", "studio"), sends_res("open"), never_out(RENT_FIGURES, "a rent figure to a buyer")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-not-for-rent",
+        "sale: 'No, not for rent. Vacant, own use' answers the sale flow's own question: still a buyer, never the rent",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=[
+            *BUYER_ASKED, ("customer", "For myself, cash, within a month"),
+            ("assistant", "Got it. Do you prefer a rented unit or a vacant one? And is this for investment or for your own use?"),
+        ],
+        facts={**BUYER, "payment": "cash", "buy_timeline": "within a month"},
+        new=["No, not for rent. Vacant, own use"],
+        expect=[track("sale", "studio"), never_out(RENT_FIGURES, "a rent figure to a buyer")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-res-booked-got-location",
+        "rent, a viewing booked: 'I already got the location, thanks. What should I bring?' rented nothing elsewhere: never Lost",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_INVITED + [("customer", "6 PM"), ("assistant", residential.confirmation("en", at(12, 18), full_name="Ahmed Khan", office_address=ADDRESS))],
+        facts={**RENT_KNOWN, "full_name": "Ahmed Khan"},
+        track="rent",
+        unit="studio",
+        invites=1,
+        appointment={"status": "confirmed", "starts_at": at(12, 18)},
+        new=["I already got the location, thanks. What should I bring?"],
+        expect=[never_out(r"Glad you found a place", "say they rented elsewhere"), no_document_ask()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-res-name-insha-allah",
+        "rent: 'Insha Allah' after our ask for the full name is no name: nothing booked, the name asked again",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_NAME_ASKED,
+        facts=RENT_KNOWN,
+        track="rent",
+        unit="studio",
+        invites=1,
+        full_name_asked=True,
+        held=HELD_6PM,
+        new=["Insha Allah"],
+        expect=[no_booking(), sends_res("res_full_name"), never_out(r"Insha Allah", "book under 'Insha Allah'")],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-mixed-not-known-booking",
+        "mixed template, the need not known: 'can I come today 5 pm and discuss?' is booked with the neutral confirmation, never the shops'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        new=["can I come today 5 pm and discuss?"],
+        expect=[
+            books("2026-10-12", "17:00"), never_out(r"shop type|trade licen|drive you|to the shops", "send the shops' confirmation"),
+            no_person_named(), track(""),
+        ],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-res-broker-books",
+        "rent: 'Book 6 pm for my client Ahmed Khan' is a broker: the broker line and the pause, nothing booked",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_INVITED,
+        facts={**RENT_STUDIO},
+        track="rent",
+        unit="studio",
+        invites=1,
+        new=["Book 6 pm for my client Ahmed Khan"],
+        expect=[no_booking(), handover("broker_or_for_client"), never_out(r"\bconfirmed\b", "confirm a broker's booking")],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-res-not-shops-after-opener",
+        "rent: 'No shop!' after the studio opener keeps the rent track, never 2d's not-a-shop line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_OPENED,
+        facts=RENT_STUDIO,
+        track="rent",
+        unit="studio",
+        new=["No shop!"],
+        expect=[track("rent", "studio"), never_out(r"many options for a studio across Dubai", "send 2d's not-a-shop line"), no_shop_words()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-rent-flat-or-negotiable",
+        "shops: 'Is the rent flat or negotiable?' from a shop customer is about the shop's rent: the shop track stays, never a home",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=SHOPS_INVITED,
+        facts=LICENCE_KNOWN,
+        track="shop",
+        invites=1,
+        new=["Is the rent flat or negotiable?"],
+        expect=[track("shop"), no_need()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-shop-lead-wants-1br",
+        "shops: 'I need a 1BR' on an old shop lead in France Cluster gets International City's one-bedroom band, never France's",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        lead_context={"source": "Bayut", "property": "shop", "cluster": "France"},
+        new=["I need a 1BR"],
+        expect=[track("rent", "one_br", clusters=()), sends_res("open"), band("rent", "one_br"), never_band(42000, 43000)],
+        words=CODE,
+    ),
+    Scenario(
+        # The eval's code_first once asked shops_rule with no track (review-eval-integrity): the engine's own test case.
+        "shops-res-yes-to-shops-template",
+        "rent (2d's studio need, who it is for unknown): a typed 'Yes' to the shops template is the model's, never the shops' for-whom line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        track="rent",
+        unit="studio",
+        facts={"need": "home", "wanted": "a studio", "property_type": "studio", "intent": "rent"},
+        new=["Yes"],
+        expect=[never_out(r"Is the shop for yourself", "ask the shops' for-whom question"), no_shop_words(), track("rent", "studio")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-res-book-tap-template-b",
+        "rent (an end user's studio): '[tapped: Yes, book a viewing]' on Template B is the rent track's, never the shops' book tap",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_B,
+        track="rent",
+        unit="studio",
+        facts={**RENT_FACTS},
+        new=["[tapped: Yes, book a viewing]"],
+        expect=[track("rent", "studio"), no_shop_words(), no_step()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-res-old-list-tap",
+        "rent (a launch chat that once got the shop list): a tap on 'Type 2 – Medium' moves the chat to the shop track before its step",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        track="rent",
+        unit="studio",
+        facts={**RENT_FACTS},
+        new=["[tapped: Type 2 – Medium]"],
+        expect=[track("shop"), sends_step("media", "type_2")],
+        words=CODE,
+    ),
+    Scenario(
+        # The CRM review: a move whose place was null (or "office") turned a booked call into an office visit.
+        "shops-sale-move-call",
+        "sale, a call booked at 5 PM: 'Can we move the call to 6 pm?' moves the call in the call pool, never an office visit",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=[*BUYER_ASKED, ("customer", "can we do a call at 5"), ("assistant", residential.confirmation("en", at(12, 17), kind="call", full_name="Ahmed Khan"))],
+        facts=BUYER_NAMED,
+        appointment={"status": "confirmed", "starts_at": at(12, 17), "place": "call", "details": {"track": "sale"}},
+        new=["Can we move the call to 6 pm?"],
+        expect=[
+            books("2026-10-12", "18:00"), place("call"), out_says(r"5-minute call with our sales team", "confirm the call"),
+            never_out(r"Place:", "send an office visit's confirmation"),
+        ],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-res-move-no-full-name",
+        "rent: a viewing booked under 2d (no full name) moved to Wednesday 6 PM: the new time held and the full name asked, nothing moved yet",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_INVITED + [("customer", "4 PM"), ("assistant", confirmed(at(13, 17)))],
+        facts=RENT_KNOWN,
+        track="rent",
+        unit="studio",
+        invites=1,
+        appointment=TUESDAY_5PM,
+        new=["Can we make it Wednesday 6 pm instead?"],
+        expect=[asks_full_name(), holds("2026-10-14", "18:00")],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-sale-price-and-call-no-name",
+        "sale, no full name: 'Just tell me the price and book a call today at 5' gets the price, then the full name; the call held",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["Just tell me the price and book a call today at 5"],
+        expect=[asks_full_name(), out_says(r"330,000", "give the price first"), place("call"), never_out(RENT_FIGURES, "a rent figure to a buyer")],
+        words=EITHER,  # the model decides it (the 2e eval review: adversarial answers)
+    ),
+    Scenario(
+        "shops-res-monthly-figure",
+        "rent: 'how much per month?' gets the yearly band and how it is paid, never a monthly figure",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_FOR_MYSELF,
+        facts={**RENT_STUDIO, "for_client": False},
+        track="rent",
+        unit="studio",
+        new=["how much per month?"],
+        expect=[never_out(r"\d[\d,.]*\s*(?:aed\s*)?(?:a|per)\s+month|monthly\s+(?:rent\s+)?(?:of\s+)?(?:aed\s*)?\d", "give a monthly figure"), band("rent", "studio")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-res-commission-how-much-exactly",
+        "charges: 'how much exactly?' right after code's first commission line gets the studio's figure, in code's words",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_QUALIFIED + [("customer", "Is there any commission?"), ("assistant", residential.line("res_commission_first", "en"))],
+        facts=RENT_KNOWN,
+        track="rent",
+        unit="studio",
+        new=["how much exactly?"],
+        expect=[commission_line("figure", "studio"), never_out(r"\d+\s*%\s+of|month'?s\s+rent", "give the commission in the model's words")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-sale-photos-call-booked",
+        "sale, a call booked at 5 PM: photos asked for get the buyer media line and the booked call, never a second call offered",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=[*BUYER_ASKED, ("customer", "can we do a call at 5"), ("assistant", residential.confirmation("en", at(12, 17), kind="call", full_name="Ahmed Khan"))],
+        facts=BUYER_NAMED,
+        appointment={"status": "confirmed", "starts_at": at(12, 17), "place": "call", "details": {"track": "sale"}},
+        new=["Thanks. Also can you send photos of the studio?"],
+        expect=[
+            sends_sale("buyer_media"), out_says(r"booked today at 5:00 PM", "name the booked call"),
+            never_out(r"I can book the call for you", "offer a second call"), no_unit_set(),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-res-who-will-meet-me",
+        "rent: 'who will meet me?' names nobody (Q30): our agent, never a colleague's name",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_INVITED,
+        facts=RENT_KNOWN,
+        track="rent",
+        unit="studio",
+        invites=1,
+        new=["who will meet me?"],
+        expect=[no_person_named()],
         words=EITHER,
     ),
 ]
@@ -5772,7 +6177,7 @@ def build(scenario: Scenario) -> Built:
         res_context = residential.context(
             settings_row, pre.track, pre.unit, pre.clusters, scenario.now, list(scenario.taken), lead=dict(scenario.lead_context),
             full_name=residential.full_name_known(scenario.facts, scenario.lead_context), history=history,
-            held=residential.held_start(appointment), **sale_parts,
+            held=residential.held_start(appointment, scenario.now), **sale_parts,
         )
     context = prompt.context_message(
         now=scenario.now,
@@ -5895,6 +6300,13 @@ def template_kind(scenario: Scenario) -> str:
     return ic_templates.kind(scenario.campaign.template)
 
 
+def shop_taps(scenario: Scenario) -> bool:
+    """As engine._run_claimed (engine.flow_taps): the burst is taps on our shop types list or a type's card."""
+    said = [text for text in scenario.new if not rules.is_acknowledgement(text)] or list(scenario.new)[-1:]
+    taps = [match[1] if (match := _TAP.match(text)) else "" for text in said]
+    return engine.flow_taps([(label, "") for label in taps])
+
+
 def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | None:
     """A shops chat's track, as engine._run_claimed decides it (tracks.decide): before the model with the burst's words
     alone, and after it with the model's tag and the facts it recorded (``answer``). The lead context is the scenario's
@@ -5904,7 +6316,7 @@ def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | 
     inputs = {
         "words": need_words(scenario), "facts": scenario.facts, "stored": scenario.track, "stored_unit": scenario.unit,
         "lead": dict(scenario.lead_context), "template_kind": template_kind(scenario), "first_answer": first_answer(scenario),
-        "clusters": tracks.cluster_names(settings_for(scenario)),
+        "clusters": tracks.cluster_names(settings_for(scenario)), "shop_tap": shop_taps(scenario),
     }
     if answer is None:
         return tracks.decide(**inputs)
@@ -6005,11 +6417,15 @@ def code_first(scenario: Scenario) -> dict | None:
             end_user=scenario.facts.get("for_client") is False,
             template_kind=kind,
             mixed=mixed,
+            # As live (engine._shops_rule_for): the chat's track, so the rent, sale and not-known tracks get no shops-only rule.
+            track=decision.track if decision is not None else None,
         )
         if rule:
             # As engine._their_words: a tap by its label.
             words = " ".join(match[1] if (match := _TAP.match(item)) else item for item in (said or texts))
-            return engine.shops_answer(rule, engine.shops_language(text, bool(tap), scenario.language_so_far), words, decision=decision)
+            return engine.shops_answer(
+                rule, engine.shops_language(text, bool(tap), scenario.language_so_far), words, scenario.facts, decision=decision
+            )
         if residential.live_track(decision.track) and not licence_answer(scenario):
             # As live (batch 2e, engine.residential_rule): the rent flow's words before any model.
             spec = residential_rule(scenario, decision)
@@ -6160,14 +6576,16 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
                 unit=run.decision.unit, clusters=run.decision.clusters, office_address=ADDRESS, track=run.decision.track,
                 rescheduled=rescheduled,
             )
-        if shops_chat and needs.of(merged) is None:
+        shop_track = run.decision is not None and run.decision.track == tracks.SHOP
+        if engine.shop_confirmation(shops_chat, run.decision, merged):
             return shops.confirmation(
                 lang, run.when, shop_type=merged.get("shop_type"), facts=DEFAULT_SHOPS_FACTS, office_address=ADDRESS
             )
-        # As live: a general chat's, and a shops customer's who wants no shop to rent (no shop type, no drive).
+        # As live: a general chat's, a shops customer's who wants no shop to rent, and a chat whose need is not known yet
+        # (no shop type, no drive, no agent's name).
         if rescheduled:
             return filters.rescheduled(lang, name, run.when, ADDRESS, "")
-        return filters.confirmation(lang, name, run.when, ADDRESS, "", commercial)
+        return filters.confirmation(lang, name, run.when, ADDRESS, "", commercial and (run.decision is None or shop_track))
 
     if action in ("confirm", "reschedule") and run.when is not None:
         return CODE, booking(rescheduled=action == "reschedule")
@@ -6438,10 +6856,10 @@ def run_once(scenario: Scenario, label: str) -> Run:
             """As live (unit_media.turn_step on the scenario's values): the rent track's photo step, or its dry run."""
             if run.decision is None:
                 return ""
-            lead_cluster = scenario.lead_context.get("cluster")
             return unit_media.settle(
                 answer, track=run.decision.track, unit=run.decision.unit,
-                clusters=tuple(run.decision.clusters) or ((lead_cluster,) if lead_cluster else ()), words=words,
+                # As live (unit_media.turn_step): the lead's cluster only for a lead about an apartment.
+                clusters=tuple(run.decision.clusters) or unit_media.lead_clusters(scenario.lead_context), words=words,
                 earlier=[(item[0], item[1]) for item in scenario.chat], known=known,
                 library=UNIT_LIBRARY if scenario.unit_library is None else scenario.unit_library,
                 listing_ref=scenario.lead_context.get("listing_ref") or "", sent=dict(scenario.media), now=scenario.now,
@@ -6480,6 +6898,8 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 residential_facts=DEFAULT_RESIDENTIAL_FACTS,
                 track=run.decision.track if res and run.decision is not None else "",
             )
+        if shops_chat and engine.broker_holds(answer):
+            when, still_invalid = None, False  # as live (Q11): a broker books nothing, the time stays a tentative
         if res and run.decision is not None and residential.live_track(run.decision.track):
             # As live (batch 2e): a residential reply may quote that track's and unit's figures only, after the model.
             run.context_words = (
@@ -6489,10 +6909,11 @@ def run_once(scenario: Scenario, label: str) -> Run:
             # As live (batch 2e, hook point 7): the rent flow's guards and lines, then 2d's facts.need kept on its tracks; the
             # rent track's photos going this turn keep the model's "Here are the photos." (unit_media's dry run, slice E).
             photos_going = bool(media_step(answer, scenario.facts, may_invite, dry_run=True))
+            confirmed_at = built.appointment.starts_at if built.appointment is not None and built.appointment.status == LeadAiAppointment.Status.CONFIRMED else None
             residential.settle(
                 answer, earlier, list(scenario.new), track=run.decision.track, unit=run.decision.unit, clusters=run.decision.clusters,
                 facts=scenario.facts, residential_facts=DEFAULT_RESIDENTIAL_FACTS, shops_facts=DEFAULT_SHOPS_FACTS, when=when,
-                still_invalid=still_invalid, sending=photos_going,
+                still_invalid=still_invalid, sending=photos_going, visit_open=built.appointment is not None, booked_at=confirmed_at,
             )
             residential.record_need(answer, scenario.facts, run.decision, words)
         if copies and not answer.get("licence"):
@@ -6507,7 +6928,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 answer, facts=scenario.facts, texts=words, said=said, earlier=earlier, now=scenario.now, closed_dates=list(scenario.closed),
                 office_taken=taken, call_taken=call_taken, residential_facts=DEFAULT_RESIDENTIAL_FACTS, unit=run.decision.unit,
                 clusters=run.decision.clusters, when=when, still_invalid=still_invalid, quiet=scenario.handed_over != "no",
-                may_invite=may_invite,
+                may_invite=may_invite, appointment=built.appointment,
             )
         elif shops_chat and not res and settled is None:
             # As live (engine.who_they_are): someone who wants no shop to rent gets the owner's line, never
@@ -6595,7 +7016,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
         if res_book and answer["opt_out"] == "none":
             # As live (batch 2e, spec §2.6): the full name from their words, the lead or a bare name after our ask; a held time
             # booked once it comes; a no keeps it for our agent.
-            held = residential.held_of(built.appointment)
+            held = residential.held_of(built.appointment, scenario.now)
             step = residential.name_turn(
                 answer, scenario.facts, scenario.lead_context, held=held, asked=scenario.full_name_asked,
                 texts=words, said=said, when=when, still_invalid=still_invalid, rule=settled is not None, now=scenario.now,
@@ -6605,8 +7026,13 @@ def run_once(scenario: Scenario, label: str) -> Run:
             run.full_name, run.name_step = step.full_name, step.kind
             if step.when is not None:
                 when = step.when
-        if res_book and engine.effective_action(answer["appointment"]["action"], built.appointment) == "confirm" and when is not None and not run.full_name:
-            residential.hold_for_name(answer, when)  # as live: no booking without the full name; the time is held
+        gate = residential.full_name_gate(
+            track=run.decision.track, action=engine.turn_action(answer["appointment"]["action"], built.appointment, when, still_invalid),
+            when=when, facts=engine._merge_facts(scenario.facts, answer["facts"]), lead=scenario.lead_context,
+        ) if res_book and answer["opt_out"] == "none" else residential.BOOK
+        if gate == residential.ASK and not run.full_name:
+            # As live: no booking, nor a move to a new time, without the full name; the time is held, a price asked goes first.
+            residential.hold_for_name(answer, when, price=residential.price_spec(words, run.decision.track, run.decision.unit, run.decision.clusters))
             when, run.name_step = None, "asked"
         run.answer, run.when, run.rejected, run.still_invalid = answer, when, rejected, still_invalid
         run.action = engine.effective_action(answer["appointment"]["action"], built.appointment)
@@ -6619,6 +7045,9 @@ def run_once(scenario: Scenario, label: str) -> Run:
             run.crm = crm_fields.residential_writes(
                 merged, run.decision.track, run.decision.unit, words=" ".join(need_words(scenario)), besides=broker
             )
+        if answer.get("deletion"):
+            # As live (engine._rule_opt_out; the CRM review of batch 2e, spec §6.3): a C40 to-do for 2311 on the lead.
+            run.crm = [*run.crm, *crm_fields.deletion_writes(scenario.now, list(scenario.closed))]
         run.failures = [reason for check in checks_for(scenario) if (reason := check(run))]
         if scenario.words in (MODEL, EITHER):
             run.notes = [reason for check in REPLY_NOTES if (reason := check(run))]
@@ -6630,6 +7059,42 @@ def run_once(scenario: Scenario, label: str) -> Run:
     if run.error:
         run.failures = [run.error]
     return run
+
+
+# The gate beyond the pass rates (spec §8, board T93) -----------------------------------------------------------------------
+
+# The check kinds of a money or policy scenario (spec §8: unit, deal, commission, VAT, PDPL, availability, opt-out, Template
+# B): its band figures, code's commission and VAT lines, the PDPL and availability checks, an opt-out, the check-back.
+POLICY_KINDS = frozenset({"money", "band", "opt_out", "pdpl", "availability", "follow_up"})
+
+
+def policy_scenario(scenario: Scenario) -> bool:
+    """A scenario that declares a money or policy check (its own expectations, never the defaults checks_for adds)."""
+    declared = frozenset().union(*(check.kinds for check in scenario.expect)) if scenario.expect else frozenset()
+    return bool(declared & POLICY_KINDS)
+
+
+def must_pass(runs) -> list:
+    """The CODE, money and policy scenarios that failed any run, by id (each must pass every run: spec §8)."""
+    failed = []
+    for run in runs:
+        if (run.scenario.words == CODE or policy_scenario(run.scenario)) and run.failures and run.scenario.id not in failed:
+            failed.append(run.scenario.id)
+    return failed
+
+
+def shop_scenario(scenario: Scenario) -> bool:
+    """A scenario of the shop flow: a shops chat whose track before the model is the shop track (spec §8: "the shop
+    scenarios stay at their 2d pass rate")."""
+    if scenario.playbook != IC_SHOPS:
+        return False
+    decision = decide(scenario)
+    return decision is not None and decision.track == tracks.SHOP
+
+
+# 2d's deployed gate (scratchpad eval2d_deployed.log, 2026-10-17, --repeat 2) over the scenarios shop_scenario reads as the
+# shop flow today: 166 of 172 runs of the 86 it held (96.51%); what 2e's shop scenarios must still pass, at least.
+SHOP_BASELINE_2D = 96.5
 
 
 class DatabaseTouched(RuntimeError):
@@ -6814,9 +7279,27 @@ class Command(BaseCommand):
             f"estimated cost ${cost:.4f} at gpt-4.1-mini prices (${PRICE_INPUT:.2f} input, ${PRICE_OUTPUT:.2f} output "
             "per 1M tokens; all input counted as uncached)"
         )
+        # Spec §8 (board T93): every CODE scenario passes every run, and so does every money and policy scenario; the shop
+        # scenarios stay at their 2d pass rate. The 2e eval review: neither was enforced, and the scripted deploy reads "no
+        # CommandError" as a passed gate.
+        must = must_pass(runs)
+        if must:
+            self.stdout.write("code, money and policy scenarios that failed a run: " + ", ".join(must))
+        shop = [run for run in runs if shop_scenario(run.scenario)]
+        shop_rate = 100.0 * sum(1 for run in shop if not run.failures) / len(shop) if shop else 100.0
+        if shop:
+            self.stdout.write(
+                f"the shop scenarios: passed {sum(1 for run in shop if not run.failures)} of {len(shop)} ({shop_rate:.1f}%); "
+                f"2d's deployed gate: {SHOP_BASELINE_2D:.1f}%"
+            )
         if rate < min_pass:
             raise CommandError(f"{rate:.1f}% passed, below the required {min_pass:g}%.", returncode=1)
         if written_rate < min_pass:
             raise CommandError(
                 f"{written_rate:.1f}% of the scenarios the model writes passed, below the required {min_pass:g}%.", returncode=1
             )
+        # A run with --min-pass 0 gates nothing (an inspection run); every gating run holds these too.
+        if must and min_pass > 0:
+            raise CommandError(f"every code, money and policy scenario must pass every run: {', '.join(must)}.", returncode=1)
+        if shop and shop_rate < SHOP_BASELINE_2D and min_pass > 0:
+            raise CommandError(f"the shop scenarios passed {shop_rate:.1f}%, below 2d's {SHOP_BASELINE_2D:.1f}%.", returncode=1)

@@ -1,3 +1,63 @@
+## 2026-10-17 — Lead AI batch 2e: the three reviews beside round 1 applied (Claude Code)
+
+Branch `leadai-2e` in the worktree `a7-2e-worktree`, on `480e72a`. Not pushed, not deployed. Applied: the CRM-safety review (its 7 findings above nit), review-customer-replay (19) and review-eval-integrity (11, one of them the server's, below). Each was checked against the code before it was fixed. One session did most of the work and stopped before committing. A second session checked that work, probed the new guards, fixed the good sentences they cut, re-ran the proofs and committed.
+
+- **Bitrix (CRM review):**
+  - A Client Type is never posted while the lead cannot be read (a 429, the limiter). It waits for the sweep (`crm_fields.waits_for_read`, `WAITS_FOR_READ`), and a read that shows a Rent/Sale holds it. Before this, a7_rent_sale.php derived Rent/Sale from it over an agent's value.
+  - A booked sales call that is moved stays a call: place null or "office" becomes "call" unless their words ask for the office (`sales.keep_call`, in `engine.ask_model` before the booking is checked, so the eval runs it too). RES_SYSTEM's BOOKING line names "call".
+  - Every booking names its to-do subject ("Viewing/Meeting" for a visit, its cancel too) and our to-do's id (C33). A place change closes the other subject's to-do by its id first (`tasks._close_other_subject`).
+  - "Delete my data" queues a C40 to-do for 2311 on the lead (`crm_fields.deletion_writes`, row field `todo`, due at the office's next free half hour, with retries). The data_deletion alert now goes to the chat's people and the Lead AI alert list as well as the panel admins.
+  - C39's own fields that a person edited are left as they are, with one timeline note (`person_edited`, `ours_before`, `person_note`, `HELD_PERSON`). A value written by any chat of ours on the lead counts as ours.
+  - Clusters come from facts.clusters first. Their words count only when the facts name none, and never our office's cluster ("office", "see you at", "meet you at", "on my way to") or one they turn down.
+  - Lead AI access can be changed only by a panel admin or superuser, and never on their own row (`catalog/views.set_agent_admin`). Before this, a Bitrix portal admin could grant it to themselves.
+- **Tracks and needs (replay):**
+  - A buyer of a one-bedroom is never read as a renter ("I want to buy a one-bedroom", "1BR, to buy", "studio, to buy", "buy, studio"). "A bedroom set" is furniture.
+  - A stored sale track switches to rent only on an explicit wish to rent (`tracks.wants_rent`). It does not switch on "not for rent", the rental yield, or "lease it out".
+  - "Not shops" after the opener keeps the home the chat is on (`tracks._known_home`, with an apology).
+  - On the shop track, "flat" as an adjective, "flats above the shop" and the shop's own room no longer move the track; a wish for a home does (`needs`, `tracks.home_wished`).
+  - The cluster of an old shop lead never fills a home's (`tracks.decide`, `unit_media.lead_clusters`, `residential.summary_lines`).
+  - A tap on the shop list or a type card moves a rent, sale or not-known chat to the shop track (`engine.flow_taps`, `decide(shop_tap=)`).
+- **Rent and sale guards (replay):**
+  - Rented elsewhere needs a place as the object, and never comes from a question or a condition. While an appointment is open, their words alone never make it Lost (`lost_to_elsewhere`).
+  - The full-name fallback rejects "Insha Allah", "Same as WhatsApp", "Khuda hafiz" and "Myself only".
+  - No monthly figure goes out on the rent track. The yearly band and how rent is paid go instead (`monthly_figure`).
+  - The commission is said in code's words only. "Agent fee", "your fee", "broker charges", "% of the rent" and the model's "one month's rent" are commission words. "How much exactly?" after code's line gets the figure line.
+  - Nobody on our side is named (`names_colleague`, `staff_names`).
+  - The claims, availability, screening and PDPL guards are wider ("Here are some photos", "all set", "There is a vacant studio", "We currently have", "The owner prefers families", "WhatsApp me a photo of your Emirates ID").
+- **Whole turns (replay):**
+  - A broker books nothing. The broker line goes, the time stays tentative, and the chat pauses (`engine.broker_holds`).
+  - A chat whose need is not known gets the neutral confirmation, never the shops one (`engine.shop_confirmation`).
+  - A move with no full name is gated as a booking is: the new time is held on the booking until the name comes (`residential.full_name_gate`, `mark_move_hold`, `held_move`). `sales.booking_text` is deleted.
+  - A price asked in the same words goes before the full-name ask (`price_spec`, `price_text`).
+  - Photos asked with a call or meeting already booked point to that booking and offer no second call.
+  - Queued photos stop once a person has been asked for (`unit_media.handed_over_since`).
+  - Off the shop track, the nudges use the options wording (`followups.off_the_shop_track`). The mixed template's opener records 2d's want (`_mixed_answer`).
+- **Eval (integrity):**
+  - The gate fails when a CODE scenario, or one with a money or policy check (`POLICY_KINDS`), fails any run. It also fails when the shop scenarios fall below 2d's 96.5% (`SHOP_BASELINE_2D`, from the deployed 2d log). `--min-pass 0` gates nothing.
+  - The policy checks have their own patterns, stricter than the guards. `no_claim` runs on every rent and sale reply.
+  - The scenarios check what their titles promise, and the eight re-routed launch chats keep `wants("home")` and `no_shop_words()`.
+  - `code_first` asks `shops_rule` with the track.
+  - CODE scenarios that the model can break are now EITHER. The rest hold against the model's own handover, silence and another time.
+  - 21 new scenarios cover the replayed inputs. "Delete my data" checks the to-do.
+- **Found on the second look and fixed before the commit.** The new guards cut good sentences:
+  - `names_colleague` read "Yes, our agent will meet you" (also "Okay", "Sorry", "Someone from our team", and the customer's own name) as a colleague named. A one-sentence reply went silent.
+  - `monthly_figure` read "5 PM" as "per month" beside any yearly band.
+  - `staff_names` took "your message said ..." and "the price said ..." as staff names.
+  - "Is the deposit one month's rent?" got the commission line. "Any agent fee?" counted as the charges in general, so every charge line went out.
+  - A lapsed move hold still reached the model's context.
+- **Skipped:**
+  - The server finding (below). This session may not touch the server.
+  - The CRM review's three nits.
+  - `shops-res-cluster-unknown` takes the band said earlier in the chat (`band(..., or_before=True)`). Code's own `cluster_question` skips a band the opener gave, so a strict check would fail code's own line.
+- **Proof:**
+  - Suite 1920 OK on SQLite (`apps.leadai apps.crmlink apps.inbox`; 1866 at `480e72a`). `makemigrations --check`: No changes detected. No migration.
+  - The guard-off runs, fixed for the merged branch (an ERROR counts as no proof): slice A 54 guards and SALE 62 runs, every one failing its tests (scratchpad `s2eA/guards_off_merged.py`, `sale/guards_off_merged.py`). 19 eval mirror cases each fail with their fix switched off (`EvalMirrorTests`).
+- **Not tested:** the real-model eval on these files (round 2 is the gate), PostgreSQL, the live Bitrix tool (C33 `crm_todo_id` and the C40 `todo` action exist in `a7_leadai_fields.php` but have never been called live), WhatsApp, the server.
+- **⚠ Server, not done (review-eval-integrity, must):** the 2e deploy run of 16:20 synced the 2e tree (`6e48d52`) into `/opt/a7-wa/backend`, pushed accounts 0011, `accounts/models.py`, `catalog/views.py` and the inbox files, and built every image. It then stopped at the eval gate, before any migration. Any `ops/wa.sh up app` before `migrate-new-image` starts 2e code on the 2d schema: login and every inbox query fail on `accounts_agent.can_lead_ai`, and every Lead AI turn fails on `leadai_leadaichatstate.track`. Another session's build from main ships these files too. Before anything else is deployed, either re-sync the live 2d tree and rebuild, or post a BUILD LOCK until 2e goes in with `migrate-new-image` first.
+- **Shared files touched:** `assistant/engine.py`, `residential.py`, `sales.py`, `tracks.py`, `needs.py`, `crm.py`, `crm_fields.py`, `prompt.py` (RES_SYSTEM's BOOKING line), `followups.py`, `tasks.py`, `unit_media.py`, `catalog/views.py`, `leadai_eval.py`, 10 test modules (`test_gate_2e_reviews.py` is new), TASKS.md. No panel file.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2e: the real-model gate's round 1 (94.5% / 92.4%) absorbed by code (Claude Code)
 
 Branch `leadai-2e` in the worktree `a7-2e-worktree`, on `6e48d52`. Not pushed, not deployed. The real-model eval on the server's build context gave 503/532 (94.5%) and 218/236 of the model's own words (92.4%), under the 95% gate on both, so nothing went live (log: scratchpad `eval2e_round1.log`). Each failing scenario, its cause, and the fix:

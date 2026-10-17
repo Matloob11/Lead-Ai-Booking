@@ -520,6 +520,18 @@ def wants_no_shop(facts: dict, reading: Reading) -> bool:
     return needs.wants_no_shop(facts) or reading.need is not None
 
 
+def off_the_shop_track(state, reading: Reading) -> bool:
+    """A chat off the shop track (batch 2e spec §6.2: its nudges use 2d's "options" words): code put it on the rent, sale or
+    other track, or it answers a template that is no shops one and its need is not known yet (the mixed template's "Yes,
+    still looking", answered with "What are you looking for ...?": the 2e review found it nudged "to see the shops")."""
+    from .assistant import tracks
+
+    track = (getattr(state, "track", "") or "") if state is not None else ""
+    if track in (tracks.RENT, tracks.SALE, tracks.OTHER):
+        return True
+    return not track and reading.template_kind != ic_templates.SHOP
+
+
 def question_left(conversation, reading: Reading | None = None) -> bool:
     """Our words since their newest message (this campaign's) told them a colleague will confirm or answer
     what they asked (nudges.defers_question): their question is still open. Without ``reading``, two small
@@ -1044,8 +1056,10 @@ def _send_nudge(conversation, state, settings_row, kind: str, now) -> str:
     name = _first_name(conversation, state)
     closed = settings_row.closed_dates
     # A customer who wants no shop to rent hears only about the visit, never about shops (needs.py): what
-    # the chat knows, or what they said since the campaign (a chat whose facts predate who_they_are).
-    options = wants_no_shop(facts, read_since(conversation))
+    # the chat knows, or what they said since the campaign (a chat whose facts predate who_they_are); and so does every chat
+    # off the shop track (batch 2e spec §6.2: off_the_shop_track).
+    reading = read_since(conversation)
+    options = wants_no_shop(facts, reading) or off_the_shop_track(state, reading)
     if kind == NUDGE_1:
         last = last_message(conversation)
         text = nudges.first_text(

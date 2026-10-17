@@ -804,6 +804,29 @@ def asks_monthly(texts) -> bool:
     return any(_MONTHLY.search(str(text or "")) for text in texts or ())
 
 
+# An amount said by the month (spec §2.10: rent is yearly, "a monthly figure is cut"; batch 2e review: "roughly AED 2,500 a
+# month" went out because the deposit's own figure is on the rent track's allow-list).
+_MONTH_WORD = r"(?:(?:a|per|each|every|/)\s*month|monthly|mahina\w*|maheena\w*|mahine)"
+_MONTHLY_FIGURE = re.compile(
+    rf"\d[\d,.]*\s*k?\s*(?:aed|dhs?|dirhams?)?\s*(?:\w+\s+){{0,2}}?{_MONTH_WORD}(?!\w)"
+    rf"|\b{_MONTH_WORD}\s+(?:\w+\s+){{0,3}}?(?:aed\s*|dhs?\s*)?\d[\d,.]*\s*k?"
+    # "2,500 pm", "2.5k p.m.": "pm" is by the month only after an amount that is no clock time ("5 PM", "5:30 PM" never).
+    r"|(?<![\d:.,])(?:\d{1,3}(?:,\d{3})+|\d{4,}|\d+(?:\.\d+)?\s*k)\s*(?:aed|dhs?|dirhams?)?\s*p\.?\s?m\.?(?!\w)"
+    r"|\d[\d,.]*\s*(?:aed|dhs?|درهم)?\s*(?:شهري|شهرياً|بالشهر|في\s+الشهر|ماہانہ|مہینہ|مہینے|महीना|महीने|मासिक)",
+    re.IGNORECASE,
+)
+
+
+def monthly_figure(sentence: str) -> bool:
+    """The sentence gives an amount of AMOUNT_FLOOR or more by the month ("about AED 3,500 a month", "monthly rent of AED
+    2,500", "2,500 pm"): the amount is the month's own, never a yearly band beside a clock time ("AED 29,000–33,000 a
+    year ... today at 5 PM")."""
+    text = " ".join(str(sentence or "").replace("’", "'").split())
+    return any(
+        any(value >= AMOUNT_FLOOR for value, _ in filters.numbers_in(match.group(0))) for match in _MONTHLY_FIGURE.finditer(text)
+    )
+
+
 def opener_text(
     language: str, track: str, unit: str = "", clusters=(), *, for_client_known: bool = False, sorry: bool = False, facts=None,
     monthly: bool = False,
@@ -1031,6 +1054,11 @@ _NOT_NAME_WORDS = frozenset(
     studio flat apartment room bedroom shop rent buy yes. no. ok. ji haan han nahi nahin hai hain kal aaj theek thik
     acha achha shukriya dont don't won't cant can't great perfect deal sounds done alright cool nice wow wait hold
     moment minute send share give tell call agent office location address
+    same as whatsapp whatsapp's profile dp display myself yourself only just also too again already above mentioned
+    given said told know sent number phone mobile contact details info information correct right exactly absolutely
+    definitely probably maybe insha inshallah inshaallah insh'allah allah khuda hafiz jazak jazakallah jazakallahu khair
+    khayr masha mashallah mashaallah bilkul alhamdulillah alhamdolillah ameen bismillah subhanallah wa walaikum
+    waalaikum wassalam salam meharbani mehrbani shukria zaroor pakka bas bhai yaar sab theek hai
     """.split()
 )
 _NAME_PREFIX = re.compile(
@@ -1085,7 +1113,9 @@ def full_name_known(facts: dict | None, lead: dict | None = None) -> str:
 
 def name_from_reply(text: str) -> str:
     """Code's fallback for the full name, right after our ask (spec §2.6): a reply of two to four alphabetic words, with
-    no digits and no question mark ("Ahmed Khan", "my name is Ahmed Khan", "mera naam Ahmed Raza hai"), else ''."""
+    no digits and no question mark ("Ahmed Khan", "my name is Ahmed Khan", "mera naam Ahmed Raza hai"), none of them a word
+    of conversation (_NOT_NAME_WORDS: batch 2e review, "Same as WhatsApp", "Insha Allah", "Khuda hafiz" and "Myself only"
+    were booked as names), else ''."""
     raw = " ".join(unicodedata.normalize("NFKC", str(text or "")).split())
     if not raw or any(ch.isdigit() for ch in raw) or any(mark in raw for mark in filters.QUESTION_MARKS):
         return ""
@@ -1245,8 +1275,18 @@ def is_fixed_line(sentence: str) -> bool:
     return _key(sentence) in _FIXED
 
 
-# Commission and VAT: only code's lines (spec §2.4).
-_COMMISSION = re.compile(r"\bcommi?ss?ion\w*|\bagency\s+fees?\b|\bbrokerage\b|\bbroker\s+fees?\b|عمولة|العمولة|کمیشن|कमीशन", re.IGNORECASE)
+# Commission and VAT: only code's lines (spec §2.4). The commission by any name (batch 2e review: "any agent fee?", "what is
+# your fee?" got no line of code's, and the model's "It's usually 5% of the annual rent." and "around one month's rent" went).
+_COMMISSION_WORDS = (
+    r"\bcommi?ss?ion\w*|\bagency\s+fees?\b|\bbrokerage\b|\bbroker'?s?\s+(?:fees?|charges?)\b|\bagent'?s?\s+(?:fees?|charges?)\b"
+    r"|\byour\s+(?:fees?|charges?\s+for\s+(?:this|it|that))\b|\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:annual\s+|yearly\s+|total\s+)?rent\b"
+    r"|عمولة|العمولة|کمیشن|कमीशन"
+)
+# Their question (asks_commission): never "one month's rent" alone, which they ask of the deposit or the first cheque as often
+# ("Is the deposit one month's rent?").
+_COMMISSION_ASK = re.compile(_COMMISSION_WORDS, re.IGNORECASE)
+# The model's sentences (speaks_commission, settle's cut): its "around one month's rent" too.
+_COMMISSION = re.compile(rf"{_COMMISSION_WORDS}|\b(?:one|1)\s+month'?s\s+rent\b", re.IGNORECASE)
 _VAT = re.compile(r"\bvat\b|\bvalue\s+added\s+tax\b|ضريبة|ویٹ|वैट", re.IGNORECASE)
 _ASKS_FIGURE = re.compile(
     r"\bhow\s+much\b|\bwhat\s+is\s+the\s+(?:exact\s+)?(?:amount|figure|commission)\b|\bexact\b|\bfigure\b|\bamount\b|\bpercent|\b%"
@@ -1256,7 +1296,13 @@ _ASKS_FIGURE = re.compile(
 
 
 def asks_commission(texts) -> bool:
-    return any(_COMMISSION.search(str(text or "")) for text in texts or ())
+    """Their words ask about the commission, by any of its names (_COMMISSION_ASK)."""
+    return any(_COMMISSION_ASK.search(str(text or "").replace("’", "'")) for text in texts or ())
+
+
+def speaks_commission(sentence: str) -> bool:
+    """A sentence of the model's speaks of the commission (_COMMISSION: "one month's rent" too): only code's line may."""
+    return bool(_COMMISSION.search(str(sentence or "").replace("’", "'")))
 
 
 def asks_vat(texts) -> bool:
@@ -1267,11 +1313,36 @@ def commission_asked_before(earlier) -> bool:
     """An earlier message of theirs asked about the commission, and a message of ours came after it (asked again now)."""
     asked = False
     for author, text in earlier or ():
-        if author == "customer" and _COMMISSION.search(str(text or "")):
+        if author == "customer" and asks_commission([text]):
             asked = True
         elif asked and author in ("assistant", "agent"):
             return True
     return False
+
+
+# Another money question, never the commission's figure asked after code's commission line ("how much is the rent?").
+_OTHER_MONEY = re.compile(
+    r"\brent\b|\bprice\b|\bdeposit\b|\bejari\b|\bdewa\b|\bchiller\b|\bcheques?\b|\bmonthly\b|\bmonth\b|\byearly\b|\bkiray\w*|\bmahina\w*"
+    r"|إيجار|ايجار|سعر|تأمين|کرایہ|کرائے|قیمت|किराया|किराए|कीमत",
+    re.IGNORECASE,
+)
+
+
+def _said_commission_line(text: str) -> bool:
+    """Our message carries code's first commission line (res_commission_first, in any language)."""
+    said = {_key(part) for part in _split(text)}
+    return any(_key(part) in said for value in LINES["res_commission_first"].values() for part in _split(value))
+
+
+def asks_commission_figure(earlier, new_texts) -> bool:
+    """Their words ask for a figure right after code's first commission line ("how much exactly?", "kitna?"), naming no
+    other money (the rent, the deposit): the commission's figure is what they ask (batch 2e review: the model answered "It's
+    usually 5% of the annual rent.")."""
+    ours = [text for author, text in earlier or () if author in ("assistant", "agent")]
+    if not ours or not _said_commission_line(ours[-1]):
+        return False
+    texts = [str(text or "") for text in new_texts or ()]
+    return any(_ASKS_FIGURE.search(text) for text in texts) and not any(_OTHER_MONEY.search(text) for text in texts)
 
 
 def commission_answer(track: str, unit: str, earlier, new_texts, *, language: str = "en", facts=None, shops_facts=None) -> str:
@@ -1279,13 +1350,16 @@ def commission_answer(track: str, unit: str, earlier, new_texts, *, language: st
     caller cuts every commission sentence of the model's first:
 
     - rent, the first ask: res_commission_first ("Our normal agency commission applies once you choose an apartment you
-      like. ..."); asked again (in this chat, on any track before), or for a number: res_commission_figure, the unit's
-      AED band plus VAT (both, each labelled, while the unit is not known);
+      like. ..."); asked again (in this chat, on any track before), or for a number (a figure asked right after code's
+      first line too: asks_commission_figure): res_commission_figure, the unit's AED band plus VAT (both, each labelled,
+      while the unit is not known);
     - shop: Matloob's line (Q24), every time; sale: res_commission_sale until Q33; not known: the first ask's line."""
     from . import claims
 
     texts = [str(text or "") for text in new_texts or ()]
     if not asks_commission(texts):
+        if track == RENT and asks_commission_figure(earlier, texts):
+            return commission_figure_line(language, unit, facts)
         return ""
     if track == tracks.SHOP:
         return claims.commission_line(language)
@@ -1331,7 +1405,7 @@ _AVAILABLE = re.compile(
     r"\b(?:is|are|'s|'re|its|it\s+is|they\s+are)\s+(?:still\s+|currently\s+|now\s+|already\s+)?(?:available|vacant|ready|free|empty|there)\b"
     r"|\b(?:currently|now|right\s+now|immediately)\s+(?:available|vacant)\b|\bavailable\s+(?:now|today|immediately|right\s+now)\b"
     r"|\bready\s+to\s+move\b|\bstill\s+available\b"
-    r"|\bwe\s+(?:have|'ve\s+got|got|do\s+have)\s+(?:a\s+|an\s+|one\s+|two\s+|some\s+|several\s+|many\s+|few\s+|nice\s+|good\s+)?"
+    r"|\bwe\s+(?:currently\s+|now\s+|still\s+|right\s+now\s+)?(?:have|'ve\s+got|got|do\s+have)\s+(?:a\s+|an\s+|one\s+|two\s+|some\s+|several\s+|many\s+|few\s+|nice\s+|good\s+)?"
     r"(?:\w+\s+){0,2}(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*-?\s*b\.?h\.?k|1\s*br)\b"
     r"|\b(?:yes|yeah|sure)[,!.]?\s+(?:it|the\s+(?:studio|flat|apartment|unit))\s+(?:is|'s)\b"
     r"|متاح|متاحة|متوفر|متوفرة|شاغر|شاغرة|دستیاب\s+ہے|available\s+hai|available\s+hain|उपलब्ध\s+है|खाली\s+है",
@@ -1356,35 +1430,69 @@ _EITHER_STATE = re.compile(
 )
 
 
+# "There is a vacant studio in Spain Cluster", "a free one-bedroom" (the 2e eval review: guard 6 needed "is vacant"): said as a
+# fact, never in a question (the sale flow's own "Do you prefer a vacant unit or a tenanted one?").
+_UNIT_WORD = r"(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*br)"
+_A_VACANT = re.compile(
+    rf"\bthere\s+(?:is|are|'s)\s+(?:still\s+)?(?:a|an|one|two|three|some|several|few)\s+(?:vacant|free|empty|available|ready)\s+(?:\w+\s+)?{_UNIT_WORD}\b"
+    rf"|\b(?:vacant|free|empty|available|ready)\s+(?:\w+\s+)?{_UNIT_WORD}\s+(?:\w+\s+){{0,4}}?(?:right\s+now|now|today|currently|immediately)\b",
+    re.IGNORECASE,
+)
+
+
 def claims_availability(sentence: str) -> bool:
-    """The sentence says a unit is available, vacant or ready, or "we have a studio in ..." (spec §2.9.6); "may be
-    available", "our agent will show you the available apartments" and a price's terms ("whether the unit is vacant or
-    rented") do not."""
+    """The sentence says a unit is available, vacant or ready, or "we have a studio in ...", "there is a vacant studio"
+    (spec §2.9.6); "may be available", "our agent will show you the available apartments", a price's terms ("whether the
+    unit is vacant or rented") and a question of which they prefer do not."""
     text = _EITHER_STATE.sub(" ", " ".join(str(sentence or "").replace("’", "'").split()))
-    return bool(_AVAILABLE.search(text)) and not _MAY_BE.search(text)
+    if _MAY_BE.search(text):
+        return False
+    asking = any(mark in text for mark in filters.QUESTION_MARKS) or re.search(r"\bprefer", text, re.IGNORECASE)
+    return bool(_AVAILABLE.search(text)) or (not asking and bool(_A_VACANT.search(text)))
 
 
 # Claims (guard 7): booked, confirmed, reserved, scheduled, sent; never in the model's words unless code booked or sends.
+_MEDIA = r"(?:photos?|pictures?|pics|videos?|images?)"
 _CLAIM = re.compile(
     r"\b(?:booked|confirmed|reserved|scheduled)\b|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b"
-    r"|\bhere\s+(?:are|is)\s+(?:the\s+)?(?:photos?|pictures?|pics|videos?|images?)\b"
+    # "Here are some photos of our apartments", "Here are a few pictures", "Sending you the photos now" (batch 2e review).
+    rf"|\bhere\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+few\s+|a\s+couple\s+of\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"
+    rf"|\b(?:sending|sharing|forwarding)\s+(?:you\s+)?(?:the\s+|some\s+|a\s+few\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"
     r"|تم\s+(?:الحجز|التأكيد|حجز|تأكيد)|حجزت|أكدت|أرسلت|ارسلت|بک\s+(?:ہو\s+گئی|کر\s+دی|کر\s+دیا)|کنفرم\s+(?:ہو\s+گئی|کر\s+دی)"
     r"|book\s+(?:ho\s+gayi|kar\s+di|kar\s+diya)|confirm\s+(?:ho\s+gayi|kar\s+di|kar\s+diya)|बुक\s+(?:हो\s+गई|कर\s+दी)|कन्फ़र्म\s+(?:हो\s+गई|कर\s+दी)",
+    re.IGNORECASE,
+)
+# A booking said in other words (batch 2e review: "Your viewing is set for 4 PM", "You're all set for 4 PM tomorrow", "it's
+# locked in", "See you at 4 PM"): true only of the time a confirmed appointment already holds (claims_done's ``booked_at``).
+_SOFT_CLAIM = re.compile(
+    r"\ball\s+set\b|\b(?:is|are|'s|'re|been)\s+set\s+(?:for|on)\b|\blocked\s+in\b|\bsee\s+you\s+(?:at|on|tomorrow|today|this)\b",
     re.IGNORECASE,
 )
 _NEGATED_CLAIM = re.compile(r"\b(?:not|n't|yet|once|after|before|until|when|if)\b", re.IGNORECASE)
 
 
-def claims_done(sentence: str) -> bool:
+def claims_done(sentence: str, booked_at=None) -> bool:
     """The sentence says something is booked, confirmed, reserved or scheduled, or that we sent something (brief rule 2),
-    and not as a condition or a no ("once it's confirmed", "it's not booked yet")."""
+    and not as a condition or a no ("once it's confirmed", "it's not booked yet"); or that it is set, all set, locked in, or
+    "see you at <time>", unless every time it names is the one a confirmed appointment holds already (``booked_at``)."""
     text = " ".join(str(sentence or "").replace("’", "'").split())
-    return bool(_CLAIM.search(text)) and not _NEGATED_CLAIM.search(text)
+    if _NEGATED_CLAIM.search(text):
+        return False
+    if _CLAIM.search(text):
+        return True
+    if not _SOFT_CLAIM.search(text):
+        return False
+    if booked_at is not None:
+        named = hours.named_times(text)
+        if not named or named <= {booked_at.astimezone(hours.DUBAI).time().replace(second=0, microsecond=0)}:
+            return False  # the booking they have ("See you at the viewing!", "See you at 5 PM" for the 5 PM one)
+    return True
 
 
 _PHOTO_CLAIM = re.compile(
-    r"\bhere\s+(?:are|is)\s+(?:the\s+)?(?:photos?|pictures?|pics|videos?|images?)\b"
-    r"|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b[^.?!]{0,30}\b(?:photos?|pictures?|pics|videos?|images?)\b",
+    rf"\bhere\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+few\s+|a\s+couple\s+of\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"
+    rf"|\b(?:sending|sharing|forwarding)\s+(?:you\s+)?(?:the\s+|some\s+|a\s+few\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"
+    rf"|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b[^.?!]{{0,30}}\b{_MEDIA}\b",
     re.IGNORECASE,
 )
 
@@ -1411,6 +1519,8 @@ _PRIVATE = re.compile(
 # and asks for none: the 2e real-model gate (round 1) lost that sentence to the guard in both runs of shops-res-documents.
 _ASKS_FOR = re.compile(
     r"[?؟]|\b(?:send|share|provide|give|upload|forward|attach|submit|enter|type|what\s+is|what'?s|may\s+i\s+have|can\s+i\s+have|could\s+you)\b"
+    # "Please WhatsApp me a photo of your Emirates ID." (the 2e eval review: none of these words was an ask).
+    r"|\bplease\b|\bwhats\s?app\s+(?:me|us|it)\b|\b(?:photo|picture|pic|scan|copy|copies|image)\s+of\s+your\b"
     r"|\b(?:tell|confirm)\s+(?:me|us)\b|\bconfirm\s+your\b"
     r"|\b(?:we|i)(?:'ll|'d|\s+will|\s+would|\s+will\s+also|\s+also)?\s+(?:need|require)\b|\bneed\s+you\s+to\b"
     r"|\b(?:need|needs|needed|require|requires|required)\b[^.?!]{0,40}\b(?:cop(?:y|ies)|scans?|photos?|pictures?|numbers?|details|here|now|in\s+(?:the\s+)?chat|on\s+whatsapp|to\s+proceed)\b"
@@ -1418,7 +1528,11 @@ _ASKS_FOR = re.compile(
     r"|أرسل|ارسل|ابعث|زودنا|بھیج|بتائیں|भेज|बताइए",
     re.IGNORECASE,
 )
-_IN_PERSON = re.compile(r"\bin\s+person\b|\bcollects?\b|\bdo\s*n'?t\s+share\b|\bplease\s+don'?t\b|\bnever\s+share\b|\bat\s+the\s+viewing\b|\bofficial\s+process\b", re.IGNORECASE)
+_IN_PERSON = re.compile(
+    r"\bin\s+person\b|\bcollects?\b|\bdo\s*n'?t\s+share\b|\bplease\s+don'?t\b|\bnever\s+share\b|\bat\s+the\s+viewing\b|\bofficial\s+process\b"
+    r"|\bbring\b|\bto\s+(?:the|our)\s+(?:viewing|office|meeting)\b",
+    re.IGNORECASE,
+)
 
 
 # Asked what documents the contract needs (charges_asked: "documents"), our need is the answer, not an ask: "We'll need your
@@ -1426,6 +1540,7 @@ _IN_PERSON = re.compile(r"\bin\s+person\b|\bcollects?\b|\bdo\s*n'?t\s+share\b|\b
 # send them here, or a question, still counts.
 _ASKS_FOR_NAMING = re.compile(
     r"[?؟]|\b(?:send|share|upload|forward|attach|enter|type|what\s+is|what'?s|may\s+i\s+have|can\s+i\s+have|could\s+you)\b"
+    r"|\bwhats\s?app\s+(?:me|us|it)\b|\b(?:photo|picture|pic|scan|copy|copies|image)\s+of\s+your\b"
     r"|\b(?:provide|give|submit)\b[^.?!]{0,40}\b(?:here|now|in\s+(?:the\s+)?chat|on\s+whatsapp|to\s+(?:me|us))\b"
     r"|\b(?:tell|confirm)\s+(?:me|us)\b|\bconfirm\s+your\b|\bneed\s+you\s+to\b"
     r"|\b(?:need|needs|needed|require|requires|required)\b[^.?!]{0,40}\b(?:cop(?:y|ies)|scans?|photos?|pictures?|numbers?|details|here|now|in\s+(?:the\s+)?chat|on\s+whatsapp)\b"
@@ -1448,6 +1563,8 @@ def asks_private(sentence: str, *, naming: bool = False) -> bool:
 _SCREENING = re.compile(
     r"\bnationalit\w*|\bwhere\s+are\s+you\s+from\b|\bwhich\s+country\b|\breligio\w*|\bmuslim\b|\bhindu\b|\bchristian\b"
     r"|\bmarried\b|\bmarital\b|\bsingle\s+or\b|\bbachelors?\b|\bfamily\s+only\b|\bfamilies\s+only\b|\bonly\s+(?:for\s+)?famil"
+    # "The owner prefers families." (the 2e eval review), "families are preferred".
+    r"|\bprefer(?:s|red)?\s+(?:a\s+|only\s+)?famil|\bfamil(?:y|ies)\s+(?:are\s+|is\s+)?preferred\b|\bno\s+singles\b"
     r"|\bshaadi\b|\bjinsiyat\b|جنسية|جنسيتك|متزوج|عزاب|عزوبي|عائلات\s+فقط|قومیت|شادی\s+شدہ|बैचलर|शादीशुदा|राष्ट्रीयता",
     re.IGNORECASE,
 )
@@ -1574,12 +1691,26 @@ def asks_for_number(texts) -> bool:
     return any(_NUMBER_ASK.search(" ".join(str(text or "").replace("’", "'").split())) for text in texts or ())
 
 
+# A place they rented or found elsewhere: the verb with a place as its object, never another object (batch 2e review: "I
+# already got the location", "Already got your message", "I already moved to Dubai last week", "Ok mil gaya, thanks" after
+# our photos were read as rented elsewhere, and a confirmed viewing was cancelled).
+_PLACE = r"(?:place|flat|studio|apartment|room|unit|home|house|accommodation|one|something)"
 _RENTED_ELSEWHERE = re.compile(
-    r"\b(?:already|alredy)\s+(?:rented|found|took|taken|got|moved)\b|\b(?:found|rented|took|got)\s+(?:a|an|another|one)\s+(?:place|flat|studio|apartment|room)\b"
-    r"|\bnot\s+(?:looking|searching)\s+(?:anymore|any\s+more)\b|\bno\s+longer\s+(?:looking|need)\b|\bdeal\s+(?:is\s+)?done\b"
-    r"|وجدت\s+(?:شقة|سكن|مكان)|استأجرت|مل\s+گیا|مل\s+gaya|mil\s+gaya|le\s+liya|मिल\s+गया|ले\s+लिया",
+    rf"\b(?:already|alredy|allready)\s+(?:have\s+|'ve\s+|got\s+)?(?:rented|found|took|taken|got|leased|booked|moved\s+in(?:to)?)\s+"
+    rf"(?:a\s+|an\s+|another\s+|one\s+|the\s+|my\s+|our\s+|some\s+)?(?:new\s+|other\s+)?{_PLACE}s?\b"
+    r"|\b(?:already|alredy|allready)\s+(?:rented|leased)\b(?!\s+(?:the|your|a|an|it|this|that)\b)"
+    rf"|\b(?:found|rented|took|got|leased|taken)\s+(?:a|an|another|one|other)\s+(?:new\s+|other\s+)?{_PLACE}s?\b(?:\s+(?:already|elsewhere))?"
+    rf"|\b(?:found|rented|got|took)\s+(?:a\s+)?{_PLACE}\s+(?:elsewhere|somewhere\s+else|already|from\s+(?:another|other|someone))\b"
+    r"|\bnot\s+(?:looking|searching)\s+(?:anymore|any\s+more)\b|\bno\s+longer\s+(?:looking|need|searching)\b"
+    r"|\bdeal\s+(?:is\s+)?done\s+(?:elsewhere|already|with\s+(?:another|other|someone|a\s+different))\b|\balready\s+(?:closed|done)\s+(?:a|the)\s+deal\b"
+    r"|وجدت\s+(?:شقة|سكن|مكان|غرفة)|استأجرت\s+(?:شقة|سكن|مكان|غرفة|استوديو|واحدة)|استأجرت\s*$"
+    r"|\b(?:flat|ghar|room|kamra|kamrah|studio|apartment|jagah|makaa?n)\s+(?:mil\s+(?:gaya|gayi|gai)|le\s+(?:liya|li|lia)|kiraye\s+(?:pe|par)\s+le\s+(?:liya|li))\b"
+    r"|(?:فلیٹ|گھر|کمرہ|کمرا|جگہ|مکان|اسٹوڈیو)\s+(?:مل\s+(?:گیا|گئی)|لے\s+(?:لیا|لی))"
+    r"|(?:फ्लैट|घर|कमरा|जगह|मकान|स्टूडियो)\s+(?:मिल\s+(?:गया|गई)|ले\s+(?:लिया|ली))",
     re.IGNORECASE,
 )
+# A condition or a question is no fact: "If the owner gives 30k, deal done", "Have you already rented it out?".
+_CONDITION = re.compile(r"\b(?:if|agar|unless|once|when|in\s+case)\b|\bلو\b|\bإذا\b|\bاذا\b|اگر|अगर", re.IGNORECASE)
 
 
 _STILL_WANTS = re.compile(
@@ -1589,17 +1720,29 @@ _STILL_WANTS = re.compile(
 
 def rented_elsewhere(texts) -> bool:
     """They already rented or found a place ("found a flat already", "not looking anymore"): res_already_rented and Lost
-    "rented elsewhere" (Q10); never with a wish in the same words ("I already rented a shop, now I need a studio")."""
+    "rented elsewhere" (Q10); never with a wish in the same words ("I already rented a shop, now I need a studio"), never
+    in a question or a condition ("If the owner gives 30k, deal done"), and never with an object that is no place ("I
+    already got the location")."""
     for text in texts or ():
         flat = " ".join(str(text or "").replace("’", "'").split())
-        match = _RENTED_ELSEWHERE.search(flat)
-        if not match:
-            continue
-        rest = flat[: match.start()] + " " + flat[match.end() :]
-        if _STILL_WANTS.search(rest) and not re.search(r"\b(?:not|no\s+longer)\b", match.group(0), re.IGNORECASE):
-            continue
-        return True
+        for sentence in _split(flat) or [flat]:
+            match = _RENTED_ELSEWHERE.search(sentence)
+            if not match:
+                continue
+            if any(mark in sentence for mark in filters.QUESTION_MARKS) or _CONDITION.search(sentence[: match.start()]):
+                continue
+            rest = flat.replace(match.group(0), " ", 1)
+            if _STILL_WANTS.search(rest) and not re.search(r"\b(?:not|no\s+longer)\b", match.group(0), re.IGNORECASE):
+                continue
+            return True
     return False
+
+
+def lost_to_elsewhere(answer: dict, texts, *, visit_open: bool = False) -> bool:
+    """They rented or found a place elsewhere: the model's facts.already_rented, or their own words (rented_elsewhere), but
+    never the words alone while an appointment is open (batch 2e review: "I already got the location, thanks" cancelled a
+    confirmed viewing as Lost)."""
+    return answer["facts"].get("already_rented") is True or (rented_elsewhere(texts) and not visit_open)
 
 
 RENTED_REASON = "rented elsewhere"
@@ -1664,6 +1807,9 @@ def render(spec: dict, language: str, *, now=None, office_address: str = "", map
         return commission_figure_line(lang, spec.get("unit") or "", facts)
     if kind == "res_vat":
         return vat_line(lang, facts)
+    if kind == "res_full_name" and spec.get("price"):
+        price = price_text(spec["price"], lang, facts)
+        return f"{price} {line(kind, lang)}".strip()
     return line(kind, lang)
 
 
@@ -1711,6 +1857,95 @@ _HANDS_OVER = re.compile(
 def hands_over(sentence: str) -> bool:
     """The sentence hands them to a person of ours, now or later (_HANDS_OVER)."""
     return bool(_HANDS_OVER.search(" ".join(str(sentence or "").replace("’", "'").split())))
+
+
+# A colleague named (Q30, RES_SYSTEM rule 13; batch 2e review: "Our agent Shoaib will meet you", "Manhial from our team will
+# get back to you here shortly" went out). A capitalised name beside agent, team or colleague; or a name the customer used for
+# one of ours (staff_names: "Manhial told me already, ask him").
+_ROLE = (
+    r"(?:agents?|colleagues?|consultants?|specialists?|managers?|representatives?|advisors?|advisers?|brokers?|coordinators?"
+    r"|team\s+members?|(?:sales|leasing|rental|property)\s+(?:agents?|managers?|executives?|consultants?|advisors?))"
+)
+_NAME = r"[A-Z][a-z]{2,}"
+_NAMED_COLLEAGUE = re.compile(
+    rf"\b(?i:our|the|your|my)\s+(?i:{_ROLE})\s*,?\s+(?:(?:Mr|Mrs|Ms|Miss)\.?\s+)?(?P<a>{_NAME})\b"
+    rf"|\b(?P<b>{_NAME})\s+(?i:from|of|at)\s+(?i:our|the)\s+(?i:team|office|company|sales\s+team|rental\s+team|leasing\s+team)\b"
+    # "Imran, our agent, will call you", "Imran (our agent)": the role set off on both sides. Never "Yes, our agent will ..."
+    # nor "Ahmed, our agent will meet you", the customer greeted by their own name.
+    rf"|\b(?P<c>{_NAME})\s*,\s*(?i:our|my|the)\s+(?i:{_ROLE})\s*(?:,|\(|—|–|\s-\s)"
+    rf"|\b(?P<d>{_NAME})\s*\(\s*(?i:our|my|the)\s+(?i:{_ROLE})\s*\)"
+)
+# Capitalised words that are no person beside those words ("Our agent Will ..." never; the brand, our places, the days; the
+# words a sentence starts with, "Someone from our team ...", "Everyone at our office ...").
+_NOT_PERSON = frozenset(
+    """will can could would shall here there today tomorrow tonight monday tuesday wednesday thursday friday saturday sunday
+    january february march april may june july august september october november december international city dubai
+    russia spain france england china persia morocco emirates greece italy cluster office team sales properties group
+    the our your this that please sure perfect great thanks thank yes yeah yep okay noted sorry hello hey dear absolutely
+    certainly definitely alright also then now well welcome someone somebody anyone anybody everyone everybody nobody none
+    staff people members member agent agents colleague colleagues specialist specialists consultant consultants advisor
+    advisors adviser advisers manager managers representative representatives broker brokers coordinator coordinators usually
+    always normally typically generally just only soon shortly directly personally kindly unfortunately fortunately actually
+    otherwise however meanwhile regards cheers good best kind warm glad happy indeed exactly correct right fine done
+    understood sir madam""".split()
+)
+_STAFF_IN_THEIR_WORDS = re.compile(
+    r"\b(?P<a>[A-Za-z]{3,})\s+(?:told|said|has\s+already|was\s+dealing|is\s+dealing|dealt|handled|helped|called|messaged|showed|sent\s+me"
+    r"|promised|replied|answered)\b"
+    r"|\b(?:ask|asked|talked\s+to|talking\s+to|spoke\s+(?:to|with)|speak\s+(?:to|with)|talk\s+(?:to|with)|dealing\s+with|in\s+touch\s+with"
+    r"|contacted)\s+(?:mr\.?\s+|ms\.?\s+|your\s+(?:agent|colleague)\s+)?(?P<b>[A-Za-z]{3,})\b"
+    rf"|\b(?:your|the)\s+(?i:{_ROLE})\s+(?P<c>[A-Za-z]{{3,}})\b",
+    re.IGNORECASE,
+)
+# Words those constructions catch that are nobody ("he told me", "you said", "ask him", "the owner told me", "The price
+# said in the ad", "Your message said 29k").
+_NOT_STAFF = _NOT_PERSON | frozenset(
+    """you he she they someone somebody nobody everyone anyone agent agents colleague broker friend brother sister wife husband
+    family manager him her them it what who which why how when where already also just still never ever not dont didnt
+    about again before earlier yesterday last first me myself who that this said told for and but you'll owner landlord
+    tenant building watchman security guard bayut dubizzle propertyfinder property finder google website app whatsapp
+    company staff person people customer client regarding about price rent message messages number website site listing
+    listings ad ads advert advertisement post photo photos picture pictures video guy man lady girl boy dewa ejari deposit
+    studio flat apartment mom mum dad mother father son daughter uncle aunt cousin boss receptionist driver neighbour
+    neighbor roommate partner was were has had is are""".split()
+)
+
+
+def _title_case(text: str) -> bool:
+    """Every word, or nearly, starts with a capital ("I Spoke With Your Agent"): a capital is no sign of a name there."""
+    words = re.findall(r"[^\W\d_]+", text)
+    return len(words) >= 3 and sum(1 for word in words if word[0].isupper()) > 0.6 * len(words)
+
+
+def staff_names(texts, own=()) -> set[str]:
+    """The names their words give one of ours ("Manhial told me already, ask him", "I spoke to Shoaib"), in lower case: a
+    capitalised word only (a lower-case "the price said ..." or "your message said ..." names nobody), never from words typed
+    in title case (_title_case), and never the customer's own name (``own``)."""
+    mine = {str(word).casefold() for name in own or () for word in str(name or "").split()}
+    found: set[str] = set()
+    for text in texts or ():
+        flat = " ".join(str(text or "").replace("’", "'").split())
+        if _title_case(flat):
+            continue
+        for match in _STAFF_IN_THEIR_WORDS.finditer(flat):
+            name = next((value for value in match.groups() if value), "")
+            if not name or not name[0].isupper() or name.casefold() in _NOT_STAFF or name.casefold() in mine:
+                continue
+            found.add(name.casefold())
+    return found
+
+
+def names_colleague(sentence: str, staff=()) -> bool:
+    """The sentence names a colleague: a capitalised name beside agent, team or colleague (_NAMED_COLLEAGUE), or a name the
+    customer used for one of ours (``staff``: staff_names), written as a name (capitalised)."""
+    text = " ".join(str(sentence or "").replace("’", "'").split())
+    for match in _NAMED_COLLEAGUE.finditer(text):
+        name = next((value for value in match.groups() if value), "")
+        if name and name.casefold() not in _NOT_PERSON:
+            return True
+    return any(
+        found.group(0)[:1].isupper() for name in staff or () for found in re.finditer(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE)
+    )
 
 
 def code_topic(texts, track: str, unit: str = "") -> str:
@@ -1803,7 +2038,9 @@ def charges_asked(texts) -> set[str] | None:
     words = [str(text or "") for text in texts or () if str(text or "").strip()]
     flat = " ".join(" ".join(words).replace("’", "'").split())
     found = {name for name, pattern in _CHARGE_ASKED.items() if pattern.search(flat)}
-    if _CHARGES_IN_GENERAL.search(flat) and not found:
+    # The commission by another name ("any agent fee?", "what is your fee?", "broker charges?") is the commission asked, never
+    # the charges in general (every charge line would go, and push code's commission line past the reply's limit).
+    if _CHARGES_IN_GENERAL.search(_COMMISSION_ASK.sub(" ", flat)) and not found:
         return None
     if asks_commission(words):
         found.add("commission")
@@ -1971,9 +2208,15 @@ def settle(
     sending: bool = False,
     when=None,
     still_invalid: bool = False,
+    visit_open: bool = False,
+    booked_at=None,
 ) -> list[str]:
     """The code guards on a rent, sale or not-known answer (spec §2.9), after engine.settle and before people.settle,
     live and in the eval with the same values. Returns what it changed (also in ``answer["trimmed"]``).
+
+    ``visit_open``: the chat has an open appointment, which rented_elsewhere's reading alone never cancels (batch 2e review:
+    "I already got the location, thanks" cancelled a confirmed viewing as Lost); ``booked_at``: a confirmed appointment's
+    start, the one time "See you at 5 PM" may name (claims_done).
 
     - Their facts only (settle_facts): a full name of theirs, an e-mail, a budget, the masked numbers.
     - The whole reply goes to a code line for: a handover (res_handover, our rental or sales team, never a name or a
@@ -2028,7 +2271,7 @@ def settle(
     elif asks_for_number(texts) and not handover["needed"]:
         code_line({"kind": "res_no_number"}, answer)  # the line carries the address and the Maps link itself (Q38)
         done.append("no_number")
-    elif track in (RENT, UNKNOWN) and (answer["facts"].get("already_rented") is True or rented_elsewhere(texts)):
+    elif track in (RENT, UNKNOWN) and lost_to_elsewhere(answer, texts, visit_open=visit_open):
         answer["opt_out"] = rules.NOT_INTERESTED
         answer["lost_reason"] = RENTED_REASON
         answer["opt_out_line"] = "res_already_rented"
@@ -2045,6 +2288,7 @@ def settle(
     language = answer.get("language") or "en"
     money_line = commission_answer(track, unit, earlier, texts, language=language, facts=residential_facts, shops_facts=shops_facts)
     cluster_line = ""
+    yearly_line = ""
     if reply:
         banned = other_unit_figures(track, unit, residential_facts)
         reply, changed = _drop(reply, lambda s: _cuts_unit(s, banned))
@@ -2054,7 +2298,7 @@ def settle(
         if changed:
             cut.append("wrong_deal")
         # Code's line goes in full when they asked (money_line): the model's copy of its sentences goes with its own words.
-        reply, changed = _drop(reply, lambda s: bool(_COMMISSION.search(s)) or bool(money_line and is_money_sentence(s)))
+        reply, changed = _drop(reply, lambda s: speaks_commission(s) or bool(money_line and is_money_sentence(s)))
         if changed:
             cut.append("commission_words")
         reply, changed = _drop(reply, lambda s: bool(_VAT.search(s)))
@@ -2070,6 +2314,22 @@ def settle(
             cut.append("injected")
             if not reply.strip():
                 reply = band_answer(language, track, unit, clusters, residential_facts)  # the rule: our own band, never silence
+        if track == RENT:
+            # Rent is yearly (spec §2.10): an amount by the month goes, and the yearly band with how it is paid comes instead.
+            reply, changed = _drop(reply, monthly_figure)
+            if changed:
+                cut.append("monthly")
+                band = rent_band(unit, clusters, residential_facts)
+                if band and not ({band["from"], band["to"]} <= {value for value, _ in filters.numbers_in(reply)}):
+                    yearly_line = f"{band_answer(language, track, unit, clusters, residential_facts)} {_YEARLY[_lang(language)]}"
+                elif band:
+                    yearly_line = _YEARLY[_lang(language)]
+        # No colleague named (Q30): a capitalised name beside agent or team, or a name they used for one of ours (never their own).
+        own = [(source or {}).get(key) for source in (facts, answer["facts"]) for key in ("customer_name", "full_name")]
+        staff = staff_names([*texts, *(text for author, text in earlier or () if author == "customer")], own=own)
+        reply, changed = _drop(reply, lambda s: names_colleague(s, staff))
+        if changed:
+            cut.append("colleague_named")
         if track == RENT and unit in (STUDIO, ONE_BR) and not cluster_known(clusters, facts, answer["facts"], texts) and not asked_cluster_before(earlier):
             reply, changed = _drop(reply, asks_occupancy)
             if changed:
@@ -2082,7 +2342,7 @@ def settle(
         if changed:
             cut.append("availability")
         if not booked:
-            reply, changed = _drop(reply, lambda s: claims_done(s) and not (sending and photo_claim_only(s)))
+            reply, changed = _drop(reply, lambda s: claims_done(s, booked_at) and not (sending and photo_claim_only(s)))
             if changed:
                 cut.append("claim")
         naming = "documents" in (asked or ())  # they asked what the contract needs: the answer names the documents
@@ -2093,6 +2353,8 @@ def settle(
         if changed:
             cut.append("screening")
     add: list[str] = []
+    if yearly_line:
+        add.append(yearly_line)
     if money_line:
         add.append(money_line)
         cut.append("commission")
@@ -2181,7 +2443,8 @@ def summary_lines(facts: dict | None, lead: dict | None = None, appointment=None
     shown = _UNIT_WORDS.get(unit or "", "")
     if shown:
         lines.append(f"Type: {shown} ({'to buy' if track == SALE else 'to rent'})")
-    clusters = facts.get("clusters") or ([lead["cluster"]] if lead.get("cluster") else [])
+    # The lead's cluster only for a lead about an apartment (an old shop enquiry's cluster is no home's: batch 2e review).
+    clusters = facts.get("clusters") or ([lead["cluster"]] if lead.get("cluster") and tracks._lead_home(lead) is not None else [])
     if isinstance(clusters, list) and clusters:
         lines.append(f"Cluster: {', '.join(str(name) for name in clusters)}")
     elif facts.get("cluster_flexible") is True:
@@ -2345,8 +2608,42 @@ def rule_answer(spec: dict, language: str, decision=None, *, facts: dict | None 
     return answer
 
 
-def held_start(appointment):
-    """The start of a tentative held for the full name (spec §2.6), else None."""
+# A move of a confirmed appointment to a new time with no full name known (spec §2.6: "a confirm or a move to a new time"):
+# the new time is held on the appointment (details.held_move) while code asks for the name, and booked once it comes.
+HELD_MOVE = "held_move"
+
+
+def _moment(value):
+    try:
+        moment = dt.datetime.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=dt.timezone.utc)
+
+
+def held_move(appointment, now=None) -> dict | None:
+    """The new time a confirmed appointment holds for the full name (held_of's shape, "move" True), else None; one nobody
+    answered lapses NAME_HOLD_LAPSES after our last ask (``now``), unless they refused the name (our agent confirms it)."""
+    if appointment is None or getattr(appointment, "status", "") != "confirmed":
+        return None
+    details = getattr(appointment, "details", None) or {}
+    move = details.get(HELD_MOVE)
+    start = _moment(move.get("start")) if isinstance(move, dict) else None
+    if start is None:
+        return None
+    asked = _moment(details.get("asked_at") or details.get("held_at"))
+    if now is not None and asked is not None and asked < now - NAME_HOLD_LAPSES and not details.get("name_refused"):
+        return None
+    place = CALL if move.get("place") == CALL else OFFICE
+    return {"start": start, "words": str(move.get("words") or ""), "asks": int(details.get("name_asks") or 0), "place": place, "move": True}
+
+
+def held_start(appointment, now=None):
+    """The start of a tentative held for the full name (spec §2.6), or of a confirmed appointment's move held for it (one
+    that lapsed by ``now`` is none: held_move), else None."""
+    if appointment is not None and getattr(appointment, "status", "") == "confirmed":
+        move = held_move(appointment, now)
+        return move["start"] if move else None
     if appointment is None or getattr(appointment, "status", "") != "tentative":
         return None
     if not (getattr(appointment, "details", None) or {}).get(HELD_FOR_NAME):
@@ -2354,9 +2651,12 @@ def held_start(appointment):
     return appointment.starts_at
 
 
-def held_of(appointment) -> dict | None:
+def held_of(appointment, now=None) -> dict | None:
     """What a full-name hold keeps: its start, their words for it, how often we asked, and its place (a buyer's call is held
-    at place "call", slice C: booked there once the name comes); None when there is none."""
+    at place "call", slice C: booked there once the name comes); a confirmed appointment's move held for the name too
+    (held_move, "move" True); None when there is none."""
+    if appointment is not None and getattr(appointment, "status", "") == "confirmed":
+        return held_move(appointment, now)
     start = held_start(appointment)
     if start is None:
         return None
@@ -2365,7 +2665,40 @@ def held_of(appointment) -> dict | None:
     return {"start": start, "words": appointment.customer_words or "", "asks": int(details.get("name_asks") or 0), "place": place}
 
 
-HELD_KEYS = (HELD_FOR_NAME, "held_at", "asked_at", "name_asks", "name_refused")
+def mark_move_hold(appointment, answer: dict, now, *, sent: bool = True) -> bool:
+    """engine._apply on a confirmed appointment: a move held for the full name (``answer["hold_for_name"]``: the new time
+    from the answer's tentative, or "again" for our ask repeated) and their no (``answer["name_refused"]``). Nothing moves:
+    the booking keeps its time until the name comes. True when the details changed (the caller saves them)."""
+    if getattr(appointment, "status", "") != "confirmed" or not sent:
+        return False
+    hold, refused = answer.get("hold_for_name"), answer.get("name_refused")
+    if not (hold or refused):
+        return False
+    details = dict(appointment.details or {})
+    proposal = answer.get("appointment") or {}
+    if hold is True:
+        day, at = hours.parse_date(proposal.get("date")), hours.parse_time(proposal.get("time"))
+        if day is None or at is None:
+            return False
+        start = dt.datetime.combine(day, at, tzinfo=hours.DUBAI)
+        details[HELD_MOVE] = {"start": start.isoformat(), "words": str(proposal.get("customer_words") or "")[:255], "place": proposal.get("place") or OFFICE}
+        details["held_at"] = now.isoformat()
+        details["name_asks"] = 0
+        details.pop("name_refused", None)
+    if HELD_MOVE not in details:
+        return False
+    if hold:
+        details["asked_at"] = now.isoformat()
+        details["name_asks"] = int(details.get("name_asks") or 0) + 1
+    if refused:
+        details["name_refused"] = True
+    if details == (appointment.details or {}):
+        return False
+    appointment.details = details
+    return True
+
+
+HELD_KEYS = (HELD_FOR_NAME, "held_at", "asked_at", "name_asks", "name_refused", HELD_MOVE)
 
 
 def held_details(details) -> dict:
@@ -2410,10 +2743,11 @@ def mark_hold(appointment, answer: dict, now, *, sent: bool = True) -> bool:
     return True
 
 
-def hold_for_name(answer: dict, when) -> None:
+def hold_for_name(answer: dict, when, *, price: dict | None = None) -> None:
     """A rent or sale booking with no full name (full_name_gate): the time becomes a tentative held at it (no other chat
     takes it: engine.taken_slots for a visit, calls.taken for a buyer's call, held at place "call"), and code asks for the
-    name (res_full_name)."""
+    name (res_full_name). ``price``: they asked the price in the same words (price_spec): the price goes first, then the
+    name (spec §3.1: "the price, the full name, then the booking"; batch 2e review: the price was hidden)."""
     local = when.astimezone(hours.DUBAI)
     place = CALL if answer["appointment"].get("place") == CALL else OFFICE
     answer["appointment"] = {
@@ -2421,7 +2755,33 @@ def hold_for_name(answer: dict, when) -> None:
         "customer_words": answer["appointment"].get("customer_words"),
     }
     answer["hold_for_name"] = True
-    code_line({"kind": "res_full_name"}, answer)
+    spec = {"kind": "res_full_name"}
+    if price:
+        spec["price"] = dict(price)
+    code_line(spec, answer)
+
+
+def price_spec(texts, track: str, unit: str = "", clusters=()) -> dict | None:
+    """What a price asked now needs for code's own price line (price_text), else None: their words ask the price
+    (sales.asks_price) on the rent or sale track."""
+    from . import sales
+
+    if track not in (RENT, SALE) or not sales.asks_price(texts):
+        return None
+    return {"track": track, "unit": unit if unit in (STUDIO, ONE_BR) else "", "clusters": [name for name in clusters or () if name]}
+
+
+def price_text(spec: dict, language: str, facts=None) -> str:
+    """Code's price line for a price_spec, in their language: a buyer's sale band (sales.price_line), a rent band (both
+    units, each named, while the unit is not known)."""
+    track, unit, clusters = spec.get("track") or RENT, spec.get("unit") or "", tuple(spec.get("clusters") or ())
+    if track == SALE:
+        from . import sales
+
+        return sales.price_line(language, unit, clusters, facts)
+    if unit in (STUDIO, ONE_BR):
+        return band_answer(language, RENT, unit, clusters, facts)
+    return " ".join(part for part in (band_answer(language, RENT, STUDIO, clusters, facts), band_answer(language, RENT, ONE_BR, clusters, facts)) if part)
 
 
 _NO_TIME = {"action": "none", "place": None, "date": None, "time": None, "customer_words": None}

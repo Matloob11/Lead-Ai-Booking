@@ -688,6 +688,13 @@ def set_agent_admin(request, pk):
         updates.append("can_linked_devices")
 
     if "can_lead_ai" in request.data:
+        # Lead AI access opens every Lead AI chat on any number, its live feed and its alerts: a panel admin's to give (a
+        # Bitrix portal admin is mirrored from the portal and must not see colleagues' chats: inbox/visibility.py), and
+        # never to oneself, as Panel Admin is (the CRM review of batch 2e).
+        if not (request.user.is_wa_admin or request.user.is_superuser):
+            return Response({"detail": "Only a panel admin can change Lead AI access."}, status=status.HTTP_403_FORBIDDEN)
+        if agent.pk == request.user.pk:
+            return Response({"detail": "You cannot change your own Lead AI access."}, status=status.HTTP_400_BAD_REQUEST)
         agent.can_lead_ai = bool(request.data.get("can_lead_ai"))
         updates.append("can_lead_ai")
 

@@ -191,6 +191,12 @@ def booking_body(lead_id: int, appointment, event: str, comment: str = "") -> di
             body["only_if_empty"] = list(fields)
     # A buyer's sales call (batch 2e slice C, C40): Mode Online 43 and the to-do "Sales call", on its move and cancel too.
     booking.update(calls.booking_fields(appointment, event))
+    # The CRM review of batch 2e: the subject always named ("Viewing/Meeting" for a visit, its cancel too: never the tool's
+    # newest to-do of either subject), and the to-do that is ours by its id (C33), so the tool moves or closes exactly that one.
+    booking.setdefault("todo_subject", TODO_SUBJECT)
+    todo_id = getattr(appointment, "crm_todo_id", None)
+    if todo_id:
+        booking["crm_todo_id"] = int(todo_id)
     if comment:
         body["comment"] = comment[:TOOL_COMMENT_MAX]
     return body

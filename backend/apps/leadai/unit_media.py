@@ -519,12 +519,13 @@ def turn_step(
         return ""
 
     def clusters():
-        # Their words', else the lead context's (the bot stays on the enquiry: "Perfect, the Spain Cluster studio.").
+        # Their words', else the lead context's (the bot stays on the enquiry: "Perfect, the Spain Cluster studio."), and only
+        # a lead about an apartment's (an old shop enquiry's cluster is no home's: batch 2e review, the CONFIRMED trigger sent
+        # unasked studio photos to a shop lead's "For myself").
         said = tuple(getattr(decision, "clusters", ()) or ())
         if said:
             return said
-        cluster = lead_context_of(lead).get("cluster")
-        return (cluster,) if isinstance(cluster, str) and cluster else ()
+        return lead_clusters(lead_context_of(lead))
 
     return settle(
         answer, track=decision.track, unit=decision.unit, clusters=clusters, words=words, earlier=earlier, known=known,
@@ -532,6 +533,15 @@ def turn_step(
         sent=lambda: sent_units(conversation), now=now, quiet=quiet, when=when, still_invalid=still_invalid,
         appointment=appointment, may_invite=may_invite, slots=slots, dry_run=dry_run,
     )
+
+
+def lead_clusters(context: dict) -> tuple:
+    """The lead context's cluster, as a turn's clusters, when the lead was about an apartment (tracks._lead_home); else ()."""
+    context = context if isinstance(context, dict) else {}
+    cluster = context.get("cluster")
+    if not isinstance(cluster, str) or not cluster or tracks._lead_home(context) is None:
+        return ()
+    return (cluster,)
 
 
 def lead_context_of(lead) -> dict:
@@ -599,10 +609,24 @@ def _sent_by_turn(conversation, turn_id) -> tuple[set, bool]:
     return files, follow
 
 
+def handed_over_since(conversation, turn_id) -> bool:
+    """The chat was handed to a person after the turn that queued this task (state.handed_over_at at or after the turn's
+    start): the photos and their question stop (batch 2e review: "Actually I want to talk to a real person" got our
+    handover line, then the queued photos and "Would you like to visit ...?" went anyway)."""
+    from .models import LeadAiChatState, LeadAiTurn
+
+    handed = LeadAiChatState.objects.filter(conversation=conversation).values_list("handed_over_at", flat=True).first()
+    if handed is None:
+        return False
+    started = LeadAiTurn.objects.filter(pk=turn_id).values_list("created_at", flat=True).first() if turn_id else None
+    return started is None or handed >= started
+
+
 def send_set(conversation_id: int, set_id: int, turn_id=None, language: str = "en", questions: str = "", invite: bool = False) -> dict:
     """A set's photos one by one (the caption on the first), then the question after them (follow_up: the model's own,
     or the visit question with two free slots computed now); with no photo delivered, the no-media line instead. Nothing
-    goes once the chat is no longer the assistant's to answer; what this turn's task sent already is not sent again."""
+    goes once the chat is no longer the assistant's to answer, or a person was asked for since the turn that queued it
+    (handed_over_since); what this turn's task sent already is not sent again."""
     from apps.gateway.client import AlotsError
     from apps.inbox import services as inbox_services
     from apps.inbox.models import Conversation
@@ -623,7 +647,7 @@ def send_set(conversation_id: int, set_id: int, turn_id=None, language: str = "e
     for index, row in enumerate(rows):
         if row.pk in done:
             continue
-        why = shop_media._still_ours(conversation)
+        why = shop_media._still_ours(conversation) or ("a person was asked for" if handed_over_since(conversation, turn_id) else "")
         if why:
             out["stopped"] = why
             return out
@@ -642,7 +666,7 @@ def send_set(conversation_id: int, set_id: int, turn_id=None, language: str = "e
     if follow_done:
         out["stopped"] = "the question went out already"
         return out
-    why = shop_media._still_ours(conversation)
+    why = shop_media._still_ours(conversation) or ("a person was asked for" if handed_over_since(conversation, turn_id) else "")
     if why:
         out["stopped"] = why
         return out
