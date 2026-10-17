@@ -337,6 +337,43 @@ def drop_location(text: str, office_address: str, maps_url: str = "") -> tuple[s
     return " ".join(kept), True
 
 
+_UNIT_PART = re.compile(r"^\s*(shop|office|unit|suite)\s*(?:no\.?|number|#)?\s*(\d{1,4})\s*$", re.IGNORECASE)
+
+
+def office_unit(office_address: str) -> re.Pattern | None:
+    """Our office's own unit, as its address names it ("Shop 20") and as a reply may write it ("Shop No. 20",
+    "shop #20"): ours wherever a reply names it, never a shop for rent; None when the address names no unit."""
+    for part in str(office_address or "").split(","):
+        match = _UNIT_PART.match(part)
+        if match:
+            return re.compile(rf"\b{match[1]}\s*(?:no\.?|number|#)?\s*{match[2]}\b", re.IGNORECASE)
+    return None
+
+
+def join_office_unit(text: str, office_address: str) -> str:
+    """The text with our office's unit written without the period of its "No." ("Shop No. 20" becomes "Shop No 20"), so
+    a sentence splitter never breaks our address in two ("Shop No." and "20 ...")."""
+    unit = office_unit(office_address)
+    if not unit:
+        return str(text or "")
+    return unit.sub(lambda match: match.group(0).replace(".", ""), str(text or ""))
+
+
+def without_office(text: str, office_address: str) -> str:
+    """The text without our office's address in it (each of its parts: "Russia Cluster", "Building V03", "Shop 20") nor
+    its unit in any of the ways a reply writes it (office_unit): what else the text says, read on its own. A guard that
+    looks for shop words reads this, so our own office ("Our office is in Russia Cluster, Building V03, Shop 20", code's
+    "Our office location: ...") is never shop talk (the 2e real-model gate, round 2)."""
+    rest = str(text or "")
+    for part in (piece.strip() for piece in str(office_address or "").split(",")):
+        if part:
+            rest = re.sub(re.escape(part), " ", rest, flags=re.IGNORECASE)
+    unit = office_unit(office_address)
+    if unit:
+        rest = unit.sub(" ", rest)
+    return " ".join(rest.split())
+
+
 # The customer asks for the location itself ("send the location", "your address?",
 # "google map"): it goes again, however recently it went. Not "how do I reach
 # there?", which the location already sent answers, nor "pata" (also "know").

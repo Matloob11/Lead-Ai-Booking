@@ -601,6 +601,40 @@ LINES = {
         "hi_latin": "Hamare agent aapse Russia Cluster mein hamare office mein milenge aur aapko available apartments dikhane le jayenge.",
         "hi": "हमारे एजेंट आपसे रशिया क्लस्टर में हमारे ऑफ़िस में मिलेंगे और आपको उपलब्ध अपार्टमेंट दिखाने ले जाएँगे।",
     },
+    # Step 3 for a shared or company stay (brief Part 5; contract_line_kind): whose name goes on the contract, with how many
+    # people stay while that is not known either. Never a promise of approval.
+    "res_contract_company": {
+        "en": "Would the contract be in your name or the company's?",
+        "ar": "هل سيكون العقد باسمك أم باسم الشركة؟",
+        "ur_latin": "Contract aap ke naam par hoga ya company ke naam par?",
+        "ur": "کنٹریکٹ آپ کے نام پر ہوگا یا کمپنی کے نام پر؟",
+        "hi_latin": "Contract aapke naam par hoga ya company ke naam par?",
+        "hi": "कॉन्ट्रैक्ट आपके नाम पर होगा या कंपनी के नाम पर?",
+    },
+    "res_contract_shared": {
+        "en": "Whose name would the contract be in?",
+        "ar": "باسم من سيكون العقد؟",
+        "ur_latin": "Contract kis ke naam par hoga?",
+        "ur": "کنٹریکٹ کس کے نام پر ہوگا؟",
+        "hi_latin": "Contract kiske naam par hoga?",
+        "hi": "कॉन्ट्रैक्ट किसके नाम पर होगा?",
+    },
+    "res_occupants_contract_company": {
+        "en": "How many people would stay, and would the contract be in your name or the company's?",
+        "ar": "كم شخصاً سيقيم، وهل سيكون العقد باسمك أم باسم الشركة؟",
+        "ur_latin": "Kitne log rahenge, aur contract aap ke naam par hoga ya company ke naam par?",
+        "ur": "کتنے لوگ رہیں گے، اور کنٹریکٹ آپ کے نام پر ہوگا یا کمپنی کے نام پر؟",
+        "hi_latin": "Kitne log rahenge, aur contract aapke naam par hoga ya company ke naam par?",
+        "hi": "कितने लोग रहेंगे, और कॉन्ट्रैक्ट आपके नाम पर होगा या कंपनी के नाम पर?",
+    },
+    "res_occupants_contract_shared": {
+        "en": "How many people would stay, and whose name would the contract be in?",
+        "ar": "كم شخصاً سيقيم، وباسم من سيكون العقد؟",
+        "ur_latin": "Kitne log rahenge, aur contract kis ke naam par hoga?",
+        "ur": "کتنے لوگ رہیں گے، اور کنٹریکٹ کس کے نام پر ہوگا؟",
+        "hi_latin": "Kitne log rahenge, aur contract kiske naam par hoga?",
+        "hi": "कितने लोग रहेंगे, और कॉन्ट्रैक्ट किसके नाम पर होगा?",
+    },
 }
 # res_handover (spec §2.11): our rental or sales team, never a person's name (Q30) nor a number (Q38).
 HANDOVER = {
@@ -1382,17 +1416,21 @@ _SHOP_PITCH = re.compile(
 _DOCUMENTS_LINE = re.compile(r"\bsignatory\b|\bcompany\s+contract\b|\bcompany's\s+documents\b", re.IGNORECASE)
 
 
-def drop_shop_words(reply: str, track: str) -> tuple[str, bool]:
+def drop_shop_words(reply: str, track: str, office_address: str = "") -> tuple[str, bool]:
     """The reply without its sentences about shops, shop types or the drive to the shops (spec §2.9.5); it keeps "Are you
-    looking for yourself or for a client?" and the company-documents line, which 2d's needs.drop_shop_pitch would cut."""
-    sentences = _split(reply)
+    looking for yourself or for a client?" and the company-documents line, which 2d's needs.drop_shop_pitch would cut.
+    Our own office's address and its unit (``office_address``: "Russia Cluster, Building V03, Shop 20, ...", "Shop No. 20")
+    are no shop talk: a sentence is read without them (filters.without_office), so "Our office is in Russia Cluster, Building
+    V03, Shop 20." stays (the 2e real-model gate, round 2: the office's own "Shop 20" read as a shop)."""
+    sentences = _split(filters.join_office_unit(reply, office_address) if office_address else reply)
 
     def cut(sentence: str) -> bool:
         if _DOCUMENTS_LINE.search(sentence):
             return False
-        if track in (RENT, SALE) and _SHOP_WORDS.search(sentence):
+        text = filters.without_office(sentence, office_address) if office_address else sentence
+        if track in (RENT, SALE) and _SHOP_WORDS.search(text):
             return True
-        return bool(_SHOP_PITCH.search(sentence))
+        return bool(_SHOP_PITCH.search(text))
 
     kept = [sentence for sentence in sentences if not cut(sentence)]
     if len(kept) == len(sentences):
@@ -2049,6 +2087,18 @@ def charges_asked(texts) -> set[str] | None:
     return found
 
 
+def asked_charges(texts, money_line: str = "") -> set[str] | None:
+    """The charges they asked about (charges_asked), with the commission among them when code's commission line answers them
+    (``money_line``) and their words name no charge: "how much exactly?" right after code's first line (asks_commission_figure)
+    asks the commission's figure, nothing else. The 2e real-model gate, round 2: both runs of
+    shops-res-commission-how-much-exactly answered it with every charge line (966-972 characters), none cut (nothing asked),
+    and code's figure line went past the reply's limit."""
+    asked = charges_asked(texts)
+    if money_line and asked is not None and not asked:
+        return {"commission"}
+    return asked
+
+
 def unasked_charge(sentence: str, asked, facts=None) -> bool:
     """The sentence quotes a charge (_CHARGE_SAID) none of whose kind they asked about, while they asked about another
     (``asked``: charges_asked; None or empty cuts nothing), and carries no band figure of ours."""
@@ -2173,24 +2223,201 @@ def asked_cluster_before(earlier) -> bool:
     )
 
 
+# Who will stay, in more of the ways the model asks it: "Will it be just for yourself?" (the 2e real-model gate, round 2: run 2
+# of shops-res-cluster-unknown asked it, _OCCUPANCY_ASK did not read it, and the cluster was never asked), "Will anyone else
+# stay with you?", "akele rahenge?". Never step 1's broker question ("for yourself or for a client?": a client named).
+_ALONE_ASK = re.compile(
+    r"\b(?:just|only)\s+(?:for\s+)?(?:yourself|you)\b|\bfor\s+yourself\s+(?:alone|only)\b|\b(?:living|staying|live|stay)\s+alone\b"
+    r"|\banyone\s+else\b|\bstay(?:ing)?\s+with\s+you\b|\blive\s+with\s+you\b"
+    r"|\bsirf\s+aap\s+(?:ke\s+liye|akele)\b|\bakele\b|وحدك|لوحدك|اکیلے|अकेले",
+    re.IGNORECASE,
+)
+_A_CLIENT = re.compile(r"\bclients?\b|عميل|کلائنٹ|क्लाइंट", re.IGNORECASE)
+
+
 def asks_occupancy(sentence: str) -> bool:
-    """The sentence asks who will stay (brief Part 5, step 3)."""
-    return rules.asks_question(sentence) and bool(_OCCUPANCY_ASK.search(" ".join(str(sentence or "").split())))
+    """The sentence asks who will stay (brief Part 5, step 3), never who the apartment is for (step 1, a client named)."""
+    text = " ".join(str(sentence or "").split())
+    if not rules.asks_question(text):
+        return False
+    return bool(_OCCUPANCY_ASK.search(text)) or (bool(_ALONE_ASK.search(text)) and not _A_CLIENT.search(text))
 
 
-def cluster_question(language: str, unit: str, earlier=(), facts=None) -> str:
-    """Code's step-2 question for an unknown cluster (brief Part 5): the unit's band, unless our side gave it already, then
-    "Any cluster you prefer, or are you flexible?"."""
+# Step 2's first half (brief Part 5: "Do you prefer a balcony, and when are you planning to move?"): the cluster comes after it.
+_REQUIREMENT_ASK = re.compile(
+    r"\bbalcon\w*|\bmov(?:e|ing)\s*-?\s*in\b|\b(?:plan(?:ning)?|want|wanting|like|need|going)\s+to\s+(?:move|shift)\b"
+    r"|\bwhen\b[^.?!]{0,40}\b(?:move|moving|shift|shifting)\b|\bshift\s+kab\b|\bkab\s+shift\b"
+    r"|شرفة|بلكونة|الانتقال|بالکونی|کب\s+شفٹ|बालकनी|कब\s+शिफ्ट",
+    re.IGNORECASE,
+)
+
+
+def asks_requirement(sentence: str) -> bool:
+    """The sentence asks step 2's first half: a balcony, or when they move (brief Part 5)."""
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_REQUIREMENT_ASK.search(text))
+
+
+def asks_cluster(sentence: str) -> bool:
+    """The sentence asks about the cluster (a question naming it)."""
+    return rules.asks_question(sentence) and bool(_CLUSTER_WORD.search(str(sentence or "")))
+
+
+def cluster_question(language: str, unit: str, earlier=(), facts=None, reply: str = "") -> str:
+    """Code's step-2 question for an unknown cluster (brief Part 5): the unit's band, unless our side gave it already (or
+    the reply it joins gives it), then "Any cluster you prefer, or are you flexible?"."""
     lang = _lang(language)
     band = rent_band(unit, (), facts)
     figures = {band["from"], band["to"]}
-    said = any(
-        author in ("assistant", "agent") and figures <= {value for value, _ in filters.numbers_in(text)} for author, text in earlier or ()
-    )
-    if said:
+    ours = [text for author, text in earlier or () if author in ("assistant", "agent")] + [reply]
+    if any(figures <= {value for value, _ in filters.numbers_in(text)} for text in ours if text):
         return CLUSTER_ASK[lang]
     sentence = _RENT_BAND[lang][0 if unit == STUDIO else 1].format(where=_IC[lang], band=band_text(band))
     return f"{sentence} {CLUSTER_ASK[lang]}"
+
+
+def requirement_asked_last(earlier) -> bool:
+    """Our side's last message asked step 2's first half (the balcony, when they move): their answer now leaves the cluster
+    as the requirement's next question."""
+    ours = [text for author, text in earlier or () if author in ("assistant", "agent")]
+    return bool(ours) and any(asks_requirement(sentence) for sentence in _split(ours[-1]))
+
+
+def invites(reply: str, answer: dict) -> bool:
+    """The reply invites them to the office (step 4): counted as an invitation (engine.settle), offering times, or asking to
+    hold a slot or to visit."""
+    sentences = _split(reply)
+    return bool(answer.get("invited_to_meeting")) or any(
+        filters.offers_time(sentence) or (rules.asks_question(sentence) and bool(_INVITING.search(sentence))) for sentence in sentences
+    )
+
+
+def cluster_first(
+    reply: str, answer: dict, *, track: str, unit: str, clusters=(), facts=None, texts=(), earlier=(), language: str = "en",
+    residential_facts=None, visit_open: bool = False, sending: bool = False,
+) -> tuple[str, str, bool]:
+    """Step 2's cluster before step 3's who will stay and step 4's invitation (brief Part 5), on the rent track while the unit
+    is known, the cluster is not, and our side never asked it: (the reply, code's cluster question or '', changed).
+
+    - An occupancy question waits (asks_occupancy), and code's cluster question goes in its place (round 1);
+    - for an end user (step 1 done: for_client false), code's cluster question also goes when the reply invites them to the
+      office (step 4 before step 2), or answers their answer to our balcony and move-in question (requirement_asked_last)
+      with no step-2 question of its own; never while photos go this turn or they ask for photos (``sending``,
+      unit_media.asked_now: unit_media's own question or slots follow the photos, or its no-pictures line), nor while a
+      visit is open.
+    Never when the reply asks the cluster itself. The 2e real-model gate, round 2: shops-res-cluster-unknown, "Balcony would
+    be nice, next month", got two slots in run 1 and "Will it be just for yourself?" in run 2, and the cluster was never
+    asked (_OCCUPANCY_ASK did not read run 2's question, and an invitation was never in place of one)."""
+    if track != RENT or unit not in (STUDIO, ONE_BR) or cluster_known(clusters, facts, answer["facts"], texts) or asked_cluster_before(earlier):
+        return reply, "", False
+    reply, cut = _drop(reply, asks_occupancy)
+    sentences = _split(reply)
+    if any(asks_cluster(sentence) for sentence in sentences):
+        return reply, "", cut
+    from .. import unit_media
+
+    known = {**(facts or {}), **{key: value for key, value in answer["facts"].items() if value is not None}}
+    end_user = known.get("for_client") is False
+    moves_on = (
+        end_user and not visit_open and not sending and not unit_media.asked_now([str(text or "") for text in texts or ()])
+        and (invites(reply, answer) or requirement_asked_last(earlier)) and not any(asks_requirement(sentence) for sentence in sentences)
+    )
+    if cut or moves_on:
+        return reply, cluster_question(language, unit, earlier, residential_facts, reply=reply), True
+    return reply, "", cut
+
+
+# Step 3 for a shared or company stay (brief Part 5: "If shared / staff / colleagues: ... How many people would stay, and would
+# the contract be in your name or the company's?"; spec §2.10: how many people, and whose name on the contract). The 2e
+# real-model gate, round 2: both runs of shops-res-company-staff ("It is for my company staff, 4 people") invited them with no
+# word of the contract.
+SHARED_OCCUPANCY = ("company_staff", "sharing")
+_STAFF_WORDS = re.compile(
+    r"\bcompany\s+staff\b|\bmy\s+staff\b|\bour\s+staff\b|\bstaff\s+(?:accommodation|members)\b|\bemployees?\b|\bworkers?\b|\bcolleagues?\b"
+    r"|موظفي|موظفين|عمال|اسٹاف|ملازمین|स्टाफ़|स्टाफ|कर्मचारी",
+    re.IGNORECASE,
+)
+_SHARING_WORDS = re.compile(r"\bshar(?:e|ing)\s+with\b|\bsharing\b|\bwith\s+(?:my\s+)?friends\b|\broommates?\b|\bpartition\b|مشاركة|شیئرنگ|शेयरिंग", re.IGNORECASE)
+_OCCUPANTS_SAID = re.compile(
+    r"\b\d{1,2}\s*(?:people|persons|staff|employees|workers|of\s+us|members|log|afrad)\b|\d{1,2}\s*(?:أشخاص|اشخاص|لوگ|अफ़राद|लोग)",
+    re.IGNORECASE,
+)
+_CONTRACT_WORD = re.compile(r"\bcontract\b|\btenancy\s+in\b|\bin\s+(?:whose|your|the\s+company'?s)\s+name\b|عقد|العقد|کنٹریکٹ|कॉन्ट्रैक्ट|अनुबंध", re.IGNORECASE)
+# Their words name whose it is, or speak of the contract at all: the model answers that.
+_CONTRACT_SAID = re.compile(r"\bcontract\b|\bname\b|\bnaam\b|عقد|باسم|نام|नाम|कॉन्ट्रैक्ट", re.IGNORECASE)
+
+
+def shared_occupancy(facts: dict | None, fresh: dict | None, texts=()) -> str:
+    """A shared or company stay: the model's occupancy (this answer's, else the chat's), else their words now ("for my company
+    staff", "sharing with friends"); '' for any other."""
+    known = {**(facts or {}), **{key: value for key, value in (fresh or {}).items() if value not in (None, "", [])}}
+    if known.get("occupancy") in SHARED_OCCUPANCY:
+        return known["occupancy"]
+    if known.get("occupancy"):
+        return ""
+    words = " ".join(str(text or "") for text in texts or ())
+    if _STAFF_WORDS.search(words):
+        return "company_staff"
+    return "sharing" if _SHARING_WORDS.search(words) else ""
+
+
+def contract_line_kind(facts: dict | None, fresh: dict | None, texts=(), earlier=(), reply: str = "") -> str:
+    """The step-3 contract question a shared or company stay still needs (the LINES kind), else '': the contract not known (the
+    model's contract), never asked by our side, never spoken of in their words now nor in the reply. Asked with how many people
+    while that is not known either (the brief's whole question)."""
+    occupancy = shared_occupancy(facts, fresh, texts)
+    if not occupancy:
+        return ""
+    known = {**(facts or {}), **{key: value for key, value in (fresh or {}).items() if value not in (None, "", [])}}
+    if known.get("contract") in ("individual", "company"):
+        return ""
+    words = " ".join(str(text or "") for text in texts or ())
+    if _CONTRACT_SAID.search(words):
+        return ""
+    ours = [sentence for author, text in earlier or () if author in ("assistant", "agent") for sentence in _split(text)]
+    if any(rules.asks_question(sentence) and _CONTRACT_WORD.search(sentence) for sentence in [*ours, *_split(reply)]):
+        return ""
+    occupants = known.get("occupants")
+    counted = (isinstance(occupants, int) and not isinstance(occupants, bool) and occupants > 0) or bool(_OCCUPANTS_SAID.search(words))
+    whose = "company" if occupancy == "company_staff" else "shared"
+    return f"res_contract_{whose}" if counted else f"res_occupants_contract_{whose}"
+
+
+# Where code's step question goes in the model's words: before its first question or the first sentence of its invitation, so
+# the invitation stays whole and last ("... staff of 4. Would the contract be in your name or the company's? Our agent will
+# meet you at our office ... which is better?").
+_INVITING = re.compile(
+    r"\bour\s+office\b|\bmeet\s+you\b|\bvisit\b|\bviewing\b|\bslots?\b|\bcome\s+(?:to|by|over|in)\b|مكتبنا|زيارة|موعد|آفس|ملاقات|ऑफ़िस|ऑफिस",
+    re.IGNORECASE,
+)
+
+
+def _with_step(reply: str, line_text: str) -> str:
+    """The model's words with code's step question before their first question or invitation (else after them)."""
+    parts = _split(reply)
+    for index, sentence in enumerate(parts):
+        if rules.asks_question(sentence) or filters.offers_time(sentence) or _INVITING.search(sentence):
+            return " ".join([*parts[:index], line_text, *parts[index:]])
+    return " ".join([*parts, line_text]).strip()
+
+
+def _fit(reply: str, keep) -> str:
+    """The reply within the reply's limit (filters.REPLY_MAX, which clean_reply cuts at): the model's sentences go, its
+    statements from the last one up and then its questions, never a sentence of code's (``keep``). The 2e real-model gate
+    lost code's commission line past the limit in round 1 (shops-res-commission-first) and again in round 2
+    (shops-res-commission-how-much-exactly)."""
+    if len(reply) <= filters.REPLY_MAX:
+        return reply
+    ours = {_key(part) for text in keep or () if text for part in _split(text)}
+    parts = _split(reply)
+    for questions in (False, True):
+        index = len(parts) - 1
+        while len(" ".join(parts)) > filters.REPLY_MAX and index >= 0:
+            sentence = parts[index]
+            if _key(sentence) not in ours and rules.asks_question(sentence) == questions:
+                del parts[index]
+            index -= 1
+    return " ".join(parts)
 
 
 def settle(
@@ -2210,9 +2437,12 @@ def settle(
     still_invalid: bool = False,
     visit_open: bool = False,
     booked_at=None,
+    office_address: str = "",
 ) -> list[str]:
     """The code guards on a rent, sale or not-known answer (spec §2.9), after engine.settle and before people.settle,
     live and in the eval with the same values. Returns what it changed (also in ``answer["trimmed"]``).
+
+    ``office_address``: our office's (the settings'), whose words and unit ("Shop 20") the shop-word guard never cuts.
 
     ``visit_open``: the chat has an open appointment, which rented_elsewhere's reading alone never cancels (batch 2e review:
     "I already got the location, thanks" cancelled a confirmed viewing as Lost); ``booked_at``: a confirmed appointment's
@@ -2288,6 +2518,7 @@ def settle(
     language = answer.get("language") or "en"
     money_line = commission_answer(track, unit, earlier, texts, language=language, facts=residential_facts, shops_facts=shops_facts)
     cluster_line = ""
+    contract_line = ""
     yearly_line = ""
     if reply:
         banned = other_unit_figures(track, unit, residential_facts)
@@ -2304,7 +2535,7 @@ def settle(
         reply, changed = _drop(reply, lambda s: bool(_VAT.search(s)))
         if changed:
             cut.append("vat_words")
-        asked = charges_asked(texts)
+        asked = asked_charges(texts, money_line)
         reply, changed = _drop(reply, lambda s: unasked_charge(s, asked, residential_facts))
         if changed:
             cut.append("unasked_charges")
@@ -2330,12 +2561,19 @@ def settle(
         reply, changed = _drop(reply, lambda s: names_colleague(s, staff))
         if changed:
             cut.append("colleague_named")
-        if track == RENT and unit in (STUDIO, ONE_BR) and not cluster_known(clusters, facts, answer["facts"], texts) and not asked_cluster_before(earlier):
-            reply, changed = _drop(reply, asks_occupancy)
-            if changed:
-                cut.append("cluster_first")
-                cluster_line = cluster_question(language, unit, earlier, residential_facts)
-        reply, changed = drop_shop_words(reply, track)
+        reply, cluster_line, changed = cluster_first(
+            reply, answer, track=track, unit=unit, clusters=clusters, facts=facts, texts=texts, earlier=earlier, language=language,
+            residential_facts=residential_facts, visit_open=visit_open, sending=sending,
+        )
+        if changed:
+            cut.append("cluster_first")
+        if track == RENT and not cluster_line and not visit_open:
+            # Step 3 for a shared or company stay: whose name goes on the contract (contract_line_kind).
+            kind = contract_line_kind(facts, answer["facts"], texts, earlier, reply)
+            if kind:
+                contract_line = line(kind, language)
+                cut.append("contract")
+        reply, changed = drop_shop_words(reply, track, office_address)
         if changed:
             cut.append("shop_words")
         reply, changed = _drop(reply, claims_availability)
@@ -2367,9 +2605,14 @@ def settle(
     if cut:
         answer["reply"] = reply
         _reply_with(answer, add)
-        if cluster_line:
-            answer["reply"] = f"{answer['reply']} {cluster_line}".strip()  # step 2's question, last: the reply's own question
+        step = cluster_line or contract_line
+        if step:
+            # Step 2's or step 3's question, before the model's own question or invitation (_with_step).
+            answer["reply"] = _with_step(answer["reply"], step)
             answer["send"] = True
+        if add or step:
+            # Code's lines go out whole: the model's sentences make room under the reply's limit (_fit).
+            answer["reply"] = _fit(answer["reply"], [*add, step])
         if not answer["reply"]:
             answer["send"] = False
         answer["trimmed"] = [*(answer.get("trimmed") or []), *dict.fromkeys(cut)]

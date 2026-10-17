@@ -731,8 +731,11 @@ class EvalCheckTests(SimpleTestCase):
         self.assertIn("does not ask the unit first", "; ".join(run_eval("shops-unit-photos-unit-unknown", res_answer("Sure, our agent will send them.")).failures))
 
     def test_code_first_asks_shops_rule_with_the_track(self):
-        # review-eval-integrity: the eval's code_first left out the track, and judged another reply than the engine sends.
-        self.assertIsNone(leadai_eval.code_first(scenario("shops-res-yes-to-shops-template")))
+        # review-eval-integrity: the eval's code_first left out the track, and judged another reply than the engine sends. The
+        # 2e gate's round 2: a yes to a shops template on the known rent track is code's opener now (engine.reads_first_yes), as
+        # live; once who it is for is known (Template B's tap from an end user), it is the model's, as before.
+        settled = leadai_eval.code_first(scenario("shops-res-yes-to-shops-template"))
+        self.assertEqual(settled["rule"], "mixed_yes:res_open_lead")
         self.assertEqual(run_eval("shops-res-yes-to-shops-template").failures, [])
         self.assertIsNone(leadai_eval.code_first(scenario("shops-res-book-tap-template-b")))
 

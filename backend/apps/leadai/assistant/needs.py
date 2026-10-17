@@ -914,22 +914,27 @@ _OUR_SHOPS_FOR_RENT = re.compile(
 )
 
 
-def drop_shop_pitch(reply: str, need: Need) -> tuple[str, bool]:
+def drop_shop_pitch(reply: str, need: Need, office: str = "") -> tuple[str, bool]:
     """The model's reply in a chat that wants no shop, without its sentences about shop types, the
     for-yourself question, a licence or the drive to the shops; for a home (or no shop at all), any
     sentence about shops, their business or their licence; for a buyer any word of renting, and for an
-    owner our shops offered for rent. (reply, changed); '' when nothing is left."""
-    sentences = _split(reply)
+    owner our shops offered for rent. (reply, changed); '' when nothing is left. ``office``: our office's
+    address, whose words and unit ("Shop 20") are no shop talk (filters.without_office; the 2e real-model
+    gate, round 2: "Visit our office in Russia Cluster, Building V03, Shop 20" read as a shop)."""
+    from . import filters
+
+    sentences = _split(filters.join_office_unit(reply, office) if office else reply)
     strict = need.kind in (HOME, NEVER_ASKED, OTHER)
 
     def pitch(sentence: str) -> bool:
-        if _PITCH.search(sentence):
+        text = filters.without_office(sentence, office) if office else sentence
+        if _PITCH.search(text):
             return True
         if strict:
-            return bool(_SHOP_WORD.search(sentence) or _BUSINESS_TALK.search(sentence))
+            return bool(_SHOP_WORD.search(text) or _BUSINESS_TALK.search(text))
         if need.kind == BUY:
-            return bool(_RENT_TALK.search(sentence))
-        return bool(_OUR_SHOPS_FOR_RENT.search(sentence))
+            return bool(_RENT_TALK.search(text))
+        return bool(_OUR_SHOPS_FOR_RENT.search(text))
 
     kept = [s for s in sentences if not pitch(s)]
     if len(kept) == len(sentences):

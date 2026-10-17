@@ -656,7 +656,14 @@ def newly(answer: dict, known: dict | None) -> bool:
     return answer["facts"].get("for_client") is True and (known or {}).get("for_client") is not True
 
 
-def backstop(answer: dict, known: dict | None, texts, *, labelled=False, held: bool = False, our_last: str = "") -> str:
+# The rent and sale tracks (tracks.RENT, tracks.SALE: a studio or a one-bedroom, batch 2e): a client named there is someone
+# else's, never a business owner's own customer, so the end user's words told earlier (told_end_user) never hide it.
+HOME_TRACKS = ("rent", "sale")
+
+
+def backstop(
+    answer: dict, known: dict | None, texts, *, labelled=False, held: bool = False, our_last: str = "", track: str = "",
+) -> str:
     """A shops answer right after the model (live and in the eval, after engine.untag_need): handed over as a broker
     (REASON) when their own words this burst declare it (WORDS; over a handover of the model's too, but KEEPS, while
     OVER_WEAKER), or the model recorded facts.for_client true this turn and handed the chat to nobody (FACTS; never when
@@ -668,13 +675,20 @@ def backstop(answer: dict, known: dict | None, texts, *, labelled=False, held: b
     for-whom question only); ``labelled``: the chat carries the Broker label already (a bool, or a callable asked only
     when the backstop would act): nothing then, the chat is the agents'. The answer then holds the handover,
     facts.for_client true and ``answer["broker_backstop"]``; engine.settle labels and pauses it with the hand-off line,
-    as for the model's tag. A taken slot it offered is none: code offers none around a handover (engine._code_may_act)."""
+    as for the model's tag. A taken slot it offered is none: code offers none around a handover (engine._code_may_act).
+
+    ``track``: the chat's track before the model (tracks.decide). On the rent and sale tracks (HOME_TRACKS) a client of
+    theirs named now ("Book 6 pm for my client Ahmed Khan") hands over even when the model, or the chat, says they are the
+    end user (told_end_user): a studio or a one-bedroom has no customers of its owner's to book a viewing for, so the
+    shops' salon owner ("I have a client at 3") is not there to protect. The 2e real-model gate, round 2: both runs of
+    shops-res-broker-books recorded for_client false (from "For myself" earlier in the chat) and booked the broker's
+    client a confirmed viewing (Q11)."""
     if not BACKSTOP or answer["opt_out"] != "none":
         return ""
     handover = answer["handover"]
     if handover["needed"] and handover["reason"] in (REASON, *KEEPS):
         return ""
-    only_explicit = bool(held) or bool(told_end_user(answer, known))
+    only_explicit = bool(held) or (bool(told_end_user(answer, known)) and track not in HOME_TRACKS)
     if declares(texts, explicit_only=only_explicit, our_last=our_last) and (not handover["needed"] or OVER_WEAKER):
         by = WORDS
     elif not held and not handover["needed"] and newly(answer, known) and not end_user(texts):

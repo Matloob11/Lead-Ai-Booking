@@ -305,7 +305,8 @@ class ChargesAskedTests(SimpleTestCase):
                 self.assertTrue(run.out.startswith(line), run.out)
                 self.assertNotIn("DEWA", run.out)
                 self.assertLessEqual(len(run.answer["reply"]), filters.REPLY_MAX)
-                with patch.object(residential, "unasked_charge", return_value=False):
+                # Round 2 keeps code's line whole under the reply's limit in its own right (residential._fit): both guards off.
+                with patch.object(residential, "unasked_charge", return_value=False), patch.object(residential, "_fit", side_effect=lambda reply, keep: reply):
                     off = failures(scenario_id, completion)
                 self.assertTrue(any("commission line" in item or "characters" in item for item in off), off)
 
@@ -454,7 +455,9 @@ class ClusterFirstTests(SimpleTestCase):
         run = run_eval("shops-res-cluster-unknown", CLUSTER_SKIPPED)
         self.assertEqual(run.failures, [])
         self.assertEqual(run.out, "Great, a studio with a balcony for next month. Any cluster you prefer, or are you flexible?")
-        with patch.object(residential, "asks_occupancy", return_value=False):
+        # Round 2 widened the guard (residential.cluster_first: an invitation, or their answer to our balcony question, also
+        # gets the cluster first); test_gate_2e_round2 proves its occupancy reading on its own.
+        with patch.object(residential, "cluster_first", side_effect=lambda reply, answer, **kwargs: (reply, "", False)):
             self.assertIn("does not ask the cluster", failures("shops-res-cluster-unknown", CLUSTER_SKIPPED))
 
     def test_never_once_the_cluster_is_known_or_was_asked(self):

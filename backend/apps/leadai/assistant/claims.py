@@ -293,17 +293,11 @@ def _place_words(text: str) -> list[str]:
     return out
 
 
-_UNIT_PART = re.compile(r"^\s*(shop|office|unit|suite)\s*(?:no\.?|number|#)?\s*(\d{1,4})\s*$", re.IGNORECASE)
-
-
 def _office_unit(office: str) -> re.Pattern | None:
     """Our office's own unit, as its address names it ("Shop 20") and as a reply may write it ("Shop No. 20",
-    "shop #20"): ours wherever a reply names it, never a shop for rent."""
-    for part in str(office or "").split(","):
-        match = _UNIT_PART.match(part)
-        if match:
-            return re.compile(rf"\b{match[1]}\s*(?:no\.?|number|#)?\s*{match[2]}\b", re.IGNORECASE)
-    return None
+    "shop #20"): ours wherever a reply names it, never a shop for rent (filters.office_unit, which the rent flow's shop-word
+    guard reads too)."""
+    return filters.office_unit(office)
 
 
 def _names_ours(text: str, office: str) -> bool:
@@ -313,15 +307,9 @@ def _names_ours(text: str, office: str) -> bool:
 
 
 def _without_address(text: str, office: str) -> str:
-    """The sentence without our office's address in it (each of its parts: "Russia Cluster", "Building V03", "Shop 20")."""
-    rest = text
-    for part in (piece.strip() for piece in str(office or "").split(",")):
-        if part:
-            rest = re.sub(re.escape(part), " ", rest, flags=re.IGNORECASE)
-    unit = _office_unit(office)
-    if unit:
-        rest = unit.sub(" ", rest)
-    return " ".join(rest.split())
+    """The sentence without our office's address in it (each of its parts: "Russia Cluster", "Building V03", "Shop 20"):
+    filters.without_office."""
+    return filters.without_office(text, office)
 
 
 def topic_of(sentence: str, known: str = "", office: str = "") -> str:

@@ -895,6 +895,9 @@ class EvalCommandTests(TestCase):
                 # my data": code's, before any model (the launch's studio seekers among them).
                 "shops-res-114-apartment-rent", "shops-res-arabic-spain", "shops-res-delete-my-data", "shops-res-emirates-id-sent",
                 "shops-res-hindi-studio", "shops-res-mixed-studio-answer", "shops-res-old-list-tap", "shops-res-urdu-voice-flats-119",
+                # The 2e gate's round 2: a studio seeker's yes to a shops template gets the rent track's opener from code (spec
+                # §1.4.2: a template yes on a known track gets that track's next step), never the model's wants_shop tag.
+                "shops-res-yes-to-shops-template",
                 # Launch chat 68's "Not shops" after 2d recorded its studio: the rent track keeps it, code's opener apologises.
                 "shops-review-studio-not-shops-68",
                 # Batch 2e slice C on the residential path: a buyer's first plain message gets code's res_open_sale.

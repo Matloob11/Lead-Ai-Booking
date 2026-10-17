@@ -1084,6 +1084,18 @@ def unasked_call(start, *, said: str, words: str = "", our_last: str = "", ours:
     return not engine.their_time(start, said=said, words=words, our_last=our_last, ours=ours, appointment=appointment, now=now)
 
 
+def asks_call(said: str, answer: dict, appointment=None) -> bool:
+    """A call asked for: in their own words (people.asks_for_call), or by the model's call request (people.is_call_request:
+    its call_requested handover, a call kept tentative) unless a sales call is booked already (``appointment``, a confirmed
+    call): the model's request is that call then, never another one (the 2e real-model gate, round 2)."""
+    from . import people
+
+    if people.asks_for_call(said):
+        return True
+    booked = calls.is_sales_call(appointment) and getattr(appointment, "status", "") == "confirmed"
+    return people.is_call_request(answer) and not booked
+
+
 def call_step(
     answer: dict,
     when,
@@ -1109,13 +1121,18 @@ def call_step(
     - A call asked for (their words: people.asks_for_call; or the model's call request) with their own day and hour, free
       in the call pool and in office hours: booked ("booked"); held by another buyer: the two nearest free call slots
       ("taken"); with no time, or one we cannot book: two free call slots ("slots").
+    - With a sales call booked already (``appointment``: a confirmed call), the model's call request alone (its
+      call_requested handover, or the call kept tentative) is that call, never a request for another one: only their own
+      words ask for a call then. The 2e real-model gate, round 2: shops-sale-photos-call-booked's "Also can you send photos
+      of the studio?" got "Our agent will discuss photos ... during your call at 5:00 PM today." with call_requested, and
+      code offered a second call, at 3:00 PM or 5:00 PM (their own booked time), in place of the buyer media line (asks_call).
     Nothing while a person has the chat, a time was refused, or they opted out."""
-    from . import engine, people
+    from . import engine
 
     if handed_over or still_invalid or answer["opt_out"] != "none" or answer.get("broker"):
         return when, ""
     handover = answer["handover"]
-    asked = people.asks_for_call(said) or people.is_call_request(answer)
+    asked = asks_call(said, answer, appointment)
     if handover["needed"] and handover["reason"] in ("call_requested", "abroad_cannot_visit"):
         answer["handover"] = {"needed": False, "reason": None}
     if abroad(handover, answer):

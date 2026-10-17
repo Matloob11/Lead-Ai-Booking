@@ -222,6 +222,19 @@ as a shops chat's; engine.passed_over_hour reads the slots before their half hou
 openai_client.RES_MAX_TOKENS. Three checks judged the wrong thing and judge the words now: our sales team's handover by
 either writer (sends_sales_handover), the for-whom question asked again, never their answer said back (FOR_WHOM_ASKED),
 and question 4 in any words (NEXT_QUESTION_4); no_document_ask reads our need for the documents as the guard does.
+
+Batch 2e's real-model gate, round 2 (2026-10-17: 97.4% overall, 95.7% of the model's own words; it failed on the rule that
+every CODE, money and policy scenario passes every run), mirrored the same way (test_gate_2e_round2 holds each failing run's
+answer): residential.settle asks the cluster before an invitation too, and after their answer to our balcony question
+(residential.cluster_first), asks whose name goes on the contract of a company or a shared stay (contract_line_kind), counts
+the commission as what "how much exactly?" asks after code's line (asked_charges) and keeps code's lines whole under the
+reply's limit (_fit); its shop-word guard, and 2d's needs.drop_shop_pitch, read a sentence without our office's address
+(office_address, as live); brokers.backstop reads a client of theirs on the rent and sale tracks whatever end user the
+model recorded (the track before the model, as live); a template yes on a known rent or sale track gets code's opener
+(engine.reads_first_yes) and the model's need tag never moves a known home on a bare yes (tracks.template_yes); with a sales
+call booked, the model's call request is that call (sales.asks_call); and a converted line never goes over a shop step (the
+switch to shops of a known end user). One check judged the wrong thing and is corrected: no_shop_words reads our own office's
+address, and its unit, as ours. shops-same-day-window-96 is EITHER: code books a window only over the model's tentative.
 """
 
 from __future__ import annotations
@@ -1318,13 +1331,38 @@ def no_screening() -> Check:
     return _check("screening", test)
 
 
+# Our own office (the eval's ADDRESS, the settings' office address) and its unit as a reply may write it ("Shop 20", "Shop
+# No. 20", "shop #20"): ours, never shop talk. The check's own reading of the address, never the guard's (filters.without_office).
+# The 2e real-model gate, round 2: code's own "Our office location: Russia Cluster, Building V03, Shop 20, Dubai International
+# City" under the rent track's invitation failed shops-res-any-cluster and shops-res-book-tap-template-b as shop talk.
+OFFICE_PARTS = tuple(part.strip() for part in ADDRESS.split(",") if part.strip())
+_OFFICE_UNIT_PART = next(
+    (match for part in OFFICE_PARTS if (match := re.fullmatch(r"(shop|office|unit|suite)\s*(?:no\.?|number|#)?\s*(\d{1,4})", part, re.I))), None
+)
+OFFICE_UNIT = re.compile(rf"\b{_OFFICE_UNIT_PART[1]}\s*(?:no\.?|number|#)?\s*{_OFFICE_UNIT_PART[2]}\b", re.I) if _OFFICE_UNIT_PART else None
+
+
+def _without_our_office(sentence: str) -> str:
+    """The sentence without our office's address parts and its unit: what else it says."""
+    rest = sentence
+    for part in OFFICE_PARTS:
+        rest = re.sub(re.escape(part), " ", rest, flags=re.I)
+    return OFFICE_UNIT.sub(" ", rest) if OFFICE_UNIT else rest
+
+
 def no_shop_words() -> Check:
     """Nothing that goes out on the rent or sale track talks about shops (spec §2.9.5), by the check's own reading
-    (RES_SHOP_TALK, never residential._SHOP_WORDS); the company-documents line may name the trade licence."""
+    (RES_SHOP_TALK, never residential._SHOP_WORDS); the company-documents line may name the trade licence, and our own
+    office's address may name its unit ("Shop 20": _without_our_office)."""
 
     def test(run):
+        # Our address read out before the sentences are split: "Shop No. 20" is never two sentences.
         bad = next(
-            (sentence for sentence in _sentences_out(run) if RES_SHOP_TALK.search(sentence) and not COMPANY_DOCUMENTS.search(sentence)), ""
+            (
+                sentence for sentence in filters.split_sentences(_without_our_office(run.out or ""))
+                if RES_SHOP_TALK.search(sentence) and not COMPANY_DOCUMENTS.search(sentence)
+            ),
+            "",
         )
         return f'talks shops: "{_short(bad, 70)}"' if bad else None
 
@@ -4279,6 +4317,13 @@ SCENARIOS = [
     # Launch review 2026-10-15, facts, slots and booking (issues 5, 6, 12, 13, 16, 17, 22, 24) ----------------------------
     Scenario(
         # Live (turn 116): kept tentative with no time, and offered 12:30 PM or 1:00 PM; he was never booked.
+        # EITHER, not CODE (the 2e gate's round 2; flaky 1 of 2 since 2d): code books the window only over the model's
+        # tentative (engine.book_window, as T18's upgrade_exact_time books one hour). Run 2 of round 2 recorded no visit at all
+        # (action none: the voice note's "check kar loon ga" read as no plan), so nothing was booked. Code cannot book from
+        # "none" on its own: whether a transcribed voice note promises a visit is the model's reading. hours.window_promise and
+        # named_window read "I have a meeting from 12 to 12:30", "My lunch is 12-12:30" and "Is your office closed between 12
+        # and 12:30?" as the same window, so code alone would book those as visits. The model can break it, so the strict
+        # every-run rule does not hold it; it still counts in the pass rate.
         "shops-same-day-window-96",
         "launch chat 96: 'barah saadhay barah baje ja ke check kar loon ga' at 11:10 books today at the start of his window",
         playbook=IC_SHOPS,
@@ -4294,7 +4339,7 @@ SCENARIOS = [
         language_so_far="ur_latin",
         new=[WINDOW_96],
         expect=[either(books("2026-10-15", "12:00"), books("2026-10-15", "12:30"))],
-        words=CODE,
+        words=EITHER,
     ),
     Scenario(
         # Live (reply 181187): "shop ... Building ... ke darmiyan hai, aur yeh parking side par hai" and "12:30 PM", passed at 12:35.
@@ -5897,17 +5942,23 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
-        # The eval's code_first once asked shops_rule with no track (review-eval-integrity): the engine's own test case.
+        # The eval's code_first once asked shops_rule with no track (review-eval-integrity): the engine's own test case. The 2e
+        # gate's round 2: the model's turn tagged this bare yes wants_shop in both runs and moved the chat to shops (once with
+        # a broker's hand-off); a template yes on a known track gets that track's next step from code now (spec §1.4.2, §1.2:
+        # what the chat knows decides before the template; engine.reads_first_yes).
         "shops-res-yes-to-shops-template",
-        "rent (2d's studio need, who it is for unknown): a typed 'Yes' to the shops template is the model's, never the shops' for-whom line",
+        "rent (2d's studio need, who it is for unknown): a typed 'Yes' to the shops template gets the rent opener from code, never the shops' for-whom line",
         playbook=IC_SHOPS,
         campaign=SHOPS_A,
         track="rent",
         unit="studio",
         facts={"need": "home", "wanted": "a studio", "property_type": "studio", "intent": "rent"},
         new=["Yes"],
-        expect=[never_out(r"Is the shop for yourself", "ask the shops' for-whom question"), no_shop_words(), track("rent", "studio")],
-        words=EITHER,
+        expect=[
+            out_says(r"^Great! Is the studio for yourself, or are you checking for a client\?$", "send the rent track's opener"),
+            never_out(r"Is the shop for yourself", "ask the shops' for-whom question"), no_shop_words(), track("rent", "studio"),
+        ],
+        words=CODE,
     ),
     Scenario(
         "shops-res-book-tap-template-b",
@@ -6002,7 +6053,12 @@ SCENARIOS = [
         track="rent",
         unit="studio",
         new=["how much exactly?"],
-        expect=[commission_line("figure", "studio"), never_out(r"\d+\s*%\s+of|month'?s\s+rent", "give the commission in the model's words")],
+        expect=[
+            commission_line("figure", "studio"), never_out(r"\d+\s*%\s+of|month'?s\s+rent", "give the commission in the model's words"),
+            # The 2e gate's round 2: both runs answered with every charge line (966-972 characters) and lost code's line past the
+            # reply's limit; the commission is what they asked (residential.settle's asked charges).
+            never_out(r"\bdeposit\b|\bEjari\b|\bDEWA\b|\bcheques?\b|\bchiller\b", "answer a charge they did not ask about"),
+        ],
         words=EITHER,
     ),
     Scenario(
@@ -6396,10 +6452,14 @@ def code_first(scenario: Scenario) -> dict | None:
             return silent  # as live (shop_flow.another_page): the copy's next page, nothing to answer
         if licence_answer(scenario):
             return None  # the model answers a no to the licence request, or a "later"; no shops rule reads it
-        # As live (batch 2e): the mixed template's first yes reads the chat's track (tracks.first_yes).
+        # As live (batch 2e): the mixed template's first yes, and any template's on a known rent or sale track, reads the chat's
+        # track (engine.reads_first_yes, tracks.first_yes).
         decision = decide(scenario)
         kind = template_kind(scenario)
-        mixed = tracks.first_yes(decision, for_client_known=scenario.facts.get("for_client") is not None) if kind != ic_templates.SHOP else ""
+        mixed = (
+            tracks.first_yes(decision, for_client_known=scenario.facts.get("for_client") is not None)
+            if engine.reads_first_yes(kind, decision) else ""
+        )
         rule = engine.shops_rule(
             text,
             tapped=bool(tap),
@@ -6634,9 +6694,10 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
         if spec.get("location") and not built.location_sent and not filters.carries_location(text, ADDRESS):
             text = offers.with_location(text, ADDRESS, lang)
         return CODE, text
-    if answer.get("converted"):
+    if answer.get("converted") and not answer.get("shop_step"):
         # engine._shape (never the model's "confirmed"), a deferral, a shops broker, a call request or must-answer
-        # questions handed to a person (people.settle): a fixed line, a shops chat's holding line its own.
+        # questions handed to a person (people.settle): a fixed line, a shops chat's holding line its own. As live, never over
+        # a shop step (engine.residential_switch's "res_switch_shop" with the shop types list).
         text = people.converted_line(answer["converted"], lang, shops=shops_chat)
         if answer["converted"] == people.MUST_ANSWER and answer.get("must_answer_kept"):
             # As live: must-answer questions while the chat goes on get the line with the model's other words, cleaned.
@@ -6783,7 +6844,10 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 # As live: a broker the model served as an end user is handed over as its own tag would be (no scenario
                 # carries the Broker label); a chat a person holds counts "I am a broker" only, and a bare "Agent" answers
                 # our for-whom question only.
-                brokers.backstop(answer, scenario.facts, words, held=scenario.handed_over != "no", our_last=our_last(scenario))
+                brokers.backstop(
+                    answer, scenario.facts, words, held=scenario.handed_over != "no", our_last=our_last(scenario),
+                    track=pre.track if pre is not None else "",  # as live: the track decided before the model
+                )
                 # As live (batch 2e): the track again, with the model's tag and the facts it recorded this turn.
                 run.decision = decide(scenario, answer)
                 switched = res and engine.residential_switch(
@@ -6914,6 +6978,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 answer, earlier, list(scenario.new), track=run.decision.track, unit=run.decision.unit, clusters=run.decision.clusters,
                 facts=scenario.facts, residential_facts=DEFAULT_RESIDENTIAL_FACTS, shops_facts=DEFAULT_SHOPS_FACTS, when=when,
                 still_invalid=still_invalid, sending=photos_going, visit_open=built.appointment is not None, booked_at=confirmed_at,
+                office_address=ADDRESS,
             )
             residential.record_need(answer, scenario.facts, run.decision, words)
         if copies and not answer.get("licence"):
@@ -6939,7 +7004,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
             engine.who_they_are(
                 answer, scenario.facts, words, need, when=when, still_invalid=still_invalid, appointment=built.appointment,
                 quiet=scenario.handed_over != "no", slots=need_slots, misread=misread,
-                shop_facts=shops.facts_block(DEFAULT_SHOPS_FACTS), invites=scenario.invites,
+                shop_facts=shops.facts_block(DEFAULT_SHOPS_FACTS), invites=scenario.invites, office_address=ADDRESS,
             )
         # As live: a want the chat read wrong is forgotten when they ask for a shop after all (answer["forget"]).
         known = {key: value for key, value in scenario.facts.items() if key not in (answer.get("forget") or ())}

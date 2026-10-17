@@ -80,8 +80,8 @@ class PlainYesTests(SimpleTestCase):
 
 
 class NudgeYesTurnTests(GateBase):
-    def nudged(self):
-        self.set_state(facts=dict(leadai_eval.WANTS_STUDIO), invites=1)
+    def nudged(self, **facts):
+        self.set_state(facts={**leadai_eval.WANTS_STUDIO, **facts}, invites=1)
         self.ours(leadai_eval.not_a_shop_sent("home", "studio_apartment"), minutes_ago=100)
         self.ours(OPTIONS_NUDGE, minutes_ago=10)
 
@@ -95,7 +95,8 @@ class NudgeYesTurnTests(GateBase):
         self.assertIsNone(LeadAiAppointment.objects.get().starts_at)  # nothing held at 3:00 PM
 
     def test_without_the_guard_the_model_holds_its_own_time(self):
-        self.nudged()
+        # The cluster known: the model's words go out as they are, with no step-2 question of code's (residential.cluster_first).
+        self.nudged(clusters=["Spain"])
         with patch.object(engine, "nudge_yes", return_value=False):
             outcome, _, _, _ = self.turn(self.inbound("Yes"), [held_one()])
         self.assertEqual(self.body(outcome), HELD_ONE)  # "I held the 3:00 PM slot", and nothing is held there

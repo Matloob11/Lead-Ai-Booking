@@ -1255,6 +1255,8 @@ def shops_rule(
     tracks.first_yes of the chat's track, the opener for the studio or one-bedroom
     the lead asked about (MIXED_YES), "What are you looking for ...?", the shops'
     own rules for a shop chat, or nothing (the model) for a need the chat knows.
+    So is any template's yes on a known rent or sale track (reads_first_yes): the
+    opener for its studio or one-bedroom, or the model once who it is for is known.
 
     ``track``: the chat's track (tracks.decide, batch 2e). On the rent, sale and
     not-known tracks (residential.live_track) only the rules of every track apply
@@ -1276,8 +1278,11 @@ def shops_rule(
         return RENTED_NO
     if ((tapped and not meeting_open) or not visit_on_table) and rules.is_not_now(words):
         return NOT_NOW
+    # The first yes to the mixed template, or to any template on a known rent or sale track (spec §1.4.2: "A template 'yes'
+    # on a track that is already known gets that track's next step"): ``mixed`` is tracks.first_yes of the chat's track.
+    home_yes = not shop_rules and track in (tracks.RENT, tracks.SALE)
     if (
-        first_answer and template_kind != ic_templates.SHOP and mixed != tracks.FOR_WHOM
+        first_answer and (template_kind != ic_templates.SHOP or home_yes) and mixed != tracks.FOR_WHOM
         and (rules.is_positive_tap(words) or rules.is_acceptance(words))
     ):
         return f"{MIXED_YES}:{mixed}" if mixed else ""
@@ -1648,6 +1653,18 @@ def tap_with_words(
         answer["trimmed"] = [*(answer.get("trimmed") or []), "tap_step"]
         return "slots"
     return ""
+
+
+def reads_first_yes(template_kind: str, decision) -> bool:
+    """The first yes to this campaign template reads the chat's track (tracks.first_yes; live and in the eval): the mixed
+    template's always, and any template's on a known rent or sale track (spec §1.4.2: "A template 'yes' on a track that is
+    already known gets that track's next step"; §1.2: what the chat knows decides before the template does). The 2e
+    real-model gate, round 2: a studio seeker's "Yes" to a shops template went to the model, which tagged wants_shop in both
+    runs of shops-res-yes-to-shops-template, and the chat moved to the shop track with the shops' for-whom line (once a
+    broker's hand-off). Never with the rent flow off (residential.live_track): 2d's own rules then."""
+    if decision is None:
+        return False
+    return template_kind != ic_templates.SHOP or (decision.track in (tracks.RENT, tracks.SALE) and residential.live_track(decision.track))
 
 
 def _mixed_answer(line_kind: str, language: str, decision, known: dict | None = None) -> dict:
@@ -3054,9 +3071,11 @@ def who_they_are(
     misread: bool = False,
     shop_facts: str = "",
     invites: int = 0,
+    office_address: str = "",
 ) -> str:
     """A shops answer after settle (live and in the eval, with the same values): what the customer is.
     Returns WHO_NOT_A_SHOP or WHO_RENTED when code's words go instead of the model's, else ''.
+    ``office_address``: our office's, whose words and unit ("Shop 20") needs.drop_shop_pitch never reads as shop talk.
 
     - Someone who wants no shop to rent (``need``: untag_need's, said now; or the chat's own,
       facts.need): never lost. Their want is recorded (facts.need, facts.wanted; a home as
@@ -3141,7 +3160,7 @@ def who_they_are(
             _not_a_shop_line(answer, chat_need, () if again else slots, sorry=need.denies or misread, ask=not again)
             done = WHO_NOT_A_SHOP
         elif answer["send"] and answer["reply"] and not answer.get("converted"):
-            answer["reply"], cut = needs.drop_shop_pitch(answer["reply"], chat_need)
+            answer["reply"], cut = needs.drop_shop_pitch(answer["reply"], chat_need, office_address)
             if cut:
                 trimmed.append("shop_pitch")
                 if not answer["reply"] and plain:
@@ -4045,7 +4064,7 @@ def _shops_rule_for(
     if licence_reply:
         return "", state.language or "en", ""
     mixed = ""
-    if template_kind != ic_templates.SHOP and decision is not None:
+    if reads_first_yes(template_kind, decision):
         mixed = tracks.first_yes(decision, for_client_known=facts.get("for_client") is not None)
     rule = shops_rule(
         text,
@@ -4359,6 +4378,8 @@ def _run_claimed(
             brokered = brokers.backstop(
                 answer, facts, words_now, labelled=lambda: conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
                 held=state.handed_over_at is not None, our_last=our_last,
+                # On the rent and sale tracks a client of theirs is someone else's (2e gate, round 2: a broker's viewing booked).
+                track=decision.track if decision is not None else "",
             )
             # The track again, with the model's tag and what it recorded this turn (spec §1.4, hook point 5).
             decision = tracks.decide(
@@ -4492,6 +4513,7 @@ def _run_claimed(
             unit=decision.unit, clusters=decision.clusters, facts=facts, residential_facts=settings_row.residential_facts,
             shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid, sending=photos_going,
             visit_open=appointment is not None, booked_at=appointment.starts_at if confirmed else None,
+            office_address=settings_row.office_address,
         )
         # 2d's facts.need and facts.wanted stay set on the rent and sale tracks (followups.holds, the nudges, panel_note).
         residential.record_need(answer, facts, decision, words_now)
@@ -4522,7 +4544,7 @@ def _run_claimed(
         who = who_they_are(
             answer, facts, words_now, need, when=when, still_invalid=still_invalid, appointment=appointment,
             quiet=state.handed_over_at is not None, slots=need_slots, misread=misread,
-            shop_facts=shops.known_amounts(settings_row), invites=state.invites,
+            shop_facts=shops.known_amounts(settings_row), invites=state.invites, office_address=settings_row.office_address,
         )
         if answer.get("forget"):
             # They want a shop after all: the rest of the turn reads the chat without the want it read wrong.
@@ -4956,10 +4978,13 @@ def _run_claimed(
             elif not maps and not filters.carries_location(text, settings_row.office_address):
                 appended = settings_row.office_address
             pin_now = needs.SEND_PIN
-    elif answer.get("converted"):
+    elif answer.get("converted") and not answer.get("shop_step"):
         # A fixed line, never the model's words: a confirmation the office could
         # not take (_shape, written as a confirmation), a deferral, a shops broker,
         # a call request or must-answer questions handed to a person (people.settle).
+        # Not over a shop step: a rent chat the model's tag moved to the shop track, whose end user gets "Sure! We have shops
+        # in International City too." and the shop types list (residential_switch: converted "res_switch_shop", which no table
+        # of lines holds; found by the 2e gate's round 2 tests, where it raised a KeyError).
         text = people.converted_line(answer["converted"], language, shops=shops_chat)
         if answer["converted"] == people.MUST_ANSWER and answer.get("must_answer_kept"):
             # Must-answer questions while the chat goes on (people.MUST_ANSWER_PAUSES False): the line goes with what the

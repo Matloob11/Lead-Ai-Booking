@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 from .. import ic_templates
 from ..models import DEFAULT_RESIDENTIAL_FACTS, DEFAULT_SHOPS_FACTS
-from . import needs
+from . import needs, rules
 
 SHOP = "shop"
 RENT = "rent"
@@ -605,6 +605,22 @@ def _from_lead(context: dict) -> Decision | None:
     return None
 
 
+def template_yes(texts, first_answer: bool) -> bool:
+    """All they said is a yes to the campaign template (``first_answer``: nothing of ours since it): "Yes", "ok", "Sure", a
+    positive tap ("Yes, still looking", "Yes, book a viewing"). Their words then name no need; a tap that names one ("Yes,
+    show me shops") is read as their words first (decide step 1: wants_shop)."""
+    words = [str(text or "").strip() for text in texts or () if str(text or "").strip()]
+    return bool(first_answer and words) and all(rules.is_acceptance(text) or rules.is_positive_tap(text) for text in words)
+
+
+def _home_known(stored: str, facts: dict, known: dict, lead, kwargs: dict) -> bool:
+    """The chat knows a studio or one-bedroom to rent or buy: its stored track, else 2d's facts.need (decide step 3)."""
+    if stored:
+        return stored in (RENT, SALE)
+    had = needs.of(facts)
+    return had is not None and from_need(had, known, lead, **kwargs).track in (RENT, SALE)
+
+
 def _facts_unit(facts: dict) -> str:
     """The unit the chat's facts hold: 2d's facts.wanted (code's), then the bedrooms, then the property type."""
     had = needs.of(facts)
@@ -677,8 +693,10 @@ def decide(
         # "to rent instead": a rent word on the sale track switches it (a buyer's own words beat what we knew).
         decision = Decision(RENT, deal=RENT, deal_from=WORDS, reason=WORDS)
 
-    # 2. The model's tag.
-    if decision is None and model_tag:
+    # 2. The model's tag; never over a home the chat knows when all they said is a yes to the template (template_yes: a yes
+    # names no new need, and spec §1.4.2 gives a known track's yes that track's next step). The 2e real-model gate, round 2:
+    # a studio seeker's "Yes" to a shops template was tagged wants_shop in both runs (shops-res-yes-to-shops-template).
+    if decision is None and model_tag and not (template_yes(texts, first_answer) and _home_known(stored, facts, known, lead, kwargs)):
         tagged = _from_tag(model_tag, known, lead, **kwargs)
         if tagged is not None and tagged.track != UNKNOWN:
             decision = dataclasses.replace(tagged, reason=tagged.reason if tagged.reason == LEAD else TAG)

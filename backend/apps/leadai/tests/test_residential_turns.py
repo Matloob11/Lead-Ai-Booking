@@ -142,13 +142,13 @@ class ModelPathTests(RentBase):
         self.assertEqual(self.body(outcome), reply)
 
     def test_an_invented_small_amount_is_cut(self):
-        self.rent()
+        self.rent(clusters=["Spain"])  # the cluster known: no step-2 question of code's joins the reply (residential.cluster_first)
         reply = "Ejari is AED 250, and we handle it. Shall I hold a slot for you?"
         outcome, _, _, _ = self.turn(self.inbound("What about Ejari?"), [res_answer(reply)])
         self.assertEqual(self.body(outcome), "Shall I hold a slot for you?")
 
     def test_the_commission_line_is_codes(self):
-        self.rent()
+        self.rent(clusters=["Spain"])  # the cluster known: no step-2 question of code's joins the reply (residential.cluster_first)
         outcome, _, _, _ = self.turn(self.inbound("Is there any commission?"), [res_answer("No commission at all! Shall I hold a slot for you?")])
         self.assertEqual(
             self.body(outcome),
@@ -327,11 +327,17 @@ class SpecialTurnTests(RentBase):
         self.assertEqual((calls, self.body(outcome)), ([], residential.line("res_no_documents", "en")))
 
     def test_a_yes_to_a_shops_template_on_the_rent_track_is_no_shop_question(self):
-        # A 448 chat on the rent track answering a shops template again: never "Is the shop for yourself ...?" (spec §1.4.2).
+        # A 448 chat on the rent track answering a shops template again: never "Is the shop for yourself ...?", and the rent
+        # track's next step from code, with no model (spec §1.4.2: a template yes on a known track). The 2e gate's round 2: the
+        # model tagged this bare yes wants_shop in both runs of shops-res-yes-to-shops-template and the chat moved to shops.
         self.rent(for_client=None)
-        outcome, calls, _, _ = self.turn(self.inbound("Yes"), [res_answer("Great! Are you looking for yourself or for a client?")])
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(self.body(outcome), "Great! Are you looking for yourself or for a client?")
+        message = self.inbound("Yes")
+        tagged = res_answer("I understand you're interested in shops, but our team specialises in studios.", need_tag="wants_shop")
+        outcome, calls, _, _ = self.turn(message, [tagged])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.body(outcome), "Great! Is the studio for yourself, or are you checking for a client?")
+        self.assertEqual((self.state().track, self.state().unit), ("rent", "studio"))
+        self.assertEqual(self.actions(message)["rule"], "mixed_yes:res_open_lead")
 
     def test_delete_my_data_stops_every_number_and_alerts_the_admins(self):
         self.rent()
