@@ -36,6 +36,19 @@ Branch `leadai-2e` in the worktree `a7-2e-worktree`, on slice A (d9155bc). RENT 
 
 ---
 
+## 2026-10-17 — Lead AI batch 2e, desk lane: the agent desk on the Lead AI screen (T100, T94's I'll call, Q37, Q39) (Claude Code)
+
+Branch `leadai-2e-desk` (worktree, from slice A `d9155bc`). Not deployed; the 2e merge joins it with the other lanes.
+
+- **Who sees the Lead AI chats (Q37):** a "Lead AI" product access in Agents & access (`Agent.can_lead_ai`, accounts migration 0011, default off, needs Official API). Such an agent opens every Lead AI chat on any number, with no number assigned, can answer it, gets its alerts (listed kinds) and hears its live events (group `wa.leadai.desk`); one without still gets 404, and the main inbox list still leaves Lead AI chats out. Panel admins see them as before. To give the agents the desk, Matloob switches the toggle on per agent; no NumberAssignment is needed.
+- **The desk** (`apps/leadai/desk.py`, panel `lead-ai/desk.js`): the track chip in place of "IC shops" ("Rent · Studio", "Shop", "Not known yet"; a shops chat nobody answered since 2e is a Shop, 2d's stored studio need is Rent · Studio) and the Shops/Rent/Sale/Other filters (`?track=`); Needs a person (`?needs=1`: handed over or a broker with nobody from the team writing since, a held time or a held full name; longest wait first, the row says why); Today (`?today=1`: every open visit and call of today, Dubai time, "Visit 4:00 PM", "Call 4:30 PM · Taken by Omar", "Held 5:00 PM"); counts on both buttons.
+- **I'll call:** `POST /api/leadai/chats/<id>/appointment/take/`, row lock, first agent wins, a second gets 409 with the first one's name; `taken_by`/`taken_at` on the appointment (leadai migration 0009). The customer is never told who.
+- **Q39:** a heads-up 15 minutes before a booked call nobody took and an urgent alert 10 minutes after its start, to everyone on the chat, nothing to the customer (`tasks._untaken_calls`). A call no longer gets the "at the office" heads-up. A rent or sale chat's alert title starts with its track.
+- **Proof:** suite 1560 OK on SQLite (1507 before; 53 new in `test_desk.py`, one 2d title updated); `makemigrations --check` clean; 21 guards switched off one by one, each failing its tests (29 tests); the shared apps' tests (inbox, catalog, accounts, campaigns, inboxai) pass except a test file that needs pytest; a local end-to-end run in Chromium (local Django on SQLite, the worktree's panel files, four agents) passed 43/43 checks, the websocket included (a desk agent who owns nothing hears a take live; an agent without access hears nothing). Not tested: PostgreSQL (the queries compile for it), Redis as the channel layer, the live server.
+- **Shared files touched:** `inbox/visibility.py`, `inbox/consumers.py`, `inbox/events.py`, `accounts/models.py` (+0011), `catalog/views.py`, `modules/agents-admin.js` (announced under Requests on the board).
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
 
 - **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.

@@ -40,4 +40,8 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
             )
         if user.has_admin_rights:
             groups.append(group_for_admins())
+        # The Lead AI desk (apps/leadai/lane.py): an agent with Lead AI access hears every Lead AI chat.
+        from apps.leadai.lane import desk_groups
+
+        groups.extend(desk_groups(user))
         return groups

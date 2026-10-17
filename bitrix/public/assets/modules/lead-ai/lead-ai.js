@@ -140,6 +140,9 @@ const ALERT_MS = { normal: 10000, high: 30000 };
 const ALERT_RESUME_MS = 4000;
 const ALERT_MAX = 4;
 const seenAlerts = new Set();
+// A customer's message can arrive twice: on the chat owner's own channel and on
+// the desk's (an owner with Lead AI access, apps/leadai/lane.py). It chimes once.
+const seenMessages = new Set();
 
 const canLayer = typeof HTMLElement !== "undefined" && "popover" in HTMLElement.prototype;
 
@@ -292,6 +295,12 @@ window.addEventListener("wa:event", (event) => {
     // Only a customer's message adds to the unread count. Our own sends do
     // not, and a campaign makes hundreds of them.
     if (message?.direction !== "in") return;
+    if (message.id != null) {
+      const key = String(message.id);
+      if (seenMessages.has(key)) return;
+      seenMessages.add(key);
+      if (seenMessages.size > 200) seenMessages.delete(seenMessages.values().next().value);
+    }
     const reading =
       isScreenOpen() &&
       String(openChatId()) === String(conversation?.id ?? message?.conversation_id) &&

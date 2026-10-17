@@ -11,6 +11,9 @@ urlpatterns = [
     path("chats/<int:pk>/pause-ai/", views.chat_pause_ai, name="chat-pause-ai"),
     path("chats/<int:pk>/resume-ai/", views.chat_resume_ai, name="chat-resume-ai"),
     path("chats/<int:pk>/appointment/cancel/", views.appointment_cancel, name="appointment-cancel"),
+    # The agent desk (batch 2e): I'll call, and the counts on Needs a person and Today.
+    path("chats/<int:pk>/appointment/take/", views.appointment_take, name="appointment-take"),
+    path("desk/", views.desk_counts, name="desk-counts"),
     path("settings/", views.assistant_settings, name="settings"),
     # The shops playbook's media library (board T30).
     path("shop-media/", media_views.library, name="shop-media"),

@@ -1,5 +1,9 @@
 /**
- * Agents roster — Panel Admin + Official API / Linked phones access.
+ * Agents roster — Panel Admin + Official API / Linked phones / Lead AI access.
+ *
+ * Lead AI access (can_lead_ai): the agent follows every chat on the Lead AI
+ * screen, on any number, and gets its alerts (apps/leadai/lane.py). It needs
+ * Official API access as well; panel admins see those chats anyway.
  */
 
 import { catalog } from "../api/api.js";
@@ -61,6 +65,7 @@ export function openAgentsAdminModal({ me } = {}) {
         is_manual_admin: updated.is_manual_admin,
         can_official_api: updated.can_official_api,
         can_linked_devices: updated.can_linked_devices,
+        can_lead_ai: updated.can_lead_ai,
         is_bitrix_admin: updated.is_bitrix_admin,
         community: updated.community,
         linked_session_count: updated.linked_session_count,
@@ -111,6 +116,14 @@ export function openAgentsAdminModal({ me } = {}) {
       hint: "QR / OpenWA",
       checked: agent.can_linked_devices !== false,
       onChange: (input) => patchAgent(agent, { can_linked_devices: input.checked }, input),
+    });
+
+    // Off unless granted: an older server sends no can_lead_ai at all.
+    const leadAiToggle = accessToggle({
+      label: "Lead AI",
+      hint: "Every Lead AI chat and its alerts",
+      checked: agent.can_lead_ai === true,
+      onChange: (input) => patchAgent(agent, { can_lead_ai: input.checked }, input),
     });
 
     const communityInput = el("input.akit-agent__community", {
@@ -169,7 +182,7 @@ export function openAgentsAdminModal({ me } = {}) {
       ]),
       el("div.akit-agent__access", {}, [
         el("div.akit-agent__access-title", {}, ["Product access"]),
-        el("div.akit-agent__toggles", {}, [officialToggle, linkedToggle]),
+        el("div.akit-agent__toggles", {}, [officialToggle, linkedToggle, leadAiToggle]),
       ]),
       el("div.akit-agent__admin", {}, [
         el("label.akit-check", {}, [adminInput, "Panel Admin"]),
@@ -210,7 +223,7 @@ export function openAgentsAdminModal({ me } = {}) {
         el("div", {}, [
           el("h3.akit-agents__title", {}, ["Team access"]),
           el("p.akit-agents__lead", {}, [
-            "Choose Official API, Linked phones, or both for each person. Community is the project they cover (Mudon Al Ranim, Damac Hills 2, …) — it shows next to their name. Panel Admin is separate — it unlocks Numbers, this roster, Linked phone agents, and New agent messages.",
+            "Choose Official API, Linked phones, or both for each person. Lead AI lets them follow every chat on the Lead AI screen and get its alerts (it needs Official API too). Community is the project they cover (Mudon Al Ranim, Damac Hills 2, …) — it shows next to their name. Panel Admin is separate — it unlocks Numbers, this roster, Linked phone agents, and New agent messages.",
           ]),
         ]),
         el("div.akit-agents__stats", {}, [

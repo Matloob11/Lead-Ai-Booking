@@ -450,7 +450,8 @@ class SaleTurnTests(NotAShopBase):
         self.assertFalse(Message.objects.filter(kind=Message.Kind.LOCATION).exists())  # no office pin for a call
         alerts = list(LeadAiAlert.objects.filter(kind="booked"))
         self.assertTrue(alerts)
-        self.assertEqual(alerts[0].title, "Sales call: Ahmed Khan, Monday 12 October 2026, 5:00 PM")
+        # The desk lane puts the track first on a rent or sale chat's alert (spec §2.11), before the call's own title (§3.3.4).
+        self.assertEqual(alerts[0].title, "Sale · Studio · Sales call: Ahmed Khan, Monday 12 October 2026, 5:00 PM")
         self.assertEqual(alerts[0].priority, "high")
         self.assertIn("Take it on the Lead AI screen, then call them on +971501234567.", alerts[0].text)
         self.assertFalse(LeadAiAlert.objects.filter(kind="handover").exists())

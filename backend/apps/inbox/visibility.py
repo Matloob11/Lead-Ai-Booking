@@ -4,6 +4,10 @@ Ownership is ``assigned_agent``. Covering a number is not a roster of every
 chat on it: a backup on the same line, or a Bitrix portal admin, must not see
 a colleague's threads. Panel admins (``is_wa_admin``) still see every chat so
 they can move work.
+
+One exception, for the Lead AI screen only (apps/leadai/lane.py, Q37): an
+agent with Lead AI access (``can_lead_ai``) also opens every chat on that
+screen, whatever its number. The main inbox list leaves those chats out.
 """
 
 from django.db.models import Q
@@ -31,7 +35,12 @@ def visible_conversation_q(user, held=None):
         return Q(number__in=user.visible_numbers) | Q(assigned_agent=user)
     if held is None:
         held = held_numbers(user)
-    return Q(assigned_agent=user) | Q(assigned_agent__isnull=True, number__in=held)
+    visible = Q(assigned_agent=user) | Q(assigned_agent__isnull=True, number__in=held)
+    # The Lead AI desk: every Lead AI chat for an agent with Lead AI access (None for anyone else).
+    from apps.leadai.lane import desk_q
+
+    desk = desk_q(user)
+    return visible | desk if desk is not None else visible
 
 
 def primary_agent_for(number):

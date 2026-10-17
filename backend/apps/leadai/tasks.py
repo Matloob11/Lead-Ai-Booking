@@ -9,7 +9,8 @@ meeting reminder.
 - handle_reminder_tap    a tap on the meeting reminder's buttons (no model);
 - send_due_reminders     beat, every minute: reminders, stuck turns, missed
                          turns and taps, messages nobody answered, past
-                         meetings, the agents' heads-up, Bitrix catch-up, and
+                         meetings, the agents' heads-up, a booked call nobody
+                         has taken (desk.py), Bitrix catch-up, and
                          the shops chats' automatic follow-ups (followups.py);
 - send_follow_up         one shops chat's Template B, check-back or nudge;
 - sync_appointment_crm   an appointment event's Bitrix work, step by step (a
@@ -122,6 +123,7 @@ def send_due_reminders() -> None:
         _escalate_handovers,
         _close_past_appointments,
         _agent_heads_up,
+        _untaken_calls,
         _retry_crm_syncs,
         _retry_crm_fields,
         _reminders,
@@ -587,7 +589,8 @@ def _lapsed_alert(row, why: str) -> None:
 
 def _agent_heads_up() -> None:
     """When Bitrix's own to-do could not be moved to the meeting time, the agents
-    get one heads-up an hour before the visit from us instead."""
+    get one heads-up an hour before the visit from us instead. A booked call has
+    its own (_untaken_calls): this one says "at the office"."""
     from .assistant import alerts, hours
     from .models import LeadAiAppointment
 
@@ -598,7 +601,7 @@ def _agent_heads_up() -> None:
         crm_todo_id__isnull=True,
         starts_at__gt=now,
         starts_at__lte=now + AGENT_HEADS_UP,
-    ).select_related("conversation__contact")[:50]
+    ).exclude(place=LeadAiAppointment.Place.CALL).select_related("conversation__contact")[:50]
     for row in rows:
         conversation = row.conversation
         name = row.customer_name or conversation.contact.display_name or "A Lead AI customer"
@@ -612,6 +615,14 @@ def _agent_heads_up() -> None:
             crm_url=alerts.crm_path(row.crm_entity, row.crm_id),
         )
         LeadAiAppointment.objects.filter(pk=row.pk).update(agent_reminded_at=now)
+
+
+def _untaken_calls() -> None:
+    """A booked call nobody has taken with I'll call: a heads-up 15 minutes before it, an urgent
+    alert 10 minutes after its start, to everyone on the chat; nothing to the customer (Q39; desk.py)."""
+    from . import desk
+
+    desk.call_alerts(timezone.now())
 
 
 def _retry_crm_syncs() -> None:

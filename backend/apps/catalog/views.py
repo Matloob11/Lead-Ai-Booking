@@ -108,6 +108,8 @@ def serialize_agent_row(agent):
         "is_bitrix_admin": agent.is_bitrix_admin,
         "can_official_api": bool(agent.can_official_api),
         "can_linked_devices": bool(agent.can_linked_devices),
+        # Every Lead AI chat and its alerts (the Lead AI desk, apps/leadai/lane.py).
+        "can_lead_ai": bool(getattr(agent, "can_lead_ai", False)),
         "is_active": agent.is_active,
         "last_seen_at": agent.last_seen_at.isoformat() if agent.last_seen_at else None,
         "linked_session_count": linked_count,
@@ -659,7 +661,7 @@ def sync_now(request):
 
 @api_view(["POST"])
 def set_agent_admin(request, pk):
-    """Update Panel Admin and/or Official / Linked product access for an agent."""
+    """Update Panel Admin and/or Official / Linked / Lead AI product access for an agent."""
     denied = _require_admin(request)
     if denied:
         return denied
@@ -684,6 +686,10 @@ def set_agent_admin(request, pk):
     if "can_linked_devices" in request.data:
         agent.can_linked_devices = bool(request.data.get("can_linked_devices"))
         updates.append("can_linked_devices")
+
+    if "can_lead_ai" in request.data:
+        agent.can_lead_ai = bool(request.data.get("can_lead_ai"))
+        updates.append("can_lead_ai")
 
     if "community" in request.data:
         agent.community = str(request.data.get("community") or "").strip()[:120]

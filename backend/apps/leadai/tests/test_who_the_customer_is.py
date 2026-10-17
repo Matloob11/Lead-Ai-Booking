@@ -341,7 +341,8 @@ class NotAShopTurnTests(NotAShopBase):
         alerts = list(self.wanted_alerts())
         self.assertEqual({alert.bitrix_user_id for alert in alerts}, {"77", "2311"})  # the chat's owner and the Lead AI alert list
         self.assertEqual(alerts[0].priority, "high")
-        self.assertEqual(alerts[0].title, "Ahmed Khan wants a studio apartment, not a shop")
+        # 2e: the track code stored for the chat names the alert first (spec §1.5, §2.11; desk lane).
+        self.assertEqual(alerts[0].title, "Rent · Studio · Ahmed Khan wants a studio apartment, not a shop")
         self.assertIn("Their words: I need an apartment studio", alerts[0].text)
         self.assertIn("keeps arranging the visit here", alerts[0].text)
         note_delay.assert_called_once()
