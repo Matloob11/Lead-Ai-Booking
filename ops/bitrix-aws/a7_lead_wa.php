@@ -369,6 +369,47 @@ function a7_lead_wa_lead_details(array $lead, string $phone, string $name): arra
     ]);
 }
 
+/**
+ * C41: sends of one template from one number since midnight in Dubai.
+ * Each popup send writes a timeline comment ("WhatsApp message" / Template / From / To).
+ * A lead send also writes the same comment on Owner Data, so the count is unique To numbers.
+ * Warn only. The caller never refuses the send.
+ */
+function a7_lead_wa_marketing_sent_today(string $template, string $fromRaw): int
+{
+    global $DB;
+    $template = str_replace(["\r", "\n"], '', trim($template));
+    $from = a7_lead_wa_digits($fromRaw);
+    if ($template === '' || strlen($from) < 8 || !is_object($DB)) {
+        return 0;
+    }
+    if (strlen($template) > 200) {
+        $template = substr($template, 0, 200);
+    }
+    $start = (new DateTime('today', new DateTimeZone('Asia/Dubai')))->format('Y-m-d H:i:s');
+    $sql = "SELECT LEFT(COMMENT, 400) C FROM b_crm_timeline
+            WHERE TYPE_ID = 7 AND CREATED >= '" . $DB->ForSql($start) . "'
+              AND COMMENT LIKE 'WhatsApp message%'";
+    $res = $DB->Query($sql);
+    $needleT = "Template: " . $template . "\n";
+    $needleF = "From: +" . $from;
+    $seen = [];
+    while ($res && ($row = $res->Fetch())) {
+        $text = str_replace(
+            ["\r\n", "\r", "<br />", "<br/>", "<br>"],
+            "\n",
+            (string)($row['C'] ?? '')
+        );
+        if (strpos($text, $needleT) === false || strpos($text, $needleF) === false) {
+            continue;
+        }
+        if (preg_match('/^To: \+(\d+)/m', $text, $match)) {
+            $seen[$match[1]] = true;
+        }
+    }
+    return count($seen);
+}
+
 function a7_lead_wa_has_open_viewing_todo(int $leadId): bool
 {
     if ($leadId <= 0 || !class_exists('CCrmActivity')) {
@@ -1236,6 +1277,16 @@ if ($action === 'header-media') {
         a7_lead_wa_json(['ok' => false, 'error' => $detail], $status >= 400 ? $status : 502);
     }
     a7_lead_wa_json(['ok' => true] + $data, 201);
+}
+
+if ($action === 'marketing-day') {
+    // C41. Read-only. The popup warns; this number never blocks a send.
+    $template = trim((string)($_POST['template'] ?? ''));
+    $from = trim((string)($_POST['from'] ?? ''));
+    a7_lead_wa_json([
+        'ok' => true,
+        'sent' => a7_lead_wa_marketing_sent_today($template, $from),
+    ]);
 }
 
 if ($action === 'context') {

@@ -1,3 +1,17 @@
+## 2026-10-17 — C41 popup warning above 100 marketing sends (Cursor)
+
+The five CRM popups warn when one MARKETING template from one number is already over 100 sends today, or this queue would take it over 100. The count is unique To numbers on today's WhatsApp timeline comments (Dubai midnight). The send button is never disabled (Q7). Excel campaigns that do not write that comment are not in the count; a failed count shows no warning.
+
+The Script label "International City — all" and the intl_city_property_reconnect breakdown (Shop / Studio/1BR / Other / being worked, Leave them out only for worked or recent) are in the popup JS behind `C41_MIXED_LIVE = false`. They stay off until Claude writes "2e is live". A shops template still uses the C37 warning.
+
+`intl_city_property_reconnect` is APPROVED on 8 WABAs. On a sending number it appears in the Leads popup. It does not appear on a number whose WABA does not have it. `crm_leads.py` was not changed: the image cannot be rebuilt while the build lock is on.
+
+**Proof:** CLI lead 79799, two comments with the same To counted as 1, a different template counted apart, then the comments and the lead were deleted (`C41_PROOF_OK`). The proof file on the server is stubbed. Live Leads popup, every send blocked: the over-100 line appeared and the button stayed "Nothing to send: all left out" (that lead is opted out). Campaigns 452→452, recipients 22604→22604. Live md5: lead JS `52d673709ac8aa28256fca93f6b79330`, lead PHP `af4235013c70d64dd49cc6b01647a0ce`, renewals JS `523817b24c6c378ef3a4513d5dcbb20d`.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `a7_lead_wa.php`, `a7_renewals_wa.js`, `a7_c41_proof.php`, `SHOPS-BOT-BOARD.md`, `TASKS.md`. Not touched: `bitrix/public/assets/modules/lead-ai/*`, `crm_leads.py`.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
 
 - **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.
