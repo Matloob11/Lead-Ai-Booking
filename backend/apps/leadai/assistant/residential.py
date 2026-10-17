@@ -438,15 +438,17 @@ class Context:
     history: list = field(default_factory=list)  # LEAD FIRST ASKED and CRM NOTES (lead_history.lines)
     calls: list = field(default_factory=list)  # CALL SLOTS (the sale track's call pool, slice C)
     held: str = ""  # a time held for the full name ("Monday 12 October 2026, 5:00 PM")
+    sale_step: str = ""  # SALE STEP: the buyer's next questions in the brief's order (sales.step_line, slice C)
 
 
 def context(
     settings_row, track: str, unit: str, clusters, now, taken=(), *, lead=None, full_name: str = "", history=(),
-    calls=(), held=None,
+    calls=(), held=None, sale_step: str = "",
 ) -> Context:
     """The residential block of one turn's context. ``taken``: the other clients' office starts; ``lead``: the lead
     context (lead_context.parse's dict); ``full_name``: the customer's full name when known (full_name_known);
-    ``calls``: CALL SLOTS lines (the sale track's, slice C); ``held``: the start held for their full name."""
+    ``calls``: CALL SLOTS lines (the sale track's, slice C); ``held``: the start held for their full name;
+    ``sale_step``: the sale track's SALE STEP line (sales.context_parts, slice C)."""
     from . import lead_context, shops
 
     facts = getattr(settings_row, "residential_facts", None)
@@ -474,6 +476,7 @@ def context(
         history=list(history or ()),
         calls=list(calls or ()),
         held=hours.describe(held) if held is not None else "",
+        sale_step=" ".join(str(sale_step or "").split()),
     )
 
 
@@ -959,6 +962,7 @@ _CONFIRM = {
 # How a name follows the head's first word ("Perfect, Ahmed Khan!", "ممتاز يا أحمد خان!").
 _NAME_JOIN = {"en": ", {name}", "ar": " {name}", "ur_latin": ", {name}", "ur": " {name}", "hi_latin": ", {name}", "hi": " {name}"}
 VISIT, CALL = "visit", "call"
+OFFICE = "office"  # an appointment's place (LeadAiAppointment.Place: "office", and "call" for a buyer's call, slice C)
 
 
 def confirmation(
@@ -1562,6 +1566,17 @@ def code_line(spec: dict, answer: dict) -> None:
     answer["share_office_location"] = bool(spec.get("location"))
     answer["send"] = True
     answer.pop("shop_step", None)
+    answer.pop("sale", None)  # a sale step's line (sales._code_line) written before it no longer goes
+
+
+# The full-name gate's own lines (name_turn, hold_for_name): they stand for a booking, so they go even while a person has
+# the chat (engine._run_claimed), as the booking would.
+NAME_GATE_LINES = ("res_full_name", "res_name_hold")
+
+
+def name_gate_line(answer: dict) -> bool:
+    """The answer's words are the full-name gate's (the name asked, or the time noted for our agent)."""
+    return (answer.get("res_line") or {}).get("kind") in NAME_GATE_LINES
 
 
 def render(spec: dict, language: str, *, now=None, office_address: str = "", maps_url: str = "", facts=None) -> str:
@@ -1973,12 +1988,14 @@ def held_start(appointment):
 
 
 def held_of(appointment) -> dict | None:
-    """What a full-name hold keeps: its start, their words for it, how often we asked; None when there is none."""
+    """What a full-name hold keeps: its start, their words for it, how often we asked, and its place (a buyer's call is held
+    at place "call", slice C: booked there once the name comes); None when there is none."""
     start = held_start(appointment)
     if start is None:
         return None
     details = appointment.details or {}
-    return {"start": start, "words": appointment.customer_words or "", "asks": int(details.get("name_asks") or 0)}
+    place = CALL if getattr(appointment, "place", "") == CALL else OFFICE
+    return {"start": start, "words": appointment.customer_words or "", "asks": int(details.get("name_asks") or 0), "place": place}
 
 
 HELD_KEYS = (HELD_FOR_NAME, "held_at", "asked_at", "name_asks", "name_refused")
@@ -2028,10 +2045,12 @@ def mark_hold(appointment, answer: dict, now, *, sent: bool = True) -> bool:
 
 def hold_for_name(answer: dict, when) -> None:
     """A rent or sale booking with no full name (full_name_gate): the time becomes a tentative held at it (no other chat
-    takes it, engine.taken_slots), and code asks for the name (res_full_name)."""
+    takes it: engine.taken_slots for a visit, calls.taken for a buyer's call, held at place "call"), and code asks for the
+    name (res_full_name)."""
     local = when.astimezone(hours.DUBAI)
+    place = CALL if answer["appointment"].get("place") == CALL else OFFICE
     answer["appointment"] = {
-        "action": "tentative", "place": "office", "date": f"{local:%Y-%m-%d}", "time": f"{local:%H:%M}",
+        "action": "tentative", "place": place, "date": f"{local:%Y-%m-%d}", "time": f"{local:%H:%M}",
         "customer_words": answer["appointment"].get("customer_words"),
     }
     answer["hold_for_name"] = True
@@ -2056,8 +2075,9 @@ def name_turn(
 
     - known from their words, the model's facts or the lead (full_name_known); else, right after our ask (``asked``),
       code's reading of a bare name (name_from_reply), written to the answer's facts;
-    - a time ``held`` for it, the name now known, and no other time of theirs: that time is booked (``when``), checked
-      again for the hours (a time gone by gets two free slots instead: res_invite);
+    - a time ``held`` for it, the name now known, and no other time of theirs: that time is booked (``when``) at its place
+      (a buyer's call at place "call"), checked again for the hours (a time gone by gets two free slots instead: res_invite,
+      or for a call the sale track's two free call slots from ``taken``, the call pool);
     - held, asked, and no name: their no ("why do you need it?"), or a second answer with none, gets res_name_hold (the
       hold stays, the team is alerted); anything else that asks nothing gets the ask once more."""
     data = answer["facts"]
@@ -2089,15 +2109,22 @@ def name_turn(
             checked = hours.check_slot(f"{start:%Y-%m-%d}", f"{start:%H:%M}", now=now, closed_dates=closed_dates)
         except hours.SlotError:
             checked = None
+        place = held.get("place") or OFFICE
         if checked is not None:
             answer["appointment"] = {
-                "action": "confirm", "place": "office", "date": f"{start:%Y-%m-%d}", "time": f"{start:%H:%M}",
+                "action": "confirm", "place": place, "date": f"{start:%Y-%m-%d}", "time": f"{start:%H:%M}",
                 "customer_words": held.get("words") or None,
             }
             return NameStep("book_held", full, checked)
         pair = hours.offer_pair(now, closed_dates, taken)
-        code_line({"kind": "res_invite", "slots": [slot.isoformat() for slot in pair], "invite": bool(pair)}, answer)
         answer["appointment"] = dict(_NO_TIME)
+        if place == CALL:
+            # A buyer's call held for the name whose time went by (slice C): two free call slots, as sales.call_step offers.
+            from . import sales
+
+            sales.offer_call_slots(answer, pair)
+            return NameStep("held_gone", full, None)
+        code_line({"kind": "res_invite", "slots": [slot.isoformat() for slot in pair], "invite": bool(pair)}, answer)
         return NameStep("held_gone", full, None)
     if not full and asked and when is None:
         if held.get("asks", 0) >= 2:

@@ -37,7 +37,7 @@ from django.utils import timezone
 from apps.inbox.models import Message
 
 from ..models import LeadAiAppointment, LeadAiChatState, LeadAiSettings, LeadAiTurn
-from . import filters, hours, live, rules, transcript
+from . import calls, filters, hours, live, rules, transcript
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,9 @@ def template_value(text: str) -> str:
 
 
 def reminder_text(appointment: LeadAiAppointment, conversation, settings_row: LeadAiSettings, language: str = "en") -> str:
+    if calls.is_sales_call(appointment):
+        # A buyer's 5-minute call (batch 2e slice C, spec §3.3.7): no office, our sales team calls them on this number.
+        return calls.reminder_text(appointment, _first(appointment, conversation), language)
     lang = language if language in REMINDER_LINES else "en"
     head, tail = REMINDER_LINES[lang]
     name = _first(appointment, conversation)
@@ -297,7 +300,8 @@ def send(appointment_id: int, claimed_at: dt.datetime, starts_at: dt.datetime) -
             variables = {
                 "1": template_value(first_name(appointment, conversation)),
                 "2": template_value(hours.time_label(appointment.starts_at)),
-                "3": template_value(settings_row.office_address),
+                # A buyer's call: "this number (our team will call you)" (spec §3.3.7; no new template).
+                "3": template_value(calls.template_place(appointment, settings_row.office_address)),
             }
             message = inbox_services.send_template(conversation, None, template, variables, payload=payload)
             route = "template"

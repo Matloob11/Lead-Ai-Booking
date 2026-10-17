@@ -174,6 +174,18 @@ the chat (engine.residential_switch), residential.settle's guards and lines afte
 set, the full-name gate (residential.name_turn and hold_for_name, with the scenario's ``full_name_asked`` and ``held``),
 its confirmation (residential.confirmation) and clean_reply's two questions and amounts from 100 up; "delete my data" is a
 stop with res_deleted. Rent and sale scenarios are held to questions_at_most(2) instead of one_question (RES_REPLY_CHECKS).
+
+Batch 2e slice C, the sales flow (assistant/sales.py, calls.py; spec §3 and §8's Sales group), mirrored the same way on the
+residential path: a buyer's turn asks the model with ``places`` (a call on the sale track, checked against the scenario's
+``call_taken``, the other buyers' calls) and the context's SALE STEP and CALL SLOTS, runs sales.call_step right after it,
+engine.settle with the track, residential.settle, then sales.settle in place of who_they_are; the full-name gate is the rent
+flow's (residential.name_turn and hold_for_name: a call is held and booked at place "call"); what goes out is a sale step's
+own words (sales.text), or the booking of a call (res_call_booked) or an office meeting under their full name
+(residential.confirmation); a buyer's reply may carry two questions and the sale bands of their unit. The scenarios
+shops-sale-* hold the five questions in three messages, the prices (a studio's, Morocco's, a one-bedroom's, never hidden),
+the photos, a call booked, held for the full name, refused as taken, asked with no time, an office meeting, the handovers
+(an offer, the mortgage process, DLD fees), a buyer abroad and the commission; the model's answers that code puts right are
+among their right answers (test_eval_command).
 """
 
 from __future__ import annotations
@@ -194,6 +206,7 @@ from django.db import connections
 from apps.leadai import ic_templates, shop_templates
 from apps.leadai.assistant import (
     brokers,
+    calls,
     claims,
     engine,
     filters,
@@ -208,6 +221,7 @@ from apps.leadai.assistant import (
     reminders,
     residential,
     rules,
+    sales,
     schema,
     shop_flow,
     shops,
@@ -1127,7 +1141,7 @@ def holds(day: str, clock: str) -> Check:
     return _check("action", test)
 
 
-PERSON_NAMES = re.compile(r"\b(?:Shoaib|Malik|Manhial|Matloob|Mr\.?\s+[A-Z][a-z]+)\b")
+PERSON_NAMES = re.compile(r"\b(?:Shoaib|Malik|Manhial|Matloob|Mr\.?\s+[A-Z][a-z]+)\b|\bagent\s+[A-Z][a-z]+\b")
 
 
 def no_person_named() -> Check:
@@ -1190,14 +1204,6 @@ def no_claim() -> Check:
             return None
         bad = next((sentence for sentence in _sentences_out(run) if residential.claims_done(sentence)), "")
         return f'claims it is done: "{_short(bad, 70)}"' if bad else None
-
-    return _check("reply", test)
-
-
-def questions_at_most(limit: int) -> Check:
-    def test(run):
-        count = sum(1 for ch in run.reply if unicodedata.name(ch, "").endswith("QUESTION MARK"))
-        return f"asks {count} questions" if count > limit else None
 
     return _check("reply", test)
 
@@ -1415,6 +1421,54 @@ def one_question() -> Check:
     return _check("reply", test)
 
 
+def questions_at_most(limit: int) -> Check:
+    """At most ``limit`` questions in what goes out: a buyer's (and a tenant's) questions go two to a message (spec §8: it
+    replaces one_question, or every two-question sales reply would fail the gate)."""
+
+    def test(run):
+        count = sum(1 for ch in run.out or "" if unicodedata.name(ch, "").endswith("QUESTION MARK"))
+        return f"asks {count} questions, expected at most {limit}" if count > limit else None
+
+    return _check("questions_count", test)
+
+
+def sends_sale(kind: str) -> Check:
+    """A sale step's own words go out (sales.text: the buyer media line, the call slots, the sales handover, the full name
+    asked), code's, never the model's."""
+
+    def test(run):
+        got = (run.answer.get("sale") or {}).get("kind") or "none"
+        if got != kind:
+            return f"sale step {got}, expected {kind}"
+        return None if run.out_by == CODE and run.out else "the sale step's words do not go out"
+
+    return _check("send", test)
+
+
+def held_for_name() -> Check:
+    """No booking: the time is held at its place while the full name is asked (spec §2.6, residential.hold_for_name)."""
+
+    def test(run):
+        if not run.answer.get("hold_for_name"):
+            return "no time held for the full name"
+        expected = residential.line("res_full_name", run.line_language or run.answer["language"])
+        return None if run.out == expected else f'sends "{_short(run.out, 60)}", expected the full name asked'
+
+    return _check("action", test)
+
+
+# A Meet link or an e-mail asked: never at launch (Q32, T102); a person named is no_person_named's (Q30).
+MEET_OR_EMAIL = re.compile(r"google\s*meet|meet\.google|\bzoom\b|\be-?mail\b|البريد|ای\s*میل|ईमेल", re.IGNORECASE)
+
+
+def no_meet_or_email() -> Check:
+    def test(run):
+        match = MEET_OR_EMAIL.search(run.out or "")
+        return f'speaks of a Meet link or an e-mail: "{match.group(0)}"' if match else None
+
+    return _check("send", test)
+
+
 def short_enough() -> Check:
     def test(run):
         size = len(run.answer["reply"])
@@ -1444,9 +1498,11 @@ def no_stock_phrase() -> Check:
     return _check("reply", test)
 
 
-REPLY_CHECKS = (untouched(), safe(), one_question(), short_enough(), no_emoji(), no_stock_phrase(), address_once())
+ONE_QUESTION = one_question()
+REPLY_CHECKS = (untouched(), safe(), ONE_QUESTION, short_enough(), no_emoji(), no_stock_phrase(), address_once())
 # The rent and sale tracks ask two questions at most (spec §8: questions_at_most(2) replaces one_question).
-RES_REPLY_CHECKS = (untouched(), safe(), questions_at_most(2), short_enough(), no_emoji(), no_stock_phrase(), address_once())
+TWO_QUESTIONS = questions_at_most(2)
+RES_REPLY_CHECKS = (untouched(), safe(), TWO_QUESTIONS, short_enough(), no_emoji(), no_stock_phrase(), address_once())
 # Reported, never counted against the pass rate: the engine already holds them
 # (it stores no reply_en for an English reply), so nothing wrong would go out.
 REPLY_NOTES = (no_gloss(),)
@@ -1504,7 +1560,10 @@ class Scenario:
     unit: str = ""
     lead_context: dict = field(default_factory=dict)
     full_name_asked: bool = False  # our last line asked for the full name (payload res_step)
-    held: dict | None = None  # {"start": moment, "words": ..., "asks": n}: a time held for the full name (a tentative)
+    # {"start": moment, "words": ..., "asks": n, "place": "office" or "call"}: a time held for the full name (a tentative)
+    held: dict | None = None
+    # Batch 2e slice C: other buyers' booked sales calls (their starts), the call pool's taken slots (calls.taken).
+    call_taken: tuple = ()
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -1972,6 +2031,321 @@ CHAT_78_LICENCE = CHAT_78 + [
     ("assistant", "For your budget of AED 33,000, the Small shop type is perfect: 400-550 sq ft, from AED 33,000 a year. What business will you run in the shop?"),
     ("customer", "Interior landscape"),
     ("assistant", "Perfect, an interior landscape shop. Do you have a DED or Trakhees licence, or will you open a new one?"),
+]
+
+# Batch 2e slice C, the sales flow (spec §3, §8's Sales group): a buyer of a studio in International City, on the mixed
+# template. Their chat as code keeps it (2d's facts.need "buy", sales.record_need), the call slots code offers at NOW (calls.py,
+# the call pool), and our ask for the full name (the rent flow's gate: res_full_name).
+BUYER = {"for_client": False, "intent": "buy", "property_type": "studio", "need": "buy", "wanted": "to buy a studio"}
+BUYER_NAMED = {**BUYER, "full_name": "Ahmed Khan"}
+CALL_SLOTS_OFFER = sales.slots_line("en", [at(12, 15), at(12, 17)], NOW)
+STUDIO_PRICE = "Studios in International City are generally around AED 330,000–350,000, depending on the cluster and whether the unit is vacant or rented."
+BUYER_ASKED = [
+    ("customer", "I want to buy a studio"),
+    ("assistant", "Sure! We can help you buy a studio or a one-bedroom in International City. Are you looking for yourself or for a client?"),
+]
+CALL_OFFERED = [("customer", "Just tell me the price and book"), ("assistant", f"{STUDIO_PRICE} {CALL_SLOTS_OFFER}")]
+RENT_FIGURES = r"\b(?:29|30|31|33|40|42|43|45),000\b"
+SALE_SCENARIOS = [
+    # The five questions in three messages (brief Part 5B), skipping what is known.
+    Scenario(
+        "shops-sale-first-message",
+        "sale: 'I want to buy a studio in Spain' is the sale track; code's opener (res_open_sale) asks who it is for",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        new=["I want to buy a studio in Spain, any cluster also fine"],
+        expect=[track("sale", "studio", clusters=("Spain",)), sends_res("open"),
+                out_says(r"Spain Cluster is a great choice", "acknowledge their cluster"),
+                out_says(r"for yourself|for a client", "ask whether it is for themselves or a client"),
+                questions_at_most(2), no_person_named(), never_out(RENT_FIGURES, "a rent figure to a buyer")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-cash-and-when",
+        "sale: 'For myself' gets questions 2 and 3 together: cash or finance, and how soon",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["For myself"],
+        expect=[says(r"\bcash\b|financ|mortgage", "ask cash or finance"), says(r"how soon|when", "ask how soon they buy"),
+                never_out(r"for yourself|for a client", "ask who it is for again"), questions_at_most(2), track("sale", "studio")],
+    ),
+    Scenario(
+        "shops-sale-rented-or-vacant",
+        "sale: 'Cash, within a month' gets questions 4 and 5: a rented or vacant unit, investment or own use",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=[*BUYER_ASKED, ("customer", "For myself"), ("assistant", "Perfect. Are you a cash buyer or planning to use finance? And how soon are you looking to buy?")],
+        facts={**BUYER, "payment": "cash", "buy_timeline": "within a month"},
+        new=["Cash, within a month"],
+        expect=[says(r"rented|vacant|tenant", "ask a rented or a vacant unit"), says(r"invest|own use|personal", "ask investment or own use"),
+                never_out(r"\bcash\b", "ask cash or finance again"), questions_at_most(2)],
+    ),
+    Scenario(
+        "shops-sale-known-question-cut",
+        "sale: a question about what the chat knows (cash, said already) is cut, the next one stays",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=[*BUYER_ASKED, ("customer", "For myself, cash")],
+        facts={**BUYER, "payment": "cash"},
+        new=["Within 2 months"],
+        expect=[never_out(r"cash buyer|financ", "ask what the chat knows (cash or finance)"), out_says(r"rented unit or a vacant one", "ask the next question"),
+                questions_at_most(2)],
+    ),
+    # Prices: the band of their unit, at once when asked, never hidden; never a rent figure.
+    Scenario(
+        "shops-sale-price-early",
+        "sale: the price asked early is given at once: a studio's sale band, never a rent figure",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["What is the price of a studio?"],
+        expect=[out_says(r"330,000", "give the studio's sale band"), out_says(r"350,000", "give the band's top"),
+                never_out(RENT_FIGURES, "a rent figure to a buyer"), questions_at_most(2)],
+    ),
+    Scenario(
+        "shops-sale-price-morocco",
+        "sale: a studio in Morocco Cluster starts from around AED 310,000",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["How much is a studio in Morocco cluster?"],
+        expect=[out_says(r"310,000", "give Morocco Cluster's own studio band"), track("sale", "studio", clusters=("Morocco",)), questions_at_most(2)],
+    ),
+    Scenario(
+        "shops-sale-price-1br",
+        "sale: a one-bedroom to buy is AED 450,000-550,000, never a studio's figure",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="one_br",
+        chat=BUYER_ASKED,
+        facts={**BUYER, "property_type": "1BR", "wanted": "to buy a 1-bedroom flat"},
+        new=["How much is a one bedroom to buy?"],
+        expect=[out_says(r"450,000", "give the one-bedroom's sale band"), out_says(r"550,000", "give the band's top"),
+                never_out(r"\b3[13]0,000\b|\b350,000\b", "a studio's figure for a one-bedroom"), track("sale", "one_br"), questions_at_most(2)],
+    ),
+    Scenario(
+        "shops-sale-price-never-hidden",
+        "sale: 'price?' answered without a figure gets code's band line (the price is never hidden)",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["price?"],
+        expect=[out_says(r"330,000", "give the price when asked"), questions_at_most(2)],
+    ),
+    Scenario(
+        "shops-sale-price-and-book",
+        "sale: 'Just tell me the price and book' gets the band and two free call slots, never an open 'when?'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["Just tell me the price and book"],
+        expect=[out_says(r"330,000", "give the band"), out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots"),
+                questions_at_most(2), no_person_named()],
+    ),
+    # No media to buyers first (§3.2).
+    Scenario(
+        "shops-sale-photos",
+        "sale: photos asked for get the buyer media line and two free call slots, never a media step",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["Can you send me photos of the studio?"],
+        expect=[sends_sale(sales.BUYER_MEDIA), no_step(), out_says(r"quick 5-minute call with you first", "say the call comes first"),
+                out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots"), invited(True)],
+        words=CODE,
+    ),
+    # A call (§3.3): the full name, booked in the call pool, no handover, no e-mail, no Meet link, nobody named.
+    Scenario(
+        "shops-sale-call-booked",
+        "sale: '5 pm works' to our two call slots books the 5-minute call (full name known): res_call_booked, no handover",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=CALL_OFFERED,
+        facts={**BUYER_NAMED},
+        new=["5 pm works"],
+        expect=[books("2026-10-12", "17:00"), place("call"),
+                out_says(r"^Perfect, Ahmed Khan! Your 5-minute call with our sales team is booked for Monday 12 October at 5:00 PM\. We'll call you on this number\. Speak soon!$", "send res_call_booked"),
+                no_person_named(), no_meet_or_email()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-call-full-name-first",
+        "sale: a call with no full name known is held, and the full name asked first; nothing booked",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        name="Ahmed",
+        chat=CALL_OFFERED,
+        facts={**BUYER},
+        new=["5 pm works"],
+        expect=[held_for_name(), place("call"), no_meet_or_email()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-call-name-given",
+        "sale: the full name given after our ask books the call held for it",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        name="Ahmed",
+        chat=[*CALL_OFFERED, ("customer", "5 pm works"), ("assistant", residential.line("res_full_name", "en"))],
+        facts={**BUYER},
+        full_name_asked=True,
+        held={"start": at(12, 17), "words": "5 pm works", "asks": 1, "place": "call"},
+        new=["Ahmed Khan"],
+        expect=[books("2026-10-12", "17:00"), place("call"), out_says(r"^Perfect, Ahmed Khan! Your 5-minute call with our sales team is booked", "send res_call_booked")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-call-at-5",
+        "2d interplay: a buyer's 'can we do a call at 5' books the call, never 2d's call_requested handover",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER_NAMED},
+        new=["can we do a call at 5"],
+        expect=[books("2026-10-12", "17:00"), place("call"), out_says(r"5-minute call with our sales team is booked", "send res_call_booked")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-call-no-time",
+        "sale: a call asked for with no time gets two free call slots, no handover",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER_NAMED},
+        new=["Can someone call me?"],
+        expect=[sends_sale(sales.CALL_SLOTS), out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots"), no_person_named()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-call-taken",
+        "sale: a call slot another buyer holds is refused with the two nearest free call slots",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER_NAMED},
+        call_taken=(at(12, 17),),
+        new=["can we do a call at 5"],
+        expect=[sends_sale(sales.CALL_TAKEN), out_says(r"today at 4:30 PM or 5:30 PM", "offer the two nearest free call slots")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-office-meeting",
+        "sale: a buyer who wants the office is booked an office meeting from the office's pool",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER_NAMED},
+        new=["I prefer to come to your office tomorrow at 11 am"],
+        expect=[books("2026-10-13", "11:00"), place("office"), out_says(r"Your meeting is confirmed", "send the meeting's confirmation"),
+                out_says(r"Our agent will meet you at the office", "say who meets them, naming nobody"), no_person_named()],
+        words=CODE,
+    ),
+    # To our sales team (brief Part 5B): negotiation, the mortgage process, DLD fees.
+    Scenario(
+        "shops-sale-negotiation",
+        "sale: an offer ('can the owner do 300k?') goes to our sales team with the handover line",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["Can the owner do 300k for the studio?"],
+        expect=[handover(sales.REASON_PRICE), sends_sale(sales.HANDOVER), out_says(r"passed your details to our sales team", "hand over to the sales team"),
+                no_person_named()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-mortgage",
+        "sale: the mortgage process asked about goes to our sales team, never answered by the bot",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["How does the mortgage process work if I buy?"],
+        expect=[handover(sales.REASON_LEGAL), sends_sale(sales.HANDOVER), never_out(r"\d+\s*%", "answer the mortgage process itself")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-dld-fee",
+        "sale: DLD transfer fees go to our sales team, never a figure from the bot",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["What is the DLD transfer fee?"],
+        expect=[handover(sales.REASON_LEGAL), sends_sale(sales.HANDOVER), never_out(r"\d+\s*%", "a DLD figure")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-abroad",
+        "sale: a buyer abroad gets the call and two free call slots, never 2d's abroad_cannot_visit handover",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["I am in London now, I can't come to the office"],
+        expect=[sends_sale(sales.ABROAD), out_says(r"quick 5-minute call with our sales team", "offer the call"),
+                out_says(r"today at 3:00 PM or 5:00 PM", "offer two free call slots")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-sale-commission",
+        "sale: a buyer's commission question gets 'Our agent will go through all the costs with you on the call.' (Q33), no figure",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="sale",
+        unit="studio",
+        chat=BUYER_ASKED,
+        facts={**BUYER},
+        new=["What is your commission?"],
+        expect=[out_says(r"Our agent will go through all the costs with you on the call\.", "give the buyer's commission line"),
+                never_out(r"\b\d+(?:\.\d+)?\s*%|2,000|2,500", "a commission figure to a buyer"), questions_at_most(2)],
+    ),
 ]
 
 SCENARIOS = [
@@ -4157,12 +4531,15 @@ SCENARIOS = [
     ),
     Scenario(
         "shops-mixed-yes-buyer-lead",
-        "mixed template: a studio buyer's yes asks what they want (the sale flow waits for slice C), never 'for yourself?'",
+        "mixed template: a studio buyer's yes gets code's opener for that studio (the sale flow is live, slice C)",
         playbook=IC_SHOPS,
         campaign=MIXED,
         lead_context={"source": "Bayut", "unit": "studio", "property": "apartment", "deal": "sale"},
         new=["[tapped: Yes, still looking]"],
-        expect=[sends_line("res_what_need"), track("other", "studio", deal="sale")],
+        expect=[
+            out_says(r"^Great! Is the studio for yourself, or are you checking for a client\?$", "open on the lead's studio"),
+            track("sale", "studio", deal="sale"), invited(False),
+        ],
         words=CODE,
     ),
     Scenario(
@@ -4282,13 +4659,12 @@ SCENARIOS = [
     ),
     Scenario(
         "shops-track-studio-sale-listing",
-        "track trap: 'is the studio still there?' on a sale listing is a buyer (other until the sale flow is live)",
+        "track trap: 'is the studio still there?' on a sale listing is a buyer (the sale track, slice C), never 2d's line",
         playbook=IC_SHOPS,
         campaign=SHOPS_A,
         lead_context={"source": "Property Finder", "listing_ref": "a7group-1891", "unit": "studio", "property": "apartment", "deal": "sale"},
         new=["is the studio still there?"],
-        expect=[not_a_shop_line(), track("other", "studio", deal="sale")],
-        words=CODE,
+        expect=[track("sale", "studio", deal="sale"), questions_at_most(2), no_person_named()],
     ),
     Scenario(
         "shops-track-englund-1bhk-49",
@@ -4806,6 +5182,7 @@ SCENARIOS = [
         expect=[sends_res("open"), never_out(r"^Sorry", "apologise for nothing"), band("rent", "studio"), track("rent", "studio")],
         words=CODE,
     ),
+    *SALE_SCENARIOS,
 ]
 
 
@@ -4874,9 +5251,11 @@ def open_appointment(scenario: Scenario) -> LeadAiAppointment | None:
     """The scenario's open appointment, built and never saved; a time held for the full name is a tentative at it."""
     if scenario.appointment is None and scenario.held:
         held = scenario.held
+        call = held.get("place") == calls.PLACE  # a buyer's call held for the name (slice C): the call pool's
         return LeadAiAppointment(
-            place=LeadAiAppointment.Place.OFFICE, status=LeadAiAppointment.Status.TENTATIVE, starts_at=held["start"],
-            customer_words=held.get("words", ""), details={residential.HELD_FOR_NAME: True, "name_asks": held.get("asks", 1)},
+            place=calls.PLACE if call else LeadAiAppointment.Place.OFFICE, status=LeadAiAppointment.Status.TENTATIVE,
+            starts_at=held["start"], customer_words=held.get("words", ""),
+            details={residential.HELD_FOR_NAME: True, "name_asks": held.get("asks", 1), **({"track": calls.TRACK} if call else {})},
         )
     if scenario.appointment is None:
         return None
@@ -4937,10 +5316,15 @@ def build(scenario: Scenario) -> Built:
     history = lead_history.lines(hours.parse_date(scenario.crm_asked), lead_history.clean_notes(scenario.crm_notes)) if shops_chat else []
     res_context = None
     if res:
+        # As live (batch 2e slice C): on the sale track, the buyer's next questions (SALE STEP) and the free call slots.
+        sale_parts = sales.context_parts(
+            scenario.facts, pre.unit, pre.clusters, [(item[0], item[1]) for item in scenario.chat if item[0] in ("assistant", "agent")],
+            scenario.now, list(scenario.closed), list(scenario.call_taken), DEFAULT_RESIDENTIAL_FACTS,
+        ) if pre.track == tracks.SALE else {}
         res_context = residential.context(
             settings_row, pre.track, pre.unit, pre.clusters, scenario.now, list(scenario.taken), lead=dict(scenario.lead_context),
             full_name=residential.full_name_known(scenario.facts, scenario.lead_context), history=history,
-            held=residential.held_start(appointment),
+            held=residential.held_start(appointment), **sale_parts,
         )
     context = prompt.context_message(
         now=scenario.now,
@@ -5314,14 +5698,16 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     merged = engine._merge_facts(scenario.facts, answer["facts"])
     # As live: a shops customer who wants no shop to rent meets "our specialist".
     commercial = engine._is_commercial(answer["segment"], merged) and needs.of(merged) is None
-
     res_book = run.res and run.decision is not None and run.decision.track in (tracks.RENT, tracks.SALE)
 
     def booking(rescheduled: bool) -> str:
         if res_book:
-            # As live (batch 2e): the rent viewing's confirmation, under their full name (the eval sets no Maps link).
+            # As live (batch 2e): the rent viewing's (or the sale office meeting's) confirmation, or a buyer's call (slice C:
+            # res_call_booked), under their full name (the eval sets no Maps link).
+            place_now = answer["appointment"].get("place") or (appointment.place if appointment is not None else "")
             return residential.confirmation(
-                lang, run.when, kind=residential.VISIT, full_name=run.full_name or residential.full_name_known(merged, scenario.lead_context),
+                lang, run.when, kind=residential.CALL if place_now == calls.PLACE else residential.VISIT,
+                full_name=run.full_name or residential.full_name_known(merged, scenario.lead_context),
                 unit=run.decision.unit, clusters=run.decision.clusters, office_address=ADDRESS, track=run.decision.track,
                 rescheduled=rescheduled,
             )
@@ -5344,10 +5730,16 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
         return CODE, filters.on_my_way(lang)
     own = [appointment.starts_at] if confirmed and appointment.starts_at else []
     if action == "reschedule_requested" and shops_chat and offer_free and len(hours.named_times(answer["reply"] or "")) < 2:
-        # "Need to reschedule" with no new time (board T44): the two nearest free slots, never their own.
-        slots = hours.offer_pair(scenario.now, list(scenario.closed), [*scenario.taken, *own])
+        # "Need to reschedule" with no new time (board T44): the two nearest free slots, never their own; a buyer's call
+        # within the call pool (batch 2e slice C).
+        pool = list(scenario.call_taken) if calls.is_sales_call(appointment) else list(scenario.taken)
+        slots = hours.offer_pair(scenario.now, list(scenario.closed), [*pool, *own])
         return CODE, shop_flow.reschedule_text(lang, slots, scenario.now)
-    if scenario.handed_over != "no":
+    if answer.get("sale") and scenario.handed_over == "no":
+        # As live (batch 2e slice C): a sale step's own words (the buyer media line, the call slots, the sales handover).
+        return CODE, sales.text(answer["sale"], lang, scenario.now)
+    if scenario.handed_over != "no" and not residential.name_gate_line(answer):
+        # (As live: the full-name gate's own words go even while a person has the chat, as the booking would.)
         # As live (people.quiet_reply): a goodbye gets nothing, a chase an apology, a call's time the request passed
         # on, anything else the holding line (live: at most every two hours; here always due).
         reason = (re.search(r"\((.+)\)", scenario.handed_over) or [None, ""])[1]
@@ -5405,7 +5797,8 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     by, text = "", ""
     if answer["send"]:
         if run.res:
-            # As live (batch 2e): two questions at most on the rent and sale tracks, and amounts checked from 100 up.
+            # As live (batch 2e): two questions at most on the rent and sale tracks (a buyer's go two to a message), and
+            # amounts checked from 100 up.
             run.reply, run.removed = filters.clean_reply(
                 answer["reply"], run.context_words, max_questions=residential.max_questions(run.decision.track if run.decision else ""),
                 amount_floor=residential.AMOUNT_FLOOR,
@@ -5449,7 +5842,11 @@ def checks_for(scenario: Scenario) -> list:
     if scenario.words in (MODEL, EITHER):
         pre = decide(scenario)
         two = pre is not None and residential.live_track(pre.track) and pre.track in (tracks.RENT, tracks.SALE)
-        checks.extend(RES_REPLY_CHECKS if two else REPLY_CHECKS)
+        # A scenario that counts its questions itself (questions_at_most) drops the default count of its track.
+        counted = "questions_count" in declared
+        checks.extend(
+            check for check in (RES_REPLY_CHECKS if two else REPLY_CHECKS) if not (counted and check in (ONE_QUESTION, TWO_QUESTIONS))
+        )
     elif scenario.words == SILENT:
         checks.append(silent())
     return checks
@@ -5476,9 +5873,13 @@ def run_once(scenario: Scenario, label: str) -> Run:
         words = need_words(scenario) if shops_chat else []
         need_seen = (needs.detect(words) or needs.of(scenario.facts)) if shops_chat else None
         need = None
+        # As live (batch 2e slice C): a buyer's turn may book a call in the call pool (the scenario's other buyers' calls), on
+        # the residential path only.
+        sale = res and pre is not None and pre.track == tracks.SALE
+        call_taken = list(scenario.call_taken)
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
-            run.decision = decide(scenario)  # as live: a rule's turn stores the track decided before the model
+            run.decision = pre  # as live: a rule's turn stores the track decided before the model
         else:
             answer, when, completions, rejected, still_invalid = engine.ask_model(
                 prompt.system_prompt(scenario.playbook, residential=res), built.context, built.appointment, scenario.now,
@@ -5486,7 +5887,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 said=said, customer_script=run.customer_script if scenario.handed_over == "no" else "",
                 name=engine.name_from(scenario.facts.get("customer_name"), scenario.name),
                 need_segment=residential.segment_of(pre.track) if res else (needs.SEGMENTS[need_seen.kind] if need_seen is not None else ""),
-                residential=res,
+                residential=res, places=calls.places_for(tracks.SALE if sale else ""), call_taken=call_taken,
             )
             if (copies or pages) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
                 answer["handover"] = {"needed": False, "reason": None}  # as live: the photo is the licence we asked for
@@ -5499,10 +5900,20 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 brokers.backstop(answer, scenario.facts, words, held=scenario.handed_over != "no", our_last=our_last(scenario))
                 # As live (batch 2e): the track again, with the model's tag and the facts it recorded this turn.
                 run.decision = decide(scenario, answer)
-                if res and engine.residential_switch(
+                switched = res and engine.residential_switch(
                     answer, pre, run.decision, scenario.facts, words, said, scenario.now, list(scenario.closed), taken, scenario.invites,
-                ):
+                )
+                if switched:
                     when, still_invalid = None, False  # as live: the model's tag moved the chat, code's words go
+                sale = res and run.decision.track == tracks.SALE
+                if sale and not switched:
+                    # As live (sales.call_step): a buyer's call booked at their own day and hour, else two free call slots;
+                    # never 2d's call_requested handover, and a buyer abroad gets the call.
+                    when, _ = sales.call_step(
+                        answer, when, appointment=built.appointment, said=said, words=customer_words(scenario), our_last=our_last(scenario),
+                        ours=our_words(scenario), now=scenario.now, closed_dates=list(scenario.closed), taken=call_taken,
+                        still_invalid=still_invalid, handed_over=scenario.handed_over != "no",
+                    )
             if shops_chat and not still_invalid:
                 # As live (engine.own_time): their own exact day and hour, booked over another time the model confirmed.
                 ours = [item[0] for item in scenario.chat if item[0] in ("assistant", "agent", "reminder")]
@@ -5554,10 +5965,10 @@ def run_once(scenario: Scenario, label: str) -> Run:
         reoffer_now = reoffered(scenario)
         may_invite = scenario.handed_over == "no" and not scenario.not_interested and (agreed_now or reoffer_now or scenario.invites < 2)
         run.may_invite = may_invite
+        body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
+        earlier = [("campaign", body)] + [(item[0], item[1]) for item in scenario.chat]
         if settled is None or settled.get("converted"):
             # As live, code settles the model's answer, and the deferral rule's (its other rules end the turn).
-            body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
-            earlier = [("campaign", body)] + [(item[0], item[1]) for item in scenario.chat]
             engine.settle(
                 answer,
                 earlier,
@@ -5570,7 +5981,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 slots=engine.invitation_slots(
                     answer, built.appointment, said, scenario.now, list(scenario.closed), taken, may_invite=may_invite
                 )
-                if shops_chat
+                if shops_chat and not sale
                 else None,
                 now=scenario.now,
                 facts=scenario.facts,
@@ -5583,6 +5994,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 crm_notes=lead_history.clean_notes(scenario.crm_notes) if shops_chat else "",
                 residential=res,
                 residential_facts=DEFAULT_RESIDENTIAL_FACTS,
+                track=run.decision.track if res and run.decision is not None else "",
             )
         if res and run.decision is not None and residential.live_track(run.decision.track):
             # As live (batch 2e): a residential reply may quote that track's and unit's figures only, after the model.
@@ -5602,7 +6014,16 @@ def run_once(scenario: Scenario, label: str) -> Run:
         elif settled is None and licence_answer(scenario):
             answer["licence"] = licence_answer(scenario)  # "declined" closes it, "later" keeps it open
         need_slots, misread = (), False
-        if shops_chat and not res and settled is None:
+        if sale and settled is None:
+            # As live (batch 2e slice C, sales.settle in place of who_they_are, after residential.settle): a buyer's questions in
+            # their order, the price never hidden, no media first, the call slots, the sales handovers.
+            sales.settle(
+                answer, facts=scenario.facts, texts=words, said=said, earlier=earlier, now=scenario.now, closed_dates=list(scenario.closed),
+                office_taken=taken, call_taken=call_taken, residential_facts=DEFAULT_RESIDENTIAL_FACTS, unit=run.decision.unit,
+                clusters=run.decision.clusters, when=when, still_invalid=still_invalid, quiet=scenario.handed_over != "no",
+                may_invite=may_invite,
+            )
+        elif shops_chat and not res and settled is None:
             # As live (engine.who_they_are): someone who wants no shop to rent gets the owner's line, never
             # the shop list and never lost; someone who rented one already the second-shop question.
             wants_other = need is not None or needs.of(scenario.facts) is not None
@@ -5678,10 +6099,12 @@ def run_once(scenario: Scenario, label: str) -> Run:
         if res_book and answer["opt_out"] == "none":
             # As live (batch 2e, spec §2.6): the full name from their words, the lead or a bare name after our ask; a held time
             # booked once it comes; a no keeps it for our agent.
+            held = residential.held_of(built.appointment)
             step = residential.name_turn(
-                answer, scenario.facts, scenario.lead_context, held=residential.held_of(built.appointment), asked=scenario.full_name_asked,
+                answer, scenario.facts, scenario.lead_context, held=held, asked=scenario.full_name_asked,
                 texts=words, said=said, when=when, still_invalid=still_invalid, rule=settled is not None, now=scenario.now,
-                closed_dates=list(scenario.closed), taken=taken,
+                # As live: a buyer's call held for the name is offered again from the call pool (slice C).
+                closed_dates=list(scenario.closed), taken=call_taken if held is not None and held["place"] == calls.PLACE else taken,
             )
             run.full_name, run.name_step = step.full_name, step.kind
             if step.when is not None:

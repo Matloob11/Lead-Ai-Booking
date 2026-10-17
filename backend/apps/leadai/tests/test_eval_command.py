@@ -545,7 +545,10 @@ RIGHT = {
     "shops-track-one-bed": answer("Great! What business will the shop be for?"),
     # The model writes the nationality as the community: code never reads it as China Cluster.
     "shops-track-from-china": answer("Great! What business will the shop be for?", facts={"community": "China"}),
-    "shops-track-studio-sale-listing": answer("Great! What business will the shop be for?"),
+    # Slice C: the sale track; its reply is the model's (RES_SYSTEM's sale section after the merge).
+    "shops-track-studio-sale-listing": answer(
+        "Studios in International City are generally around AED 330,000–350,000. Are you looking for yourself or for a client?", segment="buyer",
+    ),
     "shops-track-englund-1bhk-49": answer(
         "Great! What business will the shop be for?",
         facts={"for_client": False, "property_type": "shop", "business_activity": "room", "intent": "rent", "bedrooms": "1bhk", "community": "England"},
@@ -642,6 +645,52 @@ RIGHT = {
     "shops-res-arabic-spain": answer("", send=False),
     "shops-res-hindi-studio": answer("", send=False),
     "shops-res-mixed-studio-answer": answer("", send=False),
+    # Batch 2e slice C, the sales flow (sales.py, calls.py): what a right answer looks like, or the model's wrong one that code
+    # puts right (the price hidden, a known question, a commission figure, 2d's call_requested, a DLD figure).
+    "shops-sale-first-message": answer(
+        "Sure! Spain Cluster is a great choice, and we can check other clusters too. Are you looking for yourself or for a client?",
+        segment="buyer", facts={"intent": "buy", "property_type": "studio", "community": "Spain"},
+    ),
+    "shops-sale-cash-and-when": answer(
+        "Perfect. Are you a cash buyer or planning to use finance? And how soon are you looking to buy?", segment="buyer", facts={"for_client": False},
+    ),
+    "shops-sale-rented-or-vacant": answer(
+        "Got it. Do you prefer a rented unit or a vacant one? And is this for investment or for your own use?", segment="buyer", facts={"payment": "cash"},
+    ),
+    "shops-sale-known-question-cut": answer(
+        "Got it. Are you a cash buyer or planning to use finance? Do you prefer a rented unit or a vacant one?", segment="buyer",
+    ),
+    "shops-sale-price-early": answer(f"{leadai_eval.STUDIO_PRICE} Are you a cash buyer or planning to use finance?", segment="buyer"),
+    "shops-sale-price-morocco": answer(
+        "Studios in Morocco Cluster are generally around AED 310,000–350,000, depending on whether the unit is vacant or rented. "
+        "Are you a cash buyer or planning to use finance?",
+        segment="buyer", facts={"community": "Morocco"},
+    ),
+    "shops-sale-price-1br": answer(
+        "One-bedrooms in International City are generally around AED 450,000–550,000, depending on the cluster, whether the unit is vacant "
+        "or rented, and the balcony. Are you a cash buyer or planning to use finance?",
+        segment="buyer",
+    ),
+    "shops-sale-price-never-hidden": answer(
+        "Our sales team will share all the details with you on a quick call. Are you a cash buyer or planning to use finance?", segment="buyer",
+    ),
+    "shops-sale-price-and-book": answer(
+        "Studios in International City are generally around AED 330,000–350,000. When would you like the 5-minute call with our sales team?",
+        segment="buyer",
+    ),
+    "shops-sale-photos": answer("Sure, here are the photos of the studio.", segment="buyer"),
+    "shops-sale-call-booked": answer("", action="confirm", place="call", date="2026-10-12", time="17:00", segment="buyer"),
+    "shops-sale-call-full-name-first": answer("", action="confirm", place="call", date="2026-10-12", time="17:00", segment="buyer"),
+    "shops-sale-call-name-given": answer("Thank you, Ahmed Khan.", segment="buyer", facts={"customer_name": "Ahmed Khan"}),
+    "shops-sale-call-at-5": answer("Sure, our agent will call you at 5.", handover="call_requested", segment="buyer"),
+    "shops-sale-call-no-time": answer("Sure, our agent will call you shortly.", handover="call_requested", segment="buyer"),
+    "shops-sale-call-taken": answer("Sure, our agent will call you at 5.", handover="call_requested", segment="buyer"),
+    "shops-sale-office-meeting": booked("2026-10-13", "11:00", segment="buyer"),
+    "shops-sale-negotiation": answer("The owner may consider it. Our agent will discuss the price with you.", segment="buyer"),
+    "shops-sale-mortgage": answer("Banks in the UAE usually finance up to 80% of the price for residents.", segment="buyer"),
+    "shops-sale-dld-fee": answer("The DLD transfer fee is 4% of the price.", segment="buyer"),
+    "shops-sale-abroad": answer(SPECIALIST_REPLIES, handover="abroad_cannot_visit", segment="buyer"),
+    "shops-sale-commission": answer("Our commission is 2% of the price. Are you a cash buyer or planning to use finance?", segment="buyer"),
 }
 
 
@@ -781,6 +830,8 @@ class EvalCommandTests(TestCase):
                 # my data": code's, before any model (the launch's studio seekers among them).
                 "shops-res-114-apartment-rent", "shops-res-arabic-spain", "shops-res-delete-my-data", "shops-res-emirates-id-sent",
                 "shops-res-hindi-studio", "shops-res-mixed-studio-answer", "shops-res-urdu-voice-flats-119",
+                # Batch 2e slice C on the residential path: a buyer's first plain message gets code's res_open_sale.
+                "shops-sale-first-message",
                 "shops-spam", "shops-stop", "shops-studio-balcony-107", "shops-studio-capitals-136", "shops-studio-monthly-57",
                 "shops-studio-not-interested", "shops-track-1br-near-my-shop", "shops-track-englund-1bhk-49", "shops-track-from-china",
                 "shops-track-one-bed", "shops-track-room-and-hall-arabic", "shops-track-shop-yes", "shops-type-tap", "shops-type-tap-again",

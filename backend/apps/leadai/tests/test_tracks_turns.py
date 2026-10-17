@@ -147,7 +147,7 @@ class LeadContextTurnTests(ShopsBase):
             self.turn(message, [shop_answer("Great! What business will the shop be for?")])
         read.assert_called_once()
         state = self.state()
-        self.assertEqual((state.track, state.unit, state.lead_context["deal"]), ("other", "studio", "sale"))
+        self.assertEqual((state.track, state.unit, state.lead_context["deal"]), ("sale", "studio", "sale"))  # slice C is live
         self.assertEqual(self.actions(message)["track"]["deal_from"], tracks.LEAD)
 
 

@@ -95,8 +95,9 @@ def clean_reply(reply: str, context_text: str, *, max_questions: int = 1, amount
     colleagues wrote (never the assistant's own replies): an amount found
     there may be repeated, in any form ("40k" covers "AED 40,000"); any other
     price-like number takes its sentence with it. ``max_questions``: questions a
-    reply may ask (two on batch 2e's rent and sale tracks, spec §1.3); ``amount_floor``:
-    the smallest price-like amount checked (100 there, spec §2.4).
+    reply may ask (two on batch 2e's rent and sale tracks, spec §1.3: a buyer's
+    questions go two to a message, brief Part 5B); ``amount_floor``: the smallest
+    price-like amount checked (100 there, spec §2.4).
     """
     notes: list[str] = []
     text = (reply or "").replace("’", "'")

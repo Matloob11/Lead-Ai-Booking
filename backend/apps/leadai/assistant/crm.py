@@ -39,7 +39,7 @@ import logging
 
 from apps.crmlink import client
 
-from . import crm_facts, hours
+from . import calls, crm_facts, hours
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,8 @@ def booking_body(lead_id: int, appointment, event: str, comment: str = "") -> di
         if fields:
             body["fields"] = fields
             body["only_if_empty"] = list(fields)
+    # A buyer's sales call (batch 2e slice C, C40): Mode Online 43 and the to-do "Sales call", on its move and cancel too.
+    booking.update(calls.booking_fields(appointment, event))
     if comment:
         body["comment"] = comment[:TOOL_COMMENT_MAX]
     return body
@@ -221,13 +223,14 @@ def meeting_fields_body(lead_id: int, appointment, comment: str = "") -> dict:
     return body
 
 
-def open_meeting_todos(lead_id: int) -> list[int]:
-    """The ids of the lead's open "Viewing/Meeting" to-dos, newest first: the first is the one the
-    tool's booking action would move or close. A REST read, nothing written. Raises BitrixError."""
+def open_meeting_todos(lead_id: int, subject: str = TODO_SUBJECT) -> list[int]:
+    """The ids of the lead's open "Viewing/Meeting" to-dos (``subject``: "Sales call" for a buyer's call, C40), newest
+    first: the first is the one the tool's booking action would move or close. A REST read, nothing written. Raises
+    BitrixError."""
     rows = client.call(
         "crm.activity.list",
         {
-            "filter": {"OWNER_TYPE_ID": 1, "OWNER_ID": int(lead_id), "PROVIDER_ID": "CRM_TODO", "SUBJECT": TODO_SUBJECT, "COMPLETED": "N"},
+            "filter": {"OWNER_TYPE_ID": 1, "OWNER_ID": int(lead_id), "PROVIDER_ID": "CRM_TODO", "SUBJECT": subject, "COMPLETED": "N"},
             "order": {"ID": "DESC"},
             "select": ["ID"],
         },

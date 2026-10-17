@@ -763,14 +763,15 @@ def _book(appointment, crm_id: int, event: str, decision: str, stamp: str, extra
     the "due now" one BP 235 plans when a person edits a lead in stage 10, would take the
     meeting time in place of ours, or be closed: ``_book_around``. ``comment_for(lines)``
     writes the event's comment with these extra lines."""
-    from .assistant import crm, crm_fields
+    from .assistant import calls, crm, crm_fields
     from .models import LeadAiAppointment, LeadAiCrmStep
 
     step = f"{BOOKING_STEP}{stamp}"
     if not _step(appointment, step):
         return True, ""  # done before (a task delivered twice): its comment went with it
     try:
-        todos = crm.open_meeting_todos(crm_id)
+        # A buyer's sales call owns a "Sales call" to-do (C40): only those are the booking action's to move or close.
+        todos = crm.open_meeting_todos(crm_id, calls.todo_subject(appointment, crm.TODO_SUBJECT))
     except Exception:
         _undo_step(appointment, step)
         raise

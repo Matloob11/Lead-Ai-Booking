@@ -419,4 +419,7 @@ class EvalReroutedTests(SimpleTestCase):
         ids = {s.id for s in leadai_eval.SCENARIOS}
         for wanted in ("shops-res-full-name-given", "shops-res-full-name-refused", "shops-res-commission-figure", "shops-res-delete-my-data"):
             self.assertIn(wanted, ids)
-        self.assertEqual(leadai_eval.RES_REPLY_CHECKS[2].kinds, frozenset({"reply"}))
+        # The merge's one questions_at_most (the rent and sale lanes each wrote one): what goes out, its own kind, so a
+        # scenario that counts its questions itself drops the default count.
+        self.assertIs(leadai_eval.RES_REPLY_CHECKS[2], leadai_eval.TWO_QUESTIONS)
+        self.assertEqual(leadai_eval.RES_REPLY_CHECKS[2].kinds, frozenset({"questions_count"}))

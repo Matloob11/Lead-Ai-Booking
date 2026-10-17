@@ -146,6 +146,19 @@ facts.need, the lead context (read from Bitrix only when a step needs it, once p
 the turn's actions carry them, in shadow: no reply changes, except the first yes to the mixed template, which is never the
 shops' for-whom line by default (shops_rule's MIXED_YES: the opener for the studio or one-bedroom the lead asked about, or
 "What are you looking for ...?"; a shop lead keeps the for-whom line).
+
+Batch 2e slice C, the sales flow (2026-10-17; sales.py, calls.py; spec §3): a buyer of a studio or a one-bedroom (the sale
+track, tracks.SALE_LIVE) may book a 5-minute call with our sales team in the call pool (calls.taken: one call per half hour,
+no office slot, Q40), as a visit is booked: check_proposal and _shape take place "call" on the sale track only (``places``),
+their own day and hour for a call books it and a call with no time gets two free call slots, never 2d's call_requested
+handover (sales.call_step, right after the model); the full name comes first (the rent flow's residential.name_turn, before
+_slot_gone, which reads the call pool for a call: a call is held and booked at its own place); the shops' own guards stay off
+a buyer's answer (settle's ``track``), and after residential.settle (the sale track's commission line, Q33, among its guards)
+sales.settle takes who_they_are's place: the questions in their order, the price never hidden, no media first, the call
+slots, a buyer abroad called, negotiation, the mortgage process, DLD fees and legal questions to our sales team. The sale
+flow rides on the residential path (RES_SYSTEM's sale section): residential.RENT_LIVE off turns it off too. A call's row is
+marked (place "call", details.track "sale"), its alert says "Sales call", it gets no office pin, and its booking text is
+res_call_booked (residential.confirmation, kind "call").
 """
 
 from __future__ import annotations
@@ -171,6 +184,7 @@ from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiC
 from . import (
     alerts,
     brokers,
+    calls,
     caps,
     claims,
     crm,
@@ -191,6 +205,7 @@ from . import (
     residential,
     reminders,
     rules,
+    sales,
     schema,
     script,
     shop_flow,
@@ -696,7 +711,8 @@ def _walk_in(start: dt.datetime, said: str, now) -> bool:
 
 
 def check_proposal(
-    proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "", taken=(), said: str = ""
+    proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "", taken=(), said: str = "",
+    places=calls.OFFICE_ONLY, call_taken=(),
 ) -> dt.datetime | None:
     """The validated start (or arrival), None when the action needs no time. Raises SlotError.
 
@@ -706,7 +722,8 @@ def check_proposal(
     slot, so a time one of them holds is refused with the two nearest free ones
     (never the time this chat already has booked). The time already booked, said
     again, and a walk-in (``said``, the burst's own words: "I'm outside") are
-    never refused.
+    never refused. ``places``: what this turn may book (calls.places_for: a buyer's call on the sale track, batch 2e
+    slice C, checked against the call pool, ``call_taken``: one call per slot, never an office slot, Q40).
     """
     action = effective_action(proposal["action"], appointment)
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
@@ -714,13 +731,14 @@ def check_proposal(
         if proposal["action"] == "reschedule" and confirmed and not proposal.get("date") and not proposal.get("time"):
             return None  # they want to move it and have not said when: recorded, and asked
         place = proposal.get("place")
+        call = calls.allowed(place, places)  # SALE (slice C): a buyer's 5-minute call, booked in the call pool
         if place is None and segment == "owner":
             raise hours.SlotError(
                 "no_place",
                 "Say where the meeting is: place office for our office. A viewing at their property is "
                 "tentative at customer_property with handover owner_viewing_slot.",
             )
-        if (place or "office") != "office":
+        if (place or "office") != "office" and not call:
             raise hours.SlotError(
                 "not_office",
                 "Only meetings at our office can be confirmed here. Record a viewing at their property "
@@ -734,15 +752,20 @@ def check_proposal(
                 "The customer has not named that time or agreed to it. Offer one or two exact times and ask "
                 "them to pick.",
             )
-        if taken and not unchanged and not _walk_in(start, said, now) and hours.is_taken(start, taken):
+        taken = calls.pool(call, taken, call_taken)  # a call's own pool: one sales call per half hour, no office slot (Q40)
+        walk_in = not call and _walk_in(start, said, now)
+        if taken and not unchanged and not walk_in and hours.is_taken(start, taken):
             # A move offers neither another client's slot nor the one they are moving from.
             own = [appointment.starts_at] if confirmed and appointment.starts_at else []
             nearest = hours.nearest_free(start, now, closed_dates, [*taken, *own])
             offer = " and ".join(hours.describe(slot) for slot in nearest) or "none in the next three weeks"
+            booked = (
+                "That call time is already booked for another buyer: our sales team takes one call per 30-minute slot. "
+                if call else "That time is already booked by another client: the office takes one client per 30-minute slot. "
+            )
             raise hours.SlotError(
                 "taken",
-                "That time is already booked by another client: the office takes one client per 30-minute slot. "
-                f"The nearest free times are {offer}. Say it is taken and offer those two, asking which is better.",
+                f"{booked}The nearest free times are {offer}. Say it is taken and offer those two, asking which is better.",
                 alternatives=nearest,
             )
         return start
@@ -815,17 +838,20 @@ def offers_starts(reply: str, starts) -> bool:
     return bool(starts) and all(start.astimezone(hours.DUBAI).time() in named for start in starts)
 
 
-def _shape(answer: dict) -> dict:
+def _shape(answer: dict, places=calls.OFFICE_ONLY) -> dict:
     """A confirm the office cannot take becomes what it is, handed to a person and
     never confirmed: a viewing at the owner's property or a call is tentative, and
     so is anything for someone outside our segments (a job applicant's interview).
 
     The model wrote its reply for a confirmation, so the words that go out are
     then a fixed line (``answer["converted"]``), never its "you are confirmed".
+    A buyer's call on the sale track (``places``, calls.allowed) is booked like a visit, never handed over.
     """
     proposal = answer["appointment"]
     if proposal["action"] not in ("confirm", "reschedule"):
         return answer
+    if calls.allowed(proposal["place"], places):
+        return answer  # SALE (slice C): the call pool books it (check_proposal), the bot keeps answering the chat
     viewing = answer["handover"]["needed"] and answer["handover"]["reason"] == "owner_viewing_slot"
     if proposal["place"] in ("customer_property", "call") or viewing:
         place = proposal["place"] if proposal["place"] in ("customer_property", "call") else "customer_property"
@@ -1888,6 +1914,7 @@ def settle(
     crm_notes: str = "",
     residential: bool = False,
     residential_facts=None,
+    track: str = "",
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
@@ -1919,9 +1946,14 @@ def settle(
     What is cut or rewritten in the reply is listed in ``answer["trimmed"]``, so
     its English gloss no longer holds; ``answer["broker"]`` asks _apply to label
     and pause the chat; ``answer["pointed"]`` says the reply now points to the
-    location (its gloss got the same line).
+    location (its gloss got the same line). ``track``: the chat's (tracks.decide); a buyer's (the sale track, batch 2e
+    slice C) gets none of the shops' claims, discovery, licence or office-slot guards: sales.settle follows instead.
     """
     shops_chat = playbook == lane.IC_SHOPS
+    # The residential path (batch 2e: rent, sale, not known) and a buyer's answer (SALE, slice C) get none of the shops' own
+    # guards: residential.settle and, on the sale track, sales.settle follow with theirs.
+    residential = residential or (shops_chat and track == tracks.SALE)
+    shop_guards = shops_chat and not residential
     shop_facts = shops_facts or DEFAULT_SHOPS_FACTS
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites)
     if shops_chat:
@@ -1949,7 +1981,7 @@ def settle(
         answer["reply"], quoted = lead_history.drop_quoted(answer["reply"], crm_notes, theirs)
         if quoted:
             trimmed.append(lead_history.QUOTED)
-    elif shops_chat and answer["reply"] and not answer.get("converted"):
+    elif shop_guards and answer["reply"] and not answer.get("converted"):
         # Board T56: the prompt's old MATCH example ("For a mobile shop, Type 1 is perfect") went to
         # a vape shop. A recommendation names the customer's own business, or none (never a home: crm_facts).
         business = answer["facts"].get("business_activity") or (facts or {}).get("business_activity") or ""
@@ -2015,18 +2047,20 @@ def settle(
         # chat 114's second reply lost its "Sorry for the confusion.": people.is_apology).
         answer["reply"], repeated = filters.drop_repeats(
             answer["reply"], [text for author, text in earlier if author == "assistant"],
-            keep=lambda sentence: shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence)
-            or (residential and _residential_line(sentence)),
+            keep=lambda sentence: (
+                shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence) or sales.is_fixed_line(sentence)
+                or (residential and _residential_line(sentence))
+            ),
         )
         if repeated:
             trimmed.append("repeat")
-    if shops_chat and not residential and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
+    if shop_guards and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
         answer, [text for author, text in earlier if author == "assistant"], new_texts, shop_facts
     ):
         # Launch review issue 16: the size and price table our messages gave already, said again unasked.
         trimmed.append(claims.TABLE)
     plain_shops = (
-        shops_chat and not residential and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
+        shop_guards and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
         and not answer["handover"]["needed"] and not agreed
     )
     if plain_shops and licence_first(answer, facts or {}, earlier, new_texts, now):
@@ -2047,7 +2081,7 @@ def settle(
         # Where we are, asked by a known end user, answered with no invitation: code's two slots close it (the launch gate's
         # eval shops-location-counted-81).
         trimmed.append("location_invitation")
-    if shops_chat and answer["reply"] and not answer.get("converted") and now is not None:
+    if shop_guards and answer["reply"] and not answer.get("converted") and now is not None:
         # Launch review issue 17: the model's own times, an hour ahead and an hour apart at least, never past or taken;
         # a time they named stands (unless it has passed), and so does any time ahead when they want to come now.
         lately = [text for author, text in earlier if author == "customer"][-6:]
@@ -2156,6 +2190,8 @@ def ask_model(
     name: str = "",
     need_segment: str = "",
     residential: bool = False,
+    places=calls.OFFICE_ONLY,
+    call_taken=(),
 ):
     """(answer, validated time, completions, rejection reason, still_invalid).
 
@@ -2182,7 +2218,9 @@ def ask_model(
     their booking is never _shape's "holding" (the owner's rule: they are invited and booked
     like anyone). ``residential``: a rent, sale or not-known chat of the International City
     campaign (batch 2e): RES_SCHEMA and its own prompt cache key (the caller passes RES_SYSTEM),
-    its segment forced by the track (``need_segment``).
+    its segment forced by the track (``need_segment``). ``places`` / ``call_taken``: a buyer's
+    call on the sale track (batch 2e slice C), which _shape leaves a confirm and check_proposal
+    books in the call pool.
 
     A slot another client has is offered around by code (``answer["slot_taken"]``,
     shops.slot_taken with ``alternatives``) when the answer keeps the visit
@@ -2207,7 +2245,7 @@ def ask_model(
         normal = schema.normalize(data, shops=shops_chat, residential=residential)
         if need_segment and normal["segment"] == "other":
             normal["segment"] = need_segment
-        return _shape(normal)
+        return _shape(normal, places)
 
     answer = shaped(first.data)
 
@@ -2261,7 +2299,7 @@ def ask_model(
     def checked(answer):
         when = check_proposal(
             answer["appointment"], appointment, now, closed_dates, grounding=grounding, segment=answer["segment"], taken=taken,
-            said=said,
+            said=said, places=places, call_taken=call_taken,
         )
         if _said_again(answer, when, appointment, said):
             answer["appointment"] = dict(NO_TIME)
@@ -3739,14 +3777,15 @@ def office_lock():
                 logger.exception("Lead AI could not release the office booking lock")
 
 
-def _slot_gone(conversation, when, appointment, now, closed_dates, said: str) -> list | None:
+def _slot_gone(conversation, when, appointment, now, closed_dates, said: str, place: str = "office") -> list | None:
     """Another chat's visit took this slot while the model was thinking: the free starts
     nearest it (to offer instead), else None (still free, the time they already have, or
-    a walk-in)."""
+    a walk-in). ``place`` "call": a buyer's call, looked up in the call pool (calls.taken; batch 2e slice C)."""
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
-    if (confirmed and appointment.starts_at == when) or _walk_in(when, said, now):
+    call = place == calls.PLACE
+    if (confirmed and appointment.starts_at == when) or (not call and _walk_in(when, said, now)):
         return None
-    taken = taken_slots(conversation, now)
+    taken = calls.taken(conversation, now) if call and calls.OWN_POOL else taken_slots(conversation, now)
     if not hours.is_taken(when, taken):
         return None
     own = [appointment.starts_at] if confirmed and appointment.starts_at else []
@@ -4005,6 +4044,11 @@ def _run_claimed(
         "lead": tracks.lazy(lambda: lead_context.for_turn(conversation, chat, state, now)), "clusters": tracks.cluster_names(settings_row),
     }
     decision = tracks.decide(words=words_now, facts=facts, **track_inputs) if shops_chat else None
+    # SALE (slice C, sales.py, calls.py): a buyer's turn may book a 5-minute call in the call pool (spec §3.3). The sale flow
+    # rides on the residential path (RES_SYSTEM's sale section, residential.settle): off with it (residential.RENT_LIVE).
+    sale = decision is not None and decision.track == tracks.SALE and residential.live_track(decision.track)
+    call_taken = calls.taken(conversation, now) if sale else []
+    called = sold = ""  # what the sale steps did (the turn's actions "sale")
     need = None
     brokered = ""  # what handed a broker over that the model did not (brokers.backstop)
     shops_rule_name, shops_words = "", ""
@@ -4080,9 +4124,16 @@ def _run_claimed(
         if res:
             # The rent flow's block (spec §2.3): the lead context is read for it (once per chat, lead_context.for_turn).
             lead_now = track_inputs["lead"].get()
+            # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
+            sale_parts = sales.context_parts(
+                facts, decision.unit, decision.clusters,
+                [(transcript.who(row, campaign_templates), transcript.outbound_text(row)) for row in rows if row.direction == Message.Direction.OUTBOUND],
+                now, settings_row.closed_dates, call_taken, settings_row.residential_facts,
+            ) if sale else {}
             res_context = residential.context(
                 settings_row, decision.track, decision.unit, decision.clusters, now, taken, lead=lead_now,
                 full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment),
+                **sale_parts,
             )
         context = prompt.context_message(
             now=now,
@@ -4124,6 +4175,9 @@ def _run_claimed(
             name=greeted,
             need_segment=residential.segment_of(decision.track) if res else (needs.SEGMENTS[need_seen.kind] if need_seen is not None else ""),
             residential=res,
+            # SALE (slice C): a buyer may book a call (calls.PLACES), checked against the call pool.
+            places=calls.places_for(tracks.SALE if sale else ""),
+            call_taken=call_taken,
         )
         if (licence_media is not None or licence_page) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
             answer["handover"] = {"needed": False, "reason": None}  # the photo is the licence we asked for
@@ -4144,11 +4198,24 @@ def _run_claimed(
             decision = tracks.decide(
                 words=words_now, facts=facts, model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **track_inputs
             )
-            if res and residential_switch(
+            switched = res and residential_switch(
                 answer, res_decision, decision, facts, words_now, said_words, now, settings_row.closed_dates, taken, state.invites,
-            ):
+            )
+            if switched:
                 # The model's tag moved the chat (spec §1.4.5): the new track's words are code's, and no time of the model's.
                 when, still_invalid = None, False
+            # SALE (slice C): the sale steps follow the track as the model's tag leaves it, on the residential path only.
+            if res and decision.track == tracks.SALE and not sale:
+                call_taken = calls.taken(conversation, now)
+            sale = res and decision.track == tracks.SALE
+            if sale and not switched:
+                # SALE (slice C): a buyer's call: booked at their own day and hour, else two free call slots; never 2d's
+                # call_requested handover, and a buyer abroad gets the call (sales.call_step).
+                when, called = sales.call_step(
+                    answer, when, appointment=appointment, said=said_words, words=grounding[0], our_last=our_last, ours=ours, now=now,
+                    closed_dates=settings_row.closed_dates, taken=call_taken, still_invalid=still_invalid,
+                    handed_over=state.handed_over_at is not None, grounding=grounding,
+                )
         if shops_chat and not still_invalid:
             # Their own exact day and hour, which the model confirmed at another time ("4:30 PM today is fine" booked at 4:00 PM).
             mine = own_time(
@@ -4226,7 +4293,7 @@ def _run_claimed(
         broker_labelled=answer["handover"]["reason"] == BROKER and conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
         address_sent=settings_row.office_address if location else "",
         slots=invitation_slots(answer, appointment, said_words, now, settings_row.closed_dates, taken, may_invite=may_invite)
-        if shops_chat
+        if shops_chat and not sale
         else None,
         now=now,
         facts=facts,
@@ -4239,6 +4306,8 @@ def _run_claimed(
         crm_notes=(state.lead_notes or "") if shops_chat else "",
         residential=res,
         residential_facts=settings_row.residential_facts,
+        # The track as the model's tag leaves it, on the residential path (a shop chat's turn stays 2d's: shops guards on).
+        track=decision.track if res else "",
     )
     if res and not shops_rule_name and not deferred:
         # The rent flow's guards (spec §2.9, hook point 7): figures by unit and deal, code's commission and VAT lines, no
@@ -4259,7 +4328,16 @@ def _run_claimed(
     who = ""
     need_slots = ()
     misread = False
-    if shops_chat and not res and not shops_rule_name and not deferred:
+    if sale and not shops_rule_name and not deferred:
+        # SALE (slice C): a buyer's steps in place of who_they_are, after residential.settle: the questions in their order,
+        # the price never hidden, no media first, the call slots, the sales handovers (sales.settle).
+        sold = sales.settle(
+            answer, facts=facts, texts=words_now, said=said_words, earlier=earlier, now=now, closed_dates=settings_row.closed_dates,
+            office_taken=taken, call_taken=call_taken, residential_facts=settings_row.residential_facts, unit=decision.unit,
+            clusters=decision.clusters, when=when, still_invalid=still_invalid, quiet=state.handed_over_at is not None,
+            may_invite=may_invite,
+        )
+    elif shops_chat and not res and not shops_rule_name and not deferred:
         # Who the customer is: someone who wants no shop to rent gets the owner's line (never the shop
         # list, never lost), someone who rented one already the second-shop question (who_they_are).
         wants = need is not None or needs.of(facts) is not None
@@ -4397,6 +4475,8 @@ def _run_claimed(
         plan["broker_backstop"] = brokered  # a broker the model served as an end user, handed over by code (brokers.py)
     if decision is not None:
         plan["track"] = decision.as_dict()  # the chat's track and unit as code decided them (batch 2e, tracks.py; shadow)
+    if called or sold:
+        plan["sale"] = {key: value for key, value in (("call", called), ("step", sold)) if value}  # the sale steps (sales.py)
     # Their words, for the alerts a person must act on (a handover, a chase, a call's time); in a shops chat an Emirates ID,
     # an IBAN or a card number in them is masked (PDPL, batch 2e spec §6.3), and so it is in the facts this turn stores.
     answer["their_words"] = residential.mask(_their_words(burst, heard)) if shops_chat else _their_words(burst, heard)
@@ -4467,15 +4547,17 @@ def _run_claimed(
     # What happens, and the words ---------------------------------------------------------
     language = line_language
     # The rent and sale tracks book under the customer's full name (spec §2.6): their words, the lead's NAME and LAST_NAME,
-    # or a bare name right after our ask; a time held for it is booked once it comes, and a no keeps it for our agent.
+    # or a bare name right after our ask; a time held for it is booked once it comes, and a no keeps it for our agent. A
+    # buyer's call (SALE, slice C) is held and booked at its own place, in the call pool (spec §3.3.2).
     res_book = res and decision is not None and decision.track in (tracks.RENT, tracks.SALE)
     full_name = ""
     if res_book:
+        held = residential.held_of(appointment)
         name_step = residential.name_turn(
-            answer, facts, track_inputs["lead"].get(), held=residential.held_of(appointment),
+            answer, facts, track_inputs["lead"].get(), held=held,
             asked=last_ours is not None and transcript.payload(last_ours).get("res_step") == residential.FULL_NAME_STEP,
             texts=words_now, said=said_words, when=when, still_invalid=still_invalid, rule=bool(shops_rule_name or deferred), now=now,
-            closed_dates=settings_row.closed_dates, taken=taken,
+            closed_dates=settings_row.closed_dates, taken=call_taken if held is not None and held["place"] == calls.PLACE else taken,
         )
         full_name = name_step.full_name
         if name_step.when is not None:
@@ -4500,7 +4582,9 @@ def _run_claimed(
         # booking is stored): another chat may have booked it while the model thought.
         if hold is not None:
             hold.enter_context(office_lock())
-        gone = _slot_gone(conversation, when, appointment, now, settings_row.closed_dates, said_words)
+        gone = _slot_gone(
+            conversation, when, appointment, now, settings_row.closed_dates, said_words, place=answer["appointment"].get("place") or "office"
+        )
         if gone is not None:
             codes.append("taken")
             alternatives[:] = gone
@@ -4535,9 +4619,12 @@ def _run_claimed(
 
     def booking_text(rescheduled: bool) -> str:
         if res_book:
-            # The rent viewing's (or the sale office meeting's) confirmation, under their full name (spec §2.7).
+            # The rent viewing's (or the sale office meeting's) confirmation, or a buyer's call (SALE, slice C:
+            # res_call_booked), under their full name (spec §2.7, §3.3.3).
+            place = answer["appointment"].get("place") or (appointment.place if appointment is not None else "")
             return residential.confirmation(
-                language, when, kind=residential.VISIT, full_name=full_name or residential.full_name_known(merged, track_inputs["lead"].get()),
+                language, when, kind=residential.CALL if place == calls.PLACE else residential.VISIT,
+                full_name=full_name or residential.full_name_known(merged, track_inputs["lead"].get()),
                 unit=decision.unit, clusters=decision.clusters, office_address=settings_row.office_address, maps_url=maps,
                 track=decision.track, rescheduled=rescheduled,
             )
@@ -4610,12 +4697,19 @@ def _run_claimed(
         # open question, and never the slot they are moving from. A reply that names two
         # times already (the day they asked for, settle's slots) goes as it is.
         own = [appointment.starts_at] if confirmed and appointment.starts_at else []
-        text = shop_flow.reschedule_text(language, hours.offer_pair(now, settings_row.closed_dates, [*taken, *own]), now)
+        # SALE (slice C): a buyer's call moves within the call pool (calls.taken), a visit within the office's.
+        pool = calls.taken(conversation, now) if calls.is_sales_call(appointment) else taken
+        text = shop_flow.reschedule_text(language, hours.offer_pair(now, settings_row.closed_dates, [*pool, *own]), now)
         plan["fallback"] = "reschedule_slots"
-    elif state.handed_over_at is not None:
+    elif answer.get("sale") and state.handed_over_at is None:
+        # SALE (slice C): a sale step's own words (sales.text): the buyer media line, the call slots, the sales handover.
+        text = sales.text(answer["sale"], language, now)
+        holding = answer["sale"].get("kind") == sales.HANDOVER
+    elif state.handed_over_at is not None and not residential.name_gate_line(answer):
         # A person has the chat (people.quiet_reply, launch review issues 4 and 21): a thanks or a goodbye gets
         # nothing; a chase, an apology and the team alerted again (_apply); a call asked for or its time, passed
-        # on; anything else the holding line, at most every two hours, as before.
+        # on; anything else the holding line, at most every two hours, as before. The full-name gate's own words
+        # (the name asked, the time noted) go even then, as the booking they stand for would (spec §2.6).
         lately = state.holding_line_at is not None and now - state.holding_line_at <= people.QUIET_LINE_EVERY
         quiet_kind, text = people.quiet_reply(
             need_texts(said or burst, heard), language, shops=shops_chat, reason=state.handover_reason, answer=answer,
@@ -4708,7 +4802,8 @@ def _run_claimed(
     else:
         if answer["send"]:
             if res:
-                # Two questions at most on the rent and sale tracks, and amounts checked from 100 up (spec §1.4.9).
+                # Two questions at most on the rent and sale tracks (a buyer's go two to a message: brief Part 5B), and
+                # amounts checked from 100 up (spec §1.4.9).
                 text, filtered = filters.clean_reply(
                     answer["reply"], rows_context, max_questions=residential.max_questions(decision.track), amount_floor=residential.AMOUNT_FLOOR,
                 )
@@ -4851,7 +4946,8 @@ def _run_claimed(
     turn.reply_message_id = sent.pk
     LeadAiTurn.objects.filter(pk=turn.pk).update(reply_message=sent, actions={**(turn.actions or {}), **done})
 
-    if (done.get("appointment", {}).get("event") in ("confirmed", "rescheduled") or pin_now) and settings_row.has_pin:
+    # SALE (slice C): a buyer's call needs no office pin (our sales team calls them on this number).
+    if (done.get("appointment", {}).get("event") in ("confirmed", "rescheduled") or pin_now) and settings_row.has_pin and calls.needs_pin(answer):
         try:
             from apps.inbox import services as inbox_services
 
@@ -5059,6 +5155,9 @@ def _apply(
             current.customer_name = name[:200]
             current.mobile = conversation.contact.wa_id[:32]
             current.details = _details(facts)
+            if proposal.get("place") == calls.PLACE:
+                # SALE (slice C): a buyer's call, booked in the call pool (only the sale track ever confirms one).
+                calls.mark(current)
             current.customer_state = ""
             current.eta_at = None
             current.reminder_due_at = hours.reminder_due(when, now)
@@ -5106,8 +5205,10 @@ def _apply(
                 current.starts_at = start
                 current.customer_name = name[:200]
                 current.mobile = conversation.contact.wa_id[:32]
-                # A time held for the full name keeps its marks while it stays a tentative (residential.held_details).
+                # A time held for the full name keeps its marks while it stays a tentative (residential.held_details), and a
+                # buyer's call held for it is the call pool's (SALE, slice C: sales.mark_hold).
                 current.details = {**_details(facts), **(residential.held_details(current.details) if not is_new else {})}
+                sales.mark_hold(current, answer)
                 current.log("tentative", note=note, place=place, start=start.isoformat() if start else None)
                 current.save()
                 crm_event = "tentative"
@@ -5166,7 +5267,8 @@ def _apply(
             if {k: v for k, v in _details(facts).items() if k in keys} != {
                 k: v for k, v in (current.details or {}).items() if k in keys
             }:
-                current.details = {**_details(facts), **residential.held_details(current.details)}
+                # A full-name hold keeps its marks (residential.held_details), a buyer's call its own (SALE: calls.kept_details).
+                current.details = calls.kept_details({**_details(facts), **residential.held_details(current.details)}, current)
                 current.save(update_fields=["details", "updated_at"])
         if shops_chat and current is not None and current.pk and current.status == LeadAiAppointment.Status.TENTATIVE:
             # The rent flow's full-name hold (spec §2.6): the tentative that keeps their time from other chats, how often we
@@ -5312,6 +5414,8 @@ def appointment_alert(conversation, chat, appointment, event: str, hot: bool, na
     else:
         stamp = f"{appointment.starts_at:%Y%m%d%H%M}" if appointment.starts_at else "none"
     details = _detail_lines(appointment.details or {})
+    if calls.alert(conversation, appointment, event, who, details, stamp=stamp, crm_url=crm_url):
+        return  # SALE (slice C): a buyer's call booked, moved or held: "Sales call: {name}, {when}" (spec §3.3.4)
     when = hours.describe(appointment.starts_at) if appointment.starts_at else ""
     at = hours.time_label(appointment.starts_at) if appointment.starts_at else ""
     if event == "confirmed" and hot:

@@ -455,6 +455,8 @@ def residential_lines(ctx) -> list[str]:
         f"TRACK: {ctx.track}",
         "RES FACTS (quote only these; rents are per year, in AED):\n" + ctx.facts,
     ]
+    if getattr(ctx, "sale_step", ""):
+        lines.append(ctx.sale_step)  # the sale track's next questions (sales.step_line, batch 2e slice C)
     if ctx.charges:
         lines.append(
             "CHARGE LINES (say them in the customer's language; the system writes the commission and VAT lines):\n"
