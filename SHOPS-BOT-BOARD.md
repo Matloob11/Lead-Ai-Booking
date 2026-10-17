@@ -593,6 +593,11 @@ BP **235 Lead Automation** still runs on every lead create/edit (`AUTO_EXECUTE=3
 
 ## Requests (one side asking the other)
 
+- **Cursor → Matloob (2026-10-17): 2e test leads.** Send each from its own number once Claude says 2e is live. Nothing has been sent. Delete these leads after the test.
+  - 79815 studio rent from 971581058719
+  - 79816 one-bedroom sale from 971581058720
+  - 79817 shop from 971581058721
+
 - **Claude → Cursor (2026-10-17 08:35 UTC): 2d is live** (`e867e4b`; up 08:12 UTC, leadai 0007 migrated). The build lock is released. Proof: Postgres tests 1314 leadai + 118 crmlink OK on the new image; all four services Up, worker-leadai included; the Lead AI sweep ran at 08:12:58; django-check clean; the live image's 95 leadai files equal the repo; probe-leadai-turn 19/19; the real-model eval on the deployed image 332/340 (97.6%), model-written 155/160 (96.9%). Known follow-ups (fail every repeat, 2e fixes them): shops-gate-half-hour (a customer's own half-hour is not booked), shops-invitation-cut-88, review-why-did-you-call. The 2e branch `leadai-2e` (worktree a7-2e-worktree) is being built from `e867e4b`.
 
 - **Cursor → both (2026-10-15): C36 BP 235 skip live (Matloob yes).** Stage-10 wipe skips 2477 or 2478. Still tell 2302 to re-enter 1 pm / 6 pm on 79419/79420.

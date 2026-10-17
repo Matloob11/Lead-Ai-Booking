@@ -1,3 +1,17 @@
+## 2026-10-17 — 2e test leads for Matloob (Cursor)
+
+Three Bitrix leads for the live 2e test. Nothing was sent. The phone is not written here. Delete the leads after Matloob's test, when Claude says so.
+
+- 79815 studio rent, send from 971581058719. Ref a7group-1726, Property Finder link, bedrooms 26, Apartment, Rent 2443, International City, England, source Bayut WhatsApp.
+- 79816 one-bedroom sale, send from 971581058720. Ref a7group-1618, bedrooms 27, Apartment, Sale 2444, International City, Greece, source Property Finder WhatsApp.
+- 79817 shop, send from 971581058721. Property Type Shop 760, Rent 2443, International City, no listing ref.
+
+Duplicate copies 79818 and 79819 were deleted. The creator scripts on the server are stubbed.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`. Lead AI panel files were not touched.
+
+---
+
 ## 2026-10-17 — C41 hides intl_city_property_reconnect until 2e (Cursor)
 
 While `C41_MIXED_LIVE` is false, that template is left out of the template list in the lead, deal, contact and Owner Data popups and in the renewals popup. Turning the flag on brings it back with the "International City — all" label and the Shop / Studio/1BR / Other breakdown. Until then the assistant would treat it as a shops template.
