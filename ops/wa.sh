@@ -768,7 +768,7 @@ case "$cmd" in
         *) die "leadai-eval takes --only ID, --repeat N, --show and --list" ;;
       esac
     done
-    remote "cd $APP_DIR && docker compose exec -T $service python manage.py leadai_eval ${args[*]:-} 2>&1 | tail -200"
+    remote "cd $APP_DIR && docker compose exec -T $service python manage.py leadai_eval ${args[*]:-} 2>&1 | tail -600"
     ;;
 
   probe-leadai-turn)
@@ -1119,6 +1119,20 @@ case "$cmd" in
       die "submit-shops-templates takes no arguments, or --dry-run"
     fi
     remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_shops_templates $flag"
+    ;;
+
+  submit-ic-templates)
+    # The International City mixed template (board Q34): intl_city_property_reconnect to the
+    # eight sending numbers' WABAs (board D4). A WABA that has it already, in any status, keeps it
+    # untouched. --dry-run says what would go and submits nothing. Runs in beat, whose /app is the
+    # build context, because the command is new there before the 2e image is built.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "submit-ic-templates takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T beat python manage.py submit_ic_templates $flag"
     ;;
 
   crm-mirror-backfill)
