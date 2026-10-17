@@ -1,3 +1,23 @@
+## 2026-10-17 — Lead AI batch 2e: the six lanes merged into one branch (Claude Code)
+
+Branch `leadai-2e` in the worktree `a7-2e-worktree`: RENT (slice B) with SALE (`leadai-2e-c`), DESK (`leadai-2e-desk`), CRM (`leadai-2e-d`), MEDIA (`leadai-2e-e`) and FOLLOW-UPS (`leadai-2e-fu`) merged one at a time, one merge commit each. Not pushed, not deployed. SALE and MEDIA left no entry of their own: their work is summed up here.
+
+- **SALE (slice C):** `assistant/sales.py` (a buyer's five questions in three messages, the price never hidden, no media first, the call slots, negotiation, mortgage, DLD and legal questions to our sales team) and `assistant/calls.py` (the call pool: one sales call per half hour, no office slot, Q40; C40's Online 43 and "Sales call" to-do; the "Sales call" alert, the call's reminder and taps). `tracks.SALE_LIVE` on.
+- **MEDIA (slice E):** `LeadAiUnitMediaSet` and `unit_media.py` (the studio and one-bedroom sets, same type only, six-language captions, Q36), the `Apartment photos` panel module, reminder v2 where approved (a call keeps v1) and its Office Location tap (T45), the shop buyer's no-price line and alert (Q43).
+- **How the merge joined them:**
+  - The full-name gate is the rent lane's (`residential.name_turn`, `hold_for_name`) on both tracks; a buyer's call is held and booked at place "call" (`held_of` carries the place; a held call gone by gets two free call slots). SALE's stand-in module `residential_shared.py` is deleted: its callers use the rent lane's real functions (`sale_band`, `full_name_known`, `handover_line`, `commission_answer`, `confirmation`, `res_full_name`).
+  - The sale flow rides on the residential path: RES_SYSTEM's sale section, `residential.settle`, then `sales.settle` in who_they_are's place; `RENT_LIVE` off turns it off too. The context carries SALE STEP and CALL SLOTS on the sale track.
+  - The full-name gate's lines go even while a person holds the chat, as the booking they stand for would.
+  - DESK's track prefix stays on every rent or sale alert: "Sale · Studio · Sales call: …".
+  - MEDIA: "Here are the photos." is kept only when a set's photos really go (a dry run of the media step before `residential.settle`; a booking claim beside it is still cut). `shop_buyer` runs off the residential path only.
+  - Migrations: one chain, leadai 0008 → `0009_appointment_taken_by` (DESK) → `0010_unit_media_sets` (MEDIA, renumbered from 0009); accounts `0011_agent_can_lead_ai` (DESK).
+- **Proof:** suite 1813 OK on SQLite (`apps.leadai apps.crmlink`) after the last merge, and green after each one (1638, 1691, 1727, 1784, 1813); `makemigrations --check`: No changes detected after each; the panel modules parse (`node --check`). The photo-claim fix fails its tests with the dry run switched off.
+- **Not tested:** the real-model eval (RES_SYSTEM has never been sent to the model), PostgreSQL, the live server, Bitrix, WhatsApp, the panel inside Bitrix.
+- **Still open from the lanes:** `crm.DETAIL_LABELS` and `residential.summary_lines` in the alerts; the C40 to-do on a deletion request; a check-back yes sending the mixed template.
+- **Shared files touched by the merge:** `engine.py`, `leadai_eval.py`, `residential.py`, `sales.py`, `prompt.py`, `filters.py`, `unit_media.py`, `screen.js` (docstring), `test_eval_command.py`, `test_residential_turns.py`, `test_residential_crm.py`, `test_sales_calls.py`, `test_unit_media.py`, TASKS.md. A deploy rebuilds all four app services, `worker-leadai` included, with `migrate-new-image` first (two new leadai migrations and one accounts migration).
+
+---
+
 ## 2026-10-17 — Lead AI batch 2e slice B: the rent flow (Claude Code)
 
 Branch `leadai-2e` in the worktree `a7-2e-worktree`, on slice A (d9155bc). RENT lane of the parallel 2e build. Committed in the worktree only: not merged, not pushed, not deployed.
