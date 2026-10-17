@@ -1135,6 +1135,9 @@ def write_crm_fields(self, row_ids) -> None:
             sent_at=now, error=crm_fields.HELD_ALREADY, retry_at=None
         )
         live = [row for row in live if row not in held]
+    # Batch 2e: a Rent/Sale, Client Type or Bedrooms the lead holds otherwise than the customer now says is left as it is,
+    # and its timeline says so, once (crm_fields.held_notes; spec §5).
+    note = crm_fields.held_notes(current, held)
     # A shops "no": its lost stage only for a lead nobody is working, with no open to-do (assistant/lost.py).
     moves = [row for row in live if row.field == crm_fields.LOST]
     kept: dict[int, str] = {}
@@ -1163,6 +1166,7 @@ def write_crm_fields(self, row_ids) -> None:
                     row.payload = {**(row.payload or {}), lost.KEPT_COMMENT: now.isoformat()}
                     LeadAiCrmField.objects.filter(pk=row.pk).update(payload=row.payload)
             logger.info("Lead AI kept lead %s in its stage on a no: %s", lead_id, decision.why)
+    comment = "\n".join(part for part in (comment, note) if part)
     posting = [row for row in live if row.pk not in kept]
     if not posting and not comment:
         for pk, why in kept.items():
@@ -1333,6 +1337,19 @@ FIELD_NAMES = {
     "UF_CRM_LEAD_1737031634747": "Purpose",
     "UF_CRM_A7_AI_BUSINESS_ACTIVITY": "Business activity",
     "UF_CRM_A7_AI_TRADE_LICENSE_STATUS": "Trade license status",
+    # Batch 2e's residential fields (assistant/crm_fields.residential_writes).
+    "UF_CRM_A7_RENT_SALE": "Rent/Sale",
+    "UF_CRM_1756638760279": "Client Type",
+    "UF_CRM_1731838126127": "Bedrooms",
+    "UF_CRM_1731838581336": "Budget",
+    "UF_CRM_A7_CLUSTERS": "Clusters",
+    "UF_CRM_A7_TIMELINE": "Timeline",
+    "UF_CRM_A7_FULL_NAME": "Full name",
+    "UF_CRM_A7_BALCONY": "Balcony",
+    "UF_CRM_A7_VACANT_RENTED": "Vacant or rented",
+    "UF_CRM_A7_PAYMENT": "Payment",
+    "UF_CRM_A7_OCCUPANCY": "Occupancy",
+    "email": "E-mail",
     "lost": "the move to a lost stage",
     "license_file": "the trade licence copy (it is in the chat)",
 }

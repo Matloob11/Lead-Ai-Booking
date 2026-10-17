@@ -166,6 +166,12 @@ ic_templates) has its own first yes: code's opener for the studio or one-bedroom
 otherwise, never the for-whom line by default; its "Not now" and "Stop messages" are the shops' own. Nothing else changes
 for a customer in slice A: the scenarios of the track traps keep 2d's answers and add the track code stores in shadow.
 ``full_name_asked`` and ``held`` wait for slice B's full-name gate.
+
+Batch 2e, the CRM (spec §5, board T95), mirrored the same way: a studio or one-bedroom chat's own Bitrix lead fields are
+what engine._apply queues (``run.crm``: crm_fields.residential_writes, with the facts as the turn leaves them and the track
+it stores; a broker's turn keeps its Purpose Broker). Every shops scenario checks that the Lead fields tool would take
+them (crm_ok: one field or value off its allow-list refuses the whole batch, Bot Status included); the shops-crm-*
+scenarios check the values (crm_writes, no_crm_write).
 """
 
 from __future__ import annotations
@@ -187,6 +193,7 @@ from apps.leadai import ic_templates, shop_templates
 from apps.leadai.assistant import (
     brokers,
     claims,
+    crm_fields,
     engine,
     filters,
     hours,
@@ -213,6 +220,7 @@ from apps.leadai.models import (
     DEFAULT_RESIDENTIAL_FACTS,
     DEFAULT_SHOPS_FACTS,
     LeadAiAppointment,
+    LeadAiCrmField,
 )
 
 DUBAI = hours.DUBAI
@@ -1013,6 +1021,67 @@ def track(expected: str, unit: str | None = None, *, deal: str | None = None, cl
         return "; ".join(misses) or None
 
     return _check("track", test)
+
+
+# The lead fields a studio or one-bedroom chat writes (batch 2e), by the names Bitrix shows them under.
+CRM_NAMES = {
+    crm_fields.FIELD_RENT_SALE: "Rent/Sale",
+    crm_fields.FIELD_CLIENT_TYPE: "Client Type",
+    crm_fields.FIELD_BEDROOMS: "Bedrooms",
+    crm_fields.FIELD_PURPOSE: "Purpose",
+    crm_fields.FIELD_BUDGET: "Budget",
+    crm_fields.FIELD_CLUSTERS: "Clusters",
+    crm_fields.FIELD_TIMELINE: "Timeline",
+    crm_fields.FIELD_FULL_NAME: "Full name",
+    crm_fields.FIELD_BALCONY: "Balcony",
+    crm_fields.FIELD_VACANT_RENTED: "Vacant or rented",
+    crm_fields.FIELD_PAYMENT: "Payment",
+    crm_fields.FIELD_OCCUPANCY: "Occupancy",
+    crm_fields.EMAIL: "E-mail",
+}
+
+
+def _crm_name(field_code: str) -> str:
+    return CRM_NAMES.get(field_code, field_code)
+
+
+def crm_writes(*expected) -> Check:
+    """The turn writes these to the Bitrix lead (crm_fields.residential_writes, as engine._apply queues them; batch 2e spec
+    §5): (field, value) pairs, a value of None for any non-empty one."""
+
+    def test(run):
+        got = {field_code: value for field_code, value, _ in run.crm}
+        misses = []
+        for field_code, value in expected:
+            if field_code not in got:
+                misses.append(f"no {_crm_name(field_code)} written")
+            elif value is not None and got[field_code] != value:
+                misses.append(f"{_crm_name(field_code)} {got[field_code]!r}, expected {value!r}")
+        return "; ".join(misses) or None
+
+    return _check("crm", test)
+
+
+def no_crm_write(*fields) -> Check:
+    """The turn writes none of these to the Bitrix lead."""
+
+    def test(run):
+        got = [_crm_name(field_code) for field_code, _, _ in run.crm if field_code in fields]
+        return f"writes {', '.join(got)} to the lead, expected none" if got else None
+
+    return _check("crm", test)
+
+
+def crm_ok() -> Check:
+    """What the turn writes to the Bitrix lead is a body the Lead fields tool takes (crm_fields.refusal, its allow-list):
+    one field or value it does not know refuses the whole batch with 400, Bot Status included (batch 2e spec §5)."""
+
+    def test(run):
+        rows = [LeadAiCrmField(lead_id=1, field=field_code, value=str(value)[:255], payload=payload or {}) for field_code, value, payload in run.crm]
+        why = crm_fields.refusal(crm_fields.body_for(rows, lead_id=1)) if rows else ""
+        return f"the Lead fields tool would refuse the turn's fields: {why}" if why else None
+
+    return _check("crm_ok", test)
 
 
 # Shop talk to someone who wants no shop to rent (the owner's rule, 2026-10-15), in what goes out.
@@ -4105,6 +4174,50 @@ SCENARIOS = [
         expect=[not_a_shop_line(), no_shop_list(), track("other", "two_plus")],
         words=CODE,
     ),
+    # Batch 2e, the CRM (spec §5, board T95): what a studio or one-bedroom chat writes to its Bitrix lead, through the Lead
+    # fields tool. Every shops scenario also checks the tool would take it (crm_ok); these check the values.
+    Scenario(
+        "shops-crm-rent-studio-spain",
+        "crm: 'a studio in Spain cluster' writes Rent/Sale Rent, Client Type Tenant and Bedrooms studio, while the lead's are empty",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a studio in Spain cluster"],
+        expect=[
+            track("rent", "studio", clusters=("Spain",)),
+            crm_writes((crm_fields.FIELD_RENT_SALE, 2443), (crm_fields.FIELD_CLIENT_TYPE, 1220), (crm_fields.FIELD_BEDROOMS, 26)),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-crm-for-myself-move-in",
+        "crm: a studio seeker's 'for myself, moving next month' writes Purpose 'I want for myself' and the Timeline",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=STUDIO_ANSWERED,
+        facts={key: value for key, value in WANTS_STUDIO.items() if key != "for_client"},
+        track="rent",
+        unit="studio",
+        invites=1,
+        new=["It's for myself. I want to move in next month"],
+        expect=[
+            track("rent", "studio"),
+            crm_writes((crm_fields.FIELD_PURPOSE, crm_fields.PURPOSE_MYSELF), (crm_fields.FIELD_TIMELINE, None)),
+            no_crm_write(crm_fields.FIELD_PAYMENT, crm_fields.FIELD_VACANT_RENTED),
+        ],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-crm-2br-writes-nothing",
+        "crm: a two-bedroom seeker (the other track) gets no residential field, never Bedrooms 2 B/R the tool refuses",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["We are a family of five, looking for a 2 bedroom flat to rent"],
+        expect=[
+            track("other", "two_plus"),
+            no_crm_write(*CRM_NAMES),
+        ],
+        words=CODE,
+    ),
 ]
 
 
@@ -4492,6 +4605,7 @@ class Run:
     line_language: str = ""  # the language code's own lines go out in (scripts.follow)
     may_invite: bool = True  # as engine._run_claimed: the chat may still be invited
     decision: tracks.Decision | None = None  # a shops chat's track and unit, as engine._run_claimed stores them (batch 2e)
+    crm: list = field(default_factory=list)  # a studio or one-bedroom chat's own lead fields, as engine._apply queues them
 
 
 def code_slots(scenario: Scenario, lang: str, slots: list, *, again: bool = False) -> str:
@@ -4655,6 +4769,9 @@ def checks_for(scenario: Scenario) -> list:
     if "action" not in declared and "action" not in scenario.loose:
         checks.append(no_booking())
     checks.extend(scenario.expect)
+    if scenario.playbook == IC_SHOPS and "crm_ok" not in declared:
+        # Batch 2e: whatever the turn writes to the lead, the Lead fields tool takes (one bad value refuses Bot Status too).
+        checks.append(crm_ok())
     if scenario.words == MODEL:
         checks.append(sends())
     if scenario.words in (MODEL, EITHER):
@@ -4859,6 +4976,14 @@ def run_once(scenario: Scenario, label: str) -> Run:
         run.answer, run.when, run.rejected, run.still_invalid = answer, when, rejected, still_invalid
         run.action = engine.effective_action(answer["appointment"]["action"], built.appointment)
         run.out_by, run.out = outgoing(run, built)
+        if shops_chat and run.decision is not None:
+            # As live (engine._apply, batch 2e spec §5): a studio or one-bedroom chat's own lead fields, from the facts as the
+            # turn leaves them and the track it stores; a broker's turn keeps its Purpose Broker (crm_fields.turn_writes').
+            broker = [(crm_fields.FIELD_PURPOSE, crm_fields.PURPOSE_BROKER, {})] if answer.get("broker") else []
+            merged = engine._merge_facts(known, answer["facts"])
+            run.crm = crm_fields.residential_writes(
+                merged, run.decision.track, run.decision.unit, words=" ".join(need_words(scenario)), besides=broker
+            )
         run.failures = [reason for check in checks_for(scenario) if (reason := check(run))]
         if scenario.words in (MODEL, EITHER):
             run.notes = [reason for check in REPLY_NOTES if (reason := check(run))]

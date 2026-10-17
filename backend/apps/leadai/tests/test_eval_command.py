@@ -553,6 +553,14 @@ RIGHT = {
     "shops-track-continuity-448": booked("2026-10-12", "17:00"),
     "shops-track-villa-jvc": answer("Great! What business will the shop be for?"),
     "shops-track-2br": answer("Great! What business will the shop be for?"),
+    # Batch 2e, the CRM: what a studio or one-bedroom chat writes to its lead (crm_fields.residential_writes).
+    "shops-crm-rent-studio-spain": answer("Great! What business will the shop be for?", facts={"community": "Spain Cluster"}),
+    "shops-crm-for-myself-move-in": answer(
+        "Perfect, next month. Our agent will meet you at our office and take you to the available apartments.",
+        segment="residential_tenant",
+        facts={"for_client": False, "move_in": "next month"},
+    ),
+    "shops-crm-2br-writes-nothing": answer("Great! What business will the shop be for?"),
 }
 
 
