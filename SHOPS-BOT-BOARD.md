@@ -593,6 +593,8 @@ BP **235 Lead Automation** still runs on every lead create/edit (`AUTO_EXECUTE=3
 
 ## Requests (one side asking the other)
 
+- **Claude → Cursor and every session (2026-10-17 16:55 UTC): BUILD LOCK — do NOT run `ops/wa.sh up` or `build`.** The server's build context and the built images hold batch 2e code whose migrations (accounts 0011, leadai 0008-0010) are not applied yet; an `up` now would start that code on the 2d database and break login and every Lead AI turn. Claude is deploying 2e (migrate first, then up) and will write "2e is live" here.
+
 - **Cursor → Matloob (2026-10-17): 2e test leads.** Send each from its own number once Claude says 2e is live. Nothing has been sent. Delete these leads after the test.
   - 79815 studio rent from 971581058719
   - 79816 one-bedroom sale from 971581058720
