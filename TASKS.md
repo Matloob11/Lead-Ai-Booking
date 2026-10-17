@@ -1,3 +1,19 @@
+## 2026-10-17 — Lead AI batch 2e, lane CRM (T95): a studio or one-bedroom chat's own Bitrix fields through C6 (Claude Code)
+
+Built in the worktree `a7-2e-wt-d` (branch `leadai-2e-d`, commit `11feb0e`) on slice A, for the 2e merge. Not merged, not deployed.
+
+- **What a turn writes** (`crm_fields.residential_writes`, behind `RES_FIELDS_LIVE`, which is on because C39 is live): rent and sale tracks only, in the same batch as the turn's Bot Status.
+  - Only while the lead's own field is empty: Rent/Sale, Client Type, Bedrooms (studio or 1BR only), Purpose (805 "for myself" on rent; 804/805 from the buyer's purpose, never from "for myself" alone), Budget.
+  - Written when they change, because they are the bot's own record: Clusters, Balcony, Full name, Timeline, Occupancy (rent, never "bachelor"), Vacant or rented and Payment (sale).
+  - The e-mail, and only one the tool's FILTER_VALIDATE_EMAIL accepts.
+- **The write:** a Rent/Sale, Client Type or Bedrooms that the lead holds with another value is left as it is, and the lead's timeline says so, once. A Client Type is never written while the lead has a Rent/Sale, because `a7_rent_sale.php` would re-derive it. Text fields stay text. Purpose Broker is never replaced by a Purpose of ours.
+- **Eval:** `run.crm` mirrors the engine; every shops scenario checks that the tool would accept its fields (`crm_ok`). Three new `shops-crm-*` scenarios.
+- **Proof:** local suite 1543 OK (SQLite; 1507 before). 17 guards switched off fail 25 tests (scratchpad `crm2e/guards_off.py`). `makemigrations --check` clean; no migration.
+- **Not tested:** the real-model eval, PostgreSQL, the live C6 tool (the body has the shape of C39's proof on lead 79752), Bitrix.
+- **Shared:** `engine.py` (one call in `_apply`), `tasks.py` (two lines in `write_crm_fields`, plus `FIELD_NAMES`), `leadai_eval.py`, `test_eval_command.py`, `test_who_the_customer_is.py` (chat 44's fields assertion), `TASKS.md`.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
 
 - **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.
