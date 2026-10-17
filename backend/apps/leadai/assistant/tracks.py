@@ -53,8 +53,9 @@ ONE_BR = "one_br"
 TWO_PLUS = "two_plus"
 # The units the rent and sale flows serve; any other home is OTHER.
 UNITS = (STUDIO, ONE_BR)
-# Slice C (T94) switches the sale flow on; until then a buyer goes to OTHER (2d's invitation: nobody is lost).
-SALE_LIVE = False
+# Slice C (T94) switches the sale flow on (sales.py, calls.py); with it off a buyer goes to OTHER (2d's invitation: nobody
+# is lost).
+SALE_LIVE = True
 
 # Which step decided (Decision.reason), and where a deal came from (Decision.deal_from).
 WORDS = "words"

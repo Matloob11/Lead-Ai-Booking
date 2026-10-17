@@ -146,6 +146,17 @@ facts.need, the lead context (read from Bitrix only when a step needs it, once p
 the turn's actions carry them, in shadow: no reply changes, except the first yes to the mixed template, which is never the
 shops' for-whom line by default (shops_rule's MIXED_YES: the opener for the studio or one-bedroom the lead asked about, or
 "What are you looking for ...?"; a shop lead keeps the for-whom line).
+
+Batch 2e slice C, the sales flow (2026-10-17; sales.py, calls.py; spec §3): a buyer of a studio or a one-bedroom (the sale
+track, tracks.SALE_LIVE) may book a 5-minute call with our sales team in the call pool (calls.taken: one call per half hour,
+no office slot, Q40), as a visit is booked: check_proposal and _shape take place "call" on the sale track only (``places``),
+their own day and hour for a call books it and a call with no time gets two free call slots, never 2d's call_requested
+handover (sales.call_step, right after the model); the full name comes first (sales.name_gate, before _slot_gone, which
+reads the call pool for a call); the shops' own guards stay off a buyer's answer (settle's ``track``), and sales.settle takes
+who_they_are's place: the questions in their order, the price never hidden, no media first, the call slots, a buyer abroad
+called, negotiation, the mortgage process, DLD fees and legal questions to our sales team, the buyer's commission line (Q33).
+A call's row is marked (place "call", details.track "sale"), its alert says "Sales call", it gets no office pin, and its
+booking text is res_call_booked (residential.confirmation, kind "call").
 """
 
 from __future__ import annotations
@@ -171,6 +182,7 @@ from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiC
 from . import (
     alerts,
     brokers,
+    calls,
     caps,
     claims,
     crm,
@@ -190,6 +202,7 @@ from . import (
     prompt,
     reminders,
     rules,
+    sales,
     schema,
     script,
     shop_flow,
@@ -695,7 +708,8 @@ def _walk_in(start: dt.datetime, said: str, now) -> bool:
 
 
 def check_proposal(
-    proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "", taken=(), said: str = ""
+    proposal: dict, appointment, now, closed_dates=(), *, grounding=None, segment: str = "", taken=(), said: str = "",
+    places=calls.OFFICE_ONLY, call_taken=(),
 ) -> dt.datetime | None:
     """The validated start (or arrival), None when the action needs no time. Raises SlotError.
 
@@ -705,7 +719,8 @@ def check_proposal(
     slot, so a time one of them holds is refused with the two nearest free ones
     (never the time this chat already has booked). The time already booked, said
     again, and a walk-in (``said``, the burst's own words: "I'm outside") are
-    never refused.
+    never refused. ``places``: what this turn may book (calls.places_for: a buyer's call on the sale track, batch 2e
+    slice C, checked against the call pool, ``call_taken``: one call per slot, never an office slot, Q40).
     """
     action = effective_action(proposal["action"], appointment)
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
@@ -713,13 +728,14 @@ def check_proposal(
         if proposal["action"] == "reschedule" and confirmed and not proposal.get("date") and not proposal.get("time"):
             return None  # they want to move it and have not said when: recorded, and asked
         place = proposal.get("place")
+        call = calls.allowed(place, places)  # SALE (slice C): a buyer's 5-minute call, booked in the call pool
         if place is None and segment == "owner":
             raise hours.SlotError(
                 "no_place",
                 "Say where the meeting is: place office for our office. A viewing at their property is "
                 "tentative at customer_property with handover owner_viewing_slot.",
             )
-        if (place or "office") != "office":
+        if (place or "office") != "office" and not call:
             raise hours.SlotError(
                 "not_office",
                 "Only meetings at our office can be confirmed here. Record a viewing at their property "
@@ -733,15 +749,20 @@ def check_proposal(
                 "The customer has not named that time or agreed to it. Offer one or two exact times and ask "
                 "them to pick.",
             )
-        if taken and not unchanged and not _walk_in(start, said, now) and hours.is_taken(start, taken):
+        taken = calls.pool(call, taken, call_taken)  # a call's own pool: one sales call per half hour, no office slot (Q40)
+        walk_in = not call and _walk_in(start, said, now)
+        if taken and not unchanged and not walk_in and hours.is_taken(start, taken):
             # A move offers neither another client's slot nor the one they are moving from.
             own = [appointment.starts_at] if confirmed and appointment.starts_at else []
             nearest = hours.nearest_free(start, now, closed_dates, [*taken, *own])
             offer = " and ".join(hours.describe(slot) for slot in nearest) or "none in the next three weeks"
+            booked = (
+                "That call time is already booked for another buyer: our sales team takes one call per 30-minute slot. "
+                if call else "That time is already booked by another client: the office takes one client per 30-minute slot. "
+            )
             raise hours.SlotError(
                 "taken",
-                "That time is already booked by another client: the office takes one client per 30-minute slot. "
-                f"The nearest free times are {offer}. Say it is taken and offer those two, asking which is better.",
+                f"{booked}The nearest free times are {offer}. Say it is taken and offer those two, asking which is better.",
                 alternatives=nearest,
             )
         return start
@@ -814,17 +835,20 @@ def offers_starts(reply: str, starts) -> bool:
     return bool(starts) and all(start.astimezone(hours.DUBAI).time() in named for start in starts)
 
 
-def _shape(answer: dict) -> dict:
+def _shape(answer: dict, places=calls.OFFICE_ONLY) -> dict:
     """A confirm the office cannot take becomes what it is, handed to a person and
     never confirmed: a viewing at the owner's property or a call is tentative, and
     so is anything for someone outside our segments (a job applicant's interview).
 
     The model wrote its reply for a confirmation, so the words that go out are
     then a fixed line (``answer["converted"]``), never its "you are confirmed".
+    A buyer's call on the sale track (``places``, calls.allowed) is booked like a visit, never handed over.
     """
     proposal = answer["appointment"]
     if proposal["action"] not in ("confirm", "reschedule"):
         return answer
+    if calls.allowed(proposal["place"], places):
+        return answer  # SALE (slice C): the call pool books it (check_proposal), the bot keeps answering the chat
     viewing = answer["handover"]["needed"] and answer["handover"]["reason"] == "owner_viewing_slot"
     if proposal["place"] in ("customer_property", "call") or viewing:
         place = proposal["place"] if proposal["place"] in ("customer_property", "call") else "customer_property"
@@ -1875,6 +1899,7 @@ def settle(
     shops_facts=None,
     office_address: str = "",
     crm_notes: str = "",
+    track: str = "",
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
@@ -1903,9 +1928,12 @@ def settle(
     What is cut or rewritten in the reply is listed in ``answer["trimmed"]``, so
     its English gloss no longer holds; ``answer["broker"]`` asks _apply to label
     and pause the chat; ``answer["pointed"]`` says the reply now points to the
-    location (its gloss got the same line).
+    location (its gloss got the same line). ``track``: the chat's (tracks.decide); a buyer's (the sale track, batch 2e
+    slice C) gets none of the shops' claims, discovery, licence or office-slot guards: sales.settle follows instead.
     """
     shops_chat = playbook == lane.IC_SHOPS
+    # SALE (slice C): the shops' own guards stay off a buyer's answer (sales.settle, after this, has the sale track's).
+    shop_guards = shops_chat and track != tracks.SALE
     shop_facts = shops_facts or DEFAULT_SHOPS_FACTS
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites)
     if shops_chat:
@@ -1920,7 +1948,7 @@ def settle(
     if written in ("ar", "ur", "hi") and answer["language"] != written:
         answer["language"] = written
     trimmed = []
-    if shops_chat and answer["reply"] and not answer.get("converted"):
+    if shop_guards and answer["reply"] and not answer.get("converted"):
         # Board T56: the prompt's old MATCH example ("For a mobile shop, Type 1 is perfect") went to
         # a vape shop. A recommendation names the customer's own business, or none (never a home: crm_facts).
         business = answer["facts"].get("business_activity") or (facts or {}).get("business_activity") or ""
@@ -1986,17 +2014,19 @@ def settle(
         # chat 114's second reply lost its "Sorry for the confusion.": people.is_apology).
         answer["reply"], repeated = filters.drop_repeats(
             answer["reply"], [text for author, text in earlier if author == "assistant"],
-            keep=lambda sentence: shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence),
+            keep=lambda sentence: (
+                shops.is_fixed_line(sentence) or claims.is_code_line(sentence) or people.is_apology(sentence) or sales.is_fixed_line(sentence)
+            ),
         )
         if repeated:
             trimmed.append("repeat")
-    if shops_chat and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
+    if shop_guards and answer["reply"] and not answer.get("converted") and claims.drop_table_repeat(
         answer, [text for author, text in earlier if author == "assistant"], new_texts, shop_facts
     ):
         # Launch review issue 16: the size and price table our messages gave already, said again unasked.
         trimmed.append(claims.TABLE)
     plain_shops = (
-        shops_chat and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
+        shop_guards and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
         and not answer["handover"]["needed"] and not agreed
     )
     if plain_shops and licence_first(answer, facts or {}, earlier, new_texts, now):
@@ -2017,7 +2047,7 @@ def settle(
         # Where we are, asked by a known end user, answered with no invitation: code's two slots close it (the launch gate's
         # eval shops-location-counted-81).
         trimmed.append("location_invitation")
-    if shops_chat and answer["reply"] and not answer.get("converted") and now is not None:
+    if shop_guards and answer["reply"] and not answer.get("converted") and now is not None:
         # Launch review issue 17: the model's own times, an hour ahead and an hour apart at least, never past or taken;
         # a time they named stands (unless it has passed), and so does any time ahead when they want to come now.
         lately = [text for author, text in earlier if author == "customer"][-6:]
@@ -2125,6 +2155,8 @@ def ask_model(
     customer_script: str = "",
     name: str = "",
     need_segment: str = "",
+    places=calls.OFFICE_ONLY,
+    call_taken=(),
 ):
     """(answer, validated time, completions, rejection reason, still_invalid).
 
@@ -2149,7 +2181,8 @@ def ask_model(
     (script.has_script). ``need_segment``: a shops customer who wants no shop to rent
     (needs.py; said now, or known) is in this segment whenever the model says "other", so
     their booking is never _shape's "holding" (the owner's rule: they are invited and booked
-    like anyone).
+    like anyone). ``places`` / ``call_taken``: a buyer's call on the sale track (batch 2e slice C), which _shape
+    leaves a confirm and check_proposal books in the call pool.
 
     A slot another client has is offered around by code (``answer["slot_taken"]``,
     shops.slot_taken with ``alternatives``) when the answer keeps the visit
@@ -2171,7 +2204,7 @@ def ask_model(
         normal = schema.normalize(data, shops=shops_chat)
         if need_segment and normal["segment"] == "other":
             normal["segment"] = need_segment
-        return _shape(normal)
+        return _shape(normal, places)
 
     answer = shaped(first.data)
 
@@ -2225,7 +2258,7 @@ def ask_model(
     def checked(answer):
         when = check_proposal(
             answer["appointment"], appointment, now, closed_dates, grounding=grounding, segment=answer["segment"], taken=taken,
-            said=said,
+            said=said, places=places, call_taken=call_taken,
         )
         if _said_again(answer, when, appointment, said):
             answer["appointment"] = dict(NO_TIME)
@@ -3570,14 +3603,15 @@ def office_lock():
                 logger.exception("Lead AI could not release the office booking lock")
 
 
-def _slot_gone(conversation, when, appointment, now, closed_dates, said: str) -> list | None:
+def _slot_gone(conversation, when, appointment, now, closed_dates, said: str, place: str = "office") -> list | None:
     """Another chat's visit took this slot while the model was thinking: the free starts
     nearest it (to offer instead), else None (still free, the time they already have, or
-    a walk-in)."""
+    a walk-in). ``place`` "call": a buyer's call, looked up in the call pool (calls.taken; batch 2e slice C)."""
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
-    if (confirmed and appointment.starts_at == when) or _walk_in(when, said, now):
+    call = place == calls.PLACE
+    if (confirmed and appointment.starts_at == when) or (not call and _walk_in(when, said, now)):
         return None
-    taken = taken_slots(conversation, now)
+    taken = calls.taken(conversation, now) if call and calls.OWN_POOL else taken_slots(conversation, now)
     if not hours.is_taken(when, taken):
         return None
     own = [appointment.starts_at] if confirmed and appointment.starts_at else []
@@ -3835,6 +3869,10 @@ def _run_claimed(
         "lead": tracks.lazy(lambda: lead_context.for_turn(conversation, chat, state, now)), "clusters": tracks.cluster_names(settings_row),
     }
     decision = tracks.decide(words=words_now, facts=facts, **track_inputs) if shops_chat else None
+    # SALE (slice C, sales.py, calls.py): a buyer's turn may book a 5-minute call in the call pool (spec §3.3).
+    sale = decision is not None and decision.track == tracks.SALE
+    call_taken = calls.taken(conversation, now) if sale else []
+    called = sold = gated = ""  # what the sale steps did (the turn's actions "sale")
     need = None
     brokered = ""  # what handed a broker over that the model did not (brokers.backstop)
     shops_rule_name, shops_words = "", ""
@@ -3920,6 +3958,8 @@ def _run_claimed(
             customer_script=customer_script if state.handed_over_at is None else "",
             name=greeted,
             need_segment=needs.SEGMENTS[need_seen.kind] if need_seen is not None else "",
+            places=calls.places_for(decision.track if decision is not None else ""),
+            call_taken=call_taken,
         )
         if (licence_media is not None or licence_page) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
             answer["handover"] = {"needed": False, "reason": None}  # the photo is the licence we asked for
@@ -3938,6 +3978,17 @@ def _run_claimed(
             # The track again, with the model's tag and what it recorded this turn (spec §1.4, hook point 5).
             decision = tracks.decide(
                 words=words_now, facts=facts, model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **track_inputs
+            )
+            if decision.track == tracks.SALE and not sale:
+                call_taken = calls.taken(conversation, now)
+            sale = decision.track == tracks.SALE
+        if sale:
+            # SALE (slice C): a buyer's call: booked at their own day and hour, else two free call slots; never 2d's
+            # call_requested handover, and a buyer abroad gets the call (sales.call_step).
+            when, called = sales.call_step(
+                answer, when, appointment=appointment, said=said_words, words=grounding[0], our_last=our_last, ours=ours, now=now,
+                closed_dates=settings_row.closed_dates, taken=call_taken, still_invalid=still_invalid,
+                handed_over=state.handed_over_at is not None, grounding=grounding,
             )
         if shops_chat and not still_invalid:
             # Their own exact day and hour, which the model confirmed at another time ("4:30 PM today is fine" booked at 4:00 PM).
@@ -4016,7 +4067,7 @@ def _run_claimed(
         broker_labelled=answer["handover"]["reason"] == BROKER and conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
         address_sent=settings_row.office_address if location else "",
         slots=invitation_slots(answer, appointment, said_words, now, settings_row.closed_dates, taken, may_invite=may_invite)
-        if shops_chat
+        if shops_chat and not sale
         else None,
         now=now,
         facts=facts,
@@ -4027,6 +4078,7 @@ def _run_claimed(
         office_address=settings_row.office_address,
         # The old lead's notes as the context showed them (lead_history.for_turn keeps them on the state).
         crm_notes=(state.lead_notes or "") if shops_chat else "",
+        track=decision.track if decision is not None else "",
     )
     if licence_media is not None:
         answer["licence"] = "received"
@@ -4037,7 +4089,16 @@ def _run_claimed(
     who = ""
     need_slots = ()
     misread = False
-    if shops_chat and not shops_rule_name and not deferred:
+    if sale and not shops_rule_name and not deferred:
+        # SALE (slice C): a buyer's steps in place of who_they_are: the questions in their order, the price never hidden,
+        # no media first, the call slots, the sales handovers, the buyer's commission line (sales.settle).
+        sold = sales.settle(
+            answer, facts=facts, texts=words_now, said=said_words, earlier=earlier, now=now, closed_dates=settings_row.closed_dates,
+            office_taken=taken, call_taken=call_taken, residential_facts=settings_row.residential_facts, unit=decision.unit,
+            clusters=decision.clusters, when=when, still_invalid=still_invalid, quiet=state.handed_over_at is not None,
+            may_invite=may_invite,
+        )
+    elif shops_chat and not shops_rule_name and not deferred:
         # Who the customer is: someone who wants no shop to rent gets the owner's line (never the shop
         # list, never lost), someone who rented one already the second-shop question (who_they_are).
         wants = need is not None or needs.of(facts) is not None
@@ -4061,7 +4122,7 @@ def _run_claimed(
             quiet=state.handed_over_at is not None, need=need or (needs.of({**facts, **answer["facts"]}) if shops_chat else None),
             now=now,
         )
-    if shops_chat and not shops_rule_name and not deferred and bare_need_reply(
+    if shops_chat and not sale and not shops_rule_name and not deferred and bare_need_reply(
         # The chat's want as this turn leaves it (who_they_are wrote it when it replaced the one known), else the one said now.
         answer, needs.of({**facts, **answer["facts"]}) or need, need_slots, invites=state.invites, misread=misread,
         plain=not (state.handed_over_at is not None or when is not None or still_invalid or appointment is not None),
@@ -4170,6 +4231,8 @@ def _run_claimed(
         plan["broker_backstop"] = brokered  # a broker the model served as an end user, handed over by code (brokers.py)
     if decision is not None:
         plan["track"] = decision.as_dict()  # the chat's track and unit as code decided them (batch 2e, tracks.py; shadow)
+    if called or sold:
+        plan["sale"] = {key: value for key, value in (("call", called), ("step", sold)) if value}  # the sale steps (sales.py)
     # Their words, for the alerts a person must act on (a handover, a chase, a call's time).
     answer["their_words"] = _their_words(burst, heard)
     # Lines code writes follow the script the customer types in (T19): "توقف" or a booking
@@ -4236,6 +4299,15 @@ def _run_claimed(
 
     # What happens, and the words ---------------------------------------------------------
     language = line_language
+    if sale and not still_invalid:
+        # SALE (slice C): a buyer's full name before a booking, a call or an office meeting; a time held for it is booked
+        # once it comes (spec §2.6, §3.3.2; residential.full_name_gate, before _slot_gone).
+        when, gated = sales.name_gate(
+            answer, when, appointment=appointment, facts=facts, lead=track_inputs["lead"].get, said=said_words, our_last=our_last,
+            now=now, closed_dates=settings_row.closed_dates,
+        )
+        if gated:
+            plan["sale"] = {**(plan.get("sale") or {}), "name": gated}
     action = effective_action(answer["appointment"]["action"], appointment)
     if action == "reschedule" and when is not None and confirmed and appointment.starts_at == when:
         action = "reconfirm"  # the time already booked: said again, nothing moves
@@ -4248,7 +4320,9 @@ def _run_claimed(
         # booking is stored): another chat may have booked it while the model thought.
         if hold is not None:
             hold.enter_context(office_lock())
-        gone = _slot_gone(conversation, when, appointment, now, settings_row.closed_dates, said_words)
+        gone = _slot_gone(
+            conversation, when, appointment, now, settings_row.closed_dates, said_words, place=answer["appointment"].get("place") or "office"
+        )
         if gone is not None:
             codes.append("taken")
             alternatives[:] = gone
@@ -4263,6 +4337,9 @@ def _run_claimed(
     if shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
+    if sale:
+        # SALE (slice C): a buyer's reply may quote the sale bands of their unit (residential.known_amounts' sale part).
+        rows_context = f"{rows_context} {sales.known_amounts(decision.unit, decision.clusters, settings_row.residential_facts)}"
     maps = settings_row.office_maps_url
     text = ""
     holding = False
@@ -4278,6 +4355,13 @@ def _run_claimed(
     pin_now = False  # our office's pin follows the reply (a booking, or the not-a-shop line)
 
     def booking_text(rescheduled: bool) -> str:
+        if sale:
+            # SALE (slice C): a buyer's call (res_call_booked) or office meeting, under their full name (residential.confirmation).
+            place = answer["appointment"].get("place") or (appointment.place if appointment is not None else "")
+            return sales.booking_text(
+                language, when, call=place == calls.PLACE, facts=merged, lead=track_inputs["lead"].get(),
+                unit=decision.unit, clusters=decision.clusters, office_address=settings_row.office_address, maps_url=maps,
+            )
         if shops_chat and needs.of(merged) is None:
             # The build pack's confirmation: date, time, shop type, place, who they meet, what to bring.
             return shops.confirmation(
@@ -4347,8 +4431,15 @@ def _run_claimed(
         # open question, and never the slot they are moving from. A reply that names two
         # times already (the day they asked for, settle's slots) goes as it is.
         own = [appointment.starts_at] if confirmed and appointment.starts_at else []
-        text = shop_flow.reschedule_text(language, hours.offer_pair(now, settings_row.closed_dates, [*taken, *own]), now)
+        # SALE (slice C): a buyer's call moves within the call pool (calls.taken), a visit within the office's.
+        pool = calls.taken(conversation, now) if calls.is_sales_call(appointment) else taken
+        text = shop_flow.reschedule_text(language, hours.offer_pair(now, settings_row.closed_dates, [*pool, *own]), now)
         plan["fallback"] = "reschedule_slots"
+    elif answer.get("sale") and (state.handed_over_at is None or answer["sale"].get("kind") == sales.FULL_NAME):
+        # SALE (slice C): a sale step's own words (sales.text): the buyer media line, the call slots, the sales handover,
+        # the full name asked before a booking (which goes even while a person has the chat, as a booking would).
+        text = sales.text(answer["sale"], language, now)
+        holding = answer["sale"].get("kind") == sales.HANDOVER
     elif state.handed_over_at is not None:
         # A person has the chat (people.quiet_reply, launch review issues 4 and 21): a thanks or a goodbye gets
         # nothing; a chase, an apology and the team alerted again (_apply); a call asked for or its time, passed
@@ -4429,7 +4520,8 @@ def _run_claimed(
                 plan["invited_to_meeting"] = True
     else:
         if answer["send"]:
-            text, filtered = filters.clean_reply(answer["reply"], rows_context)
+            # A buyer's questions go two to a message (SALE, slice C; brief Part 5B), every other reply one.
+            text, filtered = filters.clean_reply(answer["reply"], rows_context, max_questions=2 if sale else 1)
             model_words = bool(text)
             gloss = bool(text) and not filtered and not answer.get("trimmed")
             if filtered:
@@ -4565,7 +4657,8 @@ def _run_claimed(
     turn.reply_message_id = sent.pk
     LeadAiTurn.objects.filter(pk=turn.pk).update(reply_message=sent, actions={**(turn.actions or {}), **done})
 
-    if (done.get("appointment", {}).get("event") in ("confirmed", "rescheduled") or pin_now) and settings_row.has_pin:
+    # SALE (slice C): a buyer's call needs no office pin (our sales team calls them on this number).
+    if (done.get("appointment", {}).get("event") in ("confirmed", "rescheduled") or pin_now) and settings_row.has_pin and calls.needs_pin(answer):
         try:
             from apps.inbox import services as inbox_services
 
@@ -4773,6 +4866,9 @@ def _apply(
             current.customer_name = name[:200]
             current.mobile = conversation.contact.wa_id[:32]
             current.details = _details(facts)
+            if proposal.get("place") == calls.PLACE:
+                # SALE (slice C): a buyer's call, booked in the call pool (only the sale track ever confirms one).
+                calls.mark(current)
             current.customer_state = ""
             current.eta_at = None
             current.reminder_due_at = hours.reminder_due(when, now)
@@ -4821,6 +4917,7 @@ def _apply(
                 current.customer_name = name[:200]
                 current.mobile = conversation.contact.wa_id[:32]
                 current.details = _details(facts)
+                sales.mark_hold(current, answer)  # SALE (slice C): a time held while we ask the full name (spec §2.6)
                 current.log("tentative", note=note, place=place, start=start.isoformat() if start else None)
                 current.save()
                 crm_event = "tentative"
@@ -4879,7 +4976,7 @@ def _apply(
             if {k: v for k, v in _details(facts).items() if k in keys} != {
                 k: v for k, v in (current.details or {}).items() if k in keys
             }:
-                current.details = _details(facts)
+                current.details = calls.kept_details(_details(facts), current)  # a buyer's call keeps its mark (SALE)
                 current.save(update_fields=["details", "updated_at"])
 
         hot = bool(
@@ -5017,6 +5114,8 @@ def appointment_alert(conversation, chat, appointment, event: str, hot: bool, na
     else:
         stamp = f"{appointment.starts_at:%Y%m%d%H%M}" if appointment.starts_at else "none"
     details = _detail_lines(appointment.details or {})
+    if calls.alert(conversation, appointment, event, who, details, stamp=stamp, crm_url=crm_url):
+        return  # SALE (slice C): a buyer's call booked, moved or held: "Sales call: {name}, {when}" (spec §3.3.4)
     when = hours.describe(appointment.starts_at) if appointment.starts_at else ""
     at = hours.time_label(appointment.starts_at) if appointment.starts_at else ""
     if event == "confirmed" and hot:

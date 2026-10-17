@@ -232,13 +232,13 @@ class DecideStepTests(SimpleTestCase):
         self.assertEqual((d.track, d.unit, d.reason, d.switched, d.sorry), ("rent", "studio", tracks.WORDS, True, True))
         d = decide(["I need a shop for my salon"], stored="rent", stored_unit="studio")
         self.assertEqual((d.track, d.unit, d.reason, d.switched), ("shop", "", tracks.WORDS, True))
-        # A rent word decides rent over a sale lead; buying decides sale (other until SALE_LIVE).
+        # A rent word decides rent over a sale lead; buying decides sale (slice C: SALE_LIVE on; other with it off).
         d = decide(["studio for monthly rent"], lead={"deal": "sale", "unit": "studio"})
         self.assertEqual((d.track, d.deal, d.deal_from), ("rent", "rent", tracks.WORDS))
         d = decide(["I want to buy a studio"])
-        self.assertEqual((d.track, d.unit, d.deal), ("other", "studio", "sale"))
-        with patch.object(tracks, "SALE_LIVE", True):
-            self.assertEqual(decide(["I want to buy a studio"]).track, "sale")
+        self.assertEqual((d.track, d.unit, d.deal), ("sale", "studio", "sale"))
+        with patch.object(tracks, "SALE_LIVE", False):
+            self.assertEqual((decide(["I want to buy a studio"]).track, decide(["I want to buy a studio"]).deal), ("other", "sale"))
 
     def test_two_needs_at_once(self):
         # The stored track when it is one of them, else the first named.
@@ -299,9 +299,9 @@ class DecideStepTests(SimpleTestCase):
         d = decide(["I need a flat"], lead={"unit": "one_br", "deal": "rent"})
         self.assertEqual((d.track, d.unit), ("rent", "one_br"))
         d = decide(["is the studio still there?"], lead={"unit": "studio", "deal": "sale"})
-        self.assertEqual((d.track, d.deal, d.deal_from), ("other", "sale", tracks.LEAD))  # a sale listing: a buyer
-        with patch.object(tracks, "SALE_LIVE", True):
-            self.assertEqual(decide(["is the studio still there?"], lead={"unit": "studio", "deal": "sale"}).track, "sale")
+        self.assertEqual((d.track, d.deal, d.deal_from), ("sale", "sale", tracks.LEAD))  # a sale listing: a buyer
+        with patch.object(tracks, "SALE_LIVE", False):
+            self.assertEqual(decide(["is the studio still there?"], lead={"unit": "studio", "deal": "sale"}).track, "other")
         # Not the first answer, or a shops template: the lead decides nothing alone.
         self.assertEqual(decide(["Yes"], template_kind="mixed", first_answer=False, lead=SPAIN_STUDIO).track, "")
         self.assertEqual(decide(["Yes"], template_kind="shop", first_answer=True).track, "shop")
@@ -373,7 +373,10 @@ class FromNeedTests(SimpleTestCase):
             self.assertEqual(tracks.from_need(needs.Need(needs.BUY, ""), lead={}, stored="rent").track, "sale")
             self.assertEqual(tracks.from_need(needs.Need(needs.BUY, ""), lead={}).track, "other")
         d = tracks.from_need(needs.Need(needs.BUY, "studio"))
-        self.assertEqual((d.track, d.deal), ("other", "sale"))  # until slice C
+        self.assertEqual((d.track, d.deal), ("sale", "sale"))  # slice C is live
+        with patch.object(tracks, "SALE_LIVE", False):
+            d = tracks.from_need(needs.Need(needs.BUY, "studio"))
+            self.assertEqual((d.track, d.deal), ("other", "sale"))  # with the flag off, 2d's invitation: nobody is lost
 
     def test_a_home_on_a_sale_lead_is_bought_unless_they_say_rent(self):
         with patch.object(tracks, "SALE_LIVE", True):

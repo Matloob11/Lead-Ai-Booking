@@ -84,13 +84,15 @@ def _strip_phones(text: str) -> str:
     return _PHONE.sub(lambda m: "" if len(_digits(m.group(0))) >= PHONE_DIGITS else m.group(0), text)
 
 
-def clean_reply(reply: str, context_text: str) -> tuple[str, list[str]]:
+def clean_reply(reply: str, context_text: str, max_questions: int = 1) -> tuple[str, list[str]]:
     """The reply made safe to send, and notes on what was removed (for the turn log).
 
     ``context_text`` is everything the customer, the campaign and our
     colleagues wrote (never the assistant's own replies): an amount found
     there may be repeated, in any form ("40k" covers "AED 40,000"); any other
-    price-like number takes its sentence with it.
+    price-like number takes its sentence with it. ``max_questions``: one per
+    reply, two on the sale track (batch 2e: a buyer's questions go two to a
+    message, brief Part 5B).
     """
     notes: list[str] = []
     text = (reply or "").replace("’", "'")
@@ -121,13 +123,13 @@ def clean_reply(reply: str, context_text: str) -> tuple[str, list[str]]:
         kept.append(sentence)
     # The owner's style: one question per reply. A second one is nearly always
     # "which day and time?" after an invitation, and waits for the answer.
-    single, asked = [], False
+    single, asked = [], 0
     for sentence in kept:
         if any(mark in sentence for mark in QUESTION_MARKS):
-            if asked:
+            if asked >= max(1, max_questions):
                 notes.append("second_question")
                 continue
-            asked = True
+            asked += 1
         single.append(sentence)
     text = " ".join(single)
     text = re.sub(r"[ \t]{2,}", " ", text).strip()

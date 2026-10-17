@@ -24,7 +24,7 @@ from django.utils import timezone
 from apps.inbox.models import Message
 
 from ..models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
-from . import alerts, filters, hours, reminders, rules, transcript
+from . import alerts, calls, filters, hours, reminders, rules, transcript
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,8 @@ def _reschedule_slots(conversation, appointment, now) -> list | None:
         return None
     from . import engine
 
-    taken = engine.taken_slots(conversation, now)
+    # A buyer's call moves within the call pool (batch 2e slice C), a visit within the office's.
+    taken = calls.taken(conversation, now) if calls.is_sales_call(appointment) else engine.taken_slots(conversation, now)
     own = [appointment.starts_at] if appointment.starts_at else []
     return hours.offer_pair(now, LeadAiSettings.load().closed_dates, [*taken, *own])
 
@@ -103,12 +104,12 @@ def handle(message_id: int) -> str:
     if LeadAiSettings.load().answers(conversation.contact.wa_id) and _window_open(conversation, now):
         language = LeadAiChatState.objects.filter(conversation=conversation).values_list("language", flat=True).first() or "en"
         slots = _reschedule_slots(conversation, appointment, now) if action == "reschedule" else None
+        # A buyer's call (batch 2e slice C): "On My Way" is ready for the call, "Running Late" a later call (spec §3.3.7).
+        line = (calls.tap_line(action, language) if calls.is_sales_call(appointment) else "") or reply_line(action, language, slots, now)
         try:
             from apps.inbox import services as inbox_services
 
-            sent = inbox_services.send_text(
-                conversation, None, reply_line(action, language, slots, now), payload={"source": SOURCE, "turn": turn.pk}
-            )
+            sent = inbox_services.send_text(conversation, None, line, payload={"source": SOURCE, "turn": turn.pk})
             reply_id = sent.pk
             outcome = LeadAiTurn.Status.REPLIED
         except Exception as exc:  # noqa: BLE001 - the state and the alert already stand
@@ -138,7 +139,15 @@ def _alert(conversation, appointment, action: str) -> None:
         appointment.crm_entity or (chat.crm_entity if chat else ""), appointment.crm_id or (chat.crm_id if chat else None)
     )
     phone = f"WhatsApp +{conversation.contact.wa_id}"
-    if action == "on_my_way":
+    call = calls.tap_alert(action, name, at, phone) if calls.is_sales_call(appointment) else None
+    if call is not None:
+        # A buyer's call (batch 2e slice C): ready for it, or wants it later.
+        title, text = call
+        alerts.raise_alert(
+            kind=action, conversation=conversation, appointment=appointment, priority="high", title=title, text=text,
+            dedupe_key=f"{'on_my_way' if action == 'on_my_way' else 'running_late_tap'}:{appointment.pk}:{stamp}", crm_url=crm_url,
+        )
+    elif action == "on_my_way":
         alerts.raise_alert(
             kind="on_my_way",
             conversation=conversation,
