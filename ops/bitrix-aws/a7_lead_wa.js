@@ -13,10 +13,10 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_LEAD_WA_V15) {
+  if (window.A7_LEAD_WA_V16) {
     return;
   }
-  window.A7_LEAD_WA_V15 = true;
+  window.A7_LEAD_WA_V16 = true;
   // C41 mixed popup. Stays false until Claude writes "2e is live".
   var C41_MIXED_LIVE = false;
 
@@ -1050,11 +1050,15 @@
     function templatesForNumber() {
       var num = currentNumber();
       var waba = num && num.waba_business_id;
-      if (!waba) {
-        return templates;
-      }
-      return templates.filter(function (t) {
+      var rows = !waba ? templates : templates.filter(function (t) {
         return !t.waba_business_id || t.waba_business_id === waba;
+      });
+      // Until 2e is live the assistant treats every campaign template as a shops one.
+      if (C41_MIXED_LIVE) {
+        return rows;
+      }
+      return rows.filter(function (t) {
+        return t.name !== "intl_city_property_reconnect";
       });
     }
 

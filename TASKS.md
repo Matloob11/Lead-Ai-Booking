@@ -1,3 +1,13 @@
+## 2026-10-17 — C41 hides intl_city_property_reconnect until 2e (Cursor)
+
+While `C41_MIXED_LIVE` is false, that template is left out of the template list in the lead, deal, contact and Owner Data popups and in the renewals popup. Turning the flag on brings it back with the "International City — all" label and the Shop / Studio/1BR / Other breakdown. Until then the assistant would treat it as a shops template.
+
+**Proof:** live Leads popup on a sending number, every send blocked. The list had 5 templates and `intl_city_property_reconnect` was not one of them. The Script label was still "International City shops". No send ran. Live md5: lead JS `86185762ac881dd1218529c0fa807460`, renewals JS `e1a75bf6eaffa6ef5754f415ae55c83d`. Other Owner Data campaigns were sending in the same minutes (476–479); this session did not create one.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `a7_renewals_wa.js`, `SHOPS-BOT-BOARD.md`, `TASKS.md`.
+
+---
+
 ## 2026-10-17 — Lead AI batch 2d is live (Claude Code)
 
 - **Deployed** `e867e4b` at 08:12 UTC: build of every service, `migrate-new-image` (leadai 0007, the V03 office default), `up app`. No campaign was sending.
