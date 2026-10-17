@@ -244,7 +244,7 @@ Status values: `Open`, `Doing`, `Blocked Qn/Dn` (waiting for a decision or data 
 | T70 | Shops eval: the PDF's 8 launch-checklist cases + the chat-35283 cases; gate ≥95% over `--repeat 2` | Claude | P2–P4 | Open |
 | T71 | 10 staff-phone chats on test numbers (PDF checklist) | Matloob + Claude (+ Cursor on request under Requests: ~10 Bitrix test leads with staff phones, Property Type Shop, Community International City, deleted afterwards) | D8 | Blocked D8 |
 | T72 | Go live at 100 a day; read every chat daily for a week; fix the prompt | Matloob + Claude | T70, T71 | Open |
-| T73 | Weekly funnel: replies → viewings booked → attended → rented (Bitrix definitions and counts: Cursor's C30) | Claude + Cursor | — | Open |
+| T73 | Weekly funnel: replies → viewings booked → attended → rented (Bitrix definitions and counts: Cursor's C30) | Claude + Cursor | — | Done (2026-10-17) — WhatsApp half: `ops/wa.sh probe-leadai-funnel [--weeks N]` (read-only, counts only, checked by hand-written SQL); the Bitrix half is C30's `a7_c30_funnel.php`. First week 2026-W42, ic_shops: 96 sent, 89 delivered, 64 read, 33 replied, 0 booked (5 tentative), 6 handovers, 2 opt-outs, median first answer 18 s |
 
 ### Batch 2e — one bot for every need (designed 2026-10-16, Q26)
 

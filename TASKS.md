@@ -1,3 +1,24 @@
+## 2026-10-17 — T73 weekly funnel, WhatsApp half: `ops/wa.sh probe-leadai-funnel` (Claude Code)
+
+New read-only probe `ops/catalog/probe-leadai-funnel.py` and the verb `probe-leadai-funnel [--weeks N]` (1-26, default 8) in `ops/wa.sh`, next to `probe-leadai-turn`. It runs in the `web` container inside one transaction set READ ONLY and rolled back. Output is counts only: no phone numbers, names or message text.
+
+Rows are per ISO week (Asia/Dubai) of the campaign message, for ic_shops, general and total. Columns: sent, delivered, read, failed, replied, booked, handovers, opt_outs, median_answer_min, answered. Each chat event is counted on the campaign message it follows, until the next Lead AI campaign message to that chat. The definitions are in the file header.
+
+**Live (2026-10-17 11:40 Dubai, `--weeks 6`):** everything falls in 2026-W42 (campaigns 395, 448, 449).
+- Total: 112 sent, 103 delivered, 76 read, 11 failed (2 refused by the gateway, 9 failed by Meta), 35 replied, 0 booked (5 tentative visits, none confirmed), 6 handovers (5 by the assistant, 1 from Bitrix), 2 opt-outs, median answer 0.3 min (18 s) over 34 chats.
+- ic_shops: 96 / 89 / 64 / 8, replied 33.
+- general (campaign 395): 16 / 14 / 12 / 3, replied 2 (1 of them an auto-reply).
+
+**Proof:**
+- An independent SQL query on live gave the same replied, answered, median, handovers, opt-outs and booked figures, and the recipient/message breakdown gives the same sent/delivered/read/failed.
+- A synthetic local check (scratchpad `funnel/check_funnel.py`, Django 5.2.5 on SQLite) covers 4 campaigns, multi-send chats and every exclusion; all hand-worked lines matched. It caught all 10 broken copies of the probe (`funnel/mutants.py`).
+
+**Not tested on live data:** a chat getting a second Lead AI campaign message (no live chat has had one) and a confirmed visit (none exist yet). Only the synthetic check exercises those two paths.
+
+**Shared:** `ops/wa.sh` (one usage line and the verb only), `TASKS.md`. Nothing under `backend/`, no commit.
+
+---
+
 ## 2026-10-17 — C41 popup warning above 100 marketing sends (Cursor)
 
 The five CRM popups warn when one MARKETING template from one number is already over 100 sends today, or this queue would take it over 100. The count is unique To numbers on today's WhatsApp timeline comments (Dubai midnight). The send button is never disabled (Q7). Excel campaigns that do not write that comment are not in the count; a failed count shows no warning.
