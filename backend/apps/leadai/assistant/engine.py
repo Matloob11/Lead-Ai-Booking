@@ -5346,6 +5346,10 @@ def _apply(
                 broker=bool(done.get("broker")),
                 booked=crm_event in ("confirmed", "rescheduled"),
             )
+            # A studio or a one-bedroom to rent or buy (batch 2e, spec §5): its own fields in the same batch (RES_FIELDS_LIVE).
+            writes += crm_fields.residential_writes(
+                facts, fresh.track, fresh.unit, words=str(answer.get("their_words") or ""), besides=writes
+            )
             if crm_fields.queue(conversation, chat, writes):
                 done["crm_fields"] = [field for field, _, _ in writes]
     return done

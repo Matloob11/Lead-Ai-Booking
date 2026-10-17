@@ -337,7 +337,10 @@ class NotAShopTurnTests(NotAShopBase):
         self.assertEqual((state.facts["need"], state.facts["wanted"], state.facts["property_type"]), ("home", "a studio apartment", "studio apartment"))
         self.assertNotIn("business_activity", state.facts)  # a studio is no business (chat 44 wrote it to Bitrix live)
         self.assertEqual((state.handed_over_at, state.not_interested_at, state.invites), (None, None, 1))
-        self.assertEqual(self.fields(), [(crm_fields.FIELD_BOT_STATUS, "2476")])
+        # Bot Status, then batch 2e's own fields of the rent track (crm_fields.residential_writes); never a business activity.
+        self.assertEqual(self.fields()[0], (crm_fields.FIELD_BOT_STATUS, "2476"))
+        self.assertIn((crm_fields.FIELD_RENT_SALE, "2443"), self.fields())
+        self.assertNotIn(crm_fields.FIELD_ACTIVITY, [field for field, _ in self.fields()])
         alerts = list(self.wanted_alerts())
         self.assertEqual({alert.bitrix_user_id for alert in alerts}, {"77", "2311"})  # the chat's owner and the Lead AI alert list
         self.assertEqual(alerts[0].priority, "high")

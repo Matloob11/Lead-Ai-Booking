@@ -691,6 +691,14 @@ RIGHT = {
     "shops-sale-dld-fee": answer("The DLD transfer fee is 4% of the price.", segment="buyer"),
     "shops-sale-abroad": answer(SPECIALIST_REPLIES, handover="abroad_cannot_visit", segment="buyer"),
     "shops-sale-commission": answer("Our commission is 2% of the price. Are you a cash buyer or planning to use finance?", segment="buyer"),
+    # Batch 2e, the CRM: what a studio or one-bedroom chat writes to its lead (crm_fields.residential_writes).
+    "shops-crm-rent-studio-spain": answer("Great! What business will the shop be for?", facts={"community": "Spain Cluster"}),
+    "shops-crm-for-myself-move-in": answer(
+        "Perfect, next month. Our agent will meet you at our office and take you to the available apartments.",
+        segment="residential_tenant",
+        facts={"for_client": False, "move_in": "next month"},
+    ),
+    "shops-crm-2br-writes-nothing": answer("Great! What business will the shop be for?"),
 }
 
 
@@ -819,7 +827,10 @@ class EvalCommandTests(TestCase):
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
                 "shops-a-yes-known", "shops-asked-for-studio-132", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
                 # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
-                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page",
+                "shops-book-tap",
+                # The CRM lane's studio seeker in Spain: the rent flow's opener, code's (its fields are the opener's facts).
+                "shops-crm-rent-studio-spain",
+                "shops-licence-copy", "shops-licence-second-page",
                 # Batch 2e: the mixed template's first answer, "Not now" and "Stop messages" are code's.
                 "shops-mixed-not-now", "shops-mixed-stop", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic",
                 "shops-mixed-yes-buyer-lead", "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead",
