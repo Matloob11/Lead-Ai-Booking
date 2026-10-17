@@ -86,6 +86,76 @@ words alone (engine.own_offer, after unasked_confirm); slots offered again after
 words that turn nothing down are no new invitation (engine.reoffered, which
 settle and may_invite read); and photos or the shop types asked for get their
 step over a tentative of the model's (engine.model_step, as before).
+
+The launch (2026-10-15), mirrored the same way: who the shops customer is
+(assistant/needs.py). The burst's own words (need_words, as engine.need_texts)
+and the model's tag decide; a "not interested" or "wrong number" said with a want
+is no opt-out (engine.not_lost_for, in code_first); the answer is untagged after
+the model (engine.untag_need) and settled after settle (engine.who_they_are), so
+someone who wants no shop to rent gets the owner's line with our location and
+two free slots (outgoing), never the shop list, and someone who rented one
+already the second-shop question. The launch customers' own words are scenarios
+(shops-...-44 to -136): each must get the location, the invitation and the
+team's alert (facts.need), never the shop list.
+
+Where a person must act (assistant/people.py, the launch's issues 4, 14 and 21),
+mirrored the same way: right after who the customer is, people.settle gives a call
+request code's words (the request passed on with the time they gave, or a question
+for a time; never the model's promise of a call), hands a shops customer's
+must-answer questions to a person (gas, chimney, NOC, Ejari, the deposit, the total
+upfront amount, ...), and cuts a reply's promises of a call and its "please contact
+our colleague"; while a person has the chat, people.quiet_reply answers instead of
+the holding line every time (a goodbye gets nothing, a chase an apology, a call's
+time the request passed on). The launch customers' own words are scenarios
+(shops-call-time-88, shops-call-chase-88, shops-goodbye-57, shops-must-answer-95,
+shops-gas-chimney-91, shops-computation-78).
+
+The batch's review (2026-10-16), mirrored the same way: must-answer questions go to a person while
+the chat goes on (people.MUST_ANSWER_PAUSES False: the line with the model's other words, no
+handover); a call in their own words beats the owner's not-a-shop line (engine.who_they_are), and
+"call me" or "call back" must be asked for (people.asks_for_call); a shop customer's room, staff
+accommodation or "flat nahi" is no home they want (needs.about_a_shop); "3 or 4 of us" is no window
+of time (hours.named_window); a buyer hears no word of renting and an invitation past two goes with
+no slots (engine.who_they_are). The scenarios shops-review-* and review-why-did-you-call hold
+these with shop customers' words that look like a need, a count, a call or a contract; the gate
+counts the scenarios the model writes on their own too (_summary).
+
+What the record keeps (assistant/crm_facts.py, the launch's issues 15 and 26), mirrored the same
+way: engine.settle keeps a shops answer's notes to the customer's own questions (never our
+discovery list, our own sentences or the prompt's old examples), drops a budget that is our own
+price and a business activity that is a home or a sentence; CUSTOMER NAME is engine.name_from's,
+never a job title; and "No thankyou" is code's no (rules.py). The launch customers' own words are
+scenarios (shops-notes-theirs-88, shops-budget-ours-62, shops-no-thankyou-120,
+shops-nine-questions-noted-95); the model's live answers pass them only through code.
+
+The launch gate (2026-10-16, batch 2d's real-model eval), mirrored the same way: right after the model,
+engine.own_time books their own exact day and hour over another time the model recorded; after own_offer,
+engine.nudge_yes gives a plain yes to our nudge code's two free slots (model_step sends them); engine.settle
+takes an "unclear" off "Who is this? Why did you call me?" (settle_handover), notes their must-answer questions
+in their own words when the model's notes miss one (crm_facts.their_questions), never quotes a figure of the old
+lead's CRM notes (lead_history.drop_quoted, with ``crm_notes``), cuts a claim that our slots start on the hour
+(claims) and closes a known end user's "Location" with code's invitation (location_invitation); and
+engine.who_they_are records no shop rented elsewhere for "need one more". The summary names every scenario that
+failed all its runs ("failed every repeat"), so a log cut short still shows them.
+
+The gate's review (2026-10-16), mirrored the same way: engine.own_time replaces only the model's confirm, reads
+only an hour said as one (never "slot 2"), never the hour work ends, and leaves a time of ours they took
+(their_time, with the chat's words and ours); "I already rented another shop" is rented, "don't need another one"
+no want (needs.wants_another); an "unclear" stays while the reply says a colleague will reply; a reply left empty
+by the hourly claim gets code's slots from their hour (engine.hourly_slots); only words that ask where we are
+get code's invitation (offers.asks_where_we_are); a yes to the morning nudge gets its own two slots again; the
+notes' budget is never kept as theirs. Scenarios code decides whatever the model writes count as code's
+(shops-options-nudge-yes, shops-nudge-ok-100, shops-location-counted-81, shops-gate-*); a figure of the CRM notes
+cut before the filter fails the model's own words (untouched), as the filter's cut did.
+
+A broker is never served as an end user (2026-10-17, assistant/brokers.py), mirrored the same way: right after
+engine.untag_need, brokers.backstop hands a shops answer over as broker_or_for_client when the model recorded
+facts.for_client true with no handover, or their own words say they are an agent or a broker or source the shop for
+a client (shops-broker: the model served the agent a Type 1 shop in both runs); engine.settle then gives code's
+hand-off line, as for the model's own tag. No scenario carries the Broker label, so the backstop's label check is
+never asked here. As live since its review (2026-10-17), the backstop is told whether a person holds the chat
+(``handed_over``: only "I am a broker" counts then) and our last line (``our_last``: a bare "Agent" answers our
+for-whom question only).
 """
 
 from __future__ import annotations
@@ -105,12 +175,17 @@ from django.db import connections
 
 from apps.leadai import shop_templates
 from apps.leadai.assistant import (
+    brokers,
+    claims,
     engine,
     filters,
     hours,
     lead_history,
+    needs,
     nudges,
+    offers,
     openai_client,
+    people,
     prompt,
     reminders,
     rules,
@@ -508,6 +583,16 @@ def has_fact(key: str) -> Check:
     return _check("fact", test)
 
 
+def no_fact(key: str) -> Check:
+    """Nothing is recorded under this fact (a studio is no business activity: needs.py)."""
+
+    def test(run):
+        got = run.answer["facts"].get(key)
+        return f"facts.{key} {got!r}, expected none" if got not in (None, "", []) else None
+
+    return _check("fact", test)
+
+
 def either(*checks: Check) -> Check:
     def test(run):
         misses = [check(run) for check in checks]
@@ -670,6 +755,88 @@ def sends_nothing() -> Check:
     return _check("send", test)
 
 
+def sends_person_line(kind: str) -> Check:
+    """What goes out is people.py's line ``kind`` (a call passed on, a call's time asked, must-answer questions
+    handed to a person, a chase's apology, the holding line), in the language code writes in."""
+
+    def test(run):
+        expected = people.line(kind, run.line_language or run.answer["language"], shops=run.scenario.playbook == IC_SHOPS)
+        return None if run.out == expected else f'sends "{_short(run.out, 60)}", expected the {kind} line'
+
+    return _check("send", test)
+
+
+def sends_must_answer() -> Check:
+    """What goes out carries people.py's must-answer line (our agent answers them here before the visit), alone or with
+    the model's other words (people.with_kept: the chat goes on, people.MUST_ANSWER_PAUSES False)."""
+
+    def test(run):
+        expected = people.line(people.MUST_ANSWER, run.line_language or run.answer["language"], shops=run.scenario.playbook == IC_SHOPS)
+        return None if expected in (run.out or "") else f'sends "{_short(run.out, 60)}", expected the must-answer line in it'
+
+    return _check("send", test)
+
+
+def questions_wait(*topics: str) -> Check:
+    """The must-answer questions go to a person while the chat goes on (people.settle: answer["questions_waiting"], no
+    handover; engine._apply raises the QUESTIONS alert), these topics among them when any are given."""
+
+    def test(run):
+        found = run.answer.get("must_answer") or []
+        if not run.answer.get("questions_waiting") or not found:
+            return "no must-answer questions passed to a person"
+        missing = [topic for topic in topics if topic not in found]
+        return f"must-answer topics {found}, missing {missing}" if missing else None
+
+    return _check("questions", test)
+
+
+def never_out(pattern: str, what: str) -> Check:
+    """Nothing that goes out, code's words too, matches ``pattern`` (never_says reads the model's reply only)."""
+    regex = re.compile(pattern, re.IGNORECASE)
+
+    def test(run):
+        match = regex.search(run.out or "")
+        return f'{what}: "{match.group(0)}"' if match else None
+
+    return _check("send", test)
+
+
+# A colleague said to reply to them ("Our specialist will reply here to assist you further", "Our team will reply here
+# shortly"): written out here, not read from people.py, so the check is the review's own.
+COLLEAGUE_WILL_REPLY = re.compile(
+    r"\b(?:agents?|specialists?|colleagues?|team|team\s+members?|someone|person)\b[^.?!]{0,40}?"
+    r"\b(?:reply|replies|respond|responds|get\s+back|answer\s+you|contact\s+you|message\s+you)\b",
+    re.IGNORECASE,
+)
+
+
+def no_unbacked_promise() -> Check:
+    """Nothing that goes out says a colleague will reply to them while nothing is handed over: no colleague is told, so
+    nobody would reply (the launch gate's fresh run of review-why-did-you-call went out so once its "unclear" was taken
+    off: "Our specialist will reply here to assist you further.")."""
+
+    def test(run):
+        match = COLLEAGUE_WILL_REPLY.search(run.out or "")
+        if run.answer["handover"]["needed"] or not match:
+            return None
+        return f'says a colleague will reply, with nothing handed over: "{_short(match.group(0), 60)}"'
+
+    return _check("send", test)
+
+
+def no_location_push() -> Check:
+    """Code did not close the reply with its invitation and our location (engine.location_invitation): their words ask
+    nothing of where we are ("Is the location good for a restaurant?")."""
+
+    def test(run):
+        if "location_invitation" in ((run.answer or {}).get("trimmed") or []):
+            return "code's slots and our location, for words that ask nothing of where we are"
+        return None
+
+    return _check("step", test)
+
+
 def follow_up(expected: str) -> Check:
     """The check-back of a shops chat: "ask" (the question), "schedule" (in a month), "clear"."""
 
@@ -701,6 +868,38 @@ def has_note() -> Check:
 
     def test(run):
         return None if run.answer["facts"].get("notes") else "facts.notes has no question for our agent"
+
+    return _check("fact", test)
+
+
+# The notes the launch chats' answers held that no customer asked (launch review issue 15): our discovery list, our own
+# questions, the prompt's old example list. Written out here, not read from crm_facts, so the check is the review's own.
+NOT_THEIR_NOTE = re.compile(
+    r"^\W*(?:what\s+business|(?:shop\s+)?size\s+needed|budget\W*$|licen[cs]e\s+kind|business\s+activity|size\s+or\s+budget|opening\s+when)"
+    r"|what\s+(?:size|is\s+your)|\bfor\s+yourself\b|\byour\s+business\b|do\s+you\s+want\s+to\s+buy"
+    r"|service\s+charge|\bdewa\b|\bparking\b|fit-?\s*out",
+    re.IGNORECASE,
+)
+
+
+def notes_theirs(*kept) -> Check:
+    """facts.notes holds no note the customer never asked (NOT_THEIR_NOTE), and still holds each of ``kept`` (their own
+    questions: never lost with ours; launch review issue 15): a note word for word, or (its words, the pattern of what it
+    asks), held by a note in any words, the model's own or the customer's (crm_facts notes their must-answer questions in
+    their own words when the model's notes miss one)."""
+
+    def held(want, notes) -> bool:
+        if isinstance(want, tuple):
+            return any(re.search(want[1], note, re.IGNORECASE) for note in notes)
+        return want in notes
+
+    def test(run):
+        notes = [str(note) for note in run.answer["facts"].get("notes") or []]
+        ours = [note for note in notes if NOT_THEIR_NOTE.search(note)]
+        if ours:
+            return f'facts.notes holds what they never asked: "{_short(ours[0], 50)}"'
+        lost = [want[0] if isinstance(want, tuple) else want for want in kept if not held(want, notes)]
+        return f'facts.notes lost their own question: "{_short(lost[0], 50)}"' if lost else None
 
     return _check("fact", test)
 
@@ -751,6 +950,88 @@ def sends_location() -> Check:
         return None if filters.carries_location(run.out, ADDRESS) else "does not give the office's location"
 
     return _check("location", test)
+
+
+def wants(kind: str) -> Check:
+    """A shops customer who wants no shop to rent (needs.py): what they want is recorded (facts.need and
+    facts.wanted), which is what sends the team's alert (engine._apply)."""
+
+    def test(run):
+        facts = run.answer["facts"]
+        if facts.get(needs.NEED) != kind:
+            return f"facts.need {facts.get(needs.NEED)!r}, expected {kind!r} (no alert to the team)"
+        return None if facts.get(needs.WANTED) else "facts.wanted not recorded (no alert to the team)"
+
+    return _check("fact", test)
+
+
+# Shop talk to someone who wants no shop to rent (the owner's rule, 2026-10-15), in what goes out.
+SHOP_TALK = re.compile(
+    r"\btype\s*[123]\b|\btypes?\s+of\s+shops\b|\bshops?\s+available\b|\bfor\s+yourself\b|\bfor\s+a\s+client\b|\bdrive\s+you\b"
+    r"|\bonly\s+(?:for\s+)?rent\b|\bnot\s+for\s+sale\b|\btrade\s+licen[cs]e\b|\bshop\s+type\b",
+    re.IGNORECASE,
+)
+
+
+def no_shop_list() -> Check:
+    """No shop step (the list, a type's media, the licence request), and nothing that goes out talks shop types,
+    the for-yourself question, the drive to the shops or "only for rent"."""
+
+    def test(run):
+        step = (run.answer.get("shop_step") or {}).get("kind")
+        if step in (shop_flow.LIST, shop_flow.MEDIA, shop_flow.LICENCE_ASK):
+            return f"shops step {step}, expected none"
+        match = SHOP_TALK.search(run.out or "")
+        return f'what goes out talks shops: "{match.group(0)}"' if match else None
+
+    return _check("step", test)
+
+
+def no_need() -> Check:
+    """A shop customer is no customer who wants something else (review 2d): no want recorded, never the owner's line."""
+
+    def test(run):
+        got = run.answer["facts"].get(needs.NEED)
+        if got:
+            return f"facts.need {got!r}: a shop customer read as wanting something else"
+        return "the owner's not-a-shop line goes to a shop customer" if run.answer.get("not_a_shop") else None
+
+    return _check("need", test)
+
+
+def no_questions() -> Check:
+    """No must-answer question is read in their words (review 2d: a customer ready to sign is no contract question)."""
+
+    def test(run):
+        found = run.answer.get("must_answer") or []
+        return f"must-answer topics {found}, expected none" if found else None
+
+    return _check("questions", test)
+
+
+def not_a_shop_line() -> Check:
+    """The owner's line for a customer who wants no shop to rent goes out (engine.not_a_shop_text): code's words."""
+
+    def test(run):
+        if not run.answer.get("not_a_shop") or run.out_by != CODE:
+            return "the owner's not-a-shop line does not go out"
+        return None
+
+    return _check("send", test)
+
+
+def slots_valid() -> Check:
+    """Every slot what goes out offers is an hour ahead at least, an hour from the other one, free and not past
+    (launch review issue 17, read as offers.wrong_times reads a reply; a time the customer named is theirs)."""
+
+    def test(run):
+        scenario = run.scenario
+        theirs = offers.theirs_from([item[1] for item in scenario.chat if item[0] == "customer"] + list(scenario.new), scenario.now)
+        if offers.wrong_times(run.out or "", scenario.now, list(scenario.closed), list(scenario.taken), theirs=theirs) is None:
+            return None
+        return f'offers a slot that is past, under an hour away or half an hour from the other: "{_short(run.out, 70)}"'
+
+    return _check("slots", test)
 
 
 def address_once() -> Check:
@@ -851,6 +1132,10 @@ def untouched() -> Check:
         # A second question is cut by the filter as house style (one per reply);
         # one_question() judges what is left. Anything else removed is a failure.
         removed = [note for note in run.removed if note != "second_question"]
+        if lead_history.QUOTED in ((run.answer or {}).get("trimmed") or []):
+            # A figure only the old lead's CRM notes hold, cut before the filter (lead_history.drop_quoted): the model
+            # quoted the notes (or obeyed them) all the same, as when the filter cut it as an amount (the gate's review).
+            removed.append(lead_history.QUOTED)
         return f"the reply filter removed: {', '.join(removed)}" if removed else None
 
     return _check("reply", test)
@@ -1071,6 +1356,19 @@ SHOPS_INVITED = SHOPS_MATCHED + [
     ("customer", "DED licence, yes"),
     ("assistant", "Perfect. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"),
 ]
+# The launch gate's review: our two slots, then words whose number is no hour of their visit, or an hour our slots do not name.
+TOMORROW_11_OR_1 = SHOPS_MATCHED + [
+    ("customer", "DED licence, yes"),
+    ("assistant", "Perfect. I can hold a slot for you tomorrow at 11:00 AM or 1:00 PM — which is better?"),
+]
+TOMORROW_5_OR_7 = SHOPS_MATCHED + [
+    ("customer", "DED licence, yes"),
+    ("assistant", "Perfect. I can hold a slot for you tomorrow at 5:00 PM or 7:00 PM — which is better?"),
+]
+TODAY_3_OR_5 = SHOPS_MATCHED + [
+    ("customer", "DED licence, yes"),
+    ("assistant", "Perfect. I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?"),
+]
 CHECK_BACK = [("customer", "[tapped: Not now]"), ("assistant", rules.line("check_back", "en"))]
 RENTED_ASKED = [
     ("customer", "Thank you but I already rented a shop last month"),
@@ -1111,6 +1409,300 @@ LIVE_INVITED = LIVE_ASKED_LICENCE + [
     ("assistant", LIVE_INVITE),
     ("customer", "How much sqf"),
     ("assistant", LIVE_AGAIN),
+]
+
+
+# The launch, 2026-10-15 (campaigns 448 and 449, Template A): 13 of the 32 who replied wanted no shop to rent
+# (needs.py). Our answer to them, as engine.not_a_shop_text writes it at NOW, with the address (no Maps link here).
+def not_a_shop_sent(kind: str, noun: str = "", *, sorry: bool = False) -> str:
+    spec = {"kind": kind, "noun": noun, "sorry": sorry, "slots": hours.offer_pair(NOW)}
+    return offers.with_location(engine.not_a_shop_text(spec, "en", NOW), ADDRESS, "en")
+
+
+WANTS_STUDIO = {"need": "home", "wanted": "a studio apartment", "property_type": "studio apartment", "intent": "rent", "for_client": False}
+STUDIO_ANSWERED = [("customer", "I need an apartment studio"), ("assistant", not_a_shop_sent("home", "studio_apartment"))]
+# Chat 63 as it goes now: "we got one" and "thank you" get code's second-shop question (engine.who_they_are).
+RENTED_63 = [("customer", "we got one"), ("customer", "thank you"), ("assistant", rules.line("rented_second_shop", "en"))]
+RENTED_63_FACTS = {"already_rented": True, "for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "Jerin"}
+# Chat 42, a buyer, as it went live: the for-whom question, the shop list, the rent explained, "only for rent".
+BUYER_42 = [
+    ("customer", "To buy"),
+    ("assistant", "You mentioned buying a shop. Is the shop for yourself, or are you checking for a client?"),
+    ("customer", "Myself"),
+    SHOP_LIST,
+    ("customer", "Wat is 33000/year"),
+    ("customer", "48000/year"),
+    (
+        "assistant",
+        "AED 33,000 or AED 48,000 per year means the annual rent price for the shop. For example, Type 1 shops start from AED "
+        "33,000 per year, and Type 2 shops start from AED 48,000 per year. What business will the shop be for?",
+    ),
+    ("customer", "You are not getting I feel\n\nI want purchase shop\nNot to rent"),
+    ("customer", "Do u understand now"),
+    (
+        "assistant",
+        "Thanks for clarifying. Currently, we only have shops available for rent, not for sale. Are you interested in renting a "
+        "shop instead, or do you know someone who is?",
+    ),
+]
+# The launch chats where a person had to act (people.py), as they went live up to the message a scenario answers.
+CALL_WORDS_88 = "We can have a call at 11.30 - 12 PM"
+CHAT_88 = [
+    SHOPS_YES,
+    FOR_WHOM,
+    ("customer", "Myself"),
+    SHOP_LIST,
+    ("customer", "Preferable Location - France (P24 P23 P26 P22)\nSize - 400sqft"),
+    ("customer", "[tapped: Type 1 – Small]"),
+    (
+        "assistant",
+        "For a shop in France cluster, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED or Trakhees "
+        "licence, or will you open a new one?",
+    ),
+    ("customer", "planning for a new one"),
+    (
+        "assistant",
+        "No problem, many tenants open a new licence. Our agent will guide you through the process. I can hold a slot for you "
+        "today at 11:30 AM or 12:00 PM — which is better?",
+    ),
+]
+FACTS_88 = {
+    "for_client": False, "property_type": "shop", "intent": "rent", "community": "France", "size_sqft": 400, "shop_type": "type_1",
+    "licence_kind": "new", "trade_licence": "no", "customer_name": "Abd",
+}
+CALL_PASSED_88 = people.line(people.CALL_PASSED, "en", shops=True)
+# A call promised at a time, or at all, in what goes out.
+CALL_PROMISE = r"\bwill\s+(?:\w+\s+)?call\s+you\b|\bcall\s+you\s+(?:today|tomorrow|at|between)\b|\bbetween\s+11:30\s+and\s+12"
+NINE_QUESTIONS_95 = (
+    "Hi, I’m seriously interested in this unit for a small dessert takeaway and production kitchen.\n\nBefore arranging the next "
+    "steps, I need to confirm a few technical points:\n\n1. Can the landlord provide an NOC for F&B / food preparation activity?\n"
+    "2. Can this exact unit be approved by Dubai Municipality for a food establishment?\n3. What is the total electrical load "
+    "available in kW?\n4. Is there existing water supply and drainage inside the shop?\n5. Can preparation and hand-wash sinks "
+    "be installed?\n6. Is there provision for exhaust/ventilation if required by Municipality?\n7. Is there a grease trap or "
+    "provision for one?\n8. Will I receive my own Ejari for the unit?\n9. What is the complete upfront amount including deposit, "
+    "agency commission, Ejari, VAT and any other fees?"
+)
+# His nine questions as the model notes them (live, turn 113 kept the first five: NOTES_MAX was 5).
+NOTES_95 = (
+    "NOC for F&B", "Dubai Municipality approval for food establishment", "total electrical load in kW",
+    "water supply and drainage inside shop", "installation of preparation and hand-wash sinks", "exhaust or ventilation provision",
+    "grease trap provision", "own Ejari for the unit", "complete upfront amount and fees",
+)
+# ... and what each asks, so a note holds it in the model's words or in his own (crm_facts.their_questions adds a
+# must-answer one the model's notes miss, as he wrote it). Read word for word, the launch gate's two runs both "lost" his
+# second question, and a note the model words its own way read as lost as much as one it dropped. Each pattern holds its
+# note and his question, and no other one (test_launch_gate).
+NINE_95 = tuple(
+    zip(
+        NOTES_95,
+        (
+            r"\bNOC\b|\bno[\s-]+objection\b",
+            r"\bmunicipal\w*\W+(?:\w+\W+){0,4}?approv|\bapprov\w*\W+(?:\w+\W+){0,4}?municipal|\bfood\s+establishment\b",
+            r"\belectric\w*|\bpower\s+load\b|\bkw\b|\bkilowatt",
+            r"\bdrain\w*|\bwater\s+supply\b",
+            r"\bsinks?\b|\bhand[\s-]?wash",
+            r"\bexhaust\b|\bventilat\w*",
+            r"\bgrease\b",
+            r"\b(?:own|my|receive|separate|individual)\s+(?:\w+\s+)?ejari\b|\bejari\s+(?:for|in|of)\s+(?:the|this|my)\b",
+            r"\bup\s*-?\s*front\b|\b(?:total|complete|full)\s+(?:amount|cost|payment)\b|\b(?:other|all|any)\s+(?:the\s+)?fees\b",
+        ),
+    )
+)
+CHAT_91 = [
+    ("customer", "Good morning"),
+    ("customer", "How are u?"),
+    ("assistant", "Good morning! We're doing well, thanks. Is the shop for yourself, or are you checking for a client?"),
+    ("customer", "Im actually looking for a restaurant or cafeteria"),
+    SHOP_LIST,
+    ("customer", "For me"),
+    (
+        "assistant",
+        "Perfect, a restaurant or cafeteria. What size shop do you need? We have small (400-550 sq ft), medium (600-800 sq ft), "
+        "and large (900-1,200 sq ft) options.",
+    ),
+    ("customer", "share me the prices and spaces so i  could decide"),
+    (
+        "assistant",
+        "For a restaurant or cafeteria, we have three shop sizes: small (400-550 sq ft) from AED 33,000 a year, medium (600-800 sq "
+        "ft) from AED 48,000 a year, and large (900-1,200 sq ft) from AED 80,000 a year. What size or budget are you considering?",
+    ),
+    ("customer", "are they an existing restaurant?"),
+    ("customer", "i want to know the location"),
+    (
+        "assistant",
+        f"The shops are spaces ready for you to open your own restaurant or cafeteria, not existing businesses. Our office is in "
+        f"{ADDRESS}. I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?",
+    ),
+]
+CHAT_78 = [
+    SHOPS_YES,
+    FOR_WHOM,
+    ("assistant", nudges.first_text("en", "there", now=NOW)),
+    ("customer", "For me"),
+    SHOP_LIST,
+    ("customer", "How much is yur shop"),
+    (
+        "assistant",
+        "We have 3 shop types: Small (400-550 sq ft) from AED 33,000, Medium (600-800 sq ft) from AED 48,000, and Large (900-1,200 "
+        "sq ft) from AED 80,000 per year. What size or budget do you have in mind?",
+    ),
+]
+# The launch chats of the "facts, slots and booking" fixes (launch review issues 5, 6, 12, 13, 16, 17, 22, 24), on their own
+# clock (Thursday 15 October 2026, Dubai). Our lines are the live replies; chat 96's voice notes are not in the export, so their
+# words are rebuilt from what our replies, the notes and appointment 18 say he said (his own "barah saadhay barah baje ja ke
+# check kar loon ga" among them), and our old address in the live replies is the one the model reads now (Building V03).
+THURSDAY = 15
+CHAT_96_START = [
+    ("customer", "[voice note] Haan ji, mujhe shop chahiye", at(THURSDAY, 10, 44)),
+    ("assistant", shop_flow.list_text("ur_latin", DEFAULT_SHOPS_FACTS), at(THURSDAY, 10, 46)),
+    ("customer", "[voice note] England cluster mein chhoti shop chahiye, 500 se 550 square feet, parking side par", at(THURSDAY, 10, 48)),
+    (
+        "assistant",
+        "Aapko England cluster mein 400-550 sq ft ka chhota shop chahiye, parking side par. Kya aapke paas koi budget hai ya aapko rent "
+        "ka andaza chahiye?",
+        at(THURSDAY, 10, 50),
+    ),
+    ("customer", "[voice note] 550 square feet ka rent kitna hai?", at(THURSDAY, 10, 51)),
+    (
+        "assistant",
+        "550 sq ft ka shop England cluster mein Type 1 hai, jo 400-550 sq ft ke darmiyan hota hai, aur iska rent AED 33,000 se shuru "
+        "hota hai. Yeh shops France, England, China, Russia, Morocco aur Persia clusters mein hain. Kya aap dekhna chahenge? Main aap "
+        "ke liye aaj 11:30 AM ya 12:00 PM ka slot reserve kar sakta hoon.",
+        at(THURSDAY, 10, 53),
+    ),
+]
+WINDOW_96 = "[voice note] Kaunsi building mein hai? Main barah saadhay barah baje ja ke check kar loon ga"
+# Chat 96's live answer at 11:12 (reply 180386): our office's address as the England shop's, and slots at 12:30 PM or 1:00 PM.
+CLAIM_96 = (
+    f"England cluster mein shop ka location {ADDRESS} hai. Aap hamare office aakar 12:30 PM ya 1:00 PM ka slot le sakte hain, jahan se "
+    "hamara agent aapko shops dikhane le jayega. Kaunsa waqt aap ke liye behtar hai?"
+)
+CHAT_96 = CHAT_96_START + [
+    ("customer", WINDOW_96, at(THURSDAY, 11, 10)),
+    ("assistant", CLAIM_96, at(THURSDAY, 11, 12)),
+    ("customer", "[voice note] Assalam o alaikum, kya shop abhi khula hai?", at(THURSDAY, 12, 24)),
+    (
+        "assistant",
+        "Walekum assalam! Shop abhi khula hai. Aap 12:30 PM ke liye hamare office ka slot confirm kar sakte hain, jahan se hamara agent "
+        "aapko shops dikhane le jayega. Kya yeh waqt aapke liye theek hai?",
+        at(THURSDAY, 12, 26),
+    ),
+]
+FACTS_96 = {"for_client": False, "property_type": "shop", "intent": "rent", "community": "England", "size_sqft": 550, "shop_type": "type_1"}
+# Chat 96's live answer at 12:34 (reply 181187): where the shop is, its side, and 12:30 PM, five minutes after it had passed.
+SIDE_96 = (
+    "Ji, shop Russia Cluster mein Building V03 ke paas hai, aur yeh parking side par hai, front side par nahi. Yeh Russia 2 ya 3 dono "
+    "buildings ke beech mein hai. Aap 12:30 PM ka slot confirm karna chahte hain?"
+)
+# Chat 62 (lead 79229) on its own clock: 600 sq ft, a new licence, and our two slots half an hour away and half an hour apart.
+CHAT_62 = [
+    ("customer", "I need 600sqf", at(THURSDAY, 10, 26)),
+    (
+        "assistant",
+        "600 sq ft, got it. For that size, a Type 2 shop is perfect: 600-800 sq ft, from AED 48,000 a year. Do you have a trade licence "
+        "already, or will you be opening a new one?",
+        at(THURSDAY, 10, 26),
+    ),
+]
+NEW_ONE_62 = (
+    "A Type 2 shop is great, starting from AED 48,000 a year. I can hold a viewing slot for you today at 11:00 AM or 11:30 AM at our "
+    "office. Which works better?"
+)
+# ... and the live reply to "How much sqf" (179991): the same two slots again, the business never asked.
+AGAIN_62 = (
+    "A Type 2 shop ranges from 600 to 800 sq ft, starting from AED 48,000 a year. Would you like to confirm a viewing slot today at "
+    "11:00 AM or 11:30 AM at our office?"
+)
+FACTS_62 = {"for_client": False, "property_type": "shop", "intent": "rent", "size_sqft": 600, "shop_type": "type_2", "customer_name": "ora"}
+CHAT_62_INVITED = CHAT_62 + [
+    ("customer", "New", at(THURSDAY, 10, 27)),
+    ("customer", "One", at(THURSDAY, 10, 27)),
+    ("assistant", f"{NEW_ONE_62}\n{ADDRESS}", at(THURSDAY, 10, 27)),
+]
+# Chat 59 (ETS), and chat 100 (Saif) before their price objections.
+CHAT_59 = [
+    SHOPS_YES,
+    FOR_WHOM,
+    ("customer", "How many square feet area"),
+    SHOP_LIST,
+    ("customer", "And give me full details including rent security"),
+    (
+        "assistant",
+        "Rent security is usually a deposit, and payment is in 1 to 4 cheques. Good question — I'll have our agent confirm details like "
+        "service charge, DEWA, parking, and fit-out at the viewing. What size or budget are you considering for the shop?",
+    ),
+    ("assistant", nudges.first_text("en", "ETS", now=at(THURSDAY, 12, 31)), at(THURSDAY, 12, 31)),
+]
+CHAT_100 = [
+    SHOPS_YES,
+    FOR_WHOM,
+    ("customer", "I need shop in Morroco cluster"),
+    SHOP_LIST,
+    ("customer", "[tapped: Type 2 – Medium]"),
+    TYPE_2_CARD,
+    ("assistant", nudges.first_text("en", "Saif", now=at(THURSDAY, 12, 34)), at(THURSDAY, 12, 34)),
+    ("customer", "Ok", at(THURSDAY, 12, 34)),
+    ("assistant", "Thanks, Saif. What business will the shop be for?", at(THURSDAY, 12, 35)),
+    ("customer", "Normal goods \nElectronics", at(THURSDAY, 12, 42)),
+]
+FACTS_100 = {
+    "for_client": False, "property_type": "shop", "intent": "rent", "community": "Morocco", "shop_type": "type_2",
+    "business_activity": "Normal goods, Electronics", "customer_name": "Saif",
+}
+# The live answers to the price objections (replies 181214 and 181246): the discount line and two slots under an hour away.
+DISCOUNT_59 = "I understand. Our agent can discuss the best price for you at the viewing. I can hold a slot for you today at 1:00 PM or 1:30 PM — which is better?"
+DISCOUNT_100 = (
+    "I understand. Our agent can discuss the best price for you at the viewing. Good shops in International City get taken fast, so "
+    "viewing early helps. I can hold a slot for you today at 1:00 PM or 1:30 PM — which is better?"
+)
+# Chat 88 before the tap sent with its typed words, and chat 81's first answer, a tap and a question 8 seconds apart.
+CHAT_88_LISTED = [SHOPS_YES, FOR_WHOM, ("customer", "Myself"), SHOP_LIST]
+TAP_WORDS_88 = ["Preferable Location - France (P24 P23 P26 P22)\nSize - 400sqft", "[tapped: Type 1 – Small]"]
+MATCH_88 = (
+    "For a shop in France cluster, Type 1 is perfect: 400-550 sq ft, from AED 33,000 a year. Do you have a DED or Trakhees licence, "
+    "or will you open a new one? I can hold a slot for you today at 11:30 AM or 12:00 PM — which is better?"
+)
+TAP_WORDS_81 = ["[tapped: Yes, show me shops]", "How much price monthly basis"]
+# Chat 91's live replies after the list: the size table again unasked (179996), and its food-use claim (180180).
+TABLE_91 = (
+    "Perfect, a restaurant or cafeteria. What size shop do you need? We have small (400-550 sq ft), medium (600-800 sq ft), and large "
+    "(900-1,200 sq ft) options."
+)
+FOOD_91 = (
+    f"The shops are spaces ready for you to open your own restaurant or cafeteria, not existing businesses. Our office is in {ADDRESS}. "
+    "When would you like to come and see them?"
+)
+FACTS_91 = {"for_client": False, "property_type": "shop", "intent": "rent", "business_activity": "restaurant or cafeteria", "customer_name": "Riza"}
+# Chat 81's "Location" (reply 180892): the clusters, our office, and an open "when" code made two slots of.
+LOCATION_81 = (
+    f"Our shops are in International City, in France, England, China, Russia, Morocco and Persia clusters. We're at {ADDRESS}. "
+    "When would you like to come and see them?"
+)
+# Chat 78's commission answer (the 14:19 reply, after the export): "There are no commissions from us for tenants".
+NO_COMMISSION_78 = "There are no commissions from us for tenants. Do you have a DED or Trakhees licence, or will you open a new one?"
+# What may never go out (the scenarios of these fixes judge what goes out, code's words too). "ke darmiyan" after a time is a
+# span of time, never a building's side ("aaj 2:00 PM ya 3:00 PM ke darmiyan": between 2 and 3 PM; the launch gate's run #1);
+# an am or pm only after a digit ("Shop Islam ke paas hai" names a place).
+PLACE_CLAIM = (
+    r"\bV0\d\b|(?<!\d\sam\s)(?<!\d\spm\s)(?<!\dam\s)(?<!\dpm\s)(?<!baje\s)(?<!bje\s)(?<!:\d\d\s)\bke\s+(?:darmiyan|beech|paas)\b"
+    r"|\b(?:parking|front)\s+side\s+par\s+hai|\bis\s+(?:on|at)\s+the\s+(?:parking|front)\s+side"
+)
+# Our slots said to start only on the hour (they are every 30 minutes): the launch gate's "Our office slots start on the
+# hour", and its review's "Our slots are hourly", "We only book full hours", "only at the top of the hour".
+HOURLY_SAID = r"\bon\s+the\s+hour\b|\btop\s+of\s+the\s+hour\b|\bhourly\b|\bfull\s+hours?\b|\bevery\s+hour\b|\bhar\s+ghante\b"
+FOOD_CLAIM = (
+    r"ready\s+for\s+you\s+to\s+open|suitable\s+for\s+(?:a\s+|your\s+)?(?:restaurant|cafe|food)|(?:restaurants?|food)\s+(?:is|are)\s+"
+    r"(?:allowed|permitted|fine|possible)|you\s+can\s+(?:open|run)\s+(?:a|your)"
+)
+NO_COMMISSION = r"\bno\s+(?:agency\s+)?commissions?\b|\bcommission[- ]free\b|\bwithout\s+(?:any\s+)?commission\b|\b0\s*%"
+OUR_LOCATION = re.escape(offers.LOCATION_LABEL["en"])  # our location as code adds it, labelled
+TABLE_AGAIN = r"400\s*-\s*550[^.?!]{0,80}600\s*-\s*800|600\s*-\s*800[^.?!]{0,80}900\s*-\s*1,?200"
+SLOT_TIME = r"\b\d{1,2}:\d{2}\s*(?:AM|PM)\b"
+CHAT_78_LICENCE = CHAT_78 + [
+    ("customer", "33k"),
+    ("assistant", "For your budget of AED 33,000, the Small shop type is perfect: 400-550 sq ft, from AED 33,000 a year. What business will you run in the shop?"),
+    ("customer", "Interior landscape"),
+    ("assistant", "Perfect, an interior landscape shop. Do you have a DED or Trakhees licence, or will you open a new one?"),
 ]
 
 SCENARIOS = [
@@ -1817,18 +2409,15 @@ SCENARIOS = [
         loose=("handover",),
     ),
     Scenario(
+        # Launch 2026-10-15: code writes it (engine.who_they_are), so the no that follows closes the lead as
+        # already rented, whatever the model answered.
         "shops-already-rented",
         "shops: 'I already rented a shop' is congratulated and asked about a second shop, not lost yet",
         playbook=IC_SHOPS,
         campaign=SHOPS_A,
         new=["Thank you but I already rented a shop last month"],
-        expect=[
-            opt_out("none"),
-            flag("already_rented", True),
-            invited(False),
-            says(r"congrat|mabrook|mubarak", "congratulate them"),
-            says(r"second|another|someone|anyone|friend|know (?:of )?any", "ask about a second shop or someone who needs one"),
-        ],
+        expect=[opt_out("none"), flag("already_rented", True), invited(False), sends_line("rented_second_shop"), no_shop_list()],
+        words=CODE,
     ),
     Scenario(
         "shops-rented-no",
@@ -2307,6 +2896,868 @@ SCENARIOS = [
             says(r"size|sq|budget|licen", "ask the next discovery item"),
         ],
     ),
+    # The launch (2026-10-15): who the customer is (needs.py, engine.who_they_are). The owner's rule: no customer
+    # is ever lost. Each of these launch customers, in their own words, gets our office's location, the invitation
+    # with two free slots and the team's alert (facts.need), never the shop list, a shop type or "only for rent".
+    Scenario(
+        "shops-want-studio-44",
+        "launch chat 44: 'I need an apartment studio' gets the owner's line, our location and two slots, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Trezah",
+        new=["I need an apartment studio"],
+        expect=[
+            not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(),
+            out_says(r"options for a studio apartment across Dubai", "say we have options for what they want"),
+            out_says(r"Visit our office and we'll give you the best option\.", "invite them in the owner's words"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-want-1bhk-49",
+        "launch chat 49: 'I need room / 1bhk Englund x cluster' gets the owner's line for a 1BHK, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Mohammed",
+        new=["I need room\n1bhk Englund x cluster"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(), out_says(r"1BHK", "name the 1BHK")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-no-shop-room-50",
+        "launch chat 50: 'No shop' + 'Looking for a room' is thanked with a sorry and invited for a room, never the list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Ejas",
+        new=["No shop", "Looking for a room"],
+        expect=[
+            not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(),
+            out_says(r"sorry for the confusion", "apologise for misreading them"), out_says(r"options for a room", "name the room"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-studio-monthly-57",
+        "launch chat 57: 'am looking for studio for monthly rent sir' gets the owner's line, never the list or the business",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Sukirtha",
+        new=["am looking for studio for monthly rent sir"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(), no_fact("business_activity")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-we-got-one-63",
+        "launch chat 63: 'we got one' + 'thank you' is already rented: congratulated and asked about a second shop, never the list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Jerin",
+        new=["we got one", "thank you"],
+        expect=[sends_line("rented_second_shop"), flag("already_rented", True), invited(False), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-not-now-studio-68",
+        "launch chat 68: 'Actually i was looking for a studio' after 'Not now' gets the owner's line with a sorry, never the list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Swathy",
+        chat=CHECK_BACK,
+        followup_asked=True,
+        new=["Actually i was looking for a studio"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(), out_says(r"sorry", "apologise")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-never-asked-98",
+        "launch chat 98: 'No I didnt look for shop' is thanked with a sorry and invited for other options, never 'for yourself?'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Raja",
+        new=["No I didnt look for shop"],
+        expect=[
+            not_a_shop_line(), wants("never_asked"), sends_location(), offers_free(), no_shop_list(),
+            out_says(r"sorry for the confusion", "apologise"), out_says(r"not only shops", "say we have other options"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-studio-balcony-107",
+        "launch chat 107: 'Studio apartment with balcony' gets the owner's line, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Mohit",
+        new=["Studio apartment with balcony"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-did-not-ask-114",
+        "launch chat 114: 'I did not ask shop.' is apologised to and invited, never asked 'for yourself, or for a client?'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        new=["I did not ask shop."],
+        expect=[not_a_shop_line(), wants("never_asked"), sends_location(), offers_free(), no_shop_list(), out_says(r"sorry", "apologise")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-asked-for-studio-132",
+        "launch chat 132: 'No I didn’t ask for shop' + 'I asked for studio' gets a sorry and the line for a studio, never the list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Mojish",
+        new=["No I didn’t ask for shop", "I asked for studio"],
+        expect=[
+            not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(),
+            out_says(r"sorry", "apologise"), out_says(r"options for a studio", "name the studio"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-buyer-42",
+        "launch chat 42: 'To buy' is a buyer: invited to the office like anyone, never 'only for rent', never the list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Manager",
+        new=["To buy"],
+        expect=[not_a_shop_line(), wants("buy"), sends_location(), offers_free(), no_shop_list(), out_says(r"options to buy", "say we have options to buy")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-buyer-not-lost-42",
+        "launch chat 42 replayed: 'Sorry nobody / I want to purchase shop' after 'only for rent' is never lost: sorry, the line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Manager",
+        chat=BUYER_42,
+        facts={"intent": "buy", "for_client": False, "property_type": "shop"},
+        list_sent=True,
+        new=["Sorry nobody\nI want to purchase shop"],
+        expect=[
+            not_a_shop_line(), wants("buy"), opt_out("none"), sends_location(), offers_free(), no_shop_list(),
+            out_says(r"sorry for the confusion", "apologise"), out_says(r"options to buy a shop", "say we have shops to buy"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-residential-room-105",
+        "launch chat 105: 'I am looking residential room' is invited for a room, not handed over as 'unclear'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        new=["I am looking residential room"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-studio-capitals-136",
+        "launch chat 136: 'AM NOT LOOKING FOR SHOPS' + studio apartments is apologised to and invited, not handed over",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Appu",
+        new=["AM NOT LOOKING FOR SHOPS", "AM LOOKING FOR STUDIO APARTMENTS"],
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), no_shop_list(), out_says(r"sorry", "apologise")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-studio-not-interested",
+        "shops: 'I need a studio' + 'not interested' is no decline: the code opt-out waits, and the owner's line goes",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a studio", "not interested"],
+        expect=[not_a_shop_line(), wants("home"), opt_out("none"), sends_location(), offers_free(), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-want-flat-arabic",
+        "shops: 'I don't want a shop, I am looking for a flat' in Arabic gets the owner's line in Arabic, with our location",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Khalid Hassan",
+        new=["لا أريد محل، أبحث عن شقة للإيجار"],
+        language="ar",
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), out_in("arabic"), out_says(r"الشقق", "name the flat")],
+        words=CODE,
+        loose=("language",),
+    ),
+    Scenario(
+        "shops-want-flat-roman-urdu",
+        "shops: 'shop nahi chahiye, flat chahiye' gets the owner's line in Roman Urdu, with our location",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Muhammad Asif",
+        new=["Mujhe shop nahi chahiye, flat chahiye rehne ke liye"],
+        language="ur_latin",
+        expect=[not_a_shop_line(), wants("home"), sends_location(), offers_free(), out_says(r"Hamare office tashreef layein", "invite them in Roman Urdu")],
+        words=CODE,
+    ),
+    Scenario(
+        # The launch gate (both runs): "Great, I held the 3:00 PM slot for you today ...", and nothing was held. A plain yes
+        # to a nudge gets code's two free slots now (engine.nudge_yes), whatever the model writes: code's words (the gate's
+        # review), never counted as the model's own.
+        "shops-options-nudge-yes",
+        "shops: 'Yes' to the nudge about the options (a studio seeker) gets two free slots and no shop talk",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=STUDIO_ANSWERED + [("assistant", nudges.first_text("en", "Ahmed Khan", options=True, now=NOW))],
+        facts=WANTS_STUDIO,
+        invites=1,
+        new=["Yes"],
+        expect=[offers_free(), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-not-a-shop-booked",
+        "shops: a studio seeker's '4:30 PM today is fine' is booked, and the confirmation names no shop type and no drive",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=STUDIO_ANSWERED,
+        facts=WANTS_STUDIO,
+        invites=1,
+        new=["4:30 PM today is fine"],
+        expect=[
+            books("2026-10-12", "16:30"), no_shop_list(), out_says(r"Your meeting is confirmed", "send the visit's confirmation"),
+            out_says(r"Our specialist will be expecting you", "say who they meet, not a shops agent"),
+        ],
+        words=CODE,
+    ),
+    # The launch, its follow-ups (launch review issues 9 and 23): a no to the second-shop question in other
+    # words closes the lead as already rented; the for-whom question a nudge asked again is answered as itself.
+    Scenario(
+        "shops-rented-soft-no-63",
+        "shops: 'if anything will let you know' to the second-shop question closes the lead as already rented, from code",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Jerin",
+        chat=RENTED_63,
+        facts=RENTED_63_FACTS,
+        rented_asked=True,
+        new=["if anything will let you know"],
+        expect=[opt_out("not_interested"), sends_line("not_interested"), lost_reason("already rented")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-rented-reach-out-63",
+        "shops: 'will definitely reach out if we need anything in the future' to the second-shop question is a no, from code",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Jerin",
+        chat=RENTED_63,
+        facts=RENTED_63_FACTS,
+        rented_asked=True,
+        new=["Thank you so much! \nI really appreciate your support and will definitely reach out if we need anything in the future."],
+        expect=[opt_out("not_interested"), sends_line("not_interested"), lost_reason("already rented")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-rented-friend-63",
+        "shops: 'My friend needs one, I will let you know' to the second-shop question is a referral, never lost",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Jerin",
+        chat=RENTED_63,
+        facts=RENTED_63_FACTS,
+        rented_asked=True,
+        new=["My friend needs one, I will let you know"],
+        expect=[opt_out("none"), lost_reason(None), no_shop_list()],
+        loose=("handover",),
+    ),
+    Scenario(
+        # Live, the model asked for the business, licence and size instead, and kept a tentative with no time
+        # (appointment 19) that held every follow-up back (launch review issue 11; it now lapses after 24 hours). A plain
+        # yes to a nudge gets code's two free slots now (engine.nudge_yes, the launch gate), whatever the model writes:
+        # code's words (the gate's review).
+        "shops-nudge-ok-100",
+        "launch chat 100: 'Ok' to the nudge after Type 2's card gets two free slots, nothing booked at a time nobody named",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Saif",
+        chat=[
+            SHOPS_YES, FOR_WHOM, ("customer", "I need shop in Morroco cluster"), SHOP_LIST, ("customer", "[tapped: Type 2 – Medium]"),
+            TYPE_2_CARD, ("assistant", nudges.first_text("en", "Saif", now=NOW)),
+        ],
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "community": "Morocco", "shop_type": "type_2", "customer_name": "Saif"},
+        list_sent=True,
+        new=["Ok"],
+        expect=[offers_free(), no_booking()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-for-whom-again-103",
+        "shops: 'For me' to the nudge that asked again 'for yourself, or for a client?' gets the shop types list, nothing booked",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="huzefa",
+        chat=[SHOPS_YES, FOR_WHOM, ("assistant", nudges.first_text("en", "huzefa", for_whom=True, now=NOW))],
+        new=["For me"],
+        expect=[flag("for_client", False), sends_step("list"), no_booking(), invited(False)],
+        words=CODE,
+    ),
+    # Where a person must act (people.py): the launch's call, chase, goodbye and must-answer questions -----------
+    Scenario(
+        # Live: "Our agent will call you today between 11:30 and 12:00 ...", the alert said only "asked for a call",
+        # and nobody called (launch review issue 4).
+        "shops-call-time-88",
+        "launch chat 88: 'We can have a call at 11.30 - 12 PM' is handed over and passed on, with no call time promised",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Abd",
+        now=at(15, 10, 35),
+        chat=CHAT_88,
+        facts=FACTS_88,
+        list_sent=True,
+        invites=1,
+        new=["We can have a call at 11.30 - 12 PM"],
+        expect=[handover("call_requested"), sends_person_line(people.CALL_PASSED), never_out(CALL_PROMISE, "promises a call")],
+        words=CODE,
+    ),
+    Scenario(
+        # Live: "Our specialist has your message and will reply here.", and no new alert (launch review issues 4 and 21).
+        "shops-call-chase-88",
+        "launch chat 88: 'will i get any call??' while a person has the chat gets an apology, never the holding line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Abd",
+        now=at(15, 12, 5),
+        chat=[*CHAT_88, ("customer", "We can have a call at 11.30 - 12 PM", at(15, 10, 35)), ("assistant", CALL_PASSED_88, at(15, 10, 35))],
+        facts=FACTS_88,
+        list_sent=True,
+        invites=2,
+        handed_over="yes (call_requested)",
+        appointment={"status": "tentative", "place": "call", "starts_at": at(15, 11, 30), "note": CALL_WORDS_88, "customer_words": CALL_WORDS_88},
+        new=["will i get any call??"],
+        expect=[sends_person_line(people.CHASE), invited(False)],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        # Live, chat 57's goodbye (8 words, more than rules.is_acknowledgement reads) got the holding line.
+        "shops-goodbye-57",
+        "launch chat 57: 'its ok sir no prblm thankyou for ur response' while a person has the chat gets nothing",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="sukirtha",
+        chat=[SHOPS_YES, FOR_WHOM, ("customer", "I want to talk to a person please"), ("assistant", people.line(people.HOLDING, "en", shops=True))],
+        facts={"for_client": None, "property_type": "shop", "customer_name": "sukirtha"},
+        handed_over="yes (customer_asked_human)",
+        new=["its ok sir no prblm thankyou for ur response"],
+        expect=[sends_nothing()],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        # Live: all nine went "to the viewing", with no alert (launch review issue 14).
+        "shops-must-answer-95",
+        "launch chat 95: nine must-answer questions go to a person before any visit, never 'at the viewing'; the chat goes on",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Madj",
+        new=[NINE_QUESTIONS_95],
+        expect=[
+            questions_wait("NOC", "Municipality approval", "Ejari", "deposit"), sends_must_answer(),
+            never_out(r"at the viewing", "leaves them to the viewing"), invited(False),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        # Live: "Good question — I'll have our agent confirm that for you at the viewing." and two slots again.
+        "shops-gas-chimney-91",
+        "launch chat 91: a restaurant's 'is there available gas line and chimney?' goes to a person before any visit",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Riza",
+        chat=CHAT_91,
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "business_activity": "restaurant or cafeteria", "customer_name": "Riza"},
+        list_sent=True,
+        invites=1,
+        new=["is there available gas line and chimney?"],
+        expect=[questions_wait("gas line", "chimney"), sends_must_answer(), never_out(r"at the viewing", "leaves them to the viewing"), invited(False)],
+        words=CODE,
+    ),
+    Scenario(
+        # Live: the computation got no answer at all (launch review issue 14).
+        "shops-computation-78",
+        "launch chat 78: 'can u give me the detai computation' (the total upfront cost) goes to a person before any visit",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        chat=CHAT_78,
+        facts={"for_client": False, "property_type": "shop", "intent": "rent"},
+        list_sent=True,
+        new=["And can u give me the detai computation i need back area", "Parking side", "33k"],
+        expect=[questions_wait("total upfront amount"), sends_must_answer(), never_out(r"at the viewing", "leaves them to the viewing"), invited(False)],
+        words=CODE,
+    ),
+    # Launch review 2026-10-15, facts, slots and booking (issues 5, 6, 12, 13, 16, 17, 22, 24) ----------------------------
+    Scenario(
+        # Live (turn 116): kept tentative with no time, and offered 12:30 PM or 1:00 PM; he was never booked.
+        "shops-same-day-window-96",
+        "launch chat 96: 'barah saadhay barah baje ja ke check kar loon ga' at 11:10 books today at the start of his window",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        now=at(THURSDAY, 11, 10),
+        campaign_at=at(THURSDAY, 10, 29),
+        chat=CHAT_96_START,
+        facts=FACTS_96,
+        list_sent=True,
+        invites=1,
+        language="ur_latin",
+        language_so_far="ur_latin",
+        new=[WINDOW_96],
+        expect=[either(books("2026-10-15", "12:00"), books("2026-10-15", "12:30"))],
+        words=CODE,
+    ),
+    Scenario(
+        # Live (reply 181187): "shop ... Building ... ke darmiyan hai, aur yeh parking side par hai" and "12:30 PM", passed at 12:35.
+        "shops-building-and-past-slot-96",
+        "launch chat 96 at 12:35: which building and side get no answer of ours, and 12:30 PM, now past, is never offered",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        now=at(THURSDAY, 12, 35),
+        campaign_at=at(THURSDAY, 10, 29),
+        chat=CHAT_96,
+        facts=FACTS_96,
+        list_sent=True,
+        invites=2,
+        language="ur_latin",
+        language_so_far="ur_latin",
+        appointment={"status": "tentative", "starts_at": None, "note": "barah saadhay barah baje ja ke check kar loon ga"},
+        new=["[voice note] Shop kaunsi building mein hai?", "[voice note] Parking side wali shop chahiye, front wali nahi"],
+        expect=[never_out(PLACE_CLAIM, "says which building or side a shop is in"), never_out(r"12:30", "offers 12:30 PM, which has passed"), slots_valid()],
+        words=EITHER,
+    ),
+    Scenario(
+        # Live (reply 180180): "The shops are spaces ready for you to open your own restaurant or cafeteria".
+        "shops-food-claim-91",
+        "launch chat 91: 'are they an existing restaurant?' and the location: no word that a restaurant works there, our office, two slots",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Riza",
+        now=at(THURSDAY, 10, 37),
+        campaign_at=at(THURSDAY, 10, 26),
+        chat=CHAT_91[:-3],
+        facts=FACTS_91,
+        list_sent=True,
+        new=["are they an existing restaurant?", "i want to know the location"],
+        expect=[never_out(FOOD_CLAIM, "says a restaurant may open there"), sends_location(), slots_valid(), invited(True)],
+    ),
+    Scenario(
+        # Live (14:19, after the export): "There are no commissions from us for tenants".
+        "shops-commission-78",
+        "launch chat 78: a commission question gets Matloob's line, never 'no commission' or a figure",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        now=at(THURSDAY, 14, 19),
+        chat=CHAT_78_LICENCE,
+        facts={
+            "for_client": False, "property_type": "shop", "intent": "rent", "budget_aed": 33000, "budget_basis": "per_year",
+            "shop_type": "type_1", "business_activity": "interior landscape",
+        },
+        list_sent=True,
+        new=["Is there any commission?"],
+        expect=[out_says(r"normal commission", "give Matloob's commission line"), never_out(NO_COMMISSION, "says there is no commission")],
+    ),
+    Scenario(
+        # Live (reply 181214): the discount line and two slots 20 minutes away.
+        "shops-rent-higher-59",
+        "launch chat 59: 'Your rent is higher than others' gets the honest line, our lowest type, never the discount line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="ETS",
+        now=at(THURSDAY, 12, 40),
+        chat=CHAT_59,
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "ETS"},
+        list_sent=True,
+        new=["Your rent is higher than others"],
+        expect=[out_says(r"Our lowest is Type 1, from AED 33,000", "say Type 1 from AED 33,000 is our lowest"), never_out(r"best price", "gives the discount line"), invited(False)],
+        words=CODE,
+    ),
+    Scenario(
+        # Live (reply 181246): the discount line, the urgency line and two slots 17 minutes away.
+        "shops-cheaper-100",
+        "launch chat 100: 'I need cheaper price no good location' gets the honest line, our lowest type, never the discount line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Saif",
+        now=at(THURSDAY, 12, 43),
+        chat=CHAT_100,
+        facts=FACTS_100,
+        list_sent=True,
+        new=["I need cheaper price no good location"],
+        expect=[out_says(r"Our lowest is Type 1, from AED 33,000", "say Type 1 from AED 33,000 is our lowest"), never_out(r"best price", "gives the discount line"), invited(False)],
+        words=CODE,
+    ),
+    Scenario(
+        # Live (turn 115): the tap's label read as asking for the shop types, and the list replaced every word of the answer.
+        "shops-tap-and-question-81",
+        "launch chat 81: [Yes, show me shops] with 'How much price monthly basis' gets the answer and 'for yourself, or for a client?'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Imtiyaz",
+        now=at(THURSDAY, 11, 8),
+        new=TAP_WORDS_81,
+        expect=[out_says(r"for yourself, or are you checking for a client", "ask the build pack's first question"), no_step(), invited(False)],
+    ),
+    Scenario(
+        # Live (turn 82): the model's words alone; no video, photos or card.
+        "shops-tap-type-with-words-88",
+        "launch chat 88: his size and cluster typed, then the 'Type 1 – Small' row tapped: Type 1's video, photos and card go",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Abd",
+        now=at(THURSDAY, 10, 33),
+        chat=CHAT_88_LISTED,
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "Abd"},
+        list_sent=True,
+        new=TAP_WORDS_88,
+        expect=[sends_step("media", "type_1", files=True), fact("shop_type", "type_1"), invited(False)],
+        words=CODE,
+    ),
+    Scenario(
+        # Live (turn 82, reply 180113): the slots cut as a second question were counted, and our Maps link went bare
+        # under the licence question ("Preferable Location - France" asked for no location).
+        "shops-invitation-cut-88",
+        "launch chat 88's typed words alone: the licence question goes, the slots it pushed out are no invitation, no location under it",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Abd",
+        now=at(THURSDAY, 10, 33),
+        chat=CHAT_88_LISTED,
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "Abd"},
+        list_sent=True,
+        new=TAP_WORDS_88[:1],
+        expect=[
+            out_says(r"licen[cs]e", "ask about the licence"), never_out(OUR_LOCATION, "put our location under the licence question"),
+            invited(False), slots_valid(),
+        ],
+    ),
+    Scenario(
+        # Live (reply 179996): "We have small (400-550 sq ft), medium (600-800 sq ft), and large (900-1,200 sq ft) options."
+        "shops-table-repeat-91",
+        "launch chat 91: 'For me' after the list gets no size table again",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Riza",
+        now=at(THURSDAY, 10, 29),
+        campaign_at=at(THURSDAY, 10, 26),
+        chat=CHAT_91[:5],
+        facts=FACTS_91,
+        list_sent=True,
+        new=["For me"],
+        expect=[never_out(TABLE_AGAIN, "gives the size and price table again")],
+    ),
+    Scenario(
+        # Live (reply 179977): "AED 33,000 or AED 48,000 per year means the annual rent price ..."; the table cut above took all
+        # of it but "What business will the shop be for?" until their own figures counted as asking for them (claims.asks_figures).
+        "shops-figures-asked-42",
+        "launch chat 42's 'Wat is 33000/year' and '48000/year' after the list: our figures are explained, never cut as the table again",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="there",
+        now=at(THURSDAY, 10, 28),
+        chat=[SHOPS_YES, FOR_WHOM, ("customer", "Myself"), SHOP_LIST],
+        facts={"for_client": False, "property_type": "shop", "intent": "rent"},
+        list_sent=True,
+        new=["Wat is 33000/year", "48000/year"],
+        expect=[out_says(r"\b(?:year|yearly|annual|annually|per\s+annum)\b", "say our rents are yearly")],
+    ),
+    Scenario(
+        # Live (reply 179991): the same 11:00 AM or 11:30 AM again; the business was never asked (launch review issue 22).
+        "shops-discovery-second-invite-62",
+        "launch chat 62: 'How much sqf' after our two slots, the business never asked: the business before any slot again",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="ora",
+        now=at(THURSDAY, 10, 29),
+        chat=CHAT_62_INVITED,
+        facts={**FACTS_62, "licence_kind": "new", "trade_licence": "no"},
+        invites=1,
+        new=["How much sqf"],
+        expect=[out_says(r"\bbusiness\b", "ask what business the shop is for"), never_out(SLOT_TIME, "invites again before asking the business"), invited(False)],
+    ),
+    Scenario(
+        # Live (reply 179957, 10:27): "today at 11:00 AM or 11:30 AM", 33 minutes away and half an hour apart.
+        "shops-new-one-62",
+        "launch chat 62: 'New' 'One' at 10:27 gets two slots an hour ahead and an hour apart",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="ora",
+        now=at(THURSDAY, 10, 27),
+        chat=CHAT_62,
+        facts=FACTS_62,
+        new=["New", "One"],
+        expect=[slots_valid(), offers_free(), invited(True)],
+    ),
+    Scenario(
+        # Live (turn 123): code made the open "when" two slots, and invited_to_meeting stayed false: 0 invitations after one.
+        "shops-location-counted-81",
+        "launch chat 81: 'Location' gets our office and two slots, counted as an invitation",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Imtiyaz",
+        now=at(THURSDAY, 11, 58),
+        chat=[
+            ("customer", TAP_WORDS_81[0], at(THURSDAY, 11, 7)),
+            ("customer", TAP_WORDS_81[1], at(THURSDAY, 11, 8)),
+            (*SHOP_LIST, at(THURSDAY, 11, 8)),
+        ],
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "Imtiyaz", "notes": ["monthly rent calculation"]},
+        list_sent=True,
+        new=["Location"],
+        expect=[sends_location(), offers_free(), slots_valid(), invited(True)],
+        # Code's invitation closes a reply with none (engine.location_invitation), whatever the model writes: code's words
+        # (the launch gate's review), never counted as the model's own.
+        words=CODE,
+    ),
+    # Batch 2d, the CRM writes (crm_facts.py, lost.py, rules.py): what the record keeps is theirs only. The model's
+    # live answers are the right ones (test_eval_command): code puts their facts right, whatever the model answers.
+    Scenario(
+        # Live (turn 85): notes "what business the shop is for; size needed; budget; licence kind; fit-out details;
+        # service charge; DEWA; parking", which the handover alert then listed as "Questions for the viewing".
+        "shops-notes-theirs-88",
+        "launch chat 88: 'planning for a new one' records no question he never asked (our discovery list, the example list)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Abd",
+        now=at(THURSDAY, 10, 33),
+        chat=CHAT_88[:7],
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "community": "France", "size_sqft": 400, "shop_type": "type_1"},
+        list_sent=True,
+        invites=1,
+        new=["planning for a new one"],
+        expect=[notes_theirs()],
+        words=EITHER,
+    ),
+    Scenario(
+        # Live (turn 76): budget_aed 48000, our Type 2 price, and "service charge; DEWA; parking; fit-out" in the alerts.
+        "shops-budget-ours-62",
+        "launch chat 62: 'If possible to send me photo first' records no budget he never gave (our Type 2 price) and no unasked note",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="ora",
+        now=at(THURSDAY, 10, 31),
+        chat=CHAT_62_INVITED + [("customer", "How much sqf", at(THURSDAY, 10, 28)), ("assistant", AGAIN_62, at(THURSDAY, 10, 29))],
+        facts={**FACTS_62, "licence_kind": "new", "trade_licence": "no"},
+        invites=1,
+        new=["If possible to send me photo first"],
+        expect=[no_fact("budget_aed"), notes_theirs()],
+        words=CODE,
+    ),
+    Scenario(
+        # Live (turn 120): the model's not_interested, since "thankyou" in one word was no rule's (launch review issue 26).
+        "shops-no-thankyou-120",
+        "launch chat 120: 'No thankyou' to the check-back is code's no: one polite line, the lead lost with their words",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Aslam",
+        chat=CHECK_BACK,
+        followup_asked=True,
+        new=["No thankyou"],
+        expect=[opt_out("not_interested"), sends_line("not_interested")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        # Live (turn 113): five of his nine questions were kept (NOTES_MAX was 5); his questions go to a person now.
+        "shops-nine-questions-noted-95",
+        "launch chat 95: all nine of his questions stay noted for our agent, none of ours added",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Madj",
+        new=[NINE_QUESTIONS_95],
+        expect=[questions_wait(), notes_theirs(*NINE_95)],
+        words=CODE,
+    ),
+    # The batch's review (2026-10-16): shop customers' words that look like a want, a count, a call or a contract ---------
+    Scenario(
+        "shops-review-shop-with-room",
+        "a shop customer's 'I need a shop with a room for my salon' is no room they want: never the owner's not-a-shop line",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a shop with a room for my salon"],
+        expect=[no_need()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-flat-nahi",
+        "'mujhe dukan kiraye pe chahiye, flat nahi' wants a shop and turns a flat down: no want of a flat",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        language="ur_latin",
+        new=["mujhe dukan kiraye pe chahiye, flat nahi"],
+        expect=[no_need()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-staff-accommodation",
+        "'I want a shop with staff accommodation' asks about the shop: no home they want",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I want a shop with staff accommodation"],
+        expect=[no_need()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-count-no-window",
+        "'today I will come, 3 or 4 of us' names a count, never a window of time to book",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM, ("customer", "For myself, a mobile shop"), SHOP_LIST],
+        facts={"for_client": False, "property_type": "shop", "business_activity": "mobile shop"},
+        list_sent=True,
+        new=["today I will come, 3 or 4 of us"],
+        expect=[never_out(r"Your viewing is confirmed", "books a time nobody named")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-sign-contract-today",
+        "'I want to sign the contract today, when can I come?' asks to come: no must-answer question, no handover",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM, ("customer", "For myself, a mobile shop"), SHOP_LIST],
+        facts={"for_client": False, "property_type": "shop", "business_activity": "mobile shop", "shop_type": "type_1"},
+        list_sent=True,
+        new=["I want to sign the contract today, when can I come?"],
+        expect=[no_questions()],
+        words=EITHER,
+        loose=("action",),
+    ),
+    Scenario(
+        "review-why-did-you-call",
+        "'Who is this? Why did you call me?' asks who we are: never a call request handed over",
+        new=["Who is this? Why did you call me?"],
+        expect=[never_out(r"pass your call request", "reads a call request"), no_unbacked_promise()],
+    ),
+    Scenario(
+        "shops-review-call-back-later",
+        "a shops customer's 'I'm driving, I'll call back later' is no call request: never handed over",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM],
+        new=["I'm driving, I'll call back later"],
+        expect=[never_out(r"pass your call request", "reads a call request")],
+        words=EITHER,
+        loose=("action",),
+    ),
+    Scenario(
+        "shops-review-studio-call-me",
+        "'I need a studio flat, please call me' is a call request: handed over with code's call line, the want recorded",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a studio flat, please call me"],
+        expect=[handover("call_requested"), sends_person_line(people.CALL_ASK), wants("home")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-review-rented-one-more",
+        "'We already have a shop, need one more' wants another shop: never read as rented elsewhere",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["We already have a shop, need one more"],
+        expect=[no_fact("already_rented"), never_out(r"Congratulations on your new shop", "asks about a second shop they asked for")],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-buyer-no-rent-42",
+        "launch chat 42's buyer, 'I want purchase shop / Not to rent', hears no word of renting",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="MANAGER",
+        chat=[("customer", "To buy"), ("assistant", not_a_shop_sent("buy", "shop"))],
+        facts={"need": "buy", "wanted": "to buy a shop", "intent": "buy", "property_type": "shop"},
+        invites=1,
+        new=["You are not getting I feel\n\nI want purchase shop\nNot to rent", "Do u understand now"],
+        expect=[never_out(r"\brent(?:ing)?\b(?! out)", "pitches renting to a buyer"), no_shop_list()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-review-studio-not-shops-68",
+        "launch chat 68's 'Not shops' after 'a studio' keeps the studio, and asks nothing of a business",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Swathy",
+        chat=[("customer", "Actually i was looking for a studio"), ("assistant", not_a_shop_sent("home", "studio"))],
+        facts={"need": "home", "wanted": "a studio", "property_type": "studio"},
+        invites=1,
+        new=["Not shops"],
+        expect=[no_fact("need"), no_fact("wanted"), never_out(r"\bbusiness\b", "asks a home seeker about a business"), no_shop_list()],
+        words=EITHER,
+    ),
+    # The launch gate's review (2026-10-16): what the gate's own fixes misread. Code decides each (words=CODE), whatever
+    # the model writes, so none counts as the model's own words ----------------------------------------------------------
+    Scenario(
+        # engine.own_time read the bare "2" as 2:00 PM and booked it over the model's 1:00 PM.
+        "shops-gate-slot-two",
+        "shops: 'Tomorrow slot 2' after our 11:00 AM or 1:00 PM takes the 1:00 PM slot (or asks), never booked at 2:00 PM",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=TOMORROW_11_OR_1,
+        facts=LICENCE_KNOWN,
+        invites=1,
+        new=["Tomorrow slot 2"],
+        expect=[either(books("2026-10-13", "13:00"), no_booking())],
+        words=CODE,
+    ),
+    Scenario(
+        # engine.own_time booked 6:00 PM, the hour work ends, over the model's 7:00 PM.
+        "shops-gate-after-work",
+        "shops: 'Tomorrow I finish work at 6, I can come after that' after our 5:00 PM or 7:00 PM is never booked at 6:00 PM",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=TOMORROW_5_OR_7,
+        facts=LICENCE_KNOWN,
+        invites=1,
+        new=["Tomorrow I finish work at 6, I can come after that"],
+        expect=[either(books("2026-10-13", "19:00"), no_booking()), slots_valid()],
+        words=CODE,
+    ),
+    Scenario(
+        # needs.wants_another read "another shop" as one more wanted: the rent went from the record, and the chat got the
+        # shop pitch (launch chat 63's bug again).
+        "shops-gate-rented-another",
+        "shops: 'Sorry, I already rented another shop' is congratulated and asked about a second shop, the rent kept",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["Sorry, I already rented another shop"],
+        expect=[opt_out("none"), flag("already_rented", True), invited(False), sends_line("rented_second_shop"), no_shop_list()],
+        words=CODE,
+    ),
+    Scenario(
+        # engine.location_invitation read "location" and a "?" as a request for ours: code's slots and our office went out,
+        # and the model's own question was cut.
+        "shops-gate-location-question",
+        "shops: 'Is the location good for a restaurant?' gets the model's answer, never code's slots and our office pushed",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[SHOPS_YES, FOR_WHOM, FOR_MYSELF, ASK_BUSINESS],
+        facts={"for_client": False, "property_type": "shop"},
+        new=["Is the location good for a restaurant?"],
+        expect=[no_location_push()],
+        words=CODE,
+    ),
+    Scenario(
+        # "Our office slots start on the hour, so please choose 4:00 PM or 5:00 PM.": claims cut it whole, and the turn went
+        # unanswered as "no reply needed".
+        "shops-gate-half-hour",
+        "shops: 'Can I come today at 4:30?' is booked at 4:30 PM or offered it, never told our slots start on the hour",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=TODAY_3_OR_5,
+        facts=LICENCE_KNOWN,
+        invites=1,
+        new=["Can I come today at 4:30?"],
+        expect=[
+            either(books("2026-10-12", "16:30"), out_says(r"\b4:30\s*PM\b", "offer their 4:30 PM")),
+            never_out(HOURLY_SAID, "says our slots start on the hour"),
+        ],
+        words=CODE,
+    ),
     # Every playbook: the customer's own script (board T19) ---------------------------------------------
     Scenario(
         "lang-urdu-after-english",
@@ -2488,7 +3939,8 @@ def build(scenario: Scenario) -> Built:
         office_address=ADDRESS,
         segment_hint=scenario.campaign.hint(),
         campaign_line=f"(sent {transcript.stamp(campaign_at)}) {shown}"[:900],
-        customer_name=scenario.facts.get("customer_name") or scenario.name,
+        # As live (engine._customer_name): a name to greet, its case put right; never a job title ("MANAGER").
+        customer_name=engine.name_from(scenario.facts.get("customer_name"), scenario.name),
         facts=scenario.facts,
         language=scenario.language_so_far,
         handed_over=scenario.handed_over,
@@ -2558,6 +4010,39 @@ def customer_words(scenario: Scenario) -> str:
     return " ".join([item[1] for item in scenario.chat if item[0] == "customer"] + list(scenario.new))
 
 
+_VOICE = "[voice note] "
+
+
+def need_words(scenario: Scenario) -> list[str]:
+    """As engine.need_texts on the burst without its acknowledgements: a tap by its label, a voice note by
+    what it says, a photo or a sticker by nothing (what needs.detect reads)."""
+    said = [text for text in scenario.new if not rules.is_acknowledgement(text)] or list(scenario.new)
+    out = []
+    for text in said:
+        tap = _TAP.match(text)
+        if tap:
+            out.append(tap[1])
+        elif text.startswith(_VOICE):
+            out.append(text[len(_VOICE) :])
+        elif not text.startswith("["):
+            out.append(text)
+    return [text for text in out if text.strip()]
+
+
+def burst_tap(scenario: Scenario) -> tuple[str, str] | None:
+    """As engine.burst_tap: the burst's last tap when it holds words of theirs too (a typed message, a voice note)."""
+    said = [text for text in scenario.new if not rules.is_acknowledgement(text)]
+    taps = [(match[1], "") for text in said if (match := _TAP.match(text))]
+    typed = any(not _TAP.match(text) and (not text.startswith("[") or text.startswith(_VOICE)) for text in said)
+    return shop_flow.burst_tap(taps, typed)
+
+
+def first_answer(scenario: Scenario) -> bool:
+    """As engine._run_claimed: our newest line is the campaign's (nothing of ours since)."""
+    outbound = [item for item in scenario.chat if item[0] in ("assistant", "agent", "campaign", "reminder")]
+    return not outbound or outbound[-1][0] == "campaign"
+
+
 def code_first(scenario: Scenario) -> dict | None:
     """The answer when engine._run_claimed settles the turn without the model, else None.
 
@@ -2579,6 +4064,8 @@ def code_first(scenario: Scenario) -> dict | None:
         opt = None
     else:
         opt = rules.opt_out_from_text(key) or (rules.shops_opt_out(key) if shops_chat else None)
+    if opt and shops_chat and engine.not_lost_for(opt, need_words(scenario)):
+        opt = None  # as live: they want something else, never lost or junk (engine.who_they_are answers them)
     language = scenario.language_so_far if scenario.language_so_far != "en" else rules.guess_language(key)
     silent = schema.normalize({"language": language, "segment": "other", "send": False}, shops=shops_chat)
     if opt:
@@ -2690,13 +4177,13 @@ class Run:
     may_invite: bool = True  # as engine._run_claimed: the chat may still be invited
 
 
-def code_slots(scenario: Scenario, lang: str, slots: list) -> str:
+def code_slots(scenario: Scenario, lang: str, slots: list, *, again: bool = False) -> str:
     """Code's two free slots as engine._run_claimed sends them: not in the words our side just used
-    for them (shop_flow.slots_text), with the address when the burst asks for the location
-    (engine.asked_location; the eval sets no Maps link)."""
-    text = shop_flow.slots_text(lang, slots, scenario.now, f"{our_words(scenario)}\n{our_last(scenario)}")
+    for them (shop_flow.slots_text; ``again``: our nudge's own two, asked about again), with the address
+    when the burst asks for the location (engine.asked_location; the eval sets no Maps link)."""
+    text = shop_flow.slots_text(lang, slots, scenario.now, f"{our_words(scenario)}\n{our_last(scenario)}", again=again)
     appended = engine.asked_location(text, " ".join(scenario.new), ADDRESS)
-    return f"{text}\n{appended}" if appended else text
+    return offers.with_location(text, appended, lang)
 
 
 def outgoing(run: Run, built: Built) -> tuple[str, str]:
@@ -2729,7 +4216,8 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     if answer.get("slot_taken") and run.alternatives and offer_free:
         # engine.ask_model: kept tentative at another client's time, or corrected with other times.
         return CODE, shops.slot_taken(lang, run.alternatives, scenario.now)
-    name = answer["facts"].get("customer_name") or scenario.facts.get("customer_name") or scenario.name
+    # As live (engine._customer_name of the merged facts, then the campaign's name): a name to greet, case put right.
+    name = engine.name_from(answer["facts"].get("customer_name") or scenario.facts.get("customer_name"), scenario.name)
     appointment = built.appointment
     confirmed = appointment is not None and appointment.status == LeadAiAppointment.Status.CONFIRMED
     action = run.action
@@ -2741,13 +4229,15 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     elif action == "running_late" and run.when is not None and confirmed and appointment.starts_at == run.when:
         action = "on_time"
     merged = engine._merge_facts(scenario.facts, answer["facts"])
-    commercial = engine._is_commercial(answer["segment"], merged)
+    # As live: a shops customer who wants no shop to rent meets "our specialist".
+    commercial = engine._is_commercial(answer["segment"], merged) and needs.of(merged) is None
 
     def booking(rescheduled: bool) -> str:
-        if shops_chat:
+        if shops_chat and needs.of(merged) is None:
             return shops.confirmation(
                 lang, run.when, shop_type=merged.get("shop_type"), facts=DEFAULT_SHOPS_FACTS, office_address=ADDRESS
             )
+        # As live: a general chat's, and a shops customer's who wants no shop to rent (no shop type, no drive).
         if rescheduled:
             return filters.rescheduled(lang, name, run.when, ADDRESS, "")
         return filters.confirmation(lang, name, run.when, ADDRESS, "", commercial)
@@ -2766,10 +4256,32 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
         slots = hours.offer_pair(scenario.now, list(scenario.closed), [*scenario.taken, *own])
         return CODE, shop_flow.reschedule_text(lang, slots, scenario.now)
     if scenario.handed_over != "no":
-        return CODE, rules.line("holding", lang)  # live: at most one holding line every two hours
+        # As live (people.quiet_reply): a goodbye gets nothing, a chase an apology, a call's time the request passed
+        # on, anything else the holding line (live: at most every two hours; here always due).
+        reason = (re.search(r"\((.+)\)", scenario.handed_over) or [None, ""])[1]
+        _, text = people.quiet_reply(
+            need_words(scenario), lang, shops=shops_chat, reason=reason, answer=answer, said=" ".join(scenario.new), now=scenario.now
+        )
+        return (CODE, text) if text else ("", "")
+    if answer.get("not_a_shop"):
+        # As live: the owner's line for someone who wants no shop to rent, with our office's location once a day
+        # (the eval sets no Maps link: the address).
+        text = engine.not_a_shop_text(answer["not_a_shop"], lang, scenario.now)
+        if not built.location_sent and not filters.carries_location(text, ADDRESS):
+            text = offers.with_location(text, ADDRESS, lang)
+        return CODE, text
+    if answer.get("price"):
+        # As live (claims.price_turn): the honest price line, our lowest type, or a colleague offered.
+        return CODE, claims.price_text(answer["price"], lang, DEFAULT_SHOPS_FACTS)
     if answer.get("converted"):
-        # engine._shape (never the model's "confirmed"), a deferral, a shops broker: a fixed line.
-        return CODE, rules.line(answer["converted"], lang)
+        # engine._shape (never the model's "confirmed"), a deferral, a shops broker, a call request or must-answer
+        # questions handed to a person (people.settle): a fixed line, a shops chat's holding line its own.
+        text = people.converted_line(answer["converted"], lang, shops=shops_chat)
+        if answer["converted"] == people.MUST_ANSWER and answer.get("must_answer_kept"):
+            # As live: must-answer questions while the chat goes on get the line with the model's other words, cleaned.
+            kept, run.removed = filters.clean_reply(answer["must_answer_kept"], built.context_words)
+            text = people.with_kept(text, kept)
+        return CODE, text
     step = answer.get("shop_step") or {}
     if step.get("kind"):
         # The shops steps (shop_flow), as engine._run_claimed sends them.
@@ -2778,14 +4290,22 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
             # [Book viewing]'s two, or the ones fitted to a yes that named no time (engine.unasked_confirm),
             # never in our last words for them, with the location when they asked for it.
             slots = step.get("slots") or hours.offer_pair(scenario.now, list(scenario.closed), [*scenario.taken, *own])
-            return CODE, code_slots(scenario, lang, slots)
+            return CODE, code_slots(scenario, lang, slots, again=bool(step.get("again")))
         if step["kind"] == shop_flow.LICENCE_THANKS and appointment is None and run.may_invite:
             slots = hours.offer_pair(scenario.now, list(scenario.closed), list(scenario.taken))
             answer["invited_to_meeting"] = bool(slots)
-        return CODE, shop_flow.step_text(step, lang, DEFAULT_SHOPS_FACTS, scenario.now, slots)
+        text = shop_flow.step_text(step, lang, DEFAULT_SHOPS_FACTS, scenario.now, slots)
+        if step["kind"] in (shop_flow.MEDIA, shop_flow.LIST) and answer.get("step_words"):
+            # As live (engine.tap_with_words): the model's answer to their typed words goes before the tap's step.
+            words, _ = filters.clean_reply(answer["step_words"], built.context_words)
+            text = f"{words}\n{text}" if words else text
+        return CODE, text
     by, text = "", ""
     if answer["send"]:
         run.reply, run.removed = filters.clean_reply(answer["reply"], built.context_words)
+        if "second_question" in run.removed:
+            # As live (offers.invitation_cut): an invitation cut as a second question is none, and takes our location with it.
+            offers.invitation_cut(answer, answer["reply"], run.reply, " ".join(scenario.new))
         if run.reply:
             by, text = MODEL, run.reply
         elif "amount" in run.removed:
@@ -2795,10 +4315,10 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
         if fallback:
             by, text = CODE, rules.line(fallback, lang)
         elif answer["handover"]["needed"]:
-            by, text = CODE, rules.line("holding", lang)
+            by, text = CODE, people.line(people.HOLDING, lang, shops=shops_chat)
     if text and answer["share_office_location"] and not built.location_sent and not filters.carries_location(text, ADDRESS):
-        # As engine._run_claimed: the address (the eval sets no Maps link) once per chat.
-        text = f"{text}\n{ADDRESS}"
+        # As engine._run_claimed: the address (the eval sets no Maps link) once per chat, labelled as our office's.
+        text = offers.with_location(text, ADDRESS, lang)
     return by, text
 
 
@@ -2838,6 +4358,10 @@ def run_once(scenario: Scenario, label: str) -> Run:
         copies = [text for text in scenario.new if _COPY.match(text)] if shops_chat and scenario.licence_open else []
         # The copy's next page, minutes after it (shop_flow.another_page): no "media received" handover either.
         pages = [text for text in scenario.new if _COPY.match(text)] if shops_chat and scenario.licence_page and not scenario.licence_open else []
+        # As live: who the customer is, in their words this burst or as the chat knows it (needs.py).
+        words = need_words(scenario) if shops_chat else []
+        need_seen = (needs.detect(words) or needs.of(scenario.facts)) if shops_chat else None
+        need = None
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
         else:
@@ -2845,10 +4369,27 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 prompt.system_prompt(scenario.playbook), built.context, built.appointment, scenario.now, list(scenario.closed),
                 user=SAFETY_ID, codes=run.codes, taken=taken, shops_chat=shops_chat, alternatives=run.alternatives, said=said,
                 customer_script=run.customer_script if scenario.handed_over == "no" else "",
-                name=scenario.facts.get("customer_name") or scenario.name,
+                name=engine.name_from(scenario.facts.get("customer_name"), scenario.name),
+                need_segment=needs.SEGMENTS[need_seen.kind] if need_seen is not None else "",
             )
             if (copies or pages) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
                 answer["handover"] = {"needed": False, "reason": None}  # as live: the photo is the licence we asked for
+            if shops_chat:
+                need = engine.untag_need(answer, scenario.facts, words)  # as live: tagged, never handed over
+                # As live: a broker the model served as an end user is handed over as its own tag would be (no scenario
+                # carries the Broker label); a chat a person holds counts "I am a broker" only, and a bare "Agent" answers
+                # our for-whom question only.
+                brokers.backstop(answer, scenario.facts, words, held=scenario.handed_over != "no", our_last=our_last(scenario))
+            if shops_chat and not still_invalid:
+                # As live (engine.own_time): their own exact day and hour, booked over another time the model confirmed.
+                ours = [item[0] for item in scenario.chat if item[0] in ("assistant", "agent", "reminder")]
+                mine = engine.own_time(
+                    answer, when, built.appointment, scenario.now, list(scenario.closed), taken=taken, said=said,
+                    words=customer_words(scenario), our_last=our_last(scenario), ours=our_words(scenario),
+                    handed_over=scenario.handed_over != "no", agent_last=bool(ours) and ours[-1] == "agent",
+                )
+                if mine is not None:
+                    when, run.upgraded = mine, True
             if when is None and not still_invalid and not answer.get("slot_taken"):
                 # As live: the customer's own exact time, free and in hours, that the model left tentative,
                 # unless a person has the chat or a colleague wrote last (engine._agent_spoke_last).
@@ -2864,11 +4405,27 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 handed_over=scenario.handed_over != "no",
             ):
                 when = None  # as live: a time nobody named or took is no booking, the two free slots go instead
+            if when is None and not still_invalid:
+                # As live (engine.book_window): their own window today ("I will come at 12-12:30"), booked at its start.
+                ours = [item[0] for item in scenario.chat if item[0] in ("assistant", "agent", "reminder")]
+                window = engine.book_window(
+                    answer, said, built.appointment, scenario.now, list(scenario.closed), taken=taken,
+                    handed_over=scenario.handed_over != "no", agent_last=bool(ours) and ours[-1] == "agent", playbook=scenario.playbook,
+                )
+                if window is not None:
+                    when, run.upgraded = window, True
             if shops_chat and when is None and not still_invalid:
                 # As live: the model's own slot offer records no visit, or one in their words alone.
                 engine.own_offer(
                     answer, appointment=built.appointment, said=said, words=customer_words(scenario),
                     our_last=our_last(scenario), yes=said_yes(scenario), now=scenario.now,
+                )
+            if shops_chat:
+                # As live (engine.nudge_yes): a plain yes to our nudge gets code's two free slots, never a time of the model's.
+                engine.nudge_yes(
+                    answer, our_last=our_last(scenario), texts=[text for text in scenario.new if text != "[sticker]"],
+                    appointment=built.appointment, when=when, still_invalid=still_invalid, said=said, now=scenario.now,
+                    closed_dates=list(scenario.closed), taken=taken, handed_over=scenario.handed_over != "no",
                 )
         agreed_now = agreed(scenario)
         reoffer_now = reoffered(scenario)
@@ -2894,18 +4451,66 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 else None,
                 now=scenario.now,
                 facts=scenario.facts,
+                closed_dates=list(scenario.closed),
+                taken=taken,
+                booked=built.appointment.starts_at if built.appointment is not None else None,
+                shops_facts=DEFAULT_SHOPS_FACTS,
+                office_address=ADDRESS,
+                # As live: the old lead's notes as the context shows them, whose figures a reply never quotes.
+                crm_notes=lead_history.clean_notes(scenario.crm_notes) if shops_chat else "",
             )
         if copies and not answer.get("licence"):
             answer["licence"] = "received"  # as live: the copy closes the request whatever the reply
         elif settled is None and licence_answer(scenario):
             answer["licence"] = licence_answer(scenario)  # "declined" closes it, "later" keeps it open
+        need_slots, misread = (), False
         if shops_chat and settled is None:
+            # As live (engine.who_they_are): someone who wants no shop to rent gets the owner's line, never
+            # the shop list and never lost; someone who rented one already the second-shop question.
+            wants_other = need is not None or needs.of(scenario.facts) is not None
+            need_slots = shops.yes_slots(said, "", scenario.now, list(scenario.closed), taken) if wants_other else ()
+            misread = any(item[0] == "assistant" for item in scenario.chat) or needs.misread(words)
+            engine.who_they_are(
+                answer, scenario.facts, words, need, when=when, still_invalid=still_invalid, appointment=built.appointment,
+                quiet=scenario.handed_over != "no", slots=need_slots, misread=misread,
+                shop_facts=shops.facts_block(DEFAULT_SHOPS_FACTS), invites=scenario.invites,
+            )
+        # As live: a want the chat read wrong is forgotten when they ask for a shop after all (answer["forget"]).
+        known = {key: value for key, value in scenario.facts.items() if key not in (answer.get("forget") or ())}
+        if settled is None:
+            # As live (people.settle): a call request gets code's words, a shops customer's must-answer questions go
+            # to a person, and no reply promises a call or sends them to a colleague.
+            people.settle(
+                answer, words, said, shops_chat=shops_chat, when=when, still_invalid=still_invalid,
+                quiet=scenario.handed_over != "no",
+                need=need or (needs.of({**known, **answer["facts"]}) if shops_chat else None), now=scenario.now,
+            )
+        if shops_chat and settled is None:
+            # As live (engine.bare_need_reply): the cuts left only an apology for someone who wants no shop: the owner's line.
+            engine.bare_need_reply(
+                answer, needs.of({**known, **answer["facts"]}) or need, need_slots, invites=scenario.invites, misread=misread,
+                plain=not (scenario.handed_over != "no" or when is not None or still_invalid or built.appointment is not None),
+            )
+        if shops_chat and settled is None:
+            # As live (claims.price_turn): a price objection, or a budget below our lowest, gets code's honest line.
+            claims.price_turn(
+                answer, words, known, our_last=our_last(scenario), sent=[item[1] for item in scenario.chat if item[0] == "assistant"],
+                facts=DEFAULT_SHOPS_FACTS, yes=engine.opens_with_yes([text for text in scenario.new if not text.startswith("[")]),
+                plain=engine.price_plain(answer, known, need, said, when=when, still_invalid=still_invalid, quiet=scenario.handed_over != "no"),
+            )
+            # As live (engine.tap_with_words): a tap sent with typed words keeps its step, the model answers the words.
+            engine.tap_with_words(
+                answer, burst_tap(scenario), known, said, scenario.now, first_answer=first_answer(scenario),
+                appointment=built.appointment, when=when, still_invalid=still_invalid, quiet=scenario.handed_over != "no",
+                media_recent=scenario.media_recent, media_today=scenario.media_today, closed_dates=list(scenario.closed), taken=taken,
+            )
+        if shops_chat and settled is None and not answer.get("shop_step"):
             # As live (engine._run_claimed): the shop types list, a type's media or the licence
             # request in place of the model's words, or the two free slots for a time nobody named
             # (engine.model_step: the same code, with the scenario's values).
             engine.model_step(
                 answer,
-                scenario.facts,
+                known,
                 said,
                 scenario.now,
                 appointment=built.appointment,
@@ -2986,6 +4591,10 @@ def brief(run: Run) -> str:
         text += f" script={answer['script_fix']}"
     if answer.get("unasked"):
         text += f" unasked={_stamp(answer['unasked']['start'])}"  # the model's booking, which code did not make
+    if answer.get("own_time"):
+        text += f" own_time={_stamp(answer['own_time']['model'])}"  # the model's other time, code booked theirs (engine.own_time)
+    if answer.get("nudge_yes"):
+        text += " nudge_yes"  # a plain yes to our nudge: code's two free slots (engine.nudge_yes)
     return text + (" (corrected once)" if run.rejected else "")
 
 
@@ -3081,15 +4690,26 @@ class Command(BaseCommand):
         total = len(runs)
         passed = sum(1 for run in runs if not run.failures)
         rate = 100.0 * passed / total if total else 0.0
+        # The scenarios the model writes (MODEL, EITHER), on their own too: code settles the rest whatever the model says,
+        # so their passes would carry a weaker prompt over the gate (review 2d: half the scenarios are code's).
+        written = [run for run in runs if run.scenario.words in (MODEL, EITHER)]
+        written_passed = sum(1 for run in written if not run.failures)
+        written_rate = 100.0 * written_passed / len(written) if written else 100.0
         self.stdout.write("")
         self.stdout.write(f"passed {passed} of {total} ({rate:.1f}%)")
+        if written:
+            self.stdout.write(f"the model's own words: passed {written_passed} of {len(written)} ({written_rate:.1f}%)")
+        by_id: dict = {}
+        for run in runs:
+            by_id.setdefault(run.scenario.id, []).append(not run.failures)
         if repeat > 1:
-            by_id: dict = {}
-            for run in runs:
-                by_id.setdefault(run.scenario.id, []).append(not run.failures)
             unsteady = [f"{key} {sum(v)}/{len(v)}" for key, v in by_id.items() if 0 < sum(v) < len(v)]
             if unsteady:
                 self.stdout.write("passed only some repeats: " + ", ".join(unsteady))
+        # Every scenario that failed all its runs, by id: a log cut short still names them (the launch gate's lost its top).
+        failed = [key for key, v in by_id.items() if not any(v)]
+        if failed:
+            self.stdout.write("failed every repeat: " + ", ".join(failed))
         noted = [run for run in runs if run.notes]
         if noted:
             self.stdout.write(
@@ -3110,3 +4730,7 @@ class Command(BaseCommand):
         )
         if rate < min_pass:
             raise CommandError(f"{rate:.1f}% passed, below the required {min_pass:g}%.", returncode=1)
+        if written_rate < min_pass:
+            raise CommandError(
+                f"{written_rate:.1f}% of the scenarios the model writes passed, below the required {min_pass:g}%.", returncode=1
+            )

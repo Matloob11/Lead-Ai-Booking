@@ -107,16 +107,16 @@ class NudgeWordsTests(SimpleTestCase):
     def test_the_morning_nudge_offers_todays_free_slots(self):
         tuesday = at(13, 10, 30)
         slots = nudges.today_slots(tuesday)
-        self.assertEqual(slots, [at(13, 11), at(13, 13)])
+        self.assertEqual(slots, [at(13, 11, 30), at(13, 13, 30)])  # an hour ahead at least (hours.OFFER_LEAD)
         self.assertEqual(
             nudges.second_text("en", "Ahmed Khan", slots),
-            "Good morning Ahmed, would today suit you to see the shops? I can hold a slot at 11:00 AM or 1:00 PM.",
+            "Good morning Ahmed, would today suit you to see the shops? I can hold a slot at 11:30 AM or 1:30 PM.",
         )
-        self.assertEqual(nudges.second_text("en", "", slots[:1]), "Good morning, would today suit you to see the shops? I can hold a slot at 11:00 AM.")
-        self.assertIn("11:00 AM یا 1:00 PM", nudges.second_text("ur", "Ahmed", slots))
-        self.assertIn("الساعة 11:00 AM أو 1:00 PM", nudges.second_text("ar", "Ahmed", slots))
+        self.assertEqual(nudges.second_text("en", "", slots[:1]), "Good morning, would today suit you to see the shops? I can hold a slot at 11:30 AM.")
+        self.assertIn("11:30 AM یا 1:30 PM", nudges.second_text("ur", "Ahmed", slots))
+        self.assertIn("الساعة 11:30 AM أو 1:30 PM", nudges.second_text("ar", "Ahmed", slots))
         # Another client's slot is never one of them; none left today, or a closed day: no nudge.
-        self.assertEqual(nudges.today_slots(tuesday, taken=[at(13, 13)]), [at(13, 11), at(13, 13, 30)])
+        self.assertEqual(nudges.today_slots(tuesday, taken=[at(13, 13, 30)]), [at(13, 11, 30), at(13, 14)])
         self.assertEqual(nudges.today_slots(at(18, 10, 30)), [])  # a Sunday
         self.assertEqual(nudges.today_slots(at(13, 19, 20)), [])
         self.assertEqual(nudges.today_slots(tuesday, closed_dates=["2026-10-13"]), [])
@@ -603,7 +603,7 @@ class NudgeTests(NudgeBase):
         result, sent = self.nudge(followups.NUDGE_2)
         self.assertEqual(result, "sent")
         self.assertEqual(
-            sent.call_args.args[2], "Good morning Ahmed, would today suit you to see the shops? I can hold a slot at 11:00 AM or 1:00 PM."
+            sent.call_args.args[2], "Good morning Ahmed, would today suit you to see the shops? I can hold a slot at 11:30 AM or 1:30 PM."
         )
         self.assertEqual(sent.call_args.kwargs["payload"]["nudge"], 2)
         self.assertEqual(self.state().nudges, 2)
@@ -674,7 +674,8 @@ class TemplateBAnswerTests(FollowUpBase):
         message = self.tap("Yes, book a viewing")
         outcome, calls, _, _ = self.turn(message, [])
         self.assertEqual(calls, [])
-        self.assertEqual(self.body(outcome), "I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?")
+        # An hour ahead at least (hours.OFFER_LEAD): it is 2:05 PM.
+        self.assertEqual(self.body(outcome), "I can hold a slot for you today at 3:30 PM or 5:30 PM — which is better?")
         self.assertEqual((self.actions(message)["rule"], self.actions(message)["shop_step"]), ("book_tap:", "slots"))
 
     def test_not_now_asks_to_check_back(self):

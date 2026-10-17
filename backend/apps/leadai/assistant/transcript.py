@@ -50,6 +50,17 @@ def is_ours(message) -> bool:
     return source(message).startswith("leadai")
 
 
+def is_our_pin(message) -> bool:
+    """Our office's pin, which the assistant sends right after the reply of the same turn (a booking, the owner's
+    not-a-shop line: engine._run_claimed): it says nothing of its own, so whoever reads "our last word" reads the
+    reply before it (engine._last_outbound, followups.last_message; review 2d: chat 136's "OK" to the owner's two
+    slots was skipped as an acknowledgement, and chat 44 never got its options nudge, the pin being our last word)."""
+    return (
+        message is not None and message.direction == Message.Direction.OUTBOUND and message.kind == Message.Kind.LOCATION
+        and source(message) == ASSISTANT
+    )
+
+
 def inbound_type(message) -> str:
     """WhatsApp's own type for an inbound row ('edit', 'revoke', 'unsupported', ...)."""
     return str(payload(message).get("type") or message.kind or "")

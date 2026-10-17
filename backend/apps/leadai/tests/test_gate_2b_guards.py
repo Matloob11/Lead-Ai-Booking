@@ -207,9 +207,10 @@ class NudgeYesEvalTests(TestCase):
             "the generic nudge": (
                 [*item.chat[:-1], ("assistant", generic, at(12, 13, 5))], NOW, ["Yes please"], "2026-10-12", "17:00", TWO_SLOTS_NOW,
             ),
+            # The nudge's 11:30 AM is under an hour away by now (hours.OFFER_LEAD): the next two free ones.
             "the second nudge's two slots": (
                 [*item.chat, ("assistant", second, at(13, 10, 30))], at(13, 10, 35), ["Yes"], "2026-10-13", "11:00",
-                "I can hold a slot for you today at 11:00 AM or 1:00 PM — which is better?",
+                "I can hold a slot for you today at 12:00 PM or 2:00 PM — which is better?",
             ),
             "the nudge, and another day": (item.chat, NOW, ["Yes, but tomorrow"], "2026-10-13", "11:00",
                                            "I can hold a slot for you tomorrow at 10:00 AM or 12:00 PM — which is better?"),
@@ -340,15 +341,15 @@ class YesSlotsTests(SimpleTestCase):
         self.assertEqual(slots("aaj shaam theek hai", "", NOW), [at(12, 17), at(12, 19)])
         self.assertEqual(slots("Yes, tomorrow evening", NUDGE, NOW), [at(13, 17), at(13, 19)])
         self.assertEqual(slots("Yes, tomorrow", NUDGE, NOW), [at(13, 10), at(13, 12)])  # their day, no evening of ours
-        self.assertEqual(slots("Yes", nudges.first_text("en", "Ahmed", now=NOW), NOW), [at(12, 14, 30), at(12, 16, 30)])  # "today or tomorrow"
+        self.assertEqual(slots("Yes", nudges.first_text("en", "Ahmed", now=NOW), NOW), [at(12, 15), at(12, 17)])  # "today or tomorrow"
         self.assertEqual(slots("Yes, but not today", nudges.first_text("en", "Ahmed", now=NOW), NOW), [at(13, 10), at(13, 12)])
-        self.assertEqual(slots("Yes", NUDGE, at(12, 18, 40)), [at(12, 19), at(13, 17)])  # this evening nearly gone
+        self.assertEqual(slots("Yes", NUDGE, at(12, 18, 40)), [at(13, 17), at(13, 19)])  # this evening gone: none an hour ahead
         taken = [at(12, 17), at(12, 17, 30), at(12, 18), at(12, 18, 30), at(12, 19), at(12, 19, 30)]
         self.assertEqual(slots("Yes", NUDGE, NOW, taken=taken), [at(13, 17), at(13, 19)])  # a full evening: the next one
 
     def test_offer_pair_from_an_hour(self):
         self.assertEqual(hours.offer_pair(NOW, after=dt.time(17, 0)), [at(12, 17), at(12, 19)])
-        self.assertEqual(hours.offer_pair(NOW), [at(12, 14, 30), at(12, 16, 30)])  # as before
+        self.assertEqual(hours.offer_pair(NOW), [at(12, 15), at(12, 17)])  # as before, an hour ahead at least
         self.assertEqual(hours.offer_pair(at(12, 19, 20), after=dt.time(17, 0)), [at(13, 17), at(13, 19)])
 
 
@@ -365,7 +366,7 @@ class HourReadersTests(SimpleTestCase):
         self.assertFalse(hours.names_hour("4 is fine", at(13, 16, 30)))
 
     def test_offered_starts(self):
-        self.assertEqual(hours.offered_starts(TWO_SLOTS_NOW), {dt.time(14, 30), dt.time(16, 30)})
+        self.assertEqual(hours.offered_starts(TWO_SLOTS_NOW), {dt.time(15, 0), dt.time(17, 0)})
         self.assertEqual(hours.offered_starts("We're open Monday to Saturday, 10 AM to 8 PM. Would 5 PM work?"), {dt.time(17, 0)})
         self.assertEqual(hours.offered_starts("نحن نعمل من الاثنين إلى السبت، من 10 صباحاً حتى 8 مساءً."), set())
         self.assertEqual(hours.offered_starts(NUDGE), set())
@@ -444,12 +445,12 @@ class UnaskedConfirmTurnTests(ShopsBase):
         self.ours(TWO_SLOTS_NOW, minutes_ago=5)
         outcome, _, _, _ = self.turn(self.inbound("Yes"), [shop_answer("", action="confirm", place="office", date="2026-10-12", time="14:30")])
         # A plain yes picks neither: which one, again, never in the same words (finding F7).
-        self.assertEqual(self.body(outcome), "Which one suits you better: today at 2:30 PM or 4:30 PM?")
+        self.assertEqual(self.body(outcome), "Which one suits you better: today at 3:00 PM or 5:00 PM?")
         self.assertEqual(LeadAiAppointment.objects.get().status, "tentative")
         self.later(2)
-        self.turn(self.inbound("The later one", seconds_ago=10), [shop_answer("", action="confirm", place="office", date="2026-10-12", time="16:30")])
+        self.turn(self.inbound("The later one", seconds_ago=10), [shop_answer("", action="confirm", place="office", date="2026-10-12", time="17:00")])
         appointment = LeadAiAppointment.objects.get()
-        self.assertEqual((appointment.status, appointment.starts_at), ("confirmed", at(12, 16, 30)))
+        self.assertEqual((appointment.status, appointment.starts_at), ("confirmed", at(12, 17)))
 
 
 class UnaskedGeneralTurnTests(GeneralBase):

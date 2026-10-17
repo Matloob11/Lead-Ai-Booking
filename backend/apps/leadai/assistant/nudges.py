@@ -17,6 +17,19 @@ At 10:30 Dubai the next day, while the customer still said nothing, one last one
 an open day with a free slot left, until noon). Then nothing more in that chat. Both only inside
 the 24-hour window, ten minutes to spare: a nudge is a free-form message, never a template.
 
+A customer who wants no shop to rent (assistant/needs.py, the owner's rule of 2026-10-15) is nudged
+only about the visit, never about shops (``options``): "Hi {name}, just checking in — shall I hold a
+slot for you to see the options today or tomorrow?", and the morning after "Good morning {name},
+would today suit you to come and see the options? I can hold a slot at {two free slots}."
+
+Our "Is the shop for yourself, or are you checking for a client?" still open (it sorts an end user
+from a broker, the build pack's first step) is asked again rather than skipped (``for_whom``): "Hi
+{name}, just checking in — is the shop for yourself, or are you checking for a client?" (launch chats
+103 and 78 were invited to see the shops over it). It is no invitation: a yes to it agrees to nothing.
+A message of ours that told them a colleague will confirm what they asked (``defers_question``: "Good
+question — I'll have our agent confirm that for you at the viewing.") gets no nudge at all: a person
+is alerted instead (followups.py; launch chats 95 and 59).
+
 Plain functions on plain data, in the six languages of the other fixed lines: followups.py
 decides and sends with them, and the eval (leadai_eval) writes the same words. A shop type's
 name ("Type 1") stays English, as the shop types list and the detail card keep it.
@@ -27,7 +40,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from . import filters, hours, rules, shop_flow, shops
+from . import crm_facts, filters, hours, rules, shop_flow, shops
 
 SILENT_FOR = dt.timedelta(hours=2)
 WINDOW_MARGIN = dt.timedelta(minutes=10)
@@ -81,6 +94,33 @@ _SECOND = {
     "hi_latin": "{gm}, kya aaj shops dekhne ke liye theek rahega? Main aapke liye {slots} ka slot rakh sakta hoon.",
     "hi": "{gm}, क्या आज दुकानें देखने के लिए ठीक रहेगा? मैं आपके लिए {slots} का स्लॉट रख सकता हूँ।",
 }
+# The same two for a customer who wants no shop to rent: the visit only, "to see the options".
+_OPTIONS = {
+    "en": "{hi}, just checking in — shall I hold a slot for you to see the options {days}?",
+    "ar": "{hi}، أردت فقط الاطمئنان — هل أحجز لك موعداً لرؤية الخيارات {days}؟",
+    "ur_latin": "{hi}, bas haal chaal poochna tha — kya main aap ke liye {days} options dekhne ka slot rakh doon?",
+    "ur": "{hi}، بس خیریت معلوم کرنی تھی — کیا میں آپ کے لیے {days} آپشنز دیکھنے کا سلاٹ رکھ دوں؟",
+    "hi_latin": "{hi}, bas haal-chaal poochna tha — kya main aapke liye {days} options dekhne ka slot rakh doon?",
+    "hi": "{hi}, बस हालचाल पूछना था — क्या मैं आपके लिए {days} विकल्प देखने का स्लॉट रख दूँ?",
+}
+_OPTIONS_SECOND = {
+    "en": "{gm}, would today suit you to come and see the options? I can hold a slot at {slots}.",
+    "ar": "{gm}، هل يناسبك اليوم أن تأتي لرؤية الخيارات؟ يمكنني حجز موعد لك الساعة {slots}.",
+    "ur_latin": "{gm}, kya aaj options dekhne ke liye aana theek rahega? Main aap ke liye {slots} ka slot rakh sakta hoon.",
+    "ur": "{gm}، کیا آج آپشنز دیکھنے کے لیے آنا ٹھیک رہے گا؟ میں آپ کے لیے {slots} کا سلاٹ رکھ سکتا ہوں۔",
+    "hi_latin": "{gm}, kya aaj options dekhne ke liye aana theek rahega? Main aapke liye {slots} ka slot rakh sakta hoon.",
+    "hi": "{gm}, क्या आज विकल्प देखने के लिए आना ठीक रहेगा? मैं आपके लिए {slots} का स्लॉट रख सकता हूँ।",
+}
+# Our for-whom question (rules "for_whom" without its "Thank you!") asked again, never skipped by an
+# invitation: no invitation itself, so it is none of _SHAPES.
+_FOR_WHOM_AGAIN = {
+    "en": "{hi}, just checking in — is the shop for yourself, or are you checking for a client?",
+    "ar": "{hi}، أردت فقط الاطمئنان — هل المحل لك شخصياً، أم تبحث عنه لعميل؟",
+    "ur_latin": "{hi}, bas haal chaal poochna tha — kya shop aap ke apne liye hai, ya aap kisi client ke liye dekh rahe hain?",
+    "ur": "{hi}، بس خیریت معلوم کرنی تھی — کیا دکان آپ کے اپنے لیے ہے، یا آپ کسی کلائنٹ کے لیے دیکھ رہے ہیں؟",
+    "hi_latin": "{hi}, bas haal-chaal poochna tha — kya shop aapke apne liye hai, ya aap kisi client ke liye dekh rahe hain?",
+    "hi": "{hi}, बस हालचाल पूछना था — क्या दुकान आपके अपने लिए है, या आप किसी क्लाइंट के लिए देख रहे हैं?",
+}
 # (today or tomorrow, today or on <day>, or)
 _DAYS = {
     "en": ("today or tomorrow", "today or on {day}", " or "),
@@ -117,7 +157,8 @@ def bare_business(activity) -> str:
     text = " ".join(text.split()).strip(" ,.;:-")
     if not text or len(text) > BUSINESS_MAX or _NOT_A_WORD.search(text):
         return ""
-    return text
+    # Never a home they want ("your apartment studio business"): a chat from before may hold one (crm_facts).
+    return text if crm_facts.is_business(text) else ""
 
 
 def business_words(language: str, activity) -> str:
@@ -151,10 +192,26 @@ def days_phrase(language: str, now, closed_dates=()) -> str:
     return other.format(day=names[day.weekday()] if names else f"{day:%A}")
 
 
-def first_text(language: str, name: str, *, shop_type: str = "", business: str = "", now=None, closed_dates=()) -> str:
-    """The first nudge: the type in view and their business when both are known, else the generic one."""
+def first_text(
+    language: str,
+    name: str,
+    *,
+    shop_type: str = "",
+    business: str = "",
+    now=None,
+    closed_dates=(),
+    options: bool = False,
+    for_whom: bool = False,
+) -> str:
+    """The first nudge: the type in view and their business when both are known, else the generic one;
+    ``options``: a customer who wants no shop to rent, asked only about the visit (needs.py);
+    ``for_whom``: our for-whom question is still open, and is asked again instead (asks_for_whom)."""
     lang = _lang(language)
     hi = _greeting(_HI, lang, name)
+    if options:
+        return _OPTIONS[lang].format(hi=hi, days=days_phrase(lang, now, closed_dates))
+    if for_whom:
+        return _FOR_WHOM_AGAIN[lang].format(hi=hi)
     words = business_words(lang, business)
     if shop_type in shops.TYPE_KEYS and words:
         return _TYPED[lang].format(hi=hi, type=shops.type_label(shop_type), business=words)
@@ -167,7 +224,9 @@ def _fixed_words(template: str) -> list[str]:
     return [part for part in parts if part]
 
 
-_SHAPES = tuple(_fixed_words(template) for table in (_TYPED, _GENERIC, _SECOND) for template in table.values())
+_SHAPES = tuple(
+    _fixed_words(template) for table in (_TYPED, _GENERIC, _SECOND, _OPTIONS, _OPTIONS_SECOND) for template in table.values()
+)
 
 
 def is_nudge(text: str) -> bool:
@@ -194,10 +253,65 @@ def slots_words(language: str, slots) -> str:
     return joiner.join(hours.time_label(slot) for slot in list(slots)[:2])
 
 
-def second_text(language: str, name: str, slots) -> str:
-    """The last nudge, the morning after: today's free slots."""
+def second_text(language: str, name: str, slots, *, options: bool = False) -> str:
+    """The last nudge, the morning after: today's free slots (``options``: about the visit only)."""
     lang = _lang(language)
-    return _SECOND[lang].format(gm=_greeting(_MORNING, lang, name), slots=slots_words(lang, slots))
+    table = _OPTIONS_SECOND if options else _SECOND
+    return table[lang].format(gm=_greeting(_MORNING, lang, name), slots=slots_words(lang, slots))
+
+
+# What our last message left open ----------------------------------------------------------------------
+
+# Our for-whom question, in each language, without the "Thank you!" that opens the line.
+FOR_WHOM_QUESTIONS = tuple(line.split("!", 1)[1].strip().casefold() for line in rules.LINES["for_whom"].values())
+
+
+def asks_for_whom(text: str) -> bool:
+    """Our message asks "Is the shop for yourself, or are you checking for a client?" (code's line, or the
+    model's words around the same question), in any of the six languages."""
+    body = " ".join(str(text or "").split()).casefold()
+    return any(question in body for question in FOR_WHOM_QUESTIONS)
+
+
+# A colleague will confirm or answer what they asked: SHOPS_SYSTEM's "Good question — I'll have our agent
+# confirm that for you at the viewing." (shops.UNKNOWN_LINE) in the model's own words and language, and the
+# general "Our specialist will confirm that with you here." Never our agent driving them to the shops,
+# calling them, guiding them through a licence, or confirming the visit itself ("Our specialist will confirm
+# the viewing with you here", "specialist ... viewing confirm kar lenge"), nor the holding line a person's
+# chat gets ("Our specialist has your message and will reply here", "... woh yahin jawab denge").
+_COLLEAGUE = r"(?:agent|specialist|colleague|consultant|team)s?"
+_ANSWERS = r"(?:confirm|answer|clarify|explain|check|reply|respond|get\s+back\s+to\s+you)"
+_ABOUT_VISIT = r"(?!\s+(?:the|your)\s+(?:visit|viewing|booking|appointment|meeting|slot|time)\b)"
+_AR_VISIT = r"(?:موعد|الموعد|المعاينة|معاينة|الزيارة|زيارة|الحجز|حجز)"
+# Right before the verb in Urdu, Hindi and their Latin spelling, the visit is what is confirmed.
+_VISIT_BEFORE = (
+    "(?<!viewing )(?<!visit )(?<!booking )(?<!meeting )(?<!appointment )(?<!slot )(?<!time )(?<!waqt )"
+    "(?<!ویونگ )(?<!وزٹ )(?<!ملاقات )(?<!میٹنگ )(?<!وقت )(?<!व्यूइंग )(?<!विज़िट )(?<!मीटिंग )(?<!समय )"
+)
+_DEFERS = re.compile(
+    rf"\b(?:have|get|ask)\s+(?:our|my|the|a)\s+{_COLLEAGUE}\s+(?:to\s+)?{_ANSWERS}\b{_ABOUT_VISIT}"
+    rf"|\b(?:our|my|the|a|an)\s+{_COLLEAGUE}\s+(?:will|can|would|shall|is\s+going\s+to)\s+(?:\w+\s+)?{_ANSWERS}\b{_ABOUT_VISIT}"
+    # Roman Urdu / Hindi: "hamara agent viewing par confirm kar dega", "agent se confirm karwa dunga", and the
+    # deflect line "Hamare specialist yahin aap ko is ki tasdeeq kar denge" (an English "confirm" is the above's)
+    rf"|\b(?:agent|specialist)\b[^.?!\n]{{0,40}}?{_VISIT_BEFORE}\b(?:confirm|tasdeeq|pushti)\s+(?:kar|karwa|karva|kara)\w*"
+    r"|\bagent\b[^.?!\n]{0,40}?\b(?:jawab\s+de\w*|bata\s*(?:dega|denge|dein|dain|ga|ge))"
+    # Arabic, never with the visit as what is confirmed ("لتأكيد الموعد", "سيؤكد المختص لدينا موعد المعاينة")
+    r"|(?:وكيلنا|الوكيل|المختص|زميلنا|فريقنا)[^.؟!\n]{0,40}?(?:تأكيد|يؤكد|سيؤكد|يجيب|سيجيب|يوضح|سيوضح|توضيح)"
+    rf"(?!\s+(?:لك\s+|معك\s+)?{_AR_VISIT})"
+    # Arabic puts the verb first: "سيؤكد لك المختص لدينا ذلك هنا" (the deflect line)
+    rf"|(?:سيؤكد|يؤكد|سيجيب|يجيب|سيوضح|يوضح)[^.؟!\n]{{0,30}}?(?:المختص|الوكيل|وكيلنا|زميلنا|فريقنا)(?!\s+(?:لدينا\s+)?{_AR_VISIT})"
+    rf"|(?:ایجنٹ|ساتھی)[^۔؟!\n]{{0,40}}?{_VISIT_BEFORE}(?:کنفرم|تصدیق|جواب|بتا)|اسپیشلسٹ[^۔؟!\n]{{0,40}}?{_VISIT_BEFORE}(?:کنفرم|تصدیق)"
+    rf"|(?:एजेंट|सहकर्मी)[^।?!\n]{{0,40}}?{_VISIT_BEFORE}(?:कन्फ़र्म|कन्फर्म|पुष्टि|जवाब|बता)"
+    rf"|स्पेशलिस्ट[^।?!\n]{{0,40}}?{_VISIT_BEFORE}(?:कन्फ़र्म|कन्फर्म|पुष्टि)",
+    re.IGNORECASE,
+)
+
+
+def defers_question(text: str) -> bool:
+    """Our message told them a colleague will confirm or answer what they asked: their question is still
+    open (launch chat 95's nine questions, 59's "full details including rent security"), so no nudge
+    pushes a visit over it and a person is alerted instead (followups.nudge_due)."""
+    return bool(_DEFERS.search(" ".join(str(text or "").replace("’", "'").split())))
 
 
 # When ----------------------------------------------------------------------------------------------

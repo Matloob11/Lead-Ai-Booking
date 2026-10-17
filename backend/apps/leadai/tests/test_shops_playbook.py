@@ -31,7 +31,7 @@ from apps.accounts.models import Agent
 from apps.campaigns.models import Campaign, CampaignRecipient
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai import lane, tasks
-from apps.leadai.assistant import crm, crm_fields, engine, filters, hours, openai_client, prompt, rules, schema, shops
+from apps.leadai.assistant import crm, crm_fields, engine, filters, hours, lost, openai_client, prompt, rules, schema, shops
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import (
     DEFAULT_OFFICE_ADDRESS,
@@ -56,7 +56,8 @@ FIELDS_URL = "https://bitrix.test/bitrix/tools/a7_leadai_fields.php"
 SYSTEM_SHA = "8fc2c8f68263f5babdf2f8219d718494486b201175c9af4e910f535c129d9466"
 CORRECTION_SHA = "fade4cc01e55b5549099487bce35aadfc8ee4167c3c0e631ebd2fac342989137"
 SCHEMA_SHA = "c34ccbb4dc47ef61353480f478783b558dc2b6f79a52d40cb6e0298178569f36"
-TWO_SLOTS_NOW = "I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"
+# Code's two slots at NOW (14:00): an hour ahead at least, two hours apart (launch review issue 17: hours.OFFER_LEAD).
+TWO_SLOTS_NOW = "I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?"
 
 
 def shop_answer(reply="Great. What business will the shop be for?", **extra):
@@ -280,12 +281,13 @@ class ShopsPromptTests(ShopsBase):
             "- Type 3 – Large: 900-1,200 sq ft, AED 80,000-200,000 a year, from AED 80,000",
             "- Clusters: France, England, China, Russia, Morocco, Persia (International City)",
             "MATCH: not yet: ask the size they need, or their budget",
-            "FREE SLOTS (the next free 30-minute viewing slots; an invitation names two of these):\n- Mon 2026-10-12 14:30 (today 2:30 PM)",
+            "FREE SLOTS (free 30-minute viewing slots, an hour from now at least and an hour apart; an invitation names two of these):\n"
+            "- Mon 2026-10-12 15:00 (today 3:00 PM)\n- Mon 2026-10-12 16:00 (today 4:00 PM)",
             "TAKEN SLOTS (other clients' viewings: never offer or book these): none",
         ):
             with self.subTest(line=line[:40]):
                 self.assertIn(line, context)
-        self.assertEqual(context.count("\n- Mon 2026-10-12 "), 6)
+        self.assertEqual(context.count("\n- Mon 2026-10-12 "), 5)  # 3, 4, 5, 6 and 7 PM, an hour apart
         # Facts already known give MATCH.
         self.set_state(facts={"size_sqft": 700})
         self.turn(self.inbound("ok what next?", seconds_ago=10), [shop_answer()])
@@ -305,7 +307,9 @@ class ShopsPromptTests(ShopsBase):
         system = prompt.SHOPS_SYSTEM
         for text in (
             'Never mention how old their inquiry is, when they asked, or that they were in "our database"',
-            'reply "Good question — I\'ll have our agent confirm that for you at the viewing." and add the question',
+            'reply "Good question — I\'ll have our agent confirm that for you at the viewing." and add their question',
+            # Launch review issue 15: no example list to copy, and the customer's own questions only.
+            "facts.notes holds only questions the customer asked: never your own questions, the DISCOVERY items",
             '"Our agent can discuss the best price for you at the viewing." It is not a handover',
             '"Good shops in International City get taken fast, so viewing early helps."',
             "answer with the HONESTY LINE from the context",
@@ -353,7 +357,8 @@ class ShopsPromptTests(ShopsBase):
         out = schema.normalize(
             {
                 "facts": {
-                    "notes": ["Service charge?", "service charge?", "  DEWA  ", 7, "[x]" * 60, "a", "b", "c"],
+                    # Twelve good ones: a turn keeps NOTES_MAX (ten: launch chat 95 asked nine).
+                    "notes": ["Service charge?", "service charge?", "  DEWA  ", 7, "[x]" * 60, "a", "b", "c", "d", "e", "f", "g", "h", "i"],
                     "shop_type": "TYPE_2",
                     "licence_kind": "dubai",
                     "already_rented": "yes",
@@ -491,7 +496,8 @@ class ShopsReplyTests(ShopsBase):
         again = self.inbound("No, tell me how much discount you give first", seconds_ago=10)
         self.later(1)
         outcome, _, _, _ = self.turn(again, [shop_answer("Sure.")])
-        self.assertEqual(self.body(outcome), rules.line("holding", "en"))
+        # The shops playbook's own holding line, "our agent" (launch review issue 21).
+        self.assertEqual(self.body(outcome), "Our agent has your message and will reply here.")
         self.assertEqual(self.state().handover_reason, "price_or_details_insisted")
 
     def test_a_sentence_already_sent_is_not_sent_again(self):
@@ -775,18 +781,18 @@ class SlotFinderTests(SimpleTestCase):
     def test_the_grid_and_the_first_slot_worth_offering(self):
         grid = hours.slot_grid(dt.date(2026, 10, 13))
         self.assertEqual((len(grid), grid[0].time(), grid[-1].time()), (20, dt.time(10, 0), dt.time(19, 30)))
-        for now, first in ((NOW, at(12, 14, 30)), (at(12, 14, 15), at(12, 14, 30)), (at(12, 14, 20), at(12, 15)), (at(12, 9, 0), at(12, 9, 30))):
+        for now, first in ((NOW, at(12, 15, 0)), (at(12, 14, 15), at(12, 15, 30)), (at(12, 14, 20), at(12, 15, 30)), (at(12, 9, 0), at(12, 10, 0))):
             with self.subTest(now=now):
                 self.assertEqual(hours.first_offer(now), first)
 
     def test_free_slots_skip_the_past_sundays_closed_days_taken_slots_and_beyond_three_weeks(self):
         self.assertEqual(hours.free_slots(at(12, 8, 0))[0], at(12, 10, 0))
         late_saturday = at(17, 19, 10)
-        self.assertEqual(hours.free_slots(late_saturday, count=2), [at(17, 19, 30), at(19, 10, 0)])  # Sunday 18 is closed
-        self.assertEqual(hours.free_slots(late_saturday, ["2026-10-19"], count=2), [at(17, 19, 30), at(20, 10, 0)])
+        self.assertEqual(hours.free_slots(late_saturday, count=2), [at(19, 10, 0), at(19, 10, 30)])  # 7:30 PM is too soon; Sunday 18 is closed
+        self.assertEqual(hours.free_slots(late_saturday, ["2026-10-19"], count=2), [at(20, 10, 0), at(20, 10, 30)])
         taken = [at(12, 15, 0), at(12, 16, 15)]
         free = hours.free_slots(NOW, (), taken)
-        self.assertEqual(free, [at(12, 14, 30), at(12, 15, 30), at(12, 17, 0), at(12, 17, 30), at(12, 18, 0), at(12, 18, 30)])
+        self.assertEqual(free, [at(12, 15, 30), at(12, 17, 0), at(12, 17, 30), at(12, 18, 0), at(12, 18, 30), at(12, 19, 0)])
         every = hours.free_slots(NOW, (), (), count=10_000)
         self.assertLessEqual(every[-1], NOW + hours.MAX_AHEAD)
         self.assertTrue(all(slot.weekday() != 6 for slot in every))
@@ -797,8 +803,8 @@ class SlotFinderTests(SimpleTestCase):
         taken = [at(13, 17, 0)]
         self.assertEqual(hours.nearest_free(at(13, 17, 0), NOW, (), taken), [at(13, 16, 30), at(13, 17, 30)])
         self.assertEqual(hours.nearest_free(at(13, 10, 0), NOW, (), [at(13, 10, 0)])[1], at(13, 10, 30))
-        self.assertEqual(hours.offer_pair(NOW), [at(12, 14, 30), at(12, 16, 30)])
-        self.assertEqual(hours.offer_pair(at(12, 18, 30)), [at(12, 19, 0), at(13, 10, 0)])
+        self.assertEqual(hours.offer_pair(NOW), [at(12, 15, 0), at(12, 17, 0)])
+        self.assertEqual(hours.offer_pair(at(12, 18, 30)), [at(12, 19, 30), at(13, 10, 0)])
         self.assertEqual(hours.offer_pair(NOW, (), [at(12, 14, 30)]), [at(12, 15, 0), at(12, 17, 0)])
 
     def test_the_two_slot_line(self):
@@ -818,7 +824,7 @@ class SlotFinderTests(SimpleTestCase):
         for language in ("ar", "ur_latin", "ur", "hi_latin", "hi"):
             with self.subTest(language=language):
                 line = shops.slot_offer(language, hours.offer_pair(NOW), NOW)
-                self.assertIn("2:30 PM", line)
+                self.assertIn("3:00 PM", line)
                 self.assertNotEqual(line, TWO_SLOTS_NOW)
         self.assertEqual(shops.slot_offer("en", [], NOW), "")
 
@@ -912,7 +918,7 @@ class ShopsSlotTests(ShopsBase):
         LeadAiAppointment.objects.create(conversation=other, status="confirmed", starts_at=at(12, 15, 0))
         self.turn(self.inbound("I want to see the shops"), [shop_answer(TWO_SLOTS_NOW, invited=True)])
         context = self.requests[0][0][1]["content"]
-        self.assertIn("- Mon 2026-10-12 14:30 (today 2:30 PM)\n- Mon 2026-10-12 15:30 (today 3:30 PM)", context)
+        self.assertIn("- Mon 2026-10-12 15:30 (today 3:30 PM)\n- Mon 2026-10-12 16:30 (today 4:30 PM)", context)
         self.assertIn("TAKEN SLOTS (other clients' viewings: never offer or book these): Mon 2026-10-12 15:00", context)
 
     def test_an_open_when_becomes_two_free_slots(self):
@@ -1124,7 +1130,10 @@ class FieldsQueueTests(ShopsBase):
                 (crm_fields.LOST, "1", {"reason": "No"}),
             ]
         )
-        with patch("apps.leadai.assistant.crm_fields.post", return_value={"ok": True}) as post:
+        # A lead nobody works, with no open to-do (assistant/lost.py): the lost move goes with the fields.
+        with patch("apps.leadai.assistant.lost.may_move", return_value=lost.Decision(True)), patch(
+            "apps.leadai.assistant.crm_fields.post", return_value={"ok": True}
+        ) as post:
             tasks.write_crm_fields.apply(args=[ids])
         post.assert_called_once_with(
             {
@@ -1321,10 +1330,12 @@ class ShopsEvalTests(TestCase):
     def test_an_open_when_is_rewritten_and_a_taken_slot_refused_as_live(self):
         # A new licence (batch 2b: a DED or Trakhees one gets its copy asked for first, shops-licence-ask).
         run, _ = self.run_with("shops-invite", eval_answer("Perfect. When would you like to come to see the shops?", invited=True, facts={"licence_kind": "new"}))
-        self.assertEqual(run.out, f"Perfect. {TWO_SLOTS_NOW}")
+        free = "I can hold a slot for you today at 3:30 PM or 5:30 PM — which is better?"  # 3 PM is another client's
+        self.assertEqual(run.out, f"Perfect. {free}")
         self.assertEqual(run.failures, [])
+        # The model's own offer of the taken 3 PM never goes out (launch review issue 17, offers.fix_times): code's free pair does.
         run, _ = self.run_with("shops-invite", eval_answer("Perfect. Would today at 3:00 PM or 5:00 PM work?", invited=True, facts={"licence_kind": "new"}))
-        self.assertIn("offers 15:00, which another client has", run.failures)
+        self.assertEqual((run.out, run.failures, run.answer["trimmed"]), (f"Perfect. {free}", [], ["times"]))
         booked = eval_answer("", action="confirm", place="office", date="2026-10-13", time="17:00")
         run, requests = self.run_with("shops-taken", booked, booked)
         self.assertEqual(len(requests), 2)
@@ -1458,7 +1469,7 @@ class DaySlotsTests(ShopsBase):
 
     def test_what_the_pair_follows(self):
         slots = shops.invitation_slots
-        self.assertEqual(slots("ok", ["When would you like to come to our office?"], NOW), [at(12, 14, 30), at(12, 16, 30)])
+        self.assertEqual(slots("ok", ["When would you like to come to our office?"], NOW), [at(12, 15, 0), at(12, 17, 0)])
         self.assertEqual(slots("I am busy today", ["When would you like to come?"], NOW), [at(13, 10, 0), at(13, 12, 0)])
         self.assertEqual(slots("Not today, maybe tomorrow?", ["What time tomorrow?"], NOW), [at(13, 10, 0), at(13, 12, 0)])
         self.assertEqual(slots("Can I come on Sunday?", ["Which other day works?"], NOW), [at(19, 10, 0), at(19, 12, 0)])
@@ -1771,9 +1782,11 @@ class ReviewSmallTests(ShopsBase):
         LeadAiSettings.objects.filter(pk=1).update(shops_facts=facts)
         self.turn(self.inbound("Too expensive"), [shop_answer()])
         context = self.requests[0][0][1]["content"]
+        # The honest price line (launch review issue 12, claims.price_text): our lowest type, its size, would it work?
         self.assertIn(
-            'OBJECTION LINES (the build pack\'s answers, with SHOP FACTS\' own figures):\n- Too expensive: "I understand. What budget '
-            'are you working with? Type 1 starts at AED 35,000, and you can pay in 1 to 4 cheques."',
+            'OBJECTION LINES (the build pack\'s answers, with SHOP FACTS\' own figures):\n- Too expensive, cheaper, higher than others: '
+            '"I understand. Our lowest is Type 1, from AED 35,000 a year (400-550 sq ft), payable in 1 to 4 cheques. Would that size work '
+            'for you?"',
             context,
         )
         self.assertIn("we have options in 5 clusters, so you can compare in one visit.", context)

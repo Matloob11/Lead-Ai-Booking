@@ -23,7 +23,7 @@ from apps.catalog.views import _submit_template_to_waba
 from apps.leadai.assistant.reminders import BUTTONS, TEMPLATE_NAME
 
 BODY = "Hi {{1}}, a reminder of your meeting today at {{2}} at {{3}}. Please tap below to let us know."
-EXAMPLE = ["Ahmed", "5:00 PM", "Russia Cluster, Building V02/V03, Shop 20, Dubai International City"]
+EXAMPLE = ["Ahmed", "5:00 PM", "Russia Cluster, Building V03, Shop 20, Dubai International City"]
 
 
 def reminder_parsed() -> dict:

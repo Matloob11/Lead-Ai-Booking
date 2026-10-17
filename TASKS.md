@@ -1,3 +1,108 @@
+## 2026-10-17 — Lead AI batch 2d: the eval gate's guards and the broker backstop (Claude Code)
+
+- **Eval gate:** the real-model eval on the build context gave 316/330 overall but 157/166 (94.6%) on the model-written subset, under the 95% gate. A second full run passed (158/166, 95.2%) but showed shops-broker failing both repeats, so nothing was deployed.
+- **Guards (workflow, then two reviews and a fixer):** a plain yes to a nudge gets code's two free slots; "one more shop" never sets already_rented; the customer's must-answer questions are merged into the notes; a free slot the customer names is booked by code, and "slots start on the hour" is never sent; a location question gets code's invitation; an 'unclear' handover on "who is this?" is dropped only when the reply promises no colleague; a figure only the CRM notes hold is cut and never stored as theirs; the eval's time-span check fixed; the eval prints "failed every repeat".
+- **Broker backstop** (`assistant/brokers.py`): a self-declared broker or a client-sourcing agent is handed over with the broker line, the Broker label and a pause (Q11) even when the model misses it. The review found false positives on talk about OUR agent ("I'm here, agent not here", "office mein agent hai?") and on owners' own clients; all seven findings fixed, each with tests.
+- **Proof:** local suite 1432 OK (SQLite), `makemigrations --check` clean, every guard proven by a guard-off run. Not yet run: the real-model eval on these files, PostgreSQL, the live server. Next: sync, eval gate, build, deploy.
+
+---
+
+## 2026-10-16 — Lead AI batch 2d, the review's 26 findings fixed: the pin, must-answer without a pause, shop customers misread, calls, counts, CRM writes (Claude Code)
+
+The batch's review (replay of the 32 launch chats, CRM and regression probes) found 26 issues; all were real and all are fixed in `backend/apps/leadai/**`. Not committed, not deployed.
+
+- **Our office pin** is no "last word" of ours (`transcript.is_our_pin`, `engine._last_outbound`, `followups.last_message`, `read_since`): chat 136's "OK" to the owner's two slots is answered (it was skipped as an acknowledgement), and chat 44 gets its options nudge (none of the 12 pinned not-a-shop chats got one).
+- **Must-answer questions go to a person while the chat goes on** (`people.MUST_ANSWER_PAUSES` False): code's line with the model's other words (chat 78 keeps its Type 1 match for 33k), a high `questions` alert to the chat's people and 2311, one escalation after 30 office minutes. Live replay: chats 91, 78 and 59 went silent for hours behind the handover. True gives back the handover.
+- **Shop customers no longer read as wanting a home** (`needs.about_a_shop`, negation after the noun, trades, "residential or commercial?"): "I need a shop with a room for my salon", "mujhe shop chahiye, flat nahi", "Villa maintenance", "أريد محل مع غرفة" and 15 more. A later "I want a SHOP" forgets a want read wrong.
+- **Who the customer is:** a call in their own words beats the owner's line; "Not shops" never replaces "a studio"; a buyer hears no word of renting and gets no third invitation (chat 42 got four); an apology left alone by the cuts becomes the owner's line (chat 114); a need chat is handed over only for a person, a call, a complaint or a broker (a visa question or a photo is alerted instead); a buyer only the model recorded is never Lost.
+- **Counts, rented, calls, contracts:** "3 or 4 of us" is no window to book; "We already have a shop, need one more" is no shop rented elsewhere and "No, I told you I need another one" no no to a second shop; "Why did you call me?" and "I'll call back later" are no call requests (every playbook); "I want to sign the contract today" is no contract question.
+- **CRM:** a call recorded through user 1 (3CX) and a person's edit hidden by our own later write keep a lead in its stage; "wanted" and "call" notes and the responsible come from the shops campaign's lead; a retried lost move whose answer was lost writes no false "not moved" and posts its kept comment once; escalation reads the shops chats in the query (100 older handovers starved it) and skips a Broker or Handed set in Bitrix, an opt-out elsewhere and a later no.
+- **Follow-ups** hold for a lead with a meeting stage or time, a closed stage, or (for a need chat) a person's work in 7 days.
+- **Smaller:** "ALI" is Ali again ("ETS" stays); chase alerts at most every 10 minutes; a note that restates the reply's own claim is dropped; the eval gate also needs 95% of the scenarios the model writes on their own.
+
+**Defaults, one constant each:** `people.MUST_ANSWER_PAUSES` False, `people.CHASE_ALERT_EVERY` 10 min, `engine.NOT_A_SHOP_INVITES` 2, `engine.NEED_HANDOVERS`, `lost.WORK_TYPES` calls and e-mails, `people.ESCALATE_READ_AT_MOST` 1000.
+
+**Proof:** 1288 tests OK locally on SQLite (1232 before). 55 new in `test_review_2d.py`, one in `test_silence_caps_people.py` (the old pause, behind its constant); 6 earlier tests changed for the deliberate defaults (must-answer without a pause, the chase cooldown). Every fix switched off fails its tests (scratchpad `fin2d/guards_off.py`). 11 new eval scenarios (`shops-review-*`, `review-why-did-you-call`). `makemigrations --check`: No changes detected.
+
+**Not tested:** the real-model eval gate (SHOPS_SYSTEM is unchanged, so its MUST-ANSWER rule still tells the model to hand over: code takes that handover off when it reads the questions), PostgreSQL, the live server, Bitrix, WhatsApp.
+
+**Shared:** TASKS.md only. A deploy rebuilds all four app services, `worker-leadai` included.
+
+---
+
+## 2026-10-16 — Lead AI batch 2d, package "CRM writes": a no moves only a lead nobody works, the notes are the customer's own questions, nothing is written twice (Claude Code)
+
+Launch review issues 1, 15, 19 (Django side only), 25 and 26, plus the side effects from side_effects.json. Two new modules, `assistant/lost.py` and `assistant/crm_facts.py`. Hooks in `tasks.py`, `crm_fields.py`, `crm.py`, `engine.py`, `filters.py`, `rules.py`, `schema.py`, the shops prompt (SHOPS_SYSTEM only), `signals.py`, `transcribe.py`, `bitrix_status.py`, `alerts.py`, `nudges.py` and the eval.
+
+**When a shops customer says no** (issue 1; chats 42, 52, 116, 118, 119, 120, 134). Live, every no moved the lead to Not Interested at once, and Bitrix closed seven agents' open to-dos along with it.
+- What happens every time: Bot Status Lost (2480), the timeline note, and a new "lost" alert ("<name> said no to the shops offer"). The alert goes to the lead's owner and the Lead AI alert list (2311) and carries their words.
+- The move to Not Interested (Junk Lead for a wrong number or spam) needs all of the following, read through `crmlink.client` just before the write:
+  - none of our colleagues wrote to the customer on WhatsApp in 7 days, on any of our numbers;
+  - the lead has no meeting stage (10, 11), no meeting time, and is not closed already;
+  - it came in 7 or more days ago;
+  - in the last 7 days no person moved it, changed it or worked on it;
+  - it has no open activity, whoever owns it;
+  - in the last 7 days no person created or changed an activity on it, or wrote a timeline comment. User 0, user 1 and the webhook's own user do not count as people.
+- If any read fails, the lead is not moved. No to-do is ever closed or changed, because the stage moves only when there is no open to-do.
+- A lead that stays in its stage gets this on its timeline: "The customer said no to our shops offer (…). Bot Status is Lost; the lead was not moved to Not Interested, because <why>. No to-do was closed or changed." The row's error starts "Not moved: ".
+- "No thankyou", "no thanku" and "no thx" now count as a no (in chat 120 the model had to read it).
+
+**Notes and budget** (issue 15). "Questions for the viewing" now keeps only questions the customer asked (`crm_facts.their_notes`). Dropped:
+- questions we put to them ("Is the shop for yourself, or are you checking for a client?": chats 42, 52, 98, 114);
+- notes that are only our discovery list ("size needed; budget; licence kind": chats 49, 78, 88, 96, 100, 119);
+- the prompt's examples (service charge, DEWA, parking, fit-out, chiller, the exact unit), unless their own words name them in one of our languages (chats 44, 59, 62, 88);
+- a sentence of ours copied into the notes ("Currently only shops for rent, not sale": chat 42).
+- Other changes:
+  - the prompt's example list is removed;
+  - `NOTES_MAX` is now 10, so all nine of chat 95's questions are kept;
+  - the comment line takes up to 600 characters;
+  - a budget that equals one of our own prices is dropped unless the customer wrote it (chat 62's "Budget (AED): 48000").
+
+**Business activity:** never a home ("studio", "room", "apartment studio": chats 44, 49, 57, 68) and never a sentence. This holds for the lead field, the booking body, comments, alerts, nudges and placeholders.
+
+**Timeline comments** (issue 19, Django side):
+- no more "Customer: -" line; the name shown is the customer's, with its case fixed ("kanchan" becomes "Kanchan");
+- a voice note we transcribed gets its own timeline line, "WhatsApp · Customer · 12 Oct 13:59 · voice note", followed by the words (chat 96's eight voice notes showed only "[audio]"). The crmlink mirror still prints "[audio]" next to it; that file is not ours to edit.
+
+**Change log** (issue 26; leads 79341, 78833): the lead is read before every write, and a value it already holds is not written again. The row reads "Not sent: the lead holds this value already." When a person sets Bot Status in Bitrix (the C12 POST), that becomes the chat's newest value, so the next turn does not write a fake change back.
+
+**Shop photos** (issue 25; chat 100): a Lead AI message keeps its own payload when the gateway's echo fills in the row (`signals.keep_own_payload`). The timeline now shows these photos as ours, and the next turn never mistakes them for an agent's.
+
+**Names:**
+- never greet a job title or a place ("Hi MANAGER" in chat 42, "Road");
+- a name in all lower case or all upper case is fixed in our own messages ("kamalraafat" becomes "Kamalraafat", "AHMED KHAN" becomes "Ahmed");
+- initials stay as they are ("ETS", chat 59).
+
+**Defaults, one constant each:**
+- `lost.MOVE_STAGE` True, `TOUCH_WINDOW` 7 days, `NEW_LEAD` 7 days, `SYSTEM_USERS` 0 and 1 plus the webhook's user.
+- `crm_facts.NOTES_THEIRS_ONLY` and `BUDGET_THEIRS_ONLY` True, `ACTIVITY_WORDS_MAX` 12; `schema.NOTES_MAX` 10; `crm.NOTES_LINE_MAX` 600.
+- `transcribe.VOICE_NOTE_ON_TIMELINE` True.
+- `write_crm_fields` time limits are 150 s and 180 s. Its rows get a retry time before Bitrix is read, so if a run is cut off, the sweep sends them again.
+
+**General playbook:** the name fixes, the "Customer: -" fix, the voice-note line, the photo payload and the business activity check apply to every chat, because the same bugs were there. The notes guard, the budget guard, the check for values already held and the lost rule apply to shops lead fields only.
+
+**Proof:**
+- 1232 tests pass locally on SQLite (1187 before this package). `test_crm_writes.py` holds 45 of them and uses the launch leads' own Bitrix answers (79641, 79417, 79428, 79420, 79419, 79321, 78833, 79341) and the live answers. With each guard patched out, its tests fail.
+- Replays of the live data:
+  - the notes guard over every launch chat's live notes keeps and drops the notes listed above (chat 96 keeps "parking side", which he said in an earlier voice note);
+  - the new no-words change how only one live message reads: chat 120's "No thankyou".
+- 4 new eval scenarios, 154 in all: `shops-notes-theirs-88`, `shops-budget-ours-62`, `shops-no-thankyou-120` and `shops-nine-questions-noted-95`. Each passes with the rebuilt live answer and fails with its guard removed.
+- `makemigrations --check`: No changes detected. No migration.
+
+**Not tested:** the eval gate with the real model, PostgreSQL (the new queries were only compiled for it), the live server, worker-leadai, Bitrix (its answers came from the side_effects.json records), WhatsApp. Not deployed, not committed.
+
+**Not done here:**
+- the crmlink mirror's "[audio]" line itself (apps/crmlink);
+- Bitrix logging each change twice in the change log (Cursor's side);
+- "Not now" and "already rented" still leave Bot Status at Qualifying;
+- the lost reason is still the customer's own words ("No"), with nothing added;
+- the Lead fields tool does not check for open to-dos itself, so a lost move sent from anywhere else still closes them;
+- the template's greeting name (the campaign side).
+
+**Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`. A deploy rebuilds all four app services, `worker-leadai` included.
+
+---
+
 ## 2026-10-16 — Lead AI media library from A7's portal listings; 2e spec and board revised for Q36, no named agent and the agent desk (Claude Code)
 
 - **Library (D11, Q36):** A7's 36 International City listings collected: 34 from Property Finder (search limited to International City, broker id 8580, all four categories) and 2 Bayut-only (Nimble; all 144 Bayut listings swept). 294 JPEG photos, each listing with its listing.json, in `backend/Types shops/Portal listings/` (gitignored). Every photo was reviewed by eye (4 agents) and every hash pair checked. 7 sets built in `backend/Types shops/Residential sets/` (5 studio, 2 1BR): no person, no third-party mark, no building outside; set.json per set, README.txt for Matloob.

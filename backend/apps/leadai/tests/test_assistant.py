@@ -820,7 +820,7 @@ class ReminderTests(Base):
         pk, at, start = reminders.claim_one(NOW)
         with patch("apps.inbox.services.send_template", side_effect=fake_send_template) as send:
             self.assertEqual(reminders.send(pk, at, start), "template")
-        self.assertEqual(send.call_args.args[3], {"1": "Ahmed", "2": "2:29 PM", "3": "Russia Cluster, Building V02/V03, Shop 20, Dubai International City"})
+        self.assertEqual(send.call_args.args[3], {"1": "Ahmed", "2": "2:29 PM", "3": "Russia Cluster, Building V03, Shop 20, Dubai International City"})
 
     def test_no_reminder_after_stop_or_when_switched_off(self):
         self.appointment()

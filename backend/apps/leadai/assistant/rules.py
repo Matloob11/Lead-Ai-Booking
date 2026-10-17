@@ -56,6 +56,8 @@ PHRASES = {
     # Not "not now": to "Would 5 PM or 6 PM work?" it means another time, not no.
     NOT_INTERESTED: (
         "not interested", "no thanks", "no thank you", "im not interested", "i am not interested",
+        # As people type them (launch chat 120's "No thankyou"; launch review issue 26).
+        "no thankyou", "no thanku", "no thank u", "no thanx", "no thnx", "no thx",
         "لا أريد", "لا اريد", "ما ابي", "لا ابي", "غير مهتم", "مش مهتم", "مو مهتم",
         "دلچسپی نہیں", "نہیں چاہیے",
         "interested nahi", "interested nahin", "nahi chahiye", "nahin chahiye", "zaroorat nahi", "zarurat nahi",
@@ -68,7 +70,8 @@ PHRASES = {
 }
 
 ACKS = {
-    "ok", "okay", "okk", "k", "kk", "thanks", "thank you", "thanx", "thx", "ty", "noted", "fine", "great",
+    "ok", "okay", "okk", "k", "kk", "thanks", "thank you", "thankyou", "thanku", "thank u", "thnx", "thanx", "thx", "ty",
+    "noted", "fine", "great",
     "good", "alright", "sure", "done", "got it", "acha", "achha", "theek hai", "thik hai", "shukriya",
     "jazakallah", "شكرا", "شكراً", "تمام", "اوکے", "ٹھیک ہے", "شکریہ", "धन्यवाद", "ठीक है",
 }
@@ -133,7 +136,11 @@ STOP_ANYWHERE = tuple(
 )
 
 
-FILLERS = ("please", "pls", "plz", "bro", "sir", "thanks", "thank you", "plz", "bhai", "yaar")
+FILLERS = (
+    "please", "pls", "plz", "bro", "sir", "thanks", "thank you", "plz", "bhai", "yaar",
+    # "No thankyou" (launch chat 120) as "No thank you": one word, as people type it.
+    "thankyou", "thanku", "thank u", "thanx", "thnx", "thx",
+)
 
 
 def opt_out_from_text(text: str) -> str | None:
@@ -286,6 +293,7 @@ REFUSALS = {
     normalize_text(p)
     for p in (
         "no", "nope", "nah", "no sir", "no need", "not needed", "no thanks", "no thank you", "not interested", "no its ok",
+        "no thankyou", "no thanku", "no thank u", "no thanx", "no thnx", "no thx",
         "nahi", "nahin", "nhi", "na", "nai", "nahi chahiye", "zaroorat nahi", "nahi shukriya",
         "لا", "لا شكرا", "لا شكراً", "لا ما ابي", "لا شكرا لك",
         "نہیں", "جی نہیں", "نہیں شکریہ",
@@ -386,6 +394,79 @@ def is_acknowledgement(text: str) -> bool:
 def asks_question(text: str) -> bool:
     """A question in any of the scripts used here (Arabic and Urdu write '؟')."""
     return any(mark in str(text or "") for mark in QUESTION_MARKS)
+
+
+# They ask who we are or why we wrote, clause by clause (_who_words): "Who is this?", "Why did you call me?", "How did you
+# get my number?", "aap kaun?", "من انت", "आप कौन". Never "Who is the owner?", "Why is the rent so high?" or "Who will
+# show me the shop?": those ask about the offer.
+_WHO_WE_ARE = re.compile(
+    r"(?:(?:hi|hello|hey|salam|salaam|dear|sir|madam|bro|excuse me|sorry|please|pls|plz|ok|okay)\s+)*"
+    r"(?:"
+    r"who\s+(?:is|are|r|s)\s+(?:this|that|you|u|it|there|speaking|calling|messaging|texting)(?:\s+(?:guys|people|please|pls|plz|sir|madam|bro))?"
+    r"|whos\s+(?:this|that|there|calling|speaking|messaging|texting)|who\s+dis|who\s+r\s+u"
+    r"|who\s+(?:am\s+i|i\s+am)\s+(?:talking|speaking|chatting)\s+(?:to|with)"
+    r"|(?:which|what)\s+company(?:\s+(?:is\s+this|is\s+it|are\s+you|r\s+u))?"
+    r"|where\s+(?:are\s+you|r\s+u)\s+(?:from|calling\s+from|messaging\s+from|texting\s+from)"
+    r"|why\s+(?:did|do|are|r|have|would|were)\s+(?:you|u|ya|your\s+team)\s+(?:\w+\s+)?"
+    r"(?:call|calling|called|message|messaging|messaged|msg|text|texting|texted|contact|contacting|contacted|send|sending|sent"
+    r"|write|writing|wrote|ring|ringing|rang|whatsapp|whatsapping)(?:\s+(?:me|us|this\s+number|my\s+number))?"
+    r"(?:\s+(?:this|that|these|the|a|your)\s+(?:message|messages|msg|text|texts|offer))?(?:\s+(?:again|today|now|here))?"
+    r"|why\s+(?:am\s+i|i\s+am|did\s+i|do\s+i)\s+(?:getting|receiving|get|receive|got|received)(?:\s+(?:this|these|your|a|the))?"
+    r"(?:\s+(?:message|messages|msg|call|calls|text|texts))?"
+    r"|(?:how|where)\s+did\s+(?:you|u)\s+get\s+my\s+(?:number|no|contact|details)"
+    r"|(?:what\s+is|whats)\s+this(?:\s+(?:about|regarding|for))?"
+    r"|(?:aap|ap|tum|tm)\s+(?:kaun|kon|kaon)(?:\s+(?:ho|hain|hai|hn|bol\s+rahe\s+(?:ho|hain)))?"
+    r"|(?:kaun|kon)\s+(?:ho|hai|hain|bol\s+raha\s+hai|bol\s+rahe\s+ho)"
+    r"|(?:kyun|kyu|kyon|kis\s+liye)\s+(?:call|message|msg|phone|rabta)(?:\s+(?:kiya|kia|kiya\s+hai|kar\s+rahe\s+ho))?"
+    r"|(?:call|message|msg|phone)\s+(?:kyun|kyu|kyon|kis\s+liye)(?:\s+(?:kiya|kia))?"
+    # Arabic
+    r"|(?:مين|من)\s*(?:انت|أنت|حضرتك|معي|معاي)?"
+    r"|(?:ليش|لماذا|ليه)\s+(?:تتصل|اتصلت|تتصلون|ترسل|ارسلت|أرسلت|راسلت|تراسلني)"
+    # Urdu
+    r"|(?:آپ|تم)\s+کون(?:\s+(?:ہیں|ہو|ہے))?|کون\s+(?:ہیں|ہو|ہے)"
+    r"|کیوں\s+(?:کال|میسج|فون)(?:\s+کی[اے]?)?|(?:کال|میسج|فون)\s+کیوں(?:\s+کی[اے]?)?"
+    # Hindi
+    r"|(?:आप|तुम)\s+कौन(?:\s+(?:हैं|हो|है))?|कौन\s+(?:हैं|हो|है)"
+    r"|क्यों\s+(?:कॉल|मैसेज|फ़ोन|फोन)(?:\s+किया)?|(?:कॉल|मैसेज|फ़ोन|फोन)\s+क्यों(?:\s+किया)?"
+    r")"
+    r"(?:\s+(?:please|pls|plz|sir|madam|bro|dear))?"
+)
+_WHO_CLAUSES = re.compile(r"[.!?؟,;:،\n]+")
+# Not normalize_text: its \w drops Devanagari's vowel signs ("कौन" would read "क न").
+_NOT_A_WORD = re.compile(r"[^\w\s\u0900-\u097f]", re.UNICODE)
+
+
+def _who_words(text: str) -> str:
+    """Lower case, NFKC, no apostrophes, punctuation or emoji, single spaces; Devanagari kept whole."""
+    text = unicodedata.normalize("NFKC", str(text or "")).lower().replace("’", "'").replace("'", "")
+    return " ".join(_NOT_A_WORD.sub(" ", text).split())
+
+
+GREETINGS = {
+    _who_words(p)
+    for p in (
+        "hi", "hii", "hello", "helo", "hey", "salam", "salaam", "assalam o alaikum", "assalamu alaikum", "assalamualaikum",
+        "asalam o alaikum", "aoa", "good morning", "good afternoon", "good evening", "السلام عليكم", "مرحبا", "مرحباً", "اهلا",
+        "أهلا", "هلا", "السلام علیکم", "नमस्ते", "हेलो",
+    )
+}
+
+
+def asks_who_we_are(texts) -> bool:
+    """All they said asks who we are or why we wrote ("Who is this? Why did you call me?"), greetings and
+    acknowledgements aside: both prompts answer it with the company and what the campaign is about, and it is no
+    request for a person (engine.settle_handover takes the model's "unclear" off it)."""
+    asked = False
+    for text in texts or ():
+        for part in _WHO_CLAUSES.split(str(text or "")):
+            words = _who_words(part)
+            if not words:
+                continue
+            if _WHO_WE_ARE.fullmatch(words):
+                asked = True
+            elif words not in GREETINGS and not is_acknowledgement(part):
+                return False
+    return asked
 
 
 def looks_like_auto_reply(text: str, seconds_after_ours: float | None = None) -> bool:
@@ -618,6 +699,25 @@ LINES = {
         "ur": "ضرور۔",
         "hi_latin": "Zaroor.",
         "hi": "ज़रूर।",
+    },
+    # Shops: they already rented a shop elsewhere ("we got one"): the build pack's congratulation and its
+    # second-shop question (board T27); a no to it closes the lead as already rented (engine RENTED_NO).
+    "rented_second_shop": {
+        "en": "Congratulations on your new shop! Do you need a second shop, or do you know someone who does?",
+        "ar": "مبروك على محلك الجديد! هل تحتاج محلاً ثانياً، أو تعرف أحداً يحتاج؟",
+        "ur_latin": "Nayi shop mubarak ho! Kya aap ko ek aur shop chahiye, ya aap kisi ko jaante hain jise zaroorat ho?",
+        "ur": "نئی دکان مبارک ہو! کیا آپ کو ایک اور دکان چاہیے، یا آپ کسی کو جانتے ہیں جسے ضرورت ہو؟",
+        "hi_latin": "Nayi shop mubarak ho! Kya aapko ek aur shop chahiye, ya aap kisi ko jaante hain jise zaroorat ho?",
+        "hi": "नई दुकान मुबारक हो! क्या आपको एक और दुकान चाहिए, या आप किसी को जानते हैं जिसे ज़रूरत हो?",
+    },
+    # Shops: the build pack's first discovery question, before a second invitation (engine.discovery_first).
+    "ask_business": {
+        "en": "What business will the shop be for?",
+        "ar": "ما النشاط التجاري الذي سيكون المحل له؟",
+        "ur_latin": "Shop kis business ke liye hogi?",
+        "ur": "دکان کس کاروبار کے لیے ہوگی؟",
+        "hi_latin": "Shop kis business ke liye hogi?",
+        "hi": "दुकान किस बिज़नेस के लिए होगी?",
     },
     # Shops: the build pack's next question when the reply invited before the licence was known.
     "ask_licence": {

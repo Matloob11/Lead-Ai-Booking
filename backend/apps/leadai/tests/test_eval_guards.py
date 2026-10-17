@@ -186,11 +186,11 @@ class PointToLocationTurnTests(FirstChatBase):
     def test_asked_for_the_location_itself_it_goes_again_and_a_day_later_too(self):
         self.ours(f"Our office is here:\n{ADDRESS}", minutes_ago=5)
         outcome, _, _, _ = self.turn(self.inbound("How do I reach there? Send the location please"), [answer("Sure, here it is.", share_location=True)])
-        self.assertEqual(self.body(outcome), f"Sure, here it is.\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"Sure, here it is.\nOur office location: {ADDRESS}")
         Message.objects.filter(payload__source="leadai_ai").update(created_at=NOW - dt.timedelta(hours=25))
         self.clock.return_value = NOW + dt.timedelta(minutes=1)
         outcome, _, _, _ = self.turn(self.inbound("How do I reach there?", seconds_ago=10), [answer("Our office is in International City.", share_location=True)])
-        self.assertEqual(self.body(outcome), f"Our office is in International City.\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"Our office is in International City.\nOur office location: {ADDRESS}")
 
 
 class PointToLocationEvalTests(TestCase):

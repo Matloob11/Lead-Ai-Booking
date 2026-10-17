@@ -251,12 +251,17 @@ def reminder_due(start: dt.datetime, now: dt.datetime | None = None) -> dt.datet
 # Slots ----------------------------------------------------------------------------
 
 SLOT = dt.timedelta(minutes=30)
-# A slot is offered only this far ahead at least, then up to the next half hour:
-# at 14:00 the first one offered is 14:30, at 14:20 it is 15:00.
-OFFER_LEAD = dt.timedelta(minutes=15)
+# A slot is offered only this far ahead at least, then up to the next half hour: at 14:00 the first
+# one offered is 15:00, at 14:20 it is 15:30 (launch review issue 17: live, slots 17 and 33 minutes
+# away were offered, and one that had passed; the old lead was 15 minutes). The default of Matloob's
+# open decision, one line to change.
+OFFER_LEAD = dt.timedelta(minutes=60)
 # The two slots an invitation names are this far apart when the day allows
 # ("today at 4:00 PM or 6:00 PM").
 OFFER_GAP = dt.timedelta(hours=2)
+# ... and never closer than this, whoever names them: code's pair, FREE SLOTS (spaced) and the model's
+# own pair (assistant/offers.py). Live, "1:00 PM or 1:30 PM" were offered as the two choices.
+MIN_GAP = dt.timedelta(minutes=60)
 SLOTS_SHOWN = 6
 _EVERY_SLOT = 22 * 20  # every start of the 30-minute grid within MAX_AHEAD
 
@@ -309,15 +314,34 @@ def free_slots(now: dt.datetime | None = None, closed_dates=(), taken=(), *, cou
     return out
 
 
+def spaced(slots, gap: dt.timedelta = MIN_GAP, count: int | None = None) -> list[dt.datetime]:
+    """The slots in order, each at least ``gap`` after the one kept before it (``count`` of them at most):
+    FREE SLOTS as the model reads them, so any two it takes are far enough apart."""
+    out: list[dt.datetime] = []
+    for slot in sorted(slots):
+        if not out or slot - out[-1] >= gap:
+            out.append(slot)
+            if count is not None and len(out) >= count:
+                break
+    return out
+
+
 def nearest_free(start: dt.datetime, now: dt.datetime | None = None, closed_dates=(), taken=()) -> list[dt.datetime]:
     """The free starts to offer instead of a taken one: the nearest before it and the
-    nearest after it, or the two nearest on the side that has any."""
+    nearest after it, or the two nearest on the side that has any, never closer than
+    MIN_GAP to each other."""
     every = free_slots(now, closed_dates, taken, count=_EVERY_SLOT)
     before = [slot for slot in every if slot < start]
     after = [slot for slot in every if slot > start]
-    if before and after:
+    if before and after and after[0] - before[-1] >= MIN_GAP:
         return [before[-1], after[0]]
-    return after[:2] if after else before[-2:]
+    if after:
+        first = after[0]
+        return [first, *[slot for slot in after[1:] if slot - first >= MIN_GAP][:1]]
+    if before:
+        last = before[-1]
+        return [*[slot for slot in before[:-1] if last - slot >= MIN_GAP][-1:], last]
+    return []
 
 
 def offer_pair(
@@ -344,7 +368,8 @@ def offer_pair(
         return [first, later[0]]
     if other_day:
         return [first, other_day[0]]
-    return every[:2]
+    # The last free day within reach: its next start an hour on at least, never the half hour after.
+    return [first, *[slot for slot in every[1:] if slot - first >= MIN_GAP][:1]]
 
 
 def slot_line(start: dt.datetime, now: dt.datetime | None = None) -> str:
@@ -458,6 +483,39 @@ _OPEN_OR_FREE = re.compile(
     r"|\b(free|available|availability|vacant|khula|khule|khuli)\b|مفتوح|متاح|متوفر|فاضي|کھلا|کھلے|خالی|खुला|खुले|उपलब्ध|खाली",
     re.IGNORECASE,
 )
+# The hour of something else, after which they come (the launch gate's review: "Tomorrow I finish work at 6, I can come
+# after that", "my duty finishes at 5 pm, then I will come", "my flight lands at 3 pm, I'll come after" were booked at
+# 6, 5 and 3): work, a duty or a shift that ends, a flight that lands. Never "a day off" ("Tomorrow is my day off, I will
+# come at 5 pm") ...
+_ANOTHER_EVENT = re.compile(
+    r"\b(?:finish|finishes|finished|finishing|duty|duties|shift|flight|lands|landing|landed|(?:i|we)\s+land)\b"
+    r"|\b(?:work|job|office|class|college|school|meeting)\s+(?:ends|ending|finish\w*|is\s+over|gets\s+over|till|until)\b"
+    r"|\b(?:after|from|off|leave|leaving|left)\s+(?:work|my\s+work|job|my\s+job|the\s+office|my\s+office|duty|class|college)\b"
+    r"|\b(?:get|gets|getting|i'?m|i\s+am)\s+off\s+(?:at|by|from)\b|\boff\s+at\b"
+    # Roman Urdu / Hindi ("duty khatam karke aaunga", "chutti ke baad", "kaam se farigh ho kar"), Arabic, Urdu, Hindi.
+    r"|\bkhatam\b|\bchutti\b|\bfarigh\b|دوام|أخلص|اخلص|رحلة|طيارة|الطائرة|ڈیوٹی|چھٹی|ड्यूटी|छुट्टी",
+    re.IGNORECASE,
+)
+# ... and what comes after an hour they named ("... at 3 pm, after that I can come", "... at 5 pm, then I will come", "...
+# I'll come after"): never "Ok then I will come at 5 pm" or "Wednesday at 5 pm then", whose hour is the visit's own.
+_AFTER_IT = re.compile(
+    r"\bafter\s+(?:that|this|it)\b|\bthen\s+(?:i|we)\b|\bthen\s+(?:come|coming|visit|reach)\b"
+    r"|\b(?:come|coming|reach|visit|be\s+there|drop\s+by|pass\s+by)\s+after\b(?!\s*\d)"
+    r"|\b(?:us|is|uss|iss)\s*ke\s+(?:baad|bad)\b|\b(?:uske|iske)\s+(?:baad|bad)\b"
+    r"|\b(?:phir|pher|fir)\s+(?:aa|aaun|aaunga|aaoon|aaonga|aunga|aaungi|aayenge|aaenge)\b"
+    r"|بعدها|بعد\s+ذلك|\bثم\b|اس\s+کے\s+بعد|\bپھر\b|उसके\s+बाद|\bफिर\b",
+    re.IGNORECASE,
+)
+
+
+def another_event(text: str) -> bool:
+    """The hour in these words may be another event's, after which they come: work, a duty or a shift that ends, a flight
+    that lands (_ANOTHER_EVENT), or an hour followed by "after that", "then I'll come" or "I'll come after" (_AFTER_IT).
+    No hour of the visit (no_promise)."""
+    raw = _plain_text(text)
+    if _ANOTHER_EVENT.search(raw):
+        return True
+    return any(spoken_times(raw[: match.start()]) for match in _AFTER_IT.finditer(raw))
 
 
 def _plain_text(text: str) -> str:
@@ -607,6 +665,8 @@ _N = rf"(\d{{1,2}}|{_LATIN_WORD}|{_SCRIPT_WORD})"
 # A word for the part of the day right after an hour: it says AM or PM.
 _PM = r"\s*(p\.?m\.?(?![a-z])|مساء|مساءً|مساءا|عصرا|عصراً|ليلا|ليلاً)"
 _AM = r"\s*(a\.?m\.?(?![a-z])|صباحا|صباحاً|صباح)"
+# "Half past" in Roman Urdu/Hindi, as people spell it (launch chat 96's voice note: "barah saadhay barah baje").
+_SAADHE = "saade|sade|saadhe|sadhe|sarhe|saarhe|saadhay|sadhay|saadhey|sadhey|saday|saaday|sadey|saadey|sarhay|saarhay"
 # A half or a quarter: (pattern, minutes after the hour; -15 is "a quarter to").
 _HALVES = tuple(
     (re.compile(pattern), minutes)
@@ -615,7 +675,7 @@ _HALVES = tuple(
         (rf"\bquarter\s+past\s+{_N}", 15),
         (rf"\bquarter\s+to\s+{_N}", -15),
         (rf"{_N}\s+thirty\b", 30),
-        (rf"\b(?:saade|sade|saadhe|sadhe|sarhe|saarhe)\s+{_N}", 30),
+        (rf"\b(?:{_SAADHE})\s+{_N}", 30),
         (rf"\b(?:sawa|sava)\s+{_N}", 15),
         (rf"\b(?:paune|pone|pauney)\s+{_N}", -15),
         (rf"{_N}\s*(?:و\s*نص|والنص|و\s*النصف|و\s*نصف)", 30),
@@ -699,7 +759,7 @@ _AHEAD = tuple(
 # Words only an hour has: when one is there and the hour is not read above ("quarter to six" in a
 # spelling not listed, "8 baje", "at 9"), the customer still named one.
 _HOUR_MARK = re.compile(
-    r"\b(?:o'?clock|oclock|baje|bajay|bje|bajey|bjy|half\s+past|quarter\s+(?:past|to)|saade|sade|sarhe|sawa|paune|noon|midday)\b"
+    rf"\b(?:o'?clock|oclock|baje|bajay|bje|bajey|bjy|half\s+past|quarter\s+(?:past|to)|{_SAADHE}|sawa|paune|noon|midday)\b"
     r"|\d\s*(?:a\.?m\.?|p\.?m\.?)(?![a-z])|\bat\s+\d{1,2}(?![\d,])|الساعة|الساعه|بجے|बजे|ساڑھے|پونے|साढ़े|पौने|ونص|والنصف"
 )
 
@@ -885,9 +945,97 @@ def hedged(text: str) -> bool:
 def no_promise(text: str) -> bool:
     """The day and hour in these words are no promise to come at that time: a hedge,
     a condition ("if I finish early"), a "no" ("I can't come Wednesday at 5"), a
-    range or an approximate hour ("after 5 pm", "around 5"), or a question whether
-    we are open or free then ("Are you open tomorrow at 5?")."""
+    range or an approximate hour ("after 5 pm", "around 5"), the hour of something
+    else they come after ("I finish work at 6, I can come after that": another_event),
+    or a question whether we are open or free then ("Are you open tomorrow at 5?")."""
     raw = _plain_text(text)
     if _HEDGE.search(raw) or _CONDITION.search(raw) or _NEGATION.search(without_no_problem(raw)) or _RANGE.search(raw):
         return True
+    if another_event(raw):
+        return True
     return any(mark in raw for mark in ("?", "؟", "？")) and bool(_OPEN_OR_FREE.search(raw))
+
+
+# A window of time they will come in (launch review issue 6) -----------------------------------------------------
+# Chat 96 said, in a voice note at 11:10, he would come and check at "barah saadhay barah baje" (12, half past 12),
+# and was never booked: T18 (engine.upgrade_exact_time) books one exact hour only, and reads a range as no promise.
+
+# The widest window that is still one plan to come ("12-12:30", "5 or 6"); wider ("11 to 2") is a choice.
+WINDOW_MAX = dt.timedelta(hours=1)
+_SPAN = re.compile(
+    r"(?<![\d:.,])(\d{1,2})(?:[:.]([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)?\s*"
+    r"(?:-|–|—|to|till|until|or|ya|se|and|aur|/|او|أو|یا|या|से)\s*"
+    r"(\d{1,2})(?:[:.]([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)?(?![\d:])"
+    rf"(?!\s*-?\s*{_UNITS})"
+)
+
+
+def _span_readings(hour: int, minute: int, meridiem: str) -> list[dt.time]:
+    """The readings of one end of a span: as its am/pm says; a bare hour the prompt's way first, then the
+    other half of the day ("11.30 - 12 PM": the 11.30 is AM)."""
+    if not 0 <= minute <= 59:
+        return []
+    if meridiem:
+        return [dt.time(hour % 12 + (12 if meridiem.startswith("p") else 0), minute)] if 1 <= hour <= 12 else []
+    if 13 <= hour <= 23:
+        return [dt.time(hour, minute)]
+    if not 1 <= hour <= 12:
+        return []
+    readings = [dt.time(12, minute)] if hour == 12 else [dt.time(hour, minute), dt.time(hour + 12, minute)]
+    bare = _bare(hour, minute)
+    return sorted(readings, key=lambda at: at != bare)
+
+
+def _fits(start: dt.time, end: dt.time) -> bool:
+    gap = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
+    return 0 < gap <= WINDOW_MAX.total_seconds() / 60 and OPEN <= start <= LATEST_START
+
+
+def _span_is_hours(raw: str, match) -> bool:
+    """A span of numbers is hours only with a mark of an hour on it (review 2d: "3 or 4 of us", "2 ya 3 dukaan
+    chahiye", "2-3 dost" are counts, and were booked as windows): minutes ("12-12:30", "11.30 - 12"), am or pm,
+    "baje" or "o'clock" right after it, or "at", "between", "from", "around" or "الساعة" right before it."""
+    if match[2] or match[3] or match[5] or match[6]:
+        return True
+    return bool(_SPAN_AFTER.match(raw, match.end()) or _SPAN_BEFORE.search(raw[: match.start()]))
+
+
+_SPAN_AFTER = re.compile(r"\s*(?:baje|bajay|bje|bajey|bjy|o'?clock|oclock|بجے|बजे)")
+_SPAN_BEFORE = re.compile(r"(?:\b(?:at|between|from|around|about|by|till|until)|الساعة|الساعه|ساعة)\s*$")
+
+
+def named_window(text: str) -> tuple[dt.time, dt.time] | None:
+    """The window of time the words give for coming, as (start, end): no wider than WINDOW_MAX, starting
+    within the hours a visit may start. A span of numbers that carries a mark of an hour (_span_is_hours:
+    "12-12:30", "11.30 - 12 PM", "between 12 and 12:30", "at 5 or 6", "12 ya 12:30 baje"), or two hours
+    named in words ("barah saadhay barah baje", "بارہ ساڑھے بارہ بجے"). None for one hour (T18's to book), a
+    wider span ("1 to 4 cheques", "11 to 2"), a count ("3 or 4 of us", "2 ya 3 dukaan"), a size or a date."""
+    raw = _plain_text(text)
+    for match in _SPAN.finditer(raw):
+        if _NUMBERING.search(raw[: match.start()]):
+            continue  # "Type 1 or 2", "Shop 20 - 21"
+        if not _span_is_hours(raw, match):
+            continue  # "3 or 4 of us", "2-3 dost": a count of something, not two hours
+        first, second = match[3] or "", match[6] or ""
+        starts = _span_readings(int(match[1]), int(match[2] or 0), first)
+        if not first and second:
+            # "11.30 - 12 PM": the end's half of the day first, then the other one.
+            starts = _span_readings(int(match[1]), int(match[2] or 0), second) + _span_readings(int(match[1]), int(match[2] or 0), "")
+        ends = _span_readings(int(match[4]), int(match[5] or 0), second or first)
+        for start in starts:
+            for end in ends:
+                if _fits(start, end):
+                    return start, end
+    times = sorted(spoken_times(text))
+    if len(times) == 2 and _fits(*times):
+        return times[0], times[1]
+    return None
+
+
+def window_promise(text: str) -> bool:
+    """A window said as a plan to come: no hedge, condition, "no" or deferral, and no question whether we are
+    open (no_promise without its reading of a range, which is the window itself)."""
+    raw = _plain_text(text)
+    if _HEDGE.search(raw) or _CONDITION.search(raw) or _NEGATION.search(without_no_problem(raw)):
+        return False
+    return not (any(mark in raw for mark in ("?", "؟", "？")) and bool(_OPEN_OR_FREE.search(raw)))

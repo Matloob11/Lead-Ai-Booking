@@ -1,11 +1,12 @@
 """Lead AI signals: confirm a chat when its campaign row settles, wake the
-assistant when a customer writes in a Lead AI chat, and put a customer who asks
-any of our numbers to stop on the opt-out registry (optout.py)."""
+assistant when a customer writes in a Lead AI chat, put a customer who asks
+any of our numbers to stop on the opt-out registry (optout.py), and keep a
+message of ours ours when the gateway's echo of it replaces its payload."""
 
 import logging
 
-from django.db import transaction
-from django.db.models.signals import post_save
+from django.db import DatabaseError, transaction
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from apps.campaigns.models import CampaignRecipient
@@ -14,6 +15,33 @@ from apps.inbox.models import Message
 from .lane import is_lead_ai_conversation_id, recipient_saved
 
 logger = logging.getLogger(__name__)
+# Lead AI payloads say so in "source" (assistant/transcript.py: leadai_ai, leadai_reminder, leadai_tap, leadai_followup).
+OWN_SOURCE = "leadai"
+
+
+@receiver(pre_save, sender=Message, dispatch_uid="leadai_keep_own_payload")
+def keep_own_payload(sender, instance, update_fields=None, **kwargs):
+    """A message the Lead AI sent keeps what it stored about it (its source, its turn, the shop photo it is) when
+    something replaces its payload: the gateway takes a photo sent with no caption for a status stub, and its echo
+    hydrates the row with WhatsApp's own payload (gateway/ingest._hydrate_existing). Launch chat 100's four Type 2
+    photos lost theirs, so the lead's timeline read them as an agent's ("WhatsApp · Agent"), and every turn after
+    would have taken them for a colleague's (engine.human_after; launch review issue 25). Ours stays, over the echo's
+    keys; the echo's own keys are added. One read, only when an outbound row's payload is saved without our source."""
+    if instance.pk is None or instance.direction != Message.Direction.OUTBOUND:
+        return
+    if update_fields is not None and "payload" not in update_fields:
+        return
+    incoming = instance.payload if isinstance(instance.payload, dict) else {}
+    if str(incoming.get("source") or "").startswith(OWN_SOURCE):
+        return
+    try:
+        with transaction.atomic():  # its own savepoint: a failed read never breaks the save around it
+            stored = Message.objects.filter(pk=instance.pk).values_list("payload", flat=True).first()
+    except DatabaseError:
+        logger.exception("Lead AI could not read message %s before its payload was replaced", instance.pk)
+        return
+    if isinstance(stored, dict) and str(stored.get("source") or "").startswith(OWN_SOURCE):
+        instance.payload = {**incoming, **stored}
 
 # Long enough for a customer's burst of short messages to finish, so the
 # assistant answers them together; the turn waits a little longer by itself

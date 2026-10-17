@@ -18,7 +18,7 @@ from django.test import Client
 
 from apps.campaigns.models import Campaign, CampaignRecipient
 from apps.inbox.models import Contact, Conversation
-from apps.leadai import optout
+from apps.leadai import bitrix_status, optout
 from apps.leadai.assistant import engine
 from apps.leadai.models import LeadAiAlert, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiCrmField, LeadAiOptOut
 from apps.leadai.tests.test_assistant import NOW, TEST_SETTINGS
@@ -137,7 +137,13 @@ class EffectTests(BotStatusBase):
         appointment.refresh_from_db()
         self.assertEqual(appointment.status, "cancelled")
         self.assertEqual(appointment.history[-1]["by"], "bitrix")
-        self.assertFalse(LeadAiCrmField.objects.exists())  # no lost move back to Bitrix
+        # No lost move back to Bitrix: the person's Lost is only kept as the lead's newest value, never posted
+        # (bitrix_status.remember, launch review issue 19).
+        self.assertFalse(LeadAiCrmField.objects.filter(sent_at__isnull=True).exists())
+        self.assertFalse(LeadAiCrmField.objects.filter(field="lost").exists())
+        self.assertEqual(
+            list(LeadAiCrmField.objects.values_list("field", "value", "error")), [("UF_CRM_A7_BOT_STATUS", "2480", bitrix_status.SET_IN_BITRIX)]
+        )
         self.assertFalse(LeadAiOptOut.objects.exists())
 
     def test_opted_out_stops_the_chat_and_blocks_the_phone_everywhere(self):

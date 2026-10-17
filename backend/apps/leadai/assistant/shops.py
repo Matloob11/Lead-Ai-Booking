@@ -235,15 +235,16 @@ def is_fixed_line(sentence: str) -> bool:
 
 def objection_lines(facts) -> list[str]:
     """The two objection answers whose figures come from SHOP FACTS (the rest are fixed words in
-    SHOPS_SYSTEM): the cheapest "from" price and the cheques, and how many clusters there are."""
+    SHOPS_SYSTEM): our lowest type, its "from" price, its size and the cheques (the honest price line
+    code sends for a price objection: claims.price_text), and how many clusters there are."""
     clean = facts_of(facts)
     cheapest = min(types_of(clean), key=lambda shop: shop.cheapest)
-    pay = f", and you can pay in {clean['cheques']}" if clean["cheques"] else ""
+    pay = f", payable in {clean['cheques']}" if clean["cheques"] else ""
     clusters = clean["clusters"]
     where = f"in {len(clusters)} clusters" if len(clusters) > 1 else f"in the {clusters[0]} cluster"
     return [
-        f'Too expensive: "I understand. What budget are you working with? Type {cheapest.number} starts at '
-        f'AED {cheapest.cheapest:,}{pay}."',
+        f'Too expensive, cheaper, higher than others: "I understand. Our lowest is Type {cheapest.number}, from AED '
+        f'{cheapest.cheapest:,} a year ({cheapest.size_from:,}-{cheapest.size_to:,} sq ft){pay}. Would that size work for you?"',
         f'Comparing other shops: "Smart. Come and see ours too — we have options {where}, so you can compare in one visit."',
     ]
 
@@ -329,7 +330,11 @@ def context(settings_row, known: dict, now, taken=(), history=()) -> Context:
         honesty=honesty_line(brand),
         facts=facts_block(facts),
         match=match_line(known, facts),
-        free=[hours.slot_line(start, now) for start in hours.free_slots(now, closed, taken)],
+        # An hour from now at least and an hour apart (launch review issue 17): any two the model takes may go.
+        free=[
+            hours.slot_line(start, now)
+            for start in hours.spaced(hours.free_slots(now, closed, taken, count=hours.SLOTS_SHOWN * 4), hours.MIN_GAP, hours.SLOTS_SHOWN)
+        ],
         taken=taken_lines,
         agent=agent_of(settings_row) or "our agent",
         objections=objection_lines(facts),

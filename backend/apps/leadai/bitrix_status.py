@@ -22,6 +22,14 @@ Applying the same change twice changes nothing more. Nothing here ever writes
 to the lead (no field, no stage, no comment): the person's own save sent this,
 and a write back would only come round again. Each chat gets one line in its
 alerts, which the listed users (2311) receive too.
+
+The person's value is also kept as the lead's newest one for each chat
+(``remember``: a LeadAiCrmField row marked set in Bitrix, never posted), so a
+value of ours queued before it never goes over it (tasks._replaced), above all a
+Lost and its move waiting for a retry, and the next value of ours that differs
+from it does go (crm_fields.changed). Launch review issue 19: leads 79382, 79419
+and 79420 were reopened by a person after our Lost, and Bitrix now sets Handed to
+agent when a person does that (board C36).
 """
 
 from __future__ import annotations
@@ -43,6 +51,8 @@ OPTED_OUT = 2481
 OPT_OUT_YES = 2482
 STATUS_NAMES = {HANDED: "Handed to agent", BROKER: "Broker", LOST: "Lost", OPTED_OUT: "Opted out"}
 HANDED_REASON = "Bitrix: handed to agent"
+# How a row kept by ``remember`` reads (its sent_at is set: it is never posted).
+SET_IN_BITRIX = "Set by a person in Bitrix: kept as the lead's newest value, never posted."
 
 
 def chats_of(lead_id: int):
@@ -173,6 +183,33 @@ def _alert(chat, lead_id: int, bot_status, wa_opt_out, changed_by, changed: list
     )
 
 
+def remember(chat, lead_id: int, bot_status, wa_opt_out, changed_by, now) -> list[str]:
+    """The person's Bot Status (and WhatsApp Opt-out Yes) as this chat's newest value for the lead it writes to
+    (crm_fields.lead_of; another lead of the chat is not ours to stand for). Returns the fields kept."""
+    from .assistant import crm_fields
+    from .models import LeadAiCrmField
+
+    conversation = chat.conversation
+    if crm_fields.lead_of(chat, conversation) != lead_id:
+        return []
+    values = []
+    if bot_status in crm_fields.STATUSES:
+        values.append((crm_fields.FIELD_BOT_STATUS, str(bot_status)))
+    if wa_opt_out == OPT_OUT_YES:
+        values.append((crm_fields.FIELD_OPT_OUT, str(wa_opt_out)))
+    last = crm_fields.last_values(conversation, lead_id) if values else {}
+    kept = []
+    for field, value in values:
+        if last.get(field) == value:
+            continue  # what this chat knows the lead holds already
+        LeadAiCrmField.objects.create(
+            conversation=conversation, lead_id=lead_id, field=field, value=value,
+            payload={"set_in_bitrix": True, "changed_by": changed_by}, sent_at=now, error=SET_IN_BITRIX,
+        )
+        kept.append(field)
+    return kept
+
+
 def apply(lead_id: int, bot_status=None, wa_opt_out=None, changed_by=None, at: str = "") -> int:
     """Apply a person's Bitrix change to every active Lead AI chat of the lead. Returns how
     many chats there are (0 when none, or when the change asks nothing of the assistant)."""
@@ -191,6 +228,7 @@ def apply(lead_id: int, bot_status=None, wa_opt_out=None, changed_by=None, at: s
             optout.record(phone, reason=f"Set in Bitrix on lead {lead_id}", source=optout.Source.BITRIX, conversation=conversation)
     for chat in chats:
         changed = _apply_one(chat, wanted, now)
+        remember(chat, lead_id, bot_status, wa_opt_out, changed_by, now)
         if changed:
             _alert(chat, lead_id, bot_status, wa_opt_out, changed_by, changed, at)
             transaction.on_commit(lambda pk=chat.conversation_id: live.appointment_changed(pk))

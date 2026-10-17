@@ -23,7 +23,7 @@ from apps.gateway.client import AlotsError
 from apps.gateway.models import CreditState
 from apps.inbox.models import Contact, Conversation, Message
 from apps.leadai import followups, shop_media, tasks
-from apps.leadai.assistant import engine, rules, transcript
+from apps.leadai.assistant import caps, engine, rules, transcript
 from apps.leadai.models import LeadAiAlert, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiCrmStep, LeadAiTurn
 from apps.leadai.tests.test_assistant import NOW, TUESDAY_5PM, _outbound, fake_send_template, fake_send_text
 from apps.leadai.tests.test_follow_ups import CHECK_DAY, THURSDAY, FollowUpBase, NudgeBase, at, failed_send, template_b
@@ -85,7 +85,8 @@ class CapCountsRepliesTests(ShopsBase):
         self.assertFalse(LeadAiAlert.objects.filter(kind="cap").exists())
 
     def test_the_cap_still_counts_every_reply(self):
-        for minutes in range(engine.CAP_PER_HOUR):
+        # A shops chat's own cap (caps.SHOPS_PER_HOUR, the launch review's default; a general chat keeps CAP_PER_HOUR).
+        for minutes in range(caps.limits("ic_shops")[0]):
             self.ours("Sure.", minutes_ago=50 - minutes, turn=9000 + minutes)
         outcome, calls, _, _ = self.turn(self.inbound("and?"), [shop_answer("ok")])
         self.assertEqual((outcome.reason, calls), ("reply limit reached", []))

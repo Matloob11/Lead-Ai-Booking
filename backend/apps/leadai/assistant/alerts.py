@@ -51,8 +51,22 @@ LISTED_KINDS = frozenset(
         # A shops customer's licence copy that could not reach the lead (tasks.write_licence_file),
         # and a Bot Status a person set in Bitrix (bitrix_status.py).
         "licence", "bitrix_status",
+        # A shops customer who wants no shop to rent: what they want, for a person to prepare (engine._wanted_alert).
+        "wanted",
+        # A shops customer's question the assistant left to a colleague, unanswered two hours on (no nudge went:
+        # followups.OPEN_QUESTION), and a shops chat's tentative visit of theirs that lapsed (tasks._close_past_appointments).
+        "open_question", "tentative_lapsed",
+        # While a person has the chat: the customer chased us, or gave their call's time (engine._quiet_alert);
+        # and a shops handover nobody answered in 30 minutes of office time (people.escalate_waiting).
+        "chase", "call_time", "handover_waiting",
+        # A shops customer said no: Bot Status Lost, the lead moved only if nobody works it (engine.record_opt_out, lost.py).
+        "lost",
+        # A shops customer's must-answer questions, while the assistant goes on with the chat (engine._questions_alert).
+        "questions",
     }
 )
+# The alerts that go to the panel admins, not to a chat's people (a chat's responsible never needs them).
+ADMIN_KINDS = frozenset({"ai_quota", "ai_down", "global_cap"})
 
 CRM_PATHS = {
     "lead": "/crm/lead/details/{id}/",
@@ -132,15 +146,18 @@ def raise_alert(
     dedupe_key: str = "",
     crm_url: str = "",
     admins: bool = False,
+    listed: bool | None = None,
 ) -> list:
     """Record one alert per recipient and deliver each after the commit.
 
     Returns the new rows; a recipient already alerted for this event is skipped.
+    ``listed``: whether the Lead AI alert list hears it too; None reads the kind (LISTED_KINDS), True or False
+    decides for this one (a shops chat's reply cap and opt-out reach the list: caps.alert, engine.record_opt_out).
     """
     from ..tasks import deliver_alert
 
     base = (dedupe_key or f"{kind}:{conversation.pk}:{timezone.now():%Y%m%d%H%M%S%f}")[:180]
-    targets = admin_recipients() if admins else recipients(conversation, listed=kind in LISTED_KINDS)
+    targets = admin_recipients() if admins else recipients(conversation, listed=kind in LISTED_KINDS if listed is None else listed)
     created = []
     for agent, bitrix_id in targets:
         who = f"a{agent.pk}" if agent is not None else f"b{bitrix_id}"
@@ -163,6 +180,41 @@ def raise_alert(
         created.append(alert)
         transaction.on_commit(lambda pk=alert.pk: deliver_alert.delay(pk))
     return created
+
+
+def reach_responsible(conversation, since) -> int:
+    """The chat's alerts raised since ``since``, before its CRM responsible was known, reach that person now
+    (tasks.resolve_responsible, right after the lookup): the same event under the same key, so whoever has it
+    is skipped and only the responsible gets a row. Launch chat 112: a STOP as the first answer was alerted
+    before the lookup ever ran, so the lead's owner never heard of it, sent two templates and called three
+    times. How many rows were added."""
+    rows = (
+        LeadAiAlert.objects.filter(conversation=conversation, created_at__gte=since)
+        .exclude(kind__in=ADMIN_KINDS)
+        .select_related("appointment")
+        .order_by("pk")
+    )
+    seen: set[str] = set()
+    added = 0
+    for row in rows:
+        base = (row.dedupe_key or "").rsplit(":", 1)[0]
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        added += len(
+            raise_alert(
+                kind=row.kind,
+                conversation=conversation,
+                title=row.title,
+                text=row.text,
+                appointment=row.appointment,
+                priority=row.priority,
+                dedupe_key=base,
+                crm_url=row.crm_url,
+                listed=False,
+            )
+        )
+    return added
 
 
 def panel_payload(alert: LeadAiAlert) -> dict:

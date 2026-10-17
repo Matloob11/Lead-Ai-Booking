@@ -17,6 +17,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from ..models import LeadAiTranscript
@@ -26,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 DOWNLOAD_GIVES_UP_AFTER = dt.timedelta(minutes=4)
 MAX_ATTEMPTS = 2
+# What a heard voice note says goes on the lead's timeline too, once (tasks.record_voice_note; launch review 26).
+VOICE_NOTE_ON_TIMELINE = True
 
 
 def transcript_for(message, *, give_up: bool = False, deadline: float | None = None) -> str | None:
@@ -67,6 +71,22 @@ def transcript_for(message, *, give_up: bool = False, deadline: float | None = N
 
 def _record(message, text: str, error: str, *, model: str = "", count: bool = True) -> None:
     row, _ = LeadAiTranscript.objects.get_or_create(message=message)
+    if text and not error:
+        # Heard: saved by the one call that makes it so (two turns hearing it at once store one), which also puts
+        # what it says on the lead's timeline, once (tasks.record_voice_note; the mirror's line for it is "[audio]").
+        heard_now = (
+            LeadAiTranscript.objects.filter(pk=row.pk)
+            .filter(Q(text="") | ~Q(error=""))
+            .update(
+                text=text[:8000], error="", model=model or row.model, attempts=min(row.attempts + (1 if count else 0), 99),
+                updated_at=timezone.now(),
+            )
+        )
+        if heard_now and VOICE_NOTE_ON_TIMELINE:
+            from ..tasks import record_voice_note
+
+            transaction.on_commit(lambda pk=message.pk: record_voice_note.delay(pk))
+        return
     row.text = text[:8000]
     row.error = error[:255]
     if model:

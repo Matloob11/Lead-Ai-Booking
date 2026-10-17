@@ -28,7 +28,7 @@ from django.test import SimpleTestCase, TestCase
 
 from apps.inbox.models import Contact, Conversation
 from apps.leadai import lane
-from apps.leadai.assistant import engine, filters, hours, prompt, rules
+from apps.leadai.assistant import engine, filters, hours, people, prompt, rules
 from apps.leadai.management.commands import leadai_eval
 from apps.leadai.models import LeadAiAppointment
 from apps.leadai.tests.test_assistant import NOW, TUESDAY_5PM, answer
@@ -38,6 +38,8 @@ from apps.leadai.tests.test_first_chat_fixes import ADDRESS, INVITATION, FirstCh
 from apps.leadai.tests.test_shops_playbook import GeneralBase, ShopsBase, at, shop_answer
 
 HOLDING = rules.line("holding", "en")
+# A shops chat's own holding line, "our agent" as every shops line says (launch review issue 21; people.py).
+SHOPS_HOLDING = people.line(people.HOLDING, "en", shops=True)
 ASK_TIME = rules.line("ask_time", "en")
 HANDED_OVER = {"handed_over_at": NOW - dt.timedelta(hours=1), "handover_reason": "customer_asked_human"}
 ASKED_BUSINESS_ONLY = [("campaign", "Hi Sumon, A7 Real Estate here."), ("assistant", "Got it. What business will the shop be for?")]
@@ -79,7 +81,7 @@ class HandedOverTakenTurnTests(ShopsBase):
         message = self.inbound("Tomorrow at 5 pm is better for me")
         outcome, calls, _, _ = self.turn(message, [shop_answer("", send=False, action="tentative", date="2026-10-13", time="17:00")])
         self.assertEqual(len(calls), 1)
-        self.assertEqual(self.body(outcome), HOLDING)
+        self.assertEqual(self.body(outcome), SHOPS_HOLDING)
         self.assertNotIn("fallback", self.actions(message))
         self.assertEqual(self.state().holding_line_at, NOW)
         mine = LeadAiAppointment.objects.get(conversation=self.conversation)
@@ -90,7 +92,7 @@ class HandedOverTakenTurnTests(ShopsBase):
         confirm = shop_answer("", action="confirm", place="office", date="2026-10-13", time="17:00")
         outcome, calls, _, _ = self.turn(message, [confirm, shop_answer("Sorry, 5 PM is taken. Would 11 AM or 6 PM work?")])
         self.assertEqual(len(calls), 2)
-        self.assertEqual(self.body(outcome), HOLDING)
+        self.assertEqual(self.body(outcome), SHOPS_HOLDING)
 
     def test_refused_twice_it_keeps_the_line_it_had_before(self):
         # Before batch 2a, a chat a person has got "Which day and exact time suit you?" here too.
@@ -115,10 +117,10 @@ class HandedOverTakenEvalTests(TestCase):
     def test_the_eval_mirrors_it(self):
         handed = replace(scenario("shops-taken"), handed_over="yes (customer_asked_human)")
         run, calls = run_scenario(handed, eval_answer("", send=False, action="tentative", date="2026-10-13", time="17:00"))
-        self.assertEqual((calls, run.out_by, run.out), (1, leadai_eval.CODE, HOLDING))
+        self.assertEqual((calls, run.out_by, run.out), (1, leadai_eval.CODE, SHOPS_HOLDING))
         confirm = eval_answer("", action="confirm", place="office", date="2026-10-13", time="17:00")
         run, calls = run_scenario(handed, confirm, eval_answer("Sorry, that one is taken. Would 11:00 AM or 6:00 PM work?"))
-        self.assertEqual((calls, run.out), (2, HOLDING))
+        self.assertEqual((calls, run.out), (2, SHOPS_HOLDING))
         run, calls = run_scenario(handed, confirm, confirm)
         self.assertEqual((calls, run.still_invalid, run.out), (2, True, ASK_TIME))
 

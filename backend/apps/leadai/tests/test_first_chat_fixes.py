@@ -279,7 +279,7 @@ class LocationOnceTests(FirstChatBase):
 
     def test_the_address_goes_out_the_first_time_and_the_turn_says_so(self):
         message, outcome, calls = self.ask_location()
-        self.assertEqual(self.body(outcome), f"Our office is in International City.\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"Our office is in International City.\nOur office location: {ADDRESS}")
         self.assertIn("LOCATION ALREADY SENT: no", calls[0][1]["content"])
         actions = self.actions(message)
         self.assertEqual(
@@ -310,7 +310,7 @@ class LocationOnceTests(FirstChatBase):
     def test_the_maps_link_goes_out_once(self):
         LeadAiSettings.objects.filter(pk=1).update(office_maps_url=MAPS)
         _, outcome, _ = self.ask_location()
-        self.assertEqual(self.body(outcome), f"Our office is in International City.\n{MAPS}")
+        self.assertEqual(self.body(outcome), f"Our office is in International City.\nOur office location: {MAPS}")
         later = self.inbound("Ok, which day is best?", seconds_ago=10)
         self.clock.return_value = NOW + dt.timedelta(minutes=1)
         outcome, calls, _, _ = self.turn(later, [answer("Would 11 AM or 5 PM tomorrow work for you?", share_location=True)])
@@ -323,14 +323,14 @@ class LocationOnceTests(FirstChatBase):
         self.ours(filters.confirmation("en", "Ahmed Khan", TUESDAY_5PM, ADDRESS, MAPS, True), minutes_ago=180)
         message = self.inbound("Please send me the location again")
         outcome, calls, _, _ = self.turn(message, [answer("Sure, here it is.", share_location=True)])
-        self.assertEqual(self.body(outcome), f"Sure, here it is.\n{MAPS}")
+        self.assertEqual(self.body(outcome), f"Sure, here it is.\nOur office location: {MAPS}")
         self.assertIn("LOCATION ALREADY SENT: no", calls[0][1]["content"])
 
     def test_a_day_later_it_may_go_again(self):
         self.ours(f"Our office is here:\n{ADDRESS}", minutes_ago=25 * 60)
         self.assertFalse(engine.location_sent(self.conversation, ADDRESS, "", since=NOW - engine.LOCATION_FRESH))
         _, outcome, calls = self.ask_location()
-        self.assertEqual(self.body(outcome), f"Our office is in International City.\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"Our office is in International City.\nOur office location: {ADDRESS}")
         self.assertIn("LOCATION ALREADY SENT: no", calls[0][1]["content"])
 
     def test_the_address_typed_again_by_the_model_is_cut(self):
@@ -356,20 +356,23 @@ class LocationOnceTests(FirstChatBase):
     def test_what_counts_as_carrying_the_address(self):
         carries = filters.carries_location
         self.assertTrue(carries(f"Our office: {ADDRESS}", ADDRESS))
-        self.assertTrue(carries("russia cluster building v02/v03 shop 20 dubai international city", ADDRESS))
-        self.assertTrue(carries("We are at Russia Cluster, Building V02-V03, Shop 20, International City.", ADDRESS))
+        self.assertTrue(carries("russia cluster building v03 shop 20 dubai international city", ADDRESS))
+        self.assertTrue(carries("We are at Russia Cluster (Building V03), Shop #20, International City.", ADDRESS))
+        # The address before 2026-10-15 ("V02/V03") still reads as our office in an old message of ours.
+        self.assertTrue(carries("Russia Cluster, Building V02/V03, Shop 20, Dubai International City", ADDRESS))
+        self.assertEqual(ADDRESS, "Russia Cluster, Building V03, Shop 20, Dubai International City")
         self.assertFalse(carries("Our office is in Russia Cluster, International City.", ADDRESS))
-        self.assertFalse(carries("A shop 200 sq ft in Russia Cluster, Building V02/V03.", ADDRESS))
+        self.assertFalse(carries("A shop 200 sq ft in Russia Cluster, Building V03.", ADDRESS))
         self.assertTrue(carries(f"Here: {MAPS}", ADDRESS, MAPS))
         self.assertFalse(carries("Here.", ADDRESS, MAPS))
         self.assertTrue(carries("Shop 20, International City", "Shop 20, International City"))
         self.assertFalse(carries("Shop 20", "Shop 20, International City"))
         self.assertFalse(carries("anything", ""))
         # The model's own shortenings and orders: the words that tell this address apart are all there.
-        self.assertTrue(carries("Russia Cluster, Bldg V02/V03, Shop 20, Dubai International City", ADDRESS))
-        self.assertTrue(carries("Our office: Russia Cluster, V02/V03, Shop 20, International City, Dubai", ADDRESS))
-        self.assertTrue(carries("Shop No. 20, Building V02/V03, Russia Cluster.", ADDRESS))
-        self.assertFalse(carries("Russia Cluster, V02/V03, International City", ADDRESS))  # no shop number
+        self.assertTrue(carries("Russia Cluster, Bldg V03, Shop 20, Dubai International City", ADDRESS))
+        self.assertTrue(carries("Our office: Russia Cluster, V03, Shop 20, International City, Dubai", ADDRESS))
+        self.assertTrue(carries("Shop No. 20, Building V03, Russia Cluster.", ADDRESS))
+        self.assertFalse(carries("Russia Cluster, V03, International City", ADDRESS))  # no shop number
         # An address only numbers tell apart is matched part by part, never by a time offer.
         self.assertFalse(carries("Would 3 PM or 5 PM work for you?", "Shop 5, Building 3, Dubai"))
         self.assertTrue(carries("We are at Shop 5, Building 3.", "Shop 5, Building 3, Dubai"))
@@ -415,7 +418,7 @@ class GlossTests(FirstChatBase):
 
     def test_the_line_code_adds_is_in_the_gloss_too(self):
         payload = self.reply_payload(answer("مكتبنا في المدينة العالمية.", language="ar", reply_en="Our office is in International City.", share_location=True))
-        self.assertEqual(payload["reply_en"], f"Our office is in International City.\n{ADDRESS}")
+        self.assertEqual(payload["reply_en"], f"Our office is in International City.\nOur office location: {ADDRESS}")
 
     def test_the_schema_and_the_prompt_ask_for_a_translation_after_the_reply(self):
         self.assertIn("sentence-by-sentence English translation of reply", schema.SCHEMA["properties"]["reply_en"]["description"])
@@ -546,7 +549,7 @@ class DeferralTurnTests(FirstChatBase):
         message = self.inbound("I will let you know", seconds_ago=35)
         outcome, calls, _, _ = self.turn(message, [answer("It is in International City.", share_location=True)])
         self.assertEqual(len(calls), 1)
-        self.assertEqual(self.body(outcome), f"It is in International City.\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"It is in International City.\nOur office location: {ADDRESS}")
         self.assertFalse(LeadAiAppointment.objects.exists())
 
     def test_the_35283_replay_with_no_invitation_counted(self):
@@ -1006,7 +1009,7 @@ class EvalMirrorTests(TestCase):
 
     def test_the_address_is_added_once_as_live(self):
         run, _ = self.run_with("location-request", eval_answer("Our office is in International City.", share_location=True))
-        self.assertEqual(run.out, f"Our office is in International City.\n{ADDRESS}")
+        self.assertEqual(run.out, f"Our office is in International City.\nOur office location: {ADDRESS}")
         self.assertEqual(run.failures, [])
         self.assertIn("LOCATION ALREADY SENT: no", leadai_eval.build(scenario("location-request")).context)
         run, _ = self.run_with("location-again", eval_answer("It is in the message above.", share_location=True))
@@ -1031,7 +1034,7 @@ class EvalMirrorTests(TestCase):
         self.assertFalse(leadai_eval.build(again).location_sent)
         with patch("apps.leadai.assistant.openai_client.complete_json", return_value=eval_answer("Sure.", share_location=True)):
             run = leadai_eval.run_once(again, "x")
-        self.assertEqual(run.out, f"Sure.\n{ADDRESS}")
+        self.assertEqual(run.out, f"Sure.\nOur office location: {ADDRESS}")
 
     def test_an_english_reply_with_a_gloss_is_noted_not_counted(self):
         # The engine drops reply_en for English replies, so it does not hold the 95% gate.

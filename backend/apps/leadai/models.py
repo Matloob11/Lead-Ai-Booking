@@ -19,8 +19,10 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
-# The visit address the assistant sends (owner's choice, 2026-10-09).
-DEFAULT_OFFICE_ADDRESS = "Russia Cluster, Building V02/V03, Shop 20, Dubai International City"
+# The visit address the assistant sends: our own office, Building V03 only (Matloob, 2026-10-15; it
+# read "V02/V03" before, and the live settings row was changed to this the same day). "Shop 20" is the
+# office's own unit number, never a shop for rent (prompt.SHOPS_SYSTEM says so).
+DEFAULT_OFFICE_ADDRESS = "Russia Cluster, Building V03, Shop 20, Dubai International City"
 # The brand the shops campaigns run under (owner's choice 2026-10-13).
 DEFAULT_BRAND_NAME = "AR Properties"
 

@@ -286,6 +286,237 @@ RIGHT = {
     "shops-nudge-morning-pick": booked("2026-10-13", "13:00"),
     "shops-old-lead": answer("Thanks! What business will the shop be for?", facts={"for_client": False}),
     "shops-crm-notes-data": answer("A grocery store, got it. What size do you need?", facts={"business_activity": "grocery store"}),
+    # The launch (2026-10-15): the model's answers as the live turns recorded them (chat_<id>.json: the turn's
+    # actions and the facts it left). Code then decides who the customer is (engine.who_they_are).
+    "shops-want-studio-44": answer(
+        "Great! What business will the shop be for?",
+        facts={
+            "for_client": False, "property_type": "shop", "business_activity": "apartment studio", "intent": "rent", "abroad": False,
+            "customer_name": "Trezah", "notes": ["fit-out requirements", "parking availability"],
+        },
+    ),
+    "shops-want-1bhk-49": answer(
+        "Great! What business will the shop be for?",
+        facts={
+            "for_client": False, "property_type": "shop", "business_activity": "room", "intent": "rent", "bedrooms": "1bhk",
+            "community": "England", "customer_name": "محمد", "notes": ["size needed", "budget", "licence kind"],
+        },
+    ),
+    "shops-no-shop-room-50": answer(
+        "Noted, a room. What business will the shop be for?",
+        facts={"for_client": False, "property_type": "room", "intent": "rent", "customer_name": "Ejas", "notes": ["Is a room available for rent?"]},
+    ),
+    "shops-studio-monthly-57": answer(
+        "Great! What business will the shop be for?",
+        facts={
+            "for_client": False, "property_type": "studio", "business_activity": "studio", "intent": "rent", "budget_basis": "per_month",
+            "customer_name": "sukirtha", "notes": ["monthly rent details"],
+        },
+    ),
+    "shops-we-got-one-63": answer(
+        "Congratulations on your new shop! Is it in International City?",
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "already_rented": True, "customer_name": "Jerin"},
+    ),
+    "shops-not-now-studio-68": answer(
+        "I see, a studio. Our shops are for retail or commercial use. Is the studio for a business activity?",
+        facts={
+            "for_client": False, "property_type": "studio", "business_activity": "studio", "intent": "rent", "customer_name": "swathy",
+            "notes": ["Is a studio allowed in International City shops?"],
+        },
+    ),
+    "shops-never-asked-98": answer(
+        "I see, thanks for clarifying. Is the shop for yourself, or are you checking for a client?",
+        facts={"property_type": "shop", "intent": "rent", "customer_name": "Raja", "notes": ["Is the shop for yourself, or are you checking for a client?"]},
+    ),
+    "shops-studio-balcony-107": answer(
+        "Great! What business will the shop be for?",
+        facts={
+            "for_client": False, "property_type": "studio apartment", "intent": "rent", "customer_name": "Mohit",
+            "notes": ["Is a studio apartment with balcony suitable for your business?"],
+        },
+    ),
+    "shops-did-not-ask-114": answer(
+        "Sorry for the confusion. Is the shop for yourself, or are you checking for a client?",
+        facts={"intent": "rent", "notes": ["Is the shop for yourself, or are you checking for a client?"]},
+    ),
+    "shops-asked-for-studio-132": answer(
+        "Great! What business will the shop be for?",
+        facts={"for_client": False, "property_type": "studio", "intent": "rent", "customer_name": "Mojish", "notes": ["studio availability"]},
+    ),
+    "shops-buyer-42": answer(
+        "You mentioned buying a shop. Is the shop for yourself, or are you checking for a client?",
+        facts={"intent": "buy", "property_type": "shop", "customer_name": "MANAGER", "notes": ["Is the shop for yourself, or are you checking for a client?"]},
+    ),
+    # Turn 75 live: the buyer closed as not interested (Bitrix Lost, stage "1").
+    "shops-buyer-not-lost-42": answer(
+        "No problem, thank you for letting us know.",
+        opt_out="not_interested",
+        facts={"intent": "buy", "for_client": False, "property_type": "shop", "customer_name": "MANAGER"},
+    ),
+    "shops-residential-room-105": answer(
+        "Our shops are for commercial use in International City. Are you looking for a shop for a business, or a residential room elsewhere?",
+        handover="unclear",
+        facts={"for_client": False, "property_type": "residential room", "intent": "rent", "customer_name": "Road", "notes": ["Is residential room available?"]},
+    ),
+    "shops-studio-capitals-136": answer(
+        "We specialize in shops in International City. For studio apartments, I will connect you to our agent who can assist you further here.",
+        handover="unclear",
+        segment="other",
+        facts={"for_client": False, "property_type": "studio apartment", "intent": "rent", "customer_name": "Appu"},
+    ),
+    "shops-studio-not-interested": answer("No problem, thank you for letting us know.", opt_out="not_interested", facts={"property_type": "studio"}),
+    "shops-want-flat-arabic": answer(
+        "عذراً على اللبس. هل تبحث عن شقة للإيجار في المدينة العالمية؟",
+        language="ar",
+        reply_en="Sorry for the confusion. Are you looking for a flat for rent in International City?",
+        handover="wrong_need",
+        facts={"property_type": "flat", "intent": "rent"},
+    ),
+    "shops-want-flat-roman-urdu": answer(
+        "Samajh gaya, aap ko flat chahiye. Kya aap kisi khaas area mein dhoond rahe hain?",
+        language="ur_latin",
+        reply_en="Understood, you need a flat. Are you looking in a particular area?",
+        facts={"property_type": "flat", "intent": "rent"},
+    ),
+    "shops-options-nudge-yes": answer("Great! I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"),
+    "shops-not-a-shop-booked": booked("2026-10-12", "16:30"),
+    # Batch 2d, the follow-ups: chat 63's words to the second-shop question are code's (RENTED_NO); a referral is the model's.
+    "shops-rented-soft-no-63": answer("", send=False),
+    "shops-rented-reach-out-63": answer("", send=False),
+    "shops-rented-friend-63": answer(
+        "That's great! Your friend is welcome to message us here, and we'll help them find the right shop.",
+        facts={"already_rented": True, "for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "Jerin"},
+    ),
+    # Chat 100's "Ok" to the nudge: the two free slots (live, turn 132 asked for the business, licence and size instead).
+    "shops-nudge-ok-100": answer(
+        "Great, Saif! I can hold a slot for you today at 2:30 PM or 4:30 PM to see the Type 2 shops — which is better?",
+        facts={"for_client": False, "property_type": "shop", "intent": "rent", "community": "Morocco", "shop_type": "type_2"},
+    ),
+    # Chat 78's own words to the nudge (turn 126 live sent the list), here after the nudge that asked for whom again (chat 103).
+    "shops-for-whom-again-103": answer(
+        "Great! What business will the shop be for?", facts={"for_client": False, "property_type": "shop", "intent": "rent", "customer_name": "huzefa"}
+    ),
+    # Where a person must act (people.py): code writes what goes out; the model's own words are judged nowhere.
+    "shops-call-time-88": answer(
+        "Sure, I'll pass your call request to our agent.", action="tentative", place="call", date="2026-10-15", time="11:30",
+        words="We can have a call at 11.30 - 12 PM", handover="call_requested",
+    ),
+    "shops-call-chase-88": answer("", send=False),
+    "shops-goodbye-57": answer("", send=False),
+    "shops-must-answer-95": answer(
+        "Thank you for the detailed questions. Our agent will answer them here before the visit.",
+        handover="legal_visa_licence_contract", facts={"for_client": False, "business_activity": "small dessert takeaway and production kitchen"},
+    ),
+    "shops-gas-chimney-91": answer(
+        "Our agent will confirm the gas line and the chimney for you here before the visit.", handover="legal_visa_licence_contract"
+    ),
+    "shops-computation-78": answer(
+        "Our agent will send you the full cost breakdown here.", handover="legal_visa_licence_contract",
+        facts={"budget_aed": 33000, "budget_basis": "per_year", "for_client": False},
+    ),
+    # Batch 2d, facts, slots and booking: the model's live answers, which code now puts right (claims.py, offers.py,
+    # engine.book_window, discovery_first, tap_with_words); each fails without its guard (test_facts_slots_booking).
+    "shops-same-day-window-96": answer(
+        leadai_eval.CLAIM_96, action="tentative", place="office", words="barah saadhay barah baje ja ke check kar loon ga", language="ur_latin",
+        reply_en="The location of the shop in England cluster is our office address. Which time is better for you?", invited=True,
+        share_location=True, facts=leadai_eval.FACTS_96,
+    ),
+    "shops-building-and-past-slot-96": answer(
+        leadai_eval.SIDE_96, action="tentative", place="office", words="barah saadhay barah baje ja ke check kar loon ga", language="ur_latin",
+        reply_en="Yes, the shop is in Russia Cluster near Building V03, on the parking side, not the front side. Do you want to confirm 12:30 PM?",
+        facts={**leadai_eval.FACTS_96, "notes": ["which building for 550 sq ft shop in England cluster"]},
+    ),
+    "shops-food-claim-91": answer(leadai_eval.FOOD_91, share_location=True, facts=leadai_eval.FACTS_91),
+    "shops-commission-78": answer(
+        leadai_eval.NO_COMMISSION_78, facts={"for_client": False, "budget_aed": 33000, "budget_basis": "per_year", "business_activity": "interior landscape"}
+    ),
+    "shops-rent-higher-59": answer(
+        leadai_eval.DISCOUNT_59, action="tentative", place="office", words="Your rent is higher than others", invited=True,
+        facts={"for_client": False, "customer_name": "ETS"},
+    ),
+    "shops-cheaper-100": answer(leadai_eval.DISCOUNT_100, invited=True, facts=leadai_eval.FACTS_100),
+    "shops-tap-and-question-81": answer(
+        "Our rents are per year: Type 1 starts from AED 33,000 a year, payable in 1 to 4 cheques. What size do you need?",
+        facts={"property_type": "shop", "intent": "rent", "customer_name": "Imtiyaz", "notes": ["monthly rent calculation"]},
+    ),
+    "shops-tap-type-with-words-88": answer(
+        leadai_eval.MATCH_88, invited=True, share_location=True,
+        facts={"for_client": False, "community": "France", "size_sqft": 400, "shop_type": "type_1", "customer_name": "Abd"},
+    ),
+    "shops-invitation-cut-88": answer(
+        leadai_eval.MATCH_88, invited=True, share_location=True,
+        facts={"for_client": False, "community": "France", "size_sqft": 400, "customer_name": "Abd"},
+    ),
+    "shops-table-repeat-91": answer(leadai_eval.TABLE_91, facts=leadai_eval.FACTS_91),
+    "shops-figures-asked-42": answer(leadai_eval.BUYER_42[6][1], facts={"for_client": False, "property_type": "shop", "intent": "rent"}),
+    "shops-discovery-second-invite-62": answer(leadai_eval.AGAIN_62, invited=True, facts={**leadai_eval.FACTS_62, "licence_kind": "new"}),
+    "shops-new-one-62": answer(
+        leadai_eval.NEW_ONE_62, action="tentative", place="office", date="2026-10-15", time="11:00", words="One", invited=True,
+        share_location=True, facts={**leadai_eval.FACTS_62, "licence_kind": "new", "trade_licence": "no"},
+    ),
+    "shops-location-counted-81": answer(
+        leadai_eval.LOCATION_81, share_location=True, facts={"for_client": False, "customer_name": "Imtiyaz"}
+    ),
+    # Batch 2d, the CRM writes: the model's live answers, whose facts code now keeps to the customer's own (crm_facts.py);
+    # each fails without it (test_crm_writes). Chat 120's "No thankyou" is code's now (rules.py): never asked.
+    "shops-notes-theirs-88": answer(
+        "No problem, many tenants open a new licence. Our agent will guide you through the process. I can hold a slot for you "
+        "today at 11:30 AM or 12:00 PM — which is better?",
+        invited=True,
+        facts={
+            **leadai_eval.FACTS_88,
+            "notes": ["what business the shop is for", "size needed", "budget", "licence kind", "fit-out details", "service charge", "DEWA", "parking"],
+        },
+    ),
+    "shops-budget-ours-62": answer(
+        "Photos help, but seeing 2-3 shops side by side is much easier. I can hold a slot for you today at 11:00 AM or 11:30 AM at "
+        "our office. Which is better?",
+        action="tentative", place="office", date="2026-10-15", time="11:00", words="If possible to send me photo first", invited=True,
+        facts={
+            **leadai_eval.FACTS_62, "licence_kind": "new", "trade_licence": "no", "budget_aed": 48000,
+            "notes": ["service charge", "DEWA", "parking", "fit-out"],
+        },
+    ),
+    "shops-no-thankyou-120": answer("", send=False),
+    # Batch 2d's review: shop customers' words that look like a want, a count, a call or a contract.
+    "shops-review-shop-with-room": answer("A salon, got it. Is the shop for yourself, or are you checking for a client?", facts={"business_activity": "salon"}),
+    "shops-review-flat-nahi": answer("Zaroor. Kya yeh shop aap ke apne liye hai, ya kisi client ke liye?", language="ur_latin"),
+    "shops-review-staff-accommodation": answer("Sure. Is the shop for yourself, or are you checking for a client?"),
+    "shops-review-count-no-window": answer(
+        "Great, all of you are welcome. I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?", invited=True,
+    ),
+    "shops-review-sign-contract-today": answer("Great! I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?", invited=True),
+    "review-why-did-you-call": answer(
+        "This is A7 Real Estate: we sent you a message about properties in Dubai. Are you looking to rent, buy or sell?", segment="other",
+    ),
+    "shops-review-call-back-later": answer("No problem, drive safe. Message us here whenever you are free."),
+    "shops-review-studio-call-me": answer("Sure, our agent will call you shortly.", segment="residential_tenant", facts={"property_type": "studio"}),
+    "shops-review-rented-one-more": answer("Great, one more shop. What business will it be for?", facts={"for_client": False}),
+    "shops-review-buyer-no-rent-42": answer(
+        "Thanks for clarifying. Currently, we only have shops available for rent, not for sale. Are you interested in renting a shop "
+        "instead, or do you know someone who is?",
+        facts={"intent": "buy"},
+    ),
+    "shops-review-studio-not-shops-68": answer(
+        "I see, a studio. Our shops are for retail or commercial use, not residential studios. Is the studio for a business activity?",
+        segment="residential_tenant",
+    ),
+    "shops-nine-questions-noted-95": answer(
+        "Thank you for the detailed questions. Our agent will answer them here before the visit.",
+        handover="legal_visa_licence_contract",
+        facts={"for_client": False, "business_activity": "small dessert takeaway and production kitchen", "notes": list(leadai_eval.NOTES_95)},
+    ),
+    # The launch gate's review: what the gate's own fixes misread (test_gate_review_2d holds each without its fix).
+    "shops-gate-slot-two": booked("2026-10-13", "13:00"),
+    "shops-gate-after-work": booked("2026-10-13", "19:00"),
+    "shops-gate-rented-another": answer(
+        "Congratulations on your new shop! Do you need a second shop, or do you know someone who does?", facts={"already_rented": True}
+    ),
+    "shops-gate-location-question": answer(
+        "International City is right next to Dragon Mart, which brings many visitors. What size of shop do you need?",
+        facts={"for_client": False, "business_activity": "restaurant"},
+    ),
+    "shops-gate-half-hour": booked("2026-10-12", "16:30"),
 }
 
 
@@ -331,7 +562,8 @@ class EvalCommandTests(TestCase):
                     self.assertEqual(list(row), ["from", "at", "text"])
                     self.assertIn(row["from"], {"customer", "assistant", "agent", "campaign", "reminder"})
                 new = [json.loads(row) for row in context.split("NEW SINCE YOUR LAST REPLY (answer these):\n", 1)[1].splitlines()]
-                self.assertEqual([row["text"] for row in new], s.new)
+                # As live (transcript.line), a line holds LINE_MAX characters: chat 95's nine questions are longer.
+                self.assertEqual([row["text"] for row in new], [text[: transcript.LINE_MAX] for text in s.new])
                 self.assertEqual(rows[-len(new):], new)  # as live, the conversation already holds them
         self.assertIn("Tue 2026-10-13 (tomorrow): CLOSED", built["shop-closed-day"].context)
         late = built["booked-running-late"].context
@@ -412,8 +644,11 @@ class EvalCommandTests(TestCase):
             [
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
                 "shops-a-yes-known", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
-                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page", "shops-not-now", "shops-not-now-no", "shops-not-now-yes",
-                "shops-other-types-tap", "shops-rented-no", "shops-spam", "shops-stop", "shops-type-tap",
+                # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
+                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page", "shops-no-thankyou-120", "shops-not-now",
+                "shops-not-now-no", "shops-not-now-yes",
+                "shops-other-types-tap", "shops-rented-no", "shops-rented-reach-out-63", "shops-rented-soft-no-63", "shops-spam", "shops-stop",
+                "shops-type-tap",
                 "shops-type-tap-again", "shops-yes-tap", "stop-all", "stop-arabic-after-english", "wrong-number",
             ],
         )
@@ -428,7 +663,10 @@ class EvalCommandTests(TestCase):
         ]
         self.assertEqual(
             sorted(corrected),
-            ["lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english", "shops-arabic"],
+            [
+                "lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english",
+                "shops-arabic", "shops-want-flat-arabic",
+            ],
         )
         self.assertEqual(model.call_count, total - len(settled) + len(corrected))
         system, context = model.call_args_list[0].args[0][:2]

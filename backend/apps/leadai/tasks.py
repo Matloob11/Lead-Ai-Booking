@@ -17,8 +17,11 @@ meeting reminder.
 - crm_readback           six minutes after a stage move, checks it stuck;
 - deliver_alert          one alert to the agent's panel and to Bitrix;
 - record_crm_note        an opt-out or "not interested" as a timeline comment;
+- record_voice_note      what a customer's voice note says, on the lead's timeline;
 - resolve_responsible    the CRM record's responsible person, cached per chat;
-- write_crm_fields       a shops chat's lead fields, through the Lead fields tool;
+- write_crm_fields       a shops chat's lead fields, through the Lead fields tool
+                         (a shops "no" moves its lead only when nobody works it:
+                         assistant/lost.py);
 - write_licence_file     a shops customer's trade licence copy, to the lead;
 - send_shop_media        a shop type's video, photos and detail card (shop_media.py).
 """
@@ -48,6 +51,13 @@ UNANSWERED_UNTIL = dt.timedelta(minutes=60)
 # Reminder taps count up to this long after the start (reminders.TAP_VALID_AFTER).
 PAST_AFTER = dt.timedelta(hours=3)
 TENTATIVE_LAPSES = dt.timedelta(days=7)
+# A shops chat's tentative visit with no time lapses this long after it was last said, one with a time
+# this long after that time (launch review 2026-10-15, issue 11: an open tentative stops every nudge, and
+# lapsed only after TENTATIVE_LAPSES, so chats 100, 96, 59 and 62 heard nothing more). Owner's defaults.
+TIMELESS_TENTATIVE_LAPSES = dt.timedelta(hours=24)
+PAST_TENTATIVE_LAPSES = dt.timedelta(hours=1)
+# The sweep looks at this many of them a minute (the next minute takes the rest).
+LAPSE_PAGE = 200
 AGENT_HEADS_UP = dt.timedelta(minutes=60)
 # The sweep stops claiming reminders after this many seconds, inside its own
 # 240 s soft limit; the next sweep, a minute later, sends the rest.
@@ -66,16 +76,17 @@ LEAD_UPDATE = "lead_update"
 # soft limit; worker-leadai's stop_grace_period (docker-compose.yml) is above
 # the hard limit, so a deploy lets a turn in flight finish.
 @shared_task(ignore_result=True, soft_time_limit=180, time_limit=210)
-def assistant_turn(message_id: int, attempt: int = 0, first_queued_at: str = "") -> None:
+def assistant_turn(message_id: int, attempt: int = 0, first_queued_at: str = "", requeued: bool = False) -> None:
+    """``requeued``: a message the reply cap held back, queued again once the cap freed (_answer_capped)."""
     from .assistant import engine
 
     first = first_queued_at or timezone.now().isoformat()
     try:
-        engine.run_turn(message_id, attempt=attempt, first_queued_at=first)
+        engine.run_turn(message_id, attempt=attempt, first_queued_at=first, requeued=requeued)
     except engine.NotReady as wait:
         next_attempt = attempt + 1 if wait.reason == "voice note downloading" else attempt
         assistant_turn.apply_async(
-            args=[message_id], kwargs={"attempt": next_attempt, "first_queued_at": first}, countdown=wait.countdown
+            args=[message_id], kwargs={"attempt": next_attempt, "first_queued_at": first, "requeued": requeued}, countdown=wait.countdown
         )
     except SoftTimeLimitExceeded:
         logger.warning("Lead AI turn on message %s ran out of time", message_id)
@@ -106,7 +117,9 @@ def send_due_reminders() -> None:
     for job in (
         _resolve_stuck_turns,
         _queue_missed_turns,
+        _answer_capped,
         _flag_unanswered,
+        _escalate_handovers,
         _close_past_appointments,
         _agent_heads_up,
         _retry_crm_syncs,
@@ -313,6 +326,27 @@ def _queue_missed_turns() -> None:
         assistant_turn.apply_async(args=[message.pk])
 
 
+def _answer_capped() -> None:
+    """A shops chat's message the reply cap held back, answered once the cap frees (assistant/caps.py; launch
+    review issue 2: chats 78 and 91 went silent mid-booking for good): the chat's newest capped message is
+    queued again, and its turn takes the same row up (caps.reclaim)."""
+    from .assistant import caps
+
+    queued = caps.to_answer(timezone.now())
+    for message_id in queued:
+        assistant_turn.apply_async(args=[message_id], kwargs={"requeued": True})
+    if queued:
+        logger.info("Lead AI queued %s capped message(s) again", len(queued))
+
+
+def _escalate_handovers() -> None:
+    """A shops handover nobody from the team answered in 30 minutes of office time: one more alert for it
+    (assistant/people.py, escalate_waiting; launch review issue 3)."""
+    from .assistant import people
+
+    people.escalate_waiting(timezone.now())
+
+
 def _flag_unanswered() -> None:
     """A Lead AI customer's message 15-60 minutes old that no turn ever took and
     nobody answered (an OpenAI outage that outlasted the missed-turn retries, a
@@ -397,6 +431,145 @@ def _close_past_appointments() -> None:
         row.log("lapsed")
         row.save(update_fields=["status", "history", "updated_at"])
         live.appointment_changed(row.conversation_id)
+    _lapse_shops_tentatives(now)
+
+
+# Why a shops chat's tentative visit lapsed (its history's "lapsed" entry).
+LAPSED_NO_TIME = "no time agreed"
+LAPSED_TIME_PASSED = "its time passed"
+
+
+def _lapse_shops_tentatives(now) -> None:
+    """A shops chat's tentative visit lapses a day after it was last said when it has no time
+    (TIMELESS_TENTATIVE_LAPSES), and an hour after its time when it has one (PAST_TENTATIVE_LAPSES): it
+    no longer holds the chat (followups.nudge_due sends nothing while a visit is open) nor tells the next
+    turns they agreed to come. Its status is done, as any lapsed tentative's, its history says "lapsed"
+    and why. Nothing goes to the customer; the team is alerted when the visit was theirs (_tentative_theirs:
+    their words say they will come), never for a slot offer of the model's own that the 025bd91 fix no
+    longer records (chats 59 and 62). A general chat's tentative keeps TENTATIVE_LAPSES, as before: no
+    follow-up waits on it there."""
+    from . import lane
+    from .models import LeadAiAppointment
+
+    tentative = LeadAiAppointment.objects.filter(status=LeadAiAppointment.Status.TENTATIVE)
+    # The shops chats first, in the query: a general chat's tentative stays open for days and must never fill
+    # the page a shops one is read from.
+    chats = set(tentative.values_list("conversation_id", flat=True))
+    shops_chats = sorted(pk for pk, playbook in lane.playbooks(chats).items() if playbook == lane.IC_SHOPS)
+    if not shops_chats:
+        return
+    candidates = (
+        tentative.filter(conversation_id__in=shops_chats)
+        .filter(
+            Q(starts_at__isnull=True, created_at__lt=now - TIMELESS_TENTATIVE_LAPSES)
+            | Q(starts_at__isnull=False, starts_at__lt=now - PAST_TENTATIVE_LAPSES)
+        )
+        .order_by("pk")
+        .values_list("pk", flat=True)[:LAPSE_PAGE]
+    )
+    for pk in list(candidates):
+        _lapse_tentative(pk, now)
+
+
+def _last_said(row) -> dt.datetime:
+    """When the tentative visit was last recorded in their words (its newest "tentative" history entry),
+    else when it was made: a CRM retry or a fact noted on it is no new word about the visit."""
+    for entry in reversed(row.history or []):
+        if isinstance(entry, dict) and entry.get("event") == "tentative":
+            try:
+                said = dt.datetime.fromisoformat(str(entry.get("at") or ""))
+            except ValueError:
+                break
+            return said if said.tzinfo is not None else said.replace(tzinfo=dt.timezone.utc)
+    return row.created_at
+
+
+def _lapse_why(row, now) -> str:
+    """Why this tentative lapses now, else '' (it stays). One with a time also waits an hour after they last
+    spoke of it: "I'm on my way" said after its time is no visit to drop."""
+    if row.starts_at is not None:
+        passed = row.starts_at < now - PAST_TENTATIVE_LAPSES and _last_said(row) < now - PAST_TENTATIVE_LAPSES
+        return LAPSED_TIME_PASSED if passed else ""
+    return LAPSED_NO_TIME if _last_said(row) < now - TIMELESS_TENTATIVE_LAPSES else ""
+
+
+def _tentative_theirs(row, now) -> bool:
+    """Their words for the visit say they will come: a yes, a day or an hour of theirs, words of coming,
+    a deferral of theirs ("I will message you"). The model's own slot offer kept their unrelated words
+    ("One", "Your rent is higher than others", "If possible to send me photo first")."""
+    from .assistant import engine, rules
+
+    words = (row.customer_words or row.note or "").strip()
+    if not words:
+        return False
+    return bool(
+        engine.comes(words, now) or engine.opens_with_yes([words]) or rules.is_deferral(words) or rules.is_dated_deferral(words)
+        or rules.mentions_deferral(words)
+    )
+
+
+def _lapse_tentative(pk: int, now) -> None:
+    from .assistant import live
+    from .models import LeadAiAppointment
+
+    with transaction.atomic():
+        row = (
+            LeadAiAppointment.objects.select_for_update()
+            .filter(pk=pk, status=LeadAiAppointment.Status.TENTATIVE)
+            .first()
+        )
+        if row is None:
+            return  # confirmed, cancelled or lapsed meanwhile
+        why = _lapse_why(row, now)
+        if not why:
+            return  # said again lately: a day from then
+        row.status = LeadAiAppointment.Status.DONE
+        row.log("lapsed", why=why, start=row.starts_at.isoformat() if row.starts_at else None)
+        row.save(update_fields=["status", "history", "updated_at"])
+        if _tentative_theirs(row, now) and not _gone_quiet(row.conversation_id):
+            _lapsed_alert(row, why)
+        transaction.on_commit(lambda conversation_id=row.conversation_id: live.appointment_changed(conversation_id))
+
+
+def _gone_quiet(conversation_id: int) -> bool:
+    """The customer asked us to stop, declined, or is on the opt-out registry: nobody follows them up."""
+    from . import optout
+    from .models import LeadAiChatState
+
+    state = LeadAiChatState.objects.filter(conversation_id=conversation_id).select_related("conversation__contact").first()
+    if state is None:
+        return False
+    return state.stopped_at is not None or state.not_interested_at is not None or optout.is_blocked(state.conversation.contact.wa_id)
+
+
+def _lapsed_alert(row, why: str) -> None:
+    """The chat's people and the Lead AI alert list hear that a tentative visit of the customer's lapsed."""
+    from .assistant import alerts, crm, engine, hours
+
+    conversation = row.conversation
+    who = row.customer_name or conversation.contact.display_name or "A Lead AI customer"
+    what = {"call": "call", "customer_property": "viewing"}.get(row.place, "visit")
+    words = (row.customer_words or row.note or "").strip()
+    if why == LAPSED_TIME_PASSED:
+        reason = f"Its time, {hours.describe(row.starts_at)}, has passed with nothing confirmed."
+    else:
+        reason = f"No day and time were agreed in the {int(TIMELESS_TENTATIVE_LAPSES.total_seconds() // 3600)} hours since they said it."
+    lines = [
+        f"{who} (WhatsApp +{conversation.contact.wa_id})",
+        *engine._detail_lines(row.details or {}),
+        f"Their words: {crm.safe(words)}" if words else "",
+        reason,
+        "The assistant no longer holds it open and sends them nothing about it: please follow up with them.",
+    ]
+    alerts.raise_alert(
+        kind="tentative_lapsed",
+        conversation=conversation,
+        appointment=row,
+        title=f"{who}: tentative {what} lapsed"[:200],
+        text="\n".join(line for line in lines if line),
+        dedupe_key=f"tentative_lapsed:{row.pk}",
+        crm_url=alerts.crm_path(row.crm_entity, row.crm_id),
+    )
 
 
 def _agent_heads_up() -> None:
@@ -851,23 +1024,32 @@ def crm_readback(self, appointment_id: int) -> None:
         )
 
 
+# Alerts a chat raised this long before its CRM responsible was known reach that person once it is.
+RESPONSIBLE_CATCH_UP = dt.timedelta(hours=2)
+
+
 @shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)
 def resolve_responsible(conversation_id: int) -> None:
+    """The chat's CRM record's responsible person, cached on its state; then the alerts the chat raised before
+    it was known reach them too (alerts.reach_responsible: launch chat 112's STOP, its first answer, never
+    reached the lead's owner)."""
     from apps.crmlink import client
     from apps.inbox.models import Conversation
 
-    from .assistant import crm
+    from .assistant import alerts, crm
     from .models import LeadAiChat, LeadAiChatState
 
-    conversation = Conversation.objects.select_related("contact").filter(pk=conversation_id).first()
+    conversation = Conversation.objects.select_related("contact", "assigned_agent").filter(pk=conversation_id).first()
     if conversation is None or not client.configured():
         return
     chat = LeadAiChat.objects.filter(conversation=conversation).first()
     try:
-        entity, crm_id, _ = crm.record_for(chat, conversation)
+        entity, crm_id = _record_of(chat, conversation)
         if entity and crm_id:
             record = crm.read_record(entity, crm_id)
             _remember_responsible(conversation, record["assigned"])
+            if record["assigned"]:
+                alerts.reach_responsible(conversation, timezone.now() - RESPONSIBLE_CATCH_UP)
     except client.BitrixError as exc:
         logger.info("Lead AI could not resolve the responsible of conversation %s: %s", conversation_id, exc)
         # Not looked up after all: the chat's next turn asks again.
@@ -889,21 +1071,31 @@ def _replaced(row) -> bool:
     return False
 
 
-@shared_task(bind=True, ignore_result=True, max_retries=len(CRM_RETRY), soft_time_limit=60, time_limit=90)
+@shared_task(bind=True, ignore_result=True, max_retries=len(CRM_RETRY), soft_time_limit=150, time_limit=180)
 def write_crm_fields(self, row_ids) -> None:
     """One turn's shops lead fields (assistant/crm_fields.py), in one call to the tool.
 
     A row that a newer row of the same chat replaced is not sent (_replaced): a
     retry must never write an older Bot Status over a newer one, nor move a lead
-    that has booked since to Not Interested. A passing failure (Bitrix down,
-    5xx, 429) is retried at 1, 3 and 10 minutes; after that the sweep sends the
+    that has booked since to Not Interested (nor one a person set another Bot
+    Status on in Bitrix since: bitrix_status.py records it). The lead is read
+    first (crm.lead.get, through the REST client): a value it holds already is
+    not written again, so it gets no edit and no line in its change log (launch
+    review issue 26; a failed read writes everything, as before). A shops "no"
+    moves the lead to its lost stage only when nobody is working it and it has
+    no open to-do (assistant/lost.py: launch review issue 1); otherwise Bot
+    Status Lost goes alone, with the customer's words and why on the timeline,
+    and no to-do is closed or changed. A passing failure (Bitrix down, 5xx,
+    429) is retried at 1, 3 and 10 minutes; after that the sweep sends the
     rows again every 15 minutes for six hours (_retry_crm_fields). A refusal (a
     field or enum the tool does not allow, no such lead) stays on the rows and
     is not retried. Nothing reaches the customer.
     """
     from django.db.models import F
 
-    from .assistant import crm_fields
+    from apps.inbox.models import Conversation
+
+    from .assistant import crm_fields, lost
     from .models import LeadAiCrmField
 
     rows = list(
@@ -919,23 +1111,86 @@ def write_crm_fields(self, row_ids) -> None:
             live.append(row)
     if not live:
         return
+    lead_id = live[0].lead_id
+    now = timezone.now()
+    # Up to four REST reads come before the post (each may wait for its slot): should this run be cut off, the sweep
+    # sends the rows again (_retry_crm_fields), as after a failed post. Every ending below sets or clears it.
+    LeadAiCrmField.objects.filter(pk__in=[row.pk for row in live]).update(retry_at=now + CRM_CATCH_UP_EVERY)
+    # What the lead holds now: a value it has already is not written again (no edit, no change-log line).
+    current = lost.read_lead(lead_id)
+    touch = lost.touch_of(current, now, lost.system_users()) if current else None
+    if touch:
+        # A person's touch this read shows: our write is about to hide it (it writes as user 1), so a later "no" must
+        # still see it (lost.remembered_touch; review 2d).
+        for row in live:
+            row.payload = {**(row.payload or {}), lost.PERSON_TOUCH: touch}
+            LeadAiCrmField.objects.filter(pk=row.pk).update(payload=row.payload)
+    held = [row for row in live if crm_fields.holds(current, row)]
+    if held:
+        # A row an earlier try of ours posted already (its answer lost on the way back: a timeout, a 502) is sent, not
+        # "held" (review 2d); one we never posted is the lead's own value.
+        ours = [row.pk for row in held if row.attempts > 0]
+        LeadAiCrmField.objects.filter(pk__in=ours).update(sent_at=now, error="", retry_at=None)
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in held if row.pk not in ours]).update(
+            sent_at=now, error=crm_fields.HELD_ALREADY, retry_at=None
+        )
+        live = [row for row in live if row not in held]
+    # A shops "no": its lost stage only for a lead nobody is working, with no open to-do (assistant/lost.py).
+    moves = [row for row in live if row.field == crm_fields.LOST]
+    kept: dict[int, str] = {}
+    comment = ""
+    if moves and lost.moved_already(current, moves[-1].value):
+        # The lead sits in that lost stage, with Bot Status Lost, already: an earlier try of ours moved it (its answer
+        # lost), or a person did. Nothing to move, and no "it was not moved" on its timeline (review 2d).
+        mine = [row.pk for row in moves if row.attempts > 0]
+        LeadAiCrmField.objects.filter(pk__in=mine).update(sent_at=now, error="", retry_at=None)
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in moves if row.pk not in mine]).update(
+            sent_at=now, error=lost.ALREADY_THERE, retry_at=None
+        )
+        live = [row for row in live if row not in moves]
+        moves = []
+    if moves:
+        conversation = Conversation.objects.select_related("contact").filter(pk=moves[-1].conversation_id).first()
+        decision = lost.may_move(lead_id, conversation.contact.wa_id if conversation else "", now=now, lead=current)
+        if not decision.move:
+            kept = {row.pk: decision.why for row in moves}
+            if any((row.payload or {}).get(lost.KEPT_COMMENT) for row in moves):
+                logger.info("Lead AI kept lead %s in its stage again; its comment went with an earlier try", lead_id)
+            else:
+                comment = lost.kept_comment(moves[-1].value, (moves[-1].payload or {}).get("reason") or "", decision.why)
+                # Marked before it is posted: a try whose answer is lost never posts it a second time (review 2d).
+                for row in moves:
+                    row.payload = {**(row.payload or {}), lost.KEPT_COMMENT: now.isoformat()}
+                    LeadAiCrmField.objects.filter(pk=row.pk).update(payload=row.payload)
+            logger.info("Lead AI kept lead %s in its stage on a no: %s", lead_id, decision.why)
+    posting = [row for row in live if row.pk not in kept]
+    if not posting and not comment:
+        for pk, why in kept.items():
+            LeadAiCrmField.objects.filter(pk=pk).update(sent_at=timezone.now(), error=f"{lost.NOT_MOVED}{why}"[:500], retry_at=None)
+        return
     ids = [row.pk for row in live]
     LeadAiCrmField.objects.filter(pk__in=ids).update(attempts=F("attempts") + 1)
+    body = crm_fields.body_for(posting, lead_id=lead_id)
+    if comment:
+        body["comment"] = comment
     try:
-        answer = crm_fields.post(crm_fields.body_for(live))
+        answer = crm_fields.post(body)
     except crm_fields.FieldsError as exc:
         LeadAiCrmField.objects.filter(pk__in=ids).update(error=str(exc)[:500])
         if self.request.retries < len(CRM_RETRY):
             raise self.retry(exc=exc, countdown=CRM_RETRY[self.request.retries])
         LeadAiCrmField.objects.filter(pk__in=ids).update(retry_at=timezone.now() + CRM_CATCH_UP_EVERY)
-        logger.warning("Lead AI could not write the shops fields of lead %s yet (the sweep tries again): %s", live[0].lead_id, exc)
+        logger.warning("Lead AI could not write the shops fields of lead %s yet (the sweep tries again): %s", lead_id, exc)
         return
     if answer.get("ok"):
-        LeadAiCrmField.objects.filter(pk__in=ids).update(sent_at=timezone.now(), error="", retry_at=None)
+        LeadAiCrmField.objects.filter(pk__in=[row.pk for row in posting]).update(sent_at=timezone.now(), error="", retry_at=None)
+        for pk, why in kept.items():
+            # Bot Status Lost and the comment went; the stage stays (assistant/lost.py).
+            LeadAiCrmField.objects.filter(pk=pk).update(sent_at=timezone.now(), error=f"{lost.NOT_MOVED}{why}"[:500], retry_at=None)
         return
     error = str(answer.get("error") or answer.get("detail") or "Refused")[:500]
     LeadAiCrmField.objects.filter(pk__in=ids).update(error=error, retry_at=None)
-    logger.warning("The Lead fields tool refused the shops fields of lead %s: %s", live[0].lead_id, error)
+    logger.warning("The Lead fields tool refused the shops fields of lead %s: %s", lead_id, error)
 
 
 # A licence copy waits this many times, LICENCE_WAIT seconds apart, for the gateway's download.
@@ -1087,10 +1342,11 @@ def _retry_crm_fields() -> None:
     """Shops lead fields the task could not write while Bitrix was down: sent again every
     15 minutes for six hours (each value its own newest row; a replaced one never),
     then the agents are told once which to set by hand. Opt-outs most of all: those
-    fields keep every later campaign away from the customer (board C10, C11)."""
+    fields keep every later campaign away from the customer (board C10, C11). A lost
+    stage is never one to set by hand (assistant/lost.py): it just stays unmoved."""
     from apps.inbox.models import Conversation
 
-    from .assistant import alerts
+    from .assistant import alerts, crm_fields, lost
     from .models import LeadAiChat, LeadAiCrmField
 
     now = timezone.now()
@@ -1101,7 +1357,12 @@ def _retry_crm_fields() -> None:
         (expired if now - row.created_at > CRM_CATCH_UP_FOR else retry).setdefault(row.conversation_id, []).append(row)
     for conversation_id, rows in expired.items():
         LeadAiCrmField.objects.filter(pk__in=[row.pk for row in rows]).update(retry_at=None)
-        rows = [row for row in rows if not _replaced(row)]
+        # A lost stage nobody could check for six hours is not moved, and nobody is told to move it by hand: the move
+        # goes only to a lead nobody is working (assistant/lost.py). Bot Status Lost, a field of its own, is still told.
+        moves = [row.pk for row in rows if row.field == crm_fields.LOST]
+        if moves:
+            LeadAiCrmField.objects.filter(pk__in=moves).update(error=f"{lost.NOT_MOVED}Bitrix could not be reached for six hours.")
+        rows = [row for row in rows if row.field != crm_fields.LOST and not _replaced(row)]
         conversation = Conversation.objects.select_related("contact").filter(pk=conversation_id).first()
         if not rows or conversation is None:
             continue
@@ -1118,8 +1379,6 @@ def _retry_crm_fields() -> None:
             dedupe_key=f"crm_fields_failed:{conversation_id}:{rows[-1].pk}",
             crm_url=alerts.crm_path("lead", rows[0].lead_id),
         )
-    from .assistant import crm_fields
-
     for conversation_id, rows in retry.items():
         ids = [row.pk for row in rows]
         # Not due again before the task has had its own tries.
@@ -1133,7 +1392,9 @@ def _retry_crm_fields() -> None:
 
 
 @shared_task(bind=True, ignore_result=True, max_retries=3, soft_time_limit=60, time_limit=90)
-def record_crm_note(self, conversation_id: int, kind: str) -> None:
+def record_crm_note(self, conversation_id: int, kind: str, lines=None) -> None:
+    """A timeline note on the chat's CRM record (a REST comment: no business process runs): an
+    opt-out, or ("wanted", with its ``lines``) what a shops customer wants instead of a shop."""
     from apps.crmlink import client
     from apps.inbox.models import Conversation
 
@@ -1145,12 +1406,68 @@ def record_crm_note(self, conversation_id: int, kind: str) -> None:
         return
     chat = LeadAiChat.objects.filter(conversation=conversation).first()
     try:
-        entity, crm_id, _ = crm.record_for(chat, conversation)
+        entity, crm_id = _record_of(chat, conversation)
         if entity and crm_id:
-            crm.add_comment(entity, crm_id, crm.note_text(kind, conversation.contact.display_name, conversation.contact.wa_id))
+            # The chat's name for them (their own, the campaign's, the contact's), never "Customer: -" (issue 26).
+            text = crm.note_text(kind, _chat_name(conversation), conversation.contact.wa_id, lines)
+            crm.add_comment(entity, crm_id, text)
     except client.BitrixError as exc:
         if _transient(exc) and self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=CRM_RETRY[min(self.request.retries, len(CRM_RETRY) - 1)])
+
+
+def _record_of(chat, conversation) -> tuple[str, int | None]:
+    """The CRM record a chat's notes and its responsible belong to: the lead its newest Lead AI campaign was sent from
+    (crm_fields.lead_of, where Bot Status and the lost move go), else the record the chat came onto the screen with
+    (crm.record_for). Review 2d: a shops campaign reaching a chat an older campaign brought from a deal put the
+    "wanted" and "call" notes on the deal, and alerted the deal's owner as the lead's."""
+    from .assistant import crm, crm_fields
+
+    lead = crm_fields.lead_of(chat, conversation)
+    if lead:
+        return "lead", int(lead)
+    entity, crm_id, _ = crm.record_for(chat, conversation)
+    return entity, crm_id
+
+
+def _chat_name(conversation) -> str:
+    """The customer's name as the assistant knows it (engine._customer_name), '' with none."""
+    from .assistant import engine
+    from .models import LeadAiChatState
+
+    facts = LeadAiChatState.objects.filter(conversation=conversation).values_list("facts", flat=True).first()
+    return engine._customer_name(conversation, facts if isinstance(facts, dict) else {})
+
+
+@shared_task(bind=True, ignore_result=True, max_retries=3, soft_time_limit=60, time_limit=90)
+def record_voice_note(self, message_id: int) -> None:
+    """What a customer's voice note in a Lead AI chat says, on the chat's lead's timeline, once it is heard
+    (transcribe.py queues it once per note): the timeline mirror (apps.crmlink) writes "[audio]" for one, and chat
+    96's eight voice notes told the agents nothing (launch review issue 26). A REST comment: no business process runs."""
+    from apps.crmlink import client
+    from apps.inbox.models import Message
+
+    from .assistant import crm, crm_fields
+    from .models import LeadAiChat, LeadAiTranscript
+
+    message = Message.objects.select_related("conversation__contact").filter(pk=message_id, direction=Message.Direction.INBOUND).first()
+    heard = LeadAiTranscript.objects.filter(message_id=message_id).first()
+    if message is None or heard is None or not heard.heard or not client.configured():
+        return
+    conversation = message.conversation
+    chat = LeadAiChat.objects.filter(conversation=conversation).first()
+    if chat is None:
+        return
+    try:
+        # The lead its newest Lead AI campaign was sent from (the mirror's own record), else the chat's record.
+        lead = crm_fields.lead_of(chat, conversation)
+        entity, crm_id = ("lead", lead) if lead else crm.record_for(chat, conversation)[:2]
+        if entity and crm_id:
+            crm.add_comment(entity, crm_id, crm.voice_note_text(message.created_at, heard.text))
+    except client.BitrixError as exc:
+        if _transient(exc) and self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=CRM_RETRY[min(self.request.retries, len(CRM_RETRY) - 1)])
+        logger.info("Lead AI could not put voice note %s on the timeline: %s", message_id, exc)
 
 
 @shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)

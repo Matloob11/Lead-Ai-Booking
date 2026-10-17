@@ -355,7 +355,7 @@ class LicenceRequestIsARequestTests(ShopsBase):
     def test_ok_to_the_licence_request_is_answered(self):
         self.set_state(facts={**KNOWN, **DED}, licence_asked_at=NOW - dt.timedelta(minutes=5))
         self.ours(rules.line("licence_copy", "en"), minutes_ago=5, shop_step=shop_flow.LICENCE_ASK)
-        reply = "Great! Meanwhile, I can hold a slot for you today at 2:30 PM or 4:30 PM — which is better?"
+        reply = "Great! Meanwhile, I can hold a slot for you today at 3:00 PM or 5:00 PM — which is better?"
         outcome, calls, _, _ = self.turn(self.inbound("ok"), [shop_answer(reply, invited=True)])
         self.assertEqual((len(calls), self.body(outcome)), (1, reply))
         self.assertEqual(self.state().invites, 1)
@@ -394,7 +394,7 @@ class TookItFromUsTests(SimpleTestCase):
         # Our last message offered other times: an older offer is not what they picked.
         tomorrow = "I can hold a slot for you tomorrow at 11:00 AM or 1:00 PM — which is better?"
         self.assertTrue(theirs(at(13, 11), "the first one", our_last=tomorrow, ours=f"{TWO_SLOTS_NOW} {tomorrow}"))
-        self.assertFalse(theirs(at(12, 14, 30), "the first one", our_last=tomorrow, ours=f"{TWO_SLOTS_NOW} {tomorrow}"))
+        self.assertFalse(theirs(at(12, 15), "the first one", our_last=tomorrow, ours=f"{TWO_SLOTS_NOW} {tomorrow}"))
 
     def test_a_yes_to_our_one_bare_hour(self):
         for said, ours in (
@@ -411,10 +411,10 @@ class TookItFromUsTests(SimpleTestCase):
         self.assertFalse(theirs(at(13, 14), "Yes", our_last=NUDGE))
 
     def test_the_same_two_slots_again_go_in_other_words(self):
-        slots = [at(12, 14, 30), at(12, 16, 30)]
+        slots = [at(12, 15), at(12, 17)]
         self.assertEqual(shop_flow.slots_text("en", slots, NOW), TWO_SLOTS_NOW)
         again = shop_flow.slots_text("en", slots, NOW, before=TWO_SLOTS_NOW)
-        self.assertEqual(again, "Which one suits you better: today at 2:30 PM or 4:30 PM?")
+        self.assertEqual(again, "Which one suits you better: today at 3:00 PM or 5:00 PM?")
         self.assertEqual(shop_flow.slots_text("en", slots, NOW, before=f"{TWO_SLOTS_NOW} {again}"), TWO_SLOTS_NOW)  # both said: as it was
         self.assertEqual(shop_flow.slots_text("ar", slots, NOW, before="شكراً"), shops.slot_offer("ar", slots, NOW))
         for language in ("en", "ar", "ur_latin", "ur", "hi_latin", "hi"):
@@ -434,7 +434,7 @@ class TookItFromUsEvalTests(TestCase):
         base = scenario("shops-licence-ask")
         item = replace(base, chat=[*base.chat, ("assistant", TWO_SLOTS_NOW)], new=["Yes"], facts={**base.facts, **DED}, licence_asked=True)
         run, _ = run_eval(item, booked("2026-10-12", "14:30"))
-        self.assertEqual((run.when, run.out), (None, "Which one suits you better: today at 2:30 PM or 4:30 PM?"))
+        self.assertEqual((run.when, run.out), (None, "Which one suits you better: today at 3:00 PM or 5:00 PM?"))
 
 
 # F8. The location asked for with the slots ----------------------------------------------------------------
@@ -452,7 +452,7 @@ class LocationWithTheSlotsEvalTests(TestCase):
     def test_the_slots_go_with_the_address(self):
         completion = eval_answer("", action="confirm", place="office", date="2026-10-12", time="18:00", share_location=True)
         run, _ = run_eval(replace(scenario("shops-nudge-yes"), new=["Yes please, send me the location"]), completion)
-        self.assertEqual((run.when, run.out), (None, f"{EVENING_SLOTS}\n{ADDRESS}"))
+        self.assertEqual((run.when, run.out), (None, f"{EVENING_SLOTS}\nOur office location: {ADDRESS}"))
 
 
 class LocationWithTheSlotsTurnTests(ShopsBase):
@@ -463,7 +463,7 @@ class LocationWithTheSlotsTurnTests(ShopsBase):
         message = self.inbound("Yes please, send me the location")
         confirm = shop_answer("", action="confirm", place="office", date="2026-10-12", time="18:00", share_location=True)
         outcome, _, _, _ = self.turn(message, [confirm])
-        self.assertEqual(self.body(outcome), f"{EVENING_SLOTS}\n{ADDRESS}")
+        self.assertEqual(self.body(outcome), f"{EVENING_SLOTS}\nOur office location: {ADDRESS}")
         self.assertTrue(self.actions(message)["location_appended"])
         self.assertEqual(LeadAiAppointment.objects.get().status, "tentative")
 

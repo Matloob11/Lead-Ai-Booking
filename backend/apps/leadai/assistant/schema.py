@@ -12,8 +12,12 @@ schema shapes the answer, code is the gate.
 A shops chat (the International City shops playbook) answers SHOPS_SCHEMA: the
 same answer, with the shop facts the build pack collects (shop_type,
 licence_kind, opening_when, already_rented), ``notes`` as the list of questions
-our agent must answer at the viewing, and "spam" as an opt-out. SCHEMA itself
-is left exactly as it was, so a general chat's request does not change.
+our agent must answer at the viewing, "spam" as an opt-out, and the handover
+reasons of a customer who wants no shop to rent (NOT_A_SHOP_REASONS: a home or
+another property, to buy, to sell, never asked about a shop, another area). Those
+reasons tag the chat and alert our team; they never hand it over or pause it
+(assistant/needs.py, the owner's rule of 2026-10-15). SCHEMA itself is left
+exactly as it was, so a general chat's request does not change.
 """
 
 from __future__ import annotations
@@ -215,7 +219,18 @@ SCHEMA = {
 SHOP_TYPES = ("type_1", "type_2", "type_3", "not_sure")
 LICENCE_KINDS = ("ded", "trakhees", "new", "none")
 SHOPS_OPT_OUT = (*OPT_OUT, "spam")
-NOTES_MAX = 5
+# A shops customer who wants no shop to rent (assistant/needs.py, launch 2026-10-15): a flat, studio,
+# room, other home or another kind of property; to buy; to sell; they never asked about a shop; or
+# another area. A shops answer only, and a tag, never a pause: code takes these off the handover.
+WRONG_NEED = "wrong_need"
+WANTS_TO_BUY = "wants_to_buy"
+WANTS_TO_SELL = "wants_to_sell"
+NEVER_ASKED = "never_asked"
+OTHER_AREA = "other_area"
+NOT_A_SHOP_REASONS = (WRONG_NEED, WANTS_TO_BUY, WANTS_TO_SELL, NEVER_ASKED, OTHER_AREA)
+SHOPS_HANDOVER_REASONS = (*HANDOVER_REASONS, *NOT_A_SHOP_REASONS)
+# A turn's questions for our agent: launch chat 95 asked nine, and lost four to a cap of five (launch review issue 15).
+NOTES_MAX = 10
 NOTE_MAX = 120
 SHOPS_TEXT_FACTS = (*(key for key in TEXT_FACTS if key != "notes"), "opening_when")
 SHOPS_BOOL_FACTS = (*BOOL_FACTS, "already_rented")
@@ -245,15 +260,19 @@ def _shops_schema() -> dict:
     properties["shop_type"] = _enum(SHOP_TYPES, "The shop type they chose or you recommended from MATCH; else null.")
     properties["opening_when"] = _text("When they want to open the shop, e.g. 'next month', else null.")
     properties["already_rented"] = _bool("True if they say they already rented a shop, else null.")
+    properties["business_activity"] = _text(
+        "The business the shop is for, in English, else null; never a home or property they want (a studio or a room is property_type)."
+    )
     properties["notes"] = {
         "type": "array",
         "items": {"type": "string"},
-        "description": "Only the NEW questions our agent must answer at the viewing (service charge, DEWA, parking, "
-        "fit-out, ...), in English, a few words each; [] when there are none.",
+        "description": "Only the questions the customer asked in this message that our agent must answer, in English, "
+        "a few words each; never your own questions, the discovery items or anything they did not ask; [] when there are none.",
     }
     facts["properties"] = {key: properties[key] for key in SHOPS_FACT_KEYS}
     facts["required"] = list(SHOPS_FACT_KEYS)
     node["properties"]["opt_out"] = {"type": "string", "enum": list(SHOPS_OPT_OUT)}
+    node["properties"]["handover"]["properties"]["reason"] = _enum(SHOPS_HANDOVER_REASONS)
     return node
 
 
@@ -275,6 +294,11 @@ def _notes(value) -> list[str]:
         if text and text.casefold() not in {note.casefold() for note in out}:
             out.append(text)
     return out[:NOTES_MAX]
+
+
+def clean_note(value) -> str:
+    """One question for our agent, cleaned as a model's note is (_notes): one line, no brackets, NOTE_MAX characters."""
+    return _clean(value, NOTE_MAX) or ""
 
 
 def _clean(value, limit: int = TEXT_MAX):
@@ -339,7 +363,7 @@ def normalize(data: dict, shops: bool = False) -> dict:
     }
 
     handover_in = data.get("handover") if isinstance(data.get("handover"), dict) else {}
-    reason = _enum_value(handover_in.get("reason"), HANDOVER_REASONS)
+    reason = _enum_value(handover_in.get("reason"), SHOPS_HANDOVER_REASONS if shops else HANDOVER_REASONS)
     needed = handover_in.get("needed") is True
     send = data.get("send") is not False
     reply = str(data.get("reply") or "").strip() if send else ""

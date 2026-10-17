@@ -18,12 +18,19 @@ What a shops chat with a Bitrix lead (LeadAiChat.crm_entity "lead") writes:
 - Bot Status: Qualifying on the first answered turn; Viewing booked on a
   confirmed booking; Handed to agent on a handover; Broker; Opted out; Lost;
 - Shop Type Wanted when facts.shop_type changes;
-- Business activity, only while the lead's own is empty;
+- Business activity, only while the lead's own is empty, and only a business:
+  never a home they want nor a sentence (crm_facts.is_business; launch chats 44,
+  49, 57 and 68 wrote "apartment studio", "room" and "studio" there);
 - Trade license status from facts.licence_kind (DED, Trakhees, New licence),
   or Yes / No when only that is known;
 - Purpose = Broker for a broker, WhatsApp Opt-out = Yes for a STOP;
 - the lost move: Not Interested ("1") for a no, Junk ("JUNK") for a wrong
-  number or spam, with the reason (the customer's words).
+  number or spam, with the reason (the customer's words), only for a lead
+  nobody is working (assistant/lost.py, decided when the rows are posted).
+
+Before a call the lead is read (tasks.write_crm_fields): a value it holds already
+is not posted (``holds``), so a write never edits a field to what it was, and the
+lead's change log gets no line for it (launch review issue 26).
 
 The lead is the one the newest Lead AI campaign that reached the chat was sent
 from (the campaign whose playbook the chat follows, lane.playbooks), else the
@@ -35,7 +42,9 @@ in a row, and one that comes back (Lost, then a booking, then Lost again) is
 posted again. The rows of one turn go in one call, from a Celery task on the
 leadai queue (tasks.write_crm_fields) that retries a passing failure; while
 Bitrix stays down, the sweep sends them again (tasks._retry_crm_fields). A
-failure is logged, never shown to the customer.
+failure is logged, never shown to the customer. A Bot Status a person set in
+Bitrix is a row too, sent already (bitrix_status.remember): nothing of ours
+queued before it goes over it, and the next value of ours that differs goes.
 """
 
 from __future__ import annotations
@@ -51,7 +60,7 @@ from django.conf import settings
 from django.db import transaction
 
 from ..models import LeadAiChatState, LeadAiCrmField
-from . import crm
+from . import crm, crm_facts
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +94,10 @@ LOST_NOT_INTERESTED = "1"
 LOST_JUNK = "JUNK"
 REASON_MAX = 255
 ACTIVITY_MAX = 200
+# A row the lead held already when it was to be posted (holds): marked done, never posted.
+HELD_ALREADY = "Not sent: the lead holds this value already."
+# The Bot Status ids a person may set in Bitrix (bitrix_status.py records them as the lead's newest value).
+STATUSES = frozenset({2475, STATUS_QUALIFYING, STATUS_BOOKED, STATUS_HANDED, STATUS_BROKER, STATUS_LOST, STATUS_OPTED_OUT})
 
 
 class FieldsError(Exception):
@@ -149,7 +162,8 @@ def turn_writes(before: dict, after: dict, *, answered: bool, first: bool, hando
     if shop and after.get("shop_type") != before.get("shop_type"):
         writes.append((FIELD_SHOP_TYPE, shop, {}))
     activity = crm.safe(after.get("business_activity"))[:ACTIVITY_MAX]
-    if activity and after.get("business_activity") != before.get("business_activity"):
+    if activity and after.get("business_activity") != before.get("business_activity") and crm_facts.is_business(activity):
+        # Never a home they want, nor a sentence (crm_facts.is_business): "apartment studio" went to the lead live.
         writes.append((FIELD_ACTIVITY, activity, {"only_if_empty": True}))
     licence = licence_value(after)
     if licence and licence != licence_value(before):
@@ -264,11 +278,36 @@ def queue_licence(conversation, chat, message) -> int | None:
     return row.pk
 
 
-def body_for(rows) -> dict:
+def _blank(value) -> bool:
+    """A lead field with no value, as the tool reads one (a7_leadai_fields_empty: '' and '0' are empty)."""
+    if value is None or value is False:
+        return True
+    if isinstance(value, list):
+        return not [item for item in value if not _blank(item)]
+    return str(value).strip() in ("", "0")
+
+
+def holds(current: dict | None, row) -> bool:
+    """The lead holds this row's value already (``current``: crm.lead.get's answer, None when it could not be read):
+    posting it would edit the field to what it is, and the lead's change log would get a line for nothing (launch
+    review issue 26). A field written only while the lead's own is empty holds whenever it has one. Never the lost
+    move, nor a licence copy (pure; tested)."""
+    if not isinstance(current, dict) or row.field in (LOST, LICENCE_FILE) or row.field not in current:
+        return False
+    value = current.get(row.field)
+    if (row.payload or {}).get("only_if_empty"):
+        return not _blank(value)
+    if isinstance(value, list):
+        return str(row.value) in {str(item).strip() for item in value}
+    return str(value if value is not None else "").strip() == str(row.value).strip()
+
+
+def body_for(rows, lead_id=None) -> dict:
     """The tool's body for some rows of one lead (pure; tested). A licence copy is never one
-    of them: it goes on its own (licence_body)."""
+    of them: it goes on its own (licence_body). ``lead_id``: the lead's, for a body that may
+    carry no row at all (only the timeline comment of a lead kept in its stage: lost.py)."""
     rows = [row for row in rows if row.field != LICENCE_FILE]
-    body: dict = {"lead_id": rows[0].lead_id if rows else None, "fields": {}}
+    body: dict = {"lead_id": rows[0].lead_id if rows else lead_id, "fields": {}}
     empty_only = []
     for row in rows:
         if row.field == LOST:

@@ -141,11 +141,51 @@ _INVITATION = re.compile(
 )
 
 
-def drop_invitations(text: str) -> tuple[str, bool]:
-    """The reply without its sentences that invite to the office (after two refusals)."""
-    kept = [s.strip() for s in _SENTENCE.split(text or "") if s.strip() and not _INVITATION.search(s)]
-    out = " ".join(kept).strip()
-    return out, out != (text or "").strip()
+# A question that only asks them to choose between what the sentence before it offered ("Which is better?",
+# "Which works better for you?", "kaunsa behtar rahega?"): once that offer is gone it asks nothing (launch review:
+# chat 62's "Photos help, ... Which is better?" after its invitation was cut).
+_CHOICE_ONLY = re.compile(
+    r"^\W*(?:so\s+|and\s+)?(?:which|kaunsa|kaun\s*sa|konsa|kon\s*sa|أيهما|أي|اي|کون\s*سا|कौन\s*सा)(?!\w)"
+    r"(?![^?؟]*\b(?:type|types|size|budget|business|licen[cs]e|cluster)\b)"
+    r"[^?؟.!]{0,40}(?:better|best|suit|suits|work|works|prefer|behtar|theek|thik|أفضل|افضل|يناسب|بہتر|ٹھیک|बेहतर|ठीक)"
+    r"[^?؟.!]{0,20}[?؟]\s*$",
+    re.IGNORECASE,
+)
+# ... or one that asks whether that offer suits them ("Is this time OK for you?", "Does that work for you?", "Kya yeh
+# waqt aapke liye theek hai?"), never one about a discovery item, the location or the photos.
+_ABOUT_THE_OFFER = re.compile(
+    r"^(?![^?؟]*\b(?:type|types|size|budget|business|licen[cs]e|cluster|location|address|photos?|pictures?|video)\b)"
+    r"(?=[^?؟]*(?:\b(?:that|this|it|these|those|yeh|ye|woh|wo|waqt|time|times|slot|slots)\b|ذلك|هذا|هذه|الوقت|یہ|وقت|यह|वह|समय))"
+    r"(?=[^?؟]*(?:\b(?:works?|suits?|ok|okay|fine|good|convenient|theek|thik|sahi|behtar|better|munasib)\b|يناسب|مناسب|ٹھیک|ठीक|सही))"
+    r"[^.!?؟]{0,80}[?؟]\s*$",
+    re.IGNORECASE,
+)
+
+
+def _asks_about_the_offer(sentence: str) -> bool:
+    """A question left asking them to choose, or to agree to, what the sentence before it offered (_CHOICE_ONLY,
+    _ABOUT_THE_OFFER), in twelve words at most."""
+    text = (sentence or "").strip()
+    return len(text.split()) <= 12 and bool(_CHOICE_ONLY.search(text) or _ABOUT_THE_OFFER.search(text))
+
+
+def drop_invitations(text: str, also=None) -> tuple[str, bool]:
+    """The reply without its sentences that invite to the office (after two refusals), nor the question left
+    asking them to choose between what those offered ("Which is better?"). ``also``: what else is an
+    invitation (a shops chat's slots, in words of no visit: offers.pushes_visit). The reply is unchanged when
+    nothing went."""
+    kept, gone, dropped = [], False, False
+    for sentence in split_sentences(text):
+        if _INVITATION.search(sentence) or (also is not None and also(sentence)):
+            gone = dropped = True
+            continue
+        if gone and _asks_about_the_offer(sentence):
+            continue
+        gone = False
+        kept.append(sentence)
+    if not dropped:
+        return (text or "").strip(), False
+    return " ".join(kept).strip(), True
 
 
 def is_invitation(text: str) -> bool:
@@ -264,7 +304,7 @@ _ADDRESS_WORDS = {
 def carries_location(text: str, office_address: str, maps_url: str = "") -> bool:
     """The text holds the office's Maps link or its address: every word that tells the
     address apart (the cluster's name, the building code, the shop number), in any
-    order, case or punctuation, so "Russia Cluster, Bldg V02/V03, Shop 20" counts.
+    order, case or punctuation, so "Russia Cluster, Bldg V03, Shop 20" counts.
     Of an address in three parts or more the last (the city, which the model
     shortens or moves: "International City, Dubai") is not needed."""
     if maps_url and maps_url in (text or ""):
@@ -416,6 +456,38 @@ _NOT_NAMES = {
 }
 _PHONE_ONLY = re.compile(r"[+\d\s().-]+")
 _A_CALL = re.compile(r"(missed\s+)?call\b", re.IGNORECASE)
+# A job title, or a word of an address or a company, where a CRM card or a profile should hold a name: the launch
+# campaigns greeted "Hi MANAGER" and "Hi Road" (launch review issue 26). Never greeted; a name after one is the
+# name ("Manager Ahmed" is Ahmed).
+_NOT_PERSONS = {
+    "manager", "admin", "administrator", "director", "ceo", "cfo", "coo", "cto", "gm", "founder", "cofounder", "chairman",
+    "president", "partner", "proprietor", "boss", "supervisor", "accountant", "accounts", "sales", "salesman", "marketing",
+    "hr", "staff", "team", "agent", "broker", "realtor", "secretary", "reception", "receptionist", "engineer", "technician",
+    "company", "business", "trading", "llc", "fze", "fzco", "fzc", "est", "establishment", "group", "properties", "realty",
+    "estate", "road", "street", "building", "tower", "villa", "apartment", "studio", "room", "store", "mall", "market",
+    "cluster", "city", "dubai", "sharjah", "ajman", "uae", "international", "personal", "private", "home", "work", "mobile",
+    "phone", "number",
+}
+# A word of capitals this short may be initials or a company ("ETS"): kept as it is written, never "Ets", when it reads
+# as initials (_initials); a short name in capitals is a name ("ALI" is Ali, "MD ALI" Ali: review 2d).
+INITIALS_MAX = 3
+_LETTERS = re.compile(r"[^\W\d_]+", re.UNICODE)
+_VOWELS = frozenset("AEIOUY")
+
+
+def _initials(letters: str) -> bool:
+    """Capitals that read as initials, not a short name: no vowel ("SK", "MD"), or two different consonants side by
+    side ("ETS", "ABC", "IBM"); "ALI", "ZIA", "RAJ", "SAM", "AMY", "JOY" and "OM" are names."""
+    upper = letters.upper()
+    if not any(ch in _VOWELS for ch in upper):
+        return True
+    return any(a not in _VOWELS and b not in _VOWELS and a != b for a, b in zip(upper, upper[1:]))
+
+
+def _names_nobody(text: str) -> bool:
+    """Every word is a placeholder, an honorific, a job title or a word of an address ("Sales Manager", "Road")."""
+    words = [word.casefold() for word in _LETTERS.findall(text or "")]
+    return bool(words) and all(word in _NOT_NAMES or word in _NOT_PERSONS or word in _HONORIFICS for word in words)
 
 
 def person_name(raw: str) -> str:
@@ -424,16 +496,42 @@ def person_name(raw: str) -> str:
     Portal leads are titled "<source> <channel> | <name>": "Bayut WhatsApp |
     Md Sumon" is "Md Sumon". What follows the last "|" is the name; nothing,
     a phone number, a "Missed Call..." or a placeholder ("there", the
-    campaign's greeting for a lead with no name) there names nobody.
+    campaign's greeting for a lead with no name), a job title or a word of an
+    address ("MANAGER", "Road") there names nobody.
     """
     text = " ".join(str(raw or "").split())
     if "|" in text:
         text = text.rsplit("|", 1)[1].strip()
-    if not text or _A_CALL.match(text) or text.strip(".").casefold() in _NOT_NAMES:
+    if not text or _A_CALL.match(text) or text.strip(".").casefold() in _NOT_NAMES or _names_nobody(text):
         return ""
     if _PHONE_ONLY.fullmatch(text) and sum(ch.isdigit() for ch in text) >= 7:
         return ""
     return text
+
+
+def _cased(word: str, *, shouting: bool = False) -> str:
+    """One word as a name is written: all small letters, or capitals past INITIALS_MAX letters (or among a name
+    written all in capitals, ``shouting``), get a capital first ("kamalraafat" Kamalraafat, "AHMED" Ahmed); short
+    capitals stay ("ETS")."""
+    letters = "".join(_LETTERS.findall(word))
+    if len(letters) < 2:
+        return word
+    if letters.islower() or (letters.isupper() and (len(letters) > INITIALS_MAX or shouting or not _initials(letters))):
+        return word[:1].upper() + word[1:].lower()
+    return word
+
+
+def cased(name: str) -> str:
+    """The name with its case put right, word by word (_cased): what the assistant's own lines, the CUSTOMER NAME it
+    reads and our alerts and Bitrix comments say ("ora" Ora, "MOHAMMED ALI" Mohammed Ali; "ETS" stays)."""
+    words = str(name or "").split()
+    return " ".join(_cased(word, shouting=_shouting(words)) for word in words)
+
+
+def _shouting(words) -> bool:
+    """A name written all in capitals with a word longer than initials ("MOHAMMED ALI"): every word of it is cased."""
+    letters = "".join("".join(_LETTERS.findall(word)) for word in words)
+    return letters.isupper() and any(len("".join(_LETTERS.findall(word))) > INITIALS_MAX for word in words)
 
 
 def first_name(name: str) -> str:
@@ -443,11 +541,14 @@ def first_name(name: str) -> str:
     WhatsApp | Md Sumon" (a portal lead's title) gives "Sumon". A word
     carrying markup or digits is not a name ("[URL=x]Click", a phone number),
     so it is dropped rather than cleaned into something that reads like one;
-    so is a placeholder such as "Lead" or "Customer". Emoji and dots are only
-    trimmed off.
+    so is a placeholder such as "Lead" or "Customer", and a job title or a
+    word of an address ("MANAGER", "Road"; a name after one is the name). Emoji
+    and dots are only trimmed off. Its case is put right ("kamalraafat"
+    Kamalraafat), short capitals kept ("ETS": maybe initials; launch review 26).
     """
-    parts = person_name(name).split()
-    while parts and parts[0].strip(".").lower() in _HONORIFICS:
+    whole = person_name(name)
+    parts = whole.split()
+    while parts and (parts[0].strip(".").lower() in _HONORIFICS or parts[0].strip(".").lower() in _NOT_PERSONS):
         parts.pop(0)
     if len(parts) > 1 and parts[0].strip(".").lower() in _NAME_PREFIXES and parts[1].strip(".").lower() not in _NAME_PARTICLES:
         parts.pop(0)
@@ -455,11 +556,9 @@ def first_name(name: str) -> str:
     if _NOT_A_NAME.search(first):
         return ""
     first = re.sub(r"[^\w\-']", "", first, flags=re.UNICODE)
-    if not first or any(ch.isdigit() for ch in first) or len(first) > 20 or first.lower() in _NOT_NAMES:
+    if not first or any(ch.isdigit() for ch in first) or len(first) > 20 or first.lower() in _NOT_NAMES or first.lower() in _NOT_PERSONS:
         return ""
-    if len(first) > 1 and (first.isupper() or first.islower()):
-        first = first.capitalize()
-    return first
+    return _cased(first, shouting=_shouting(whole.split()))
 
 
 def confirmation(language: str, name: str, start, office_address: str, maps_url: str, commercial: bool) -> str:

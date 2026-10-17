@@ -39,7 +39,7 @@ import logging
 
 from apps.crmlink import client
 
-from . import hours
+from . import crm_facts, hours
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,17 @@ _UNSAFE = str.maketrans({"[": "(", "]": ")", "<": "‹", ">": "›"})
 
 def safe(value) -> str:
     """Customer or model text for a Bitrix comment: no BB-code or HTML, no control characters."""
+    return safe_line(value, 255)
+
+
+def safe_line(value, limit: int) -> str:
+    """``safe`` with its own length."""
     text = " ".join(str(value or "").split())
-    return text.translate(_UNSAFE)[:255]
+    return text.translate(_UNSAFE)[:limit]
+
+
+# The "Questions for the viewing" line of a comment holds this much (ten short questions, shops.NOTES_KEPT).
+NOTES_LINE_MAX = 600
 
 
 def record_for(chat, conversation):
@@ -171,7 +180,8 @@ def booking_body(lead_id: int, appointment, event: str, comment: str = "") -> di
         details = appointment.details or {}
         fields = {}
         activity = safe(details.get("business_activity"))[:ACTIVITY_MAX]
-        if activity:
+        if activity and crm_facts.is_business(activity):
+            # Never a home they want nor a sentence (crm_facts.is_business; launch review issue 26).
             fields[FIELD_ACTIVITY] = activity
         licence = _licence_id(details)
         if licence:
@@ -273,6 +283,8 @@ DETAIL_LABELS = (
     ("opening_when", "Opening"),
     ("licence_copy", "Licence copy"),
     ("preapproval", "Initial approval"),
+    # A shops customer who wants no shop to rent: what our agent prepares for the visit (assistant/needs.py).
+    ("wanted", "Wants"),
     # A shops chat keeps a list here: the questions our agent answers at the viewing.
     ("notes", "Notes"),
 )
@@ -331,10 +343,17 @@ def comment_text(appointment, event: str, *, office_address: str = "", agents: s
     details = appointment.details or {}
     for key, label in DETAIL_LABELS:
         value = details.get(key)
+        if key == "notes" and isinstance(value, list):
+            # Their own questions only (crm_facts.own_notes), and all of them: up to NOTES_LINE_MAX characters, never
+            # safe()'s 255 (launch chat 95 asked nine).
+            value = crm_facts.own_notes(value)
+            if value:
+                lines.append(f"Questions for the viewing: {safe_line(detail_value(key, value), NOTES_LINE_MAX)}")
+            continue
         if value in (None, "", []):
             continue
-        if key == "notes" and isinstance(value, list):
-            label = "Questions for the viewing"
+        if key == "business_activity" and not crm_facts.is_business(value):
+            continue  # a home they want or a sentence, kept by a chat from before (crm_facts.is_business)
         lines.append(f"{label}: {safe(detail_value(key, value))}")
     if agents:
         lines.append(f"Agents: {safe(agents)}")
@@ -349,18 +368,39 @@ NOTE_TITLES = {
     "wrong_number": "CUSTOMER SAYS WRONG NUMBER",
     "not_interested": "CUSTOMER NOT INTERESTED",
     "spam": "MESSAGE LOOKS LIKE SPAM",
+    # A shops customer who wants no shop to rent (engine.wanted_note_lines): the lead stays open.
+    "wanted": "CUSTOMER WANTS SOMETHING OTHER THAN A SHOP",
+    # A customer asked for a call, with the time they gave (people.call_note_lines; launch chat 88).
+    "call": "CUSTOMER ASKED FOR A CALL",
 }
 
 
-def note_text(kind: str, customer: str, wa_id: str) -> str:
+def note_text(kind: str, customer: str, wa_id: str, lines=None) -> str:
+    """A timeline note; ``lines`` (already safe) replace the closing line, as for "wanted". ``customer``: the chat's
+    name for them (engine._customer_name: their own, the campaign's, the contact's); with none, no "Customer:" line
+    at all, never "Customer: -" (launch review issue 26: seven leads' notes read so)."""
+    tail = [str(line)[:400] for line in lines or () if str(line or "").strip()]
+    if not tail:
+        tail = ["The assistant stopped inviting this customer." if kind == "not_interested" else "The assistant stopped in this chat."]
+    name = safe(customer)
     return "\n".join(
         [
             f"WhatsApp Lead AI · {NOTE_TITLES.get(kind, safe(kind).upper())}",
-            f"Customer: {safe(customer) or '-'}",
+            *([f"Customer: {name}"] if name else []),
             f"Mobile: +{safe(wa_id).lstrip('+')}",
-            "The assistant stopped inviting this customer." if kind == "not_interested" else "The assistant stopped in this chat.",
+            *tail,
         ]
     )
+
+
+def voice_note_text(sent_at, heard: str) -> str:
+    """A customer's voice note as the lead's timeline should have read it, with what it says (launch review issue 26:
+    the mirror's line for one is "[audio]", and chat 96's eight voice notes told the agents nothing)."""
+    from django.utils import timezone
+
+    stamp = timezone.localtime(sent_at).strftime("%d %b %H:%M") if sent_at else ""
+    head = " · ".join(part for part in ("WhatsApp", "Customer", stamp, "voice note") if part)
+    return f"{head}\n{safe_line(heard, 1500)}"
 
 
 def add_comment(entity: str, crm_id: int, text: str) -> None:

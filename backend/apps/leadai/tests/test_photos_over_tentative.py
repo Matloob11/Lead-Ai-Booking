@@ -324,13 +324,15 @@ class ReofferTests(SimpleTestCase):
         again = normal(shop_answer(leadai_eval.LIVE_AGAIN, invited=True))
         reoffer = engine.reoffered(agreed=False, our_last=leadai_eval.LIVE_INVITE, texts=["How much sqf"])
         engine.settle(again, earlier, ["How much sqf"], 1, reoffer=reoffer, playbook=lane.IC_SHOPS, now=NOW, facts=LIVE_FACTS)
-        self.assertEqual((again["invited_to_meeting"], again["reply"], again.get("trimmed")), (False, leadai_eval.LIVE_AGAIN, None))
-        # A third question, still one invitation: its slots stay.
+        # Neither counted nor cut; its live slots (2:30 PM, half an hour away, and 3:00 PM) are code's valid pair now (offers.fix_times).
+        size = "A Type 2 shop ranges from 600 to 800 sq ft, starting from AED 48,000 a year."
+        self.assertEqual((again["invited_to_meeting"], again["reply"], again.get("trimmed")), (False, f"{size} {TWO_SLOTS_NOW}", ["times"]))
+        # A third question, still one invitation: its slots stay, valid ones.
         third = normal(shop_answer(PARKING, invited=True))
         earlier += [("customer", "How much sqf"), ("assistant", leadai_eval.LIVE_AGAIN)]
         reoffer = engine.reoffered(agreed=False, our_last=leadai_eval.LIVE_AGAIN, texts=["Is there parking?"])
         engine.settle(third, earlier, ["Is there parking?"], 1, reoffer=reoffer, playbook=lane.IC_SHOPS, now=NOW, facts=LIVE_FACTS)
-        self.assertEqual((third["invited_to_meeting"], third["reply"]), (False, PARKING))
+        self.assertEqual((third["invited_to_meeting"], third["reply"]), (False, f"{PARKING.split(' I can hold')[0]} {TWO_SLOTS_NOW}"))
         # As the fix was first proposed (no reoffer), 10:29 was the second invitation and the next reply lost its slots.
         cut = normal(shop_answer(PARKING, invited=True))
         engine.settle(cut, earlier, ["Is there parking?"], 2, playbook=lane.IC_SHOPS, now=NOW, facts=LIVE_FACTS)
@@ -438,7 +440,9 @@ class LiveTurnTests(ShopsBase):
         message = self.inbound("One", seconds_ago=30)
         outcome, calls, crm_delay, _ = self.turn(message, [invitation_1027()])
         self.assertEqual(len(calls), 1)
-        self.assertTrue(self.body(outcome).startswith(leadai_eval.LIVE_INVITE), self.body(outcome))
+        # Its live slots (half an hour away, half an hour apart) are code's valid pair now (offers.fix_times).
+        great = "A Type 2 shop is great, starting from AED 48,000 a year."
+        self.assertTrue(self.body(outcome).startswith(f"{great} {TWO_SLOTS_NOW}"), self.body(outcome))
         self.assertFalse(LeadAiAppointment.objects.exists())  # no "Tentative - Time mentioned" banner
         crm_delay.assert_not_called()  # no MEETING TENTATIVE on the lead
         self.assertFalse(LeadAiAlert.objects.filter(kind="tentative").exists())
@@ -456,13 +460,16 @@ class LiveTurnTests(ShopsBase):
         self.later(2)
         message = self.inbound("How much sqf", seconds_ago=20)
         outcome, _, _, _ = self.turn(message, [shop_answer(leadai_eval.LIVE_AGAIN, invited=True)])
-        self.assertEqual(self.body(outcome), leadai_eval.LIVE_AGAIN)
+        # Its live slots are code's valid pair now (an hour ahead at least: it is 2:02 PM; offers.fix_times).
+        size = "A Type 2 shop ranges from 600 to 800 sq ft, starting from AED 48,000 a year."
+        later_pair = "I can hold a slot for you today at 3:30 PM or 5:30 PM — which is better?"
+        self.assertEqual(self.body(outcome), f"{size} {later_pair}")
         self.assertEqual((self.actions(message)["reoffer"], self.state().invites), (True, 1))
-        # A third question still gets its slots, and it is still one invitation.
+        # A third question still gets its slots, and it is still one invitation; the same two asked about in other words.
         self.later(3)
         message = self.inbound("Is there parking?", seconds_ago=20)
         outcome, _, _, _ = self.turn(message, [shop_answer(PARKING, invited=True, facts={"notes": ["parking"]})])
-        self.assertEqual(self.body(outcome), PARKING)
+        self.assertEqual(self.body(outcome), f"{PARKING.split(' I can hold')[0]} Which one suits you better: today at 3:30 PM or 5:30 PM?")
         self.assertEqual(self.state().invites, 1)
         # 10:31: the photos.
         self.later(5)
