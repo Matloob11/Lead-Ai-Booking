@@ -1135,6 +1135,31 @@ case "$cmd" in
     remote "cd $APP_DIR && docker compose exec -T beat python manage.py submit_ic_templates $flag"
     ;;
 
+  submit-leadai-reminder-v2-template)
+    # Board T45: the meeting reminder v2 (v1's three quick replies plus [Office Location]) to
+    # the eight sending numbers' WABAs (board D4). Idempotent. --dry-run lists the WABAs. Runs in beat,
+    # whose /app is the build context, because the command is new there before the 2e image.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "submit-leadai-reminder-v2-template takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T beat python manage.py submit_leadai_reminder_v2_template $flag"
+    ;;
+
+  set-leadai-shops-clusters)
+    # Board Q42: the shop clusters Lead AI names, as the AI settings dialog sets them (validated by
+    # shops.validate, recorded in the settings history). One argument: the comma-separated list.
+    [[ $# -eq 1 ]] || die "set-leadai-shops-clusters takes one argument: \"France, England, ...\""
+    clusters_ok='^[A-Za-z ,]{3,200}$'
+    [[ "$1" =~ $clusters_ok ]] || die "refusing: letters, spaces and commas only"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-leadai-shops-clusters.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/set-leadai-shops-clusters.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T -e LEADAI_SHOPS_CLUSTERS='$1' web python manage.py shell"
+    ;;
+
   crm-mirror-backfill)
     # Board T57 and the Bitrix REST throttle: queue the CRM timeline mirror again for
     # messages that never reached their record. --since UTC picks every message from
