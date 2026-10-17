@@ -108,10 +108,19 @@ _STUDIO_BUSINESS = (
     r"architecture|animation|sound|ceramic|pottery|gym|boxing|martial|crossfit|editing|media|content|bridal"
 )
 _NOUN_PATTERNS = (
-    # (noun key, pattern); the first that matches names what they want.
+    # (noun key, pattern); the first that matches names what they want. A key with its count ("bedroom:1") is that noun.
     ("bhk", re.compile(r"\b(\d)\s*-?\s*b\.?\s*h\.?\s*k\b")),
     ("bhk", re.compile(r"\bbhk\b")),
-    ("bedroom", re.compile(r"\b(\d|one|two|three|four|five|single|double)[\s-]*(?:bed\s*rooms?|bedrooms?|br|b/r)\b")),
+    ("bedroom", re.compile(r"\b(\d|one|two|three|four|five|single|double|ek)[\s-]*(?:bed\s*rooms?|bedrooms?|br|b/r)\b")),
+    # Batch 2e (spec §1.2): "1 bed", "one bed", "1 bed hall" (a 1BHK), never a bed space, nor "a room with 1 bed".
+    ("bedroom", re.compile(r"(?<!with )(?<!with a )\b(\d|one|two|three|four|five|ek)[\s-]*bed\b(?![\s-]*(?:spaces?|sharing|partitions?)\b)")),
+    # Arabic: a room and a hall is a one-bedroom ("غرفة وصالة"), two rooms and a hall a two-bedroom; 2d read both as a room.
+    ("bedroom:1", re.compile(r"(?:غرفة|غرفه)\s*(?:نوم\s*)?و\s*(?:صالة|صاله|صالون)")),
+    ("bedroom:2", re.compile(r"(?:غرفتين|غرفتان)\s*(?:نوم\s*)?و\s*(?:صالة|صاله|صالون)")),
+    ("bedroom", re.compile(r"([0-9٠-٩])\s*غرف\s*(?:نوم\s*)?و\s*(?:صالة|صاله|صالون)")),
+    # Urdu and Devanagari: "ایک بیڈروم", "ون بیڈروم", "एक बेडरूम", "दो बेडरूम".
+    ("bedroom", re.compile(r"(ایک|ون|دو|تین|[0-9۰-۹])\s*بیڈ\s*روم")),
+    ("bedroom", re.compile(r"(एक|वन|दो|तीन|[0-9])\s*बेड\s*रूम")),
     ("studio_apartment", re.compile(r"\bstudio\s+(?:apartments?|flats?|units?|rooms?)\b|\b(?:apartment|flat)\s+studio\b")),
     ("studio", re.compile(r"\bstudios?\b")),
     # Never the building a shop is in: "under an apartment building", "a flats building", "near the villas".
@@ -182,9 +191,11 @@ _NOUN_NEGATED = re.compile(
 )
 # ... and said after the noun ("flat nahi", "फ्लैट नहीं", "فلیٹ نہیں": review 2d).
 _NOUN_NEGATED_AFTER = re.compile(r"\s*(?:nahi|nahin|nhi|nai)\b|\s*(?:نہیں|नहीं|नही)")
-# "near the apartments", "under an apartment building", "تحت الشقق": where the shop is, not what they want.
+# "near the apartments", "under an apartment building", "تحت الشقق": where the shop is, not what they want; and their own
+# place ("a 1BR near my shop", "a shop close to our flat": batch 2e) is where, never what.
 _NOUN_PLACE = re.compile(
-    r"\b(?:near|under|beside|behind|next\s+to|opposite|facing|between|around|among|above|below|close\s+to)\s+(?:the\s+|a\s+|an\s+|some\s+)?$"
+    r"\b(?:near|under|beside|behind|next\s+to|opposite|facing|between|around|among|above|below|close\s+to)\s+"
+    r"(?:the\s+|a\s+|an\s+|some\s+|my\s+|our\s+|his\s+|her\s+|their\s+)?$"
     r"|(?:تحت|فوق|قرب|قريب\s+من|بجانب|جنب|عند|بين)\s+$"
 )
 # "Villa maintenance", "apartment cleaning services": a trade of theirs, not a home they want (review 2d).
@@ -237,11 +248,20 @@ def _home_noun(text: str) -> str:
     return "home" if _HOME_WORDS.search(text) else ""
 
 
-_COUNTS = {"one": "1", "single": "1", "two": "2", "double": "2", "three": "3", "four": "4", "five": "5"}
+_COUNTS = {
+    "one": "1", "single": "1", "two": "2", "double": "2", "three": "3", "four": "4", "five": "5",
+    # Roman Urdu / Hindi, Urdu script and Devanagari (batch 2e): "ek bedroom", "ایک بیڈروم", "दो बेडरूम".
+    "ek": "1", "ایک": "1", "ون": "1", "دو": "2", "تین": "3", "एक": "1", "वन": "1", "दो": "2", "तीन": "3",
+}
 
 
 def _count(word: str) -> str:
-    return _COUNTS.get(word, word)
+    """A count as digits: "one" and "ek" are 1; a digit of any script ("٣", "۲") is itself."""
+    if word in _COUNTS:
+        return _COUNTS[word]
+    if len(word) == 1 and word.isdigit():
+        return str(unicodedata.digit(word))
+    return word
 
 
 # To buy, to sell ----------------------------------------------------------------------------------
@@ -664,8 +684,11 @@ def noun_words(noun: str, language: str) -> str:
             return f"a {count}BHK" if count else "a BHK flat"
         return f"شقق {count}BHK" if index == 1 else f"{count}BHK"
     if key == "bedroom":
+        # Arabic counts its own way: one bedroom, two bedrooms (a dual), three bedrooms and more (batch 2e: "غرفة وصالة"
+        # now reads as a one-bedroom, so its line says so).
+        arabic = {"1": "الشقق بغرفة نوم واحدة", "2": "الشقق بغرفتي نوم"}.get(count, f"شقق {count} غرف نوم")
         forms = (
-            f"a {count}-bedroom flat", f"شقق {count} غرف نوم", f"{count} bedroom flat", f"{count} بیڈروم فلیٹ", f"{count} bedroom flat",
+            f"a {count}-bedroom flat", arabic, f"{count} bedroom flat", f"{count} بیڈروم فلیٹ", f"{count} bedroom flat",
             f"{count} बेडरूम फ्लैट",
         )
         return forms[index]

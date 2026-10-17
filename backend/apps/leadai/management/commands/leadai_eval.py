@@ -156,6 +156,16 @@ hand-off line, as for the model's own tag. No scenario carries the Broker label,
 never asked here. As live since its review (2026-10-17), the backstop is told whether a person holds the chat
 (``handed_over``: only "I am a broker" counts then) and our last line (``our_last``: a bare "Agent" answers our
 for-whom question only).
+
+Batch 2e slice A (one bot for every need, assistant/tracks.py; spec §8), mirrored the same way: a shops chat's track and
+unit are decided as engine._run_claimed decides them (``decide``: tracks.decide before the model with the burst's words,
+the scenario's stored ``track`` / ``unit`` and ``lead_context`` and the campaign template's kind, and again after it with
+the model's tag and the facts it recorded), and the check ``track`` judges them. The mixed template (Campaign MIXED,
+ic_templates) has its own first yes: code's opener for the studio or one-bedroom the lead asked about
+(tracks.open_lead_text), the shops' for-whom line for a shop lead, "What are you looking for ...?" (rules res_what_need)
+otherwise, never the for-whom line by default; its "Not now" and "Stop messages" are the shops' own. Nothing else changes
+for a customer in slice A: the scenarios of the track traps keep 2d's answers and add the track code stores in shadow.
+``full_name_asked`` and ``held`` wait for slice B's full-name gate.
 """
 
 from __future__ import annotations
@@ -173,7 +183,7 @@ from dataclasses import dataclass, field
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connections
 
-from apps.leadai import shop_templates
+from apps.leadai import ic_templates, shop_templates
 from apps.leadai.assistant import (
     brokers,
     claims,
@@ -192,11 +202,18 @@ from apps.leadai.assistant import (
     schema,
     shop_flow,
     shops,
+    tracks,
     transcript,
 )
 # As ``scripts``: script() below is the check a scenario names ("the reply is in Urdu script").
 from apps.leadai.assistant import script as scripts
-from apps.leadai.models import DEFAULT_BRAND_NAME, DEFAULT_OFFICE_ADDRESS, DEFAULT_SHOPS_FACTS, LeadAiAppointment
+from apps.leadai.models import (
+    DEFAULT_BRAND_NAME,
+    DEFAULT_OFFICE_ADDRESS,
+    DEFAULT_RESIDENTIAL_FACTS,
+    DEFAULT_SHOPS_FACTS,
+    LeadAiAppointment,
+)
 
 DUBAI = hours.DUBAI
 NOW = dt.datetime(2026, 10, 12, 14, 0, tzinfo=DUBAI)  # a Monday: every run reads the same calendar
@@ -316,13 +333,24 @@ SHOPS_395 = Campaign(
     ),
     buttons=("Interested", "Not Interested"),
 )
+# Batch 2e: the International City mixed template (shops, studios and one-bedrooms, to rent or to buy), word for word as
+# submit_ic_templates submits it (ic_templates.py); ic_templates.kind reads it as "mixed".
+MIXED = Campaign(
+    template=ic_templates.MIXED_NAME,
+    category="MARKETING",
+    record="record: lead",
+    body=shop_templates.rendered(ic_templates.mixed_body(DEFAULT_SHOPS_FACTS), {"1": "{name}", "2": "Malik"}),
+    buttons=ic_templates.MIXED_BUTTONS,
+)
 IC_SHOPS = "ic_shops"
 
 
 def settings_for(scenario) -> types.SimpleNamespace:
-    """The Lead AI settings a scenario's turn reads (no database): the build pack's facts, AR Properties."""
+    """The Lead AI settings a scenario's turn reads (no database): the build pack's facts, AR Properties, and the
+    residential facts' defaults (their clusters name International City for tracks.decide)."""
     return types.SimpleNamespace(
         shops_facts=DEFAULT_SHOPS_FACTS,
+        residential_facts=DEFAULT_RESIDENTIAL_FACTS,
         closed_dates=list(scenario.closed),
         brand_name=DEFAULT_BRAND_NAME,
         viewing_agent_name="",
@@ -965,6 +993,28 @@ def wants(kind: str) -> Check:
     return _check("fact", test)
 
 
+def track(expected: str, unit: str | None = None, *, deal: str | None = None, clusters: tuple | None = None) -> Check:
+    """The chat's track as code decides it (tracks.decide, as engine._run_claimed stores it: batch 2e), and its unit, deal
+    and clusters when given ("" is "not known yet")."""
+
+    def test(run):
+        got = run.decision
+        if got is None:
+            return "no track decided (not a shops chat)"
+        misses = []
+        if got.track != expected:
+            misses.append(f"track {got.track or 'not known'}, expected {expected or 'not known'}")
+        if unit is not None and got.unit != unit:
+            misses.append(f"unit {got.unit or 'none'}, expected {unit or 'none'}")
+        if deal is not None and got.deal != deal:
+            misses.append(f"deal {got.deal or 'none'}, expected {deal or 'none'}")
+        if clusters is not None and tuple(got.clusters) != tuple(clusters):
+            misses.append(f"clusters {list(got.clusters)}, expected {list(clusters)}")
+        return "; ".join(misses) or None
+
+    return _check("track", test)
+
+
 # Shop talk to someone who wants no shop to rent (the owner's rule, 2026-10-15), in what goes out.
 SHOP_TALK = re.compile(
     r"\btype\s*[123]\b|\btypes?\s+of\s+shops\b|\bshops?\s+available\b|\bfor\s+yourself\b|\bfor\s+a\s+client\b|\bdrive\s+you\b"
@@ -1258,6 +1308,14 @@ class Scenario:
     # A shops chat: the old lead's Bitrix DATE_CREATE (YYYY-MM-DD) and COMMENTS (lead_history; board T28).
     crm_asked: str = ""
     crm_notes: str = ""
+    # Batch 2e (spec §8): the chat's stored track and unit (state.track, state.unit), the lead context as
+    # lead_context.parse keeps it (state.lead_context: never read from Bitrix here), and, for slice B's full-name gate,
+    # whether our last line asked for the full name and the time held for it.
+    track: str = ""
+    unit: str = ""
+    lead_context: dict = field(default_factory=dict)
+    full_name_asked: bool = False
+    held: dict | None = None
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -3816,6 +3874,237 @@ SCENARIOS = [
         expect=[action("none"), out_in("latin"), no_second_booking()],
         words=EITHER,
     ),
+    # Batch 2e slice A (spec §8): the mixed template's first answer is code's, never the shops' for-whom line by default
+    # (tracks.first_yes): the opener for the studio or one-bedroom the lead asked about, the for-whom line for a shop
+    # lead, "What are you looking for ...?" otherwise; its "Not now" and "Stop messages" are the shops' own.
+    Scenario(
+        "shops-mixed-yes-tap",
+        "mixed template: the tap 'Yes, still looking' with nothing known asks what they want, never 'for yourself?'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        new=["[tapped: Yes, still looking]"],
+        expect=[sends_line("res_what_need"), invited(False), track("")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-typed-yes",
+        "mixed template: a typed 'Yes' with nothing known asks what they want, never 'for yourself?'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        new=["Yes"],
+        expect=[sends_line("res_what_need"), invited(False), track("")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-studio-lead",
+        "mixed template: a Bayut studio lead in Spain Cluster taps yes and gets code's opener for that studio",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        lead_context={"source": "Bayut", "listing_ref": "a7group-1722", "unit": "studio", "property": "apartment", "cluster": "Spain", "deal": "rent"},
+        new=["[tapped: Yes, still looking]"],
+        expect=[
+            out_says(r"^Great! Is the studio in Spain Cluster for yourself, or are you checking for a client\?$", "open on the lead's studio"),
+            track("rent", "studio", clusters=("Spain",)), invited(False),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-1br-lead-arabic",
+        "mixed template: 'نعم' from an England Cluster one-bedroom lead gets the opener for it, in Arabic",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        name="Khalid Hassan",
+        lead_context={"source": "Property Finder", "unit": "one_br", "cluster": "England", "deal": "rent"},
+        new=["نعم"],
+        language="ar",
+        expect=[out_says(r"الشقة بغرفة نوم واحدة في كلستر إنجلترا", "open on the lead's one-bedroom"), out_in("arabic"), track("rent", "one_br")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-shop-lead",
+        "mixed template: a shop lead's yes gets the shops' 'for yourself, or for a client?'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        lead_context={"source": "Property Finder", "property": "shop", "cluster": "China"},
+        new=["[tapped: Yes, still looking]"],
+        expect=[sends_line("for_whom"), track("shop")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-buyer-lead",
+        "mixed template: a studio buyer's yes asks what they want (the sale flow waits for slice C), never 'for yourself?'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        lead_context={"source": "Bayut", "unit": "studio", "property": "apartment", "deal": "sale"},
+        new=["[tapped: Yes, still looking]"],
+        expect=[sends_line("res_what_need"), track("other", "studio", deal="sale")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-known-shop",
+        "mixed template: a known shop end user's yes gets the shop types, the shop track's next step",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="shop",
+        facts={"for_client": False, "property_type": "shop", "business_activity": "mobile phone shop"},
+        new=["[tapped: Yes, still looking]"],
+        expect=[sends_step(shop_flow.LIST), track("shop")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-yes-known-studio",
+        "mixed template: a chat known to want a studio to rent gets the opener for it on its yes",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="rent",
+        unit="studio",
+        new=["Yes"],
+        expect=[out_says(r"^Great! Is the studio for yourself, or are you checking for a client\?$", "open on their studio"), track("rent", "studio")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-not-now",
+        "mixed template: 'Not now' gets 'Should I check back with you in a month?', as the shops' own",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        new=["[tapped: Not now]"],
+        expect=[sends_line("check_back"), follow_up("ask")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-mixed-stop",
+        "mixed template: 'Stop messages' opts out with the shops' line",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        new=["[tapped: Stop messages]"],
+        expect=[opt_out("stop_all"), sends_line("stop_all")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    # The track traps (spec §8): words that look like another need and are none, or are one. The track as code stores it in
+    # shadow, and 2d's answers unchanged (slice A changes no reply).
+    Scenario(
+        "shops-track-shop-yes",
+        "track: Template A's 'Yes, show me shops' is the shop track, and still gets 'for yourself, or for a client?'",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["[tapped: Yes, show me shops]"],
+        expect=[sends_line("for_whom"), track("shop")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-photo-studio",
+        "track trap: 'a shop for my photo studio' is a shop, never a studio to rent",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a shop for my photo studio"],
+        expect=[track("shop"), no_need()],
+    ),
+    Scenario(
+        "shops-track-room-at-the-back",
+        "track trap: 'a shop with a room at the back' is a shop, never a room to rent",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a shop with a room at the back for storage"],
+        expect=[track("shop"), no_need()],
+    ),
+    Scenario(
+        "shops-track-live-in-a-studio",
+        "track trap: 'I live in a studio in France cluster, I need a shop' is a shop customer, never a studio seeker",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I live in a studio in France cluster, I need a shop for my mobile business"],
+        expect=[track("shop"), no_need()],
+    ),
+    Scenario(
+        "shops-track-1br-near-my-shop",
+        "track trap: 'I need a 1BR near my shop' wants a one-bedroom to rent (their shop is where), 2d's line for it",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a 1BR near my shop"],
+        expect=[not_a_shop_line(), wants("home"), no_shop_list(), track("rent", "one_br")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-room-and-hall-arabic",
+        "track trap: 'غرفة وصالة' (a room and a hall) is a one-bedroom, never a room; 2d's line in Arabic",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Khalid Hassan",
+        new=["أبحث عن غرفة وصالة للإيجار"],
+        language="ar",
+        expect=[not_a_shop_line(), wants("home"), out_in("arabic"), track("rent", "one_br")],
+        words=CODE,
+        loose=("language",),
+    ),
+    Scenario(
+        "shops-track-one-bed",
+        "track trap: '1 bed' is a one-bedroom (2d read it as nothing): 2d's line, the one-bedroom track",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need 1 bed in International City"],
+        expect=[not_a_shop_line(), wants("home"), no_shop_list(), track("rent", "one_br")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-from-china",
+        "track trap: 'I am from China, I need a studio' names no cluster, whatever community the model writes",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I am from China, I need a studio"],
+        expect=[not_a_shop_line(), track("rent", "studio", clusters=())],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-studio-sale-listing",
+        "track trap: 'is the studio still there?' on a sale listing is a buyer (other until the sale flow is live)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        lead_context={"source": "Property Finder", "listing_ref": "a7group-1891", "unit": "studio", "property": "apartment", "deal": "sale"},
+        new=["is the studio still there?"],
+        expect=[not_a_shop_line(), track("other", "studio", deal="sale")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-englund-1bhk-49",
+        "launch chat 49 re-read: 'I need room / 1bhk Englund x cluster' is a one-bedroom to rent in England Cluster",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Mohammed",
+        new=["I need room\n1bhk Englund x cluster"],
+        expect=[not_a_shop_line(), wants("home"), track("rent", "one_br", clusters=("England",))],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-continuity-448",
+        "campaigns 448/449: a chat holding 2d's 'a studio apartment' that says 'ok, today 5 pm' is the rent track; booked",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=STUDIO_ANSWERED,
+        facts=WANTS_STUDIO,
+        invites=1,
+        new=["ok, today 5 pm"],
+        expect=[track("rent", "studio"), books("2026-10-12", "17:00"), out_says(r"Your meeting is confirmed", "send the visit's confirmation")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-villa-jvc",
+        "track: a villa in JVC is the other track: 2d's line, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["I need a villa in JVC"],
+        expect=[not_a_shop_line(), no_shop_list(), track("other")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-track-2br",
+        "track: a two-bedroom flat is the other track: 2d's line, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["Looking for a 2BR flat"],
+        expect=[not_a_shop_line(), no_shop_list(), track("other", "two_plus")],
+        words=CODE,
+    ),
 ]
 
 
@@ -4043,6 +4332,27 @@ def first_answer(scenario: Scenario) -> bool:
     return not outbound or outbound[-1][0] == "campaign"
 
 
+def template_kind(scenario: Scenario) -> str:
+    """As engine._run_claimed: ic_templates.kind of the campaign template the chat answers."""
+    return ic_templates.kind(scenario.campaign.template)
+
+
+def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | None:
+    """A shops chat's track, as engine._run_claimed decides it (tracks.decide): before the model with the burst's words
+    alone, and after it with the model's tag and the facts it recorded (``answer``). The lead context is the scenario's
+    (lead_context.parse's shape), never read from Bitrix; None in a general chat."""
+    if scenario.playbook != IC_SHOPS:
+        return None
+    inputs = {
+        "words": need_words(scenario), "facts": scenario.facts, "stored": scenario.track, "stored_unit": scenario.unit,
+        "lead": dict(scenario.lead_context), "template_kind": template_kind(scenario), "first_answer": first_answer(scenario),
+        "clusters": tracks.cluster_names(settings_for(scenario)),
+    }
+    if answer is None:
+        return tracks.decide(**inputs)
+    return tracks.decide(model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **inputs)
+
+
 def code_first(scenario: Scenario) -> dict | None:
     """The answer when engine._run_claimed settles the turn without the model, else None.
 
@@ -4111,6 +4421,10 @@ def code_first(scenario: Scenario) -> dict | None:
             return silent  # as live (shop_flow.another_page): the copy's next page, nothing to answer
         if licence_answer(scenario):
             return None  # the model answers a no to the licence request, or a "later"; no shops rule reads it
+        # As live (batch 2e): the mixed template's first yes reads the chat's track (tracks.first_yes).
+        decision = decide(scenario)
+        kind = template_kind(scenario)
+        mixed = tracks.first_yes(decision, for_client_known=scenario.facts.get("for_client") is not None) if kind != ic_templates.SHOP else ""
         rule = engine.shops_rule(
             text,
             tapped=bool(tap),
@@ -4126,11 +4440,13 @@ def code_first(scenario: Scenario) -> dict | None:
             quiet=scenario.handed_over != "no",
             facts=scenario.facts,
             end_user=scenario.facts.get("for_client") is False,
+            template_kind=kind,
+            mixed=mixed,
         )
         if rule:
             # As engine._their_words: a tap by its label.
             words = " ".join(match[1] if (match := _TAP.match(item)) else item for item in (said or texts))
-            return engine.shops_answer(rule, engine.shops_language(text, bool(tap), scenario.language_so_far), words)
+            return engine.shops_answer(rule, engine.shops_language(text, bool(tap), scenario.language_so_far), words, decision=decision)
     words = engine.deferral(
         said,
         appointment=appointment,
@@ -4175,6 +4491,7 @@ class Run:
     customer_script: str = ""  # the script of their latest typed message (scripts.customer_script)
     line_language: str = ""  # the language code's own lines go out in (scripts.follow)
     may_invite: bool = True  # as engine._run_claimed: the chat may still be invited
+    decision: tracks.Decision | None = None  # a shops chat's track and unit, as engine._run_claimed stores them (batch 2e)
 
 
 def code_slots(scenario: Scenario, lang: str, slots: list, *, again: bool = False) -> str:
@@ -4273,6 +4590,9 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     if answer.get("price"):
         # As live (claims.price_turn): the honest price line, our lowest type, or a colleague offered.
         return CODE, claims.price_text(answer["price"], lang, DEFAULT_SHOPS_FACTS)
+    if answer.get("open_lead"):
+        # As live (batch 2e, tracks.first_yes): the mixed template's yes from a lead whose studio or one-bedroom we know.
+        return CODE, tracks.open_lead_text(lang, answer["open_lead"].get("unit", ""), answer["open_lead"].get("clusters") or ())
     if answer.get("converted"):
         # engine._shape (never the model's "confirmed"), a deferral, a shops broker, a call request or must-answer
         # questions handed to a person (people.settle): a fixed line, a shops chat's holding line its own.
@@ -4364,6 +4684,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
         need = None
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
+            run.decision = decide(scenario)  # as live: a rule's turn stores the track decided before the model
         else:
             answer, when, completions, rejected, still_invalid = engine.ask_model(
                 prompt.system_prompt(scenario.playbook), built.context, built.appointment, scenario.now, list(scenario.closed),
@@ -4380,6 +4701,8 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 # carries the Broker label); a chat a person holds counts "I am a broker" only, and a bare "Agent" answers
                 # our for-whom question only.
                 brokers.backstop(answer, scenario.facts, words, held=scenario.handed_over != "no", our_last=our_last(scenario))
+                # As live (batch 2e): the track again, with the model's tag and the facts it recorded this turn.
+                run.decision = decide(scenario, answer)
             if shops_chat and not still_invalid:
                 # As live (engine.own_time): their own exact day and hour, booked over another time the model confirmed.
                 ours = [item[0] for item in scenario.chat if item[0] in ("assistant", "agent", "reminder")]

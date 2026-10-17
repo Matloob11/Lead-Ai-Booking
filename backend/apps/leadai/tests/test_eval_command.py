@@ -517,6 +517,42 @@ RIGHT = {
         facts={"for_client": False, "business_activity": "restaurant"},
     ),
     "shops-gate-half-hour": booked("2026-10-12", "16:30"),
+    # Batch 2e slice A: the mixed template's first answer is code's (never asked); the track traps keep 2d's answers.
+    "shops-mixed-yes-tap": answer("", send=False),
+    "shops-mixed-typed-yes": answer("", send=False),
+    "shops-mixed-yes-studio-lead": answer("", send=False),
+    "shops-mixed-yes-1br-lead-arabic": answer("", send=False),
+    "shops-mixed-yes-shop-lead": answer("", send=False),
+    "shops-mixed-yes-buyer-lead": answer("", send=False),
+    "shops-mixed-yes-known-shop": answer("", send=False),
+    "shops-mixed-yes-known-studio": answer("", send=False),
+    "shops-mixed-not-now": answer("", send=False),
+    "shops-mixed-stop": answer("", send=False),
+    "shops-track-shop-yes": answer("", send=False),
+    "shops-track-photo-studio": answer("A photo studio, got it. Is the shop for yourself, or are you checking for a client?", facts={"business_activity": "photo studio"}),
+    "shops-track-room-at-the-back": answer("Sure, a back room for storage. Is the shop for yourself, or are you checking for a client?"),
+    "shops-track-live-in-a-studio": answer(
+        "A mobile business, got it. Is the shop for yourself, or are you checking for a client?", facts={"business_activity": "mobile phones"}
+    ),
+    "shops-track-1br-near-my-shop": answer("Great! What business will the shop be for?", facts={"property_type": "shop"}),
+    "shops-track-room-and-hall-arabic": answer(
+        "عذراً على اللبس. هل تبحث عن شقة للإيجار في المدينة العالمية؟",
+        language="ar",
+        reply_en="Sorry for the confusion. Are you looking for a flat for rent in International City?",
+        handover="wrong_need",
+        facts={"property_type": "flat", "intent": "rent"},
+    ),
+    "shops-track-one-bed": answer("Great! What business will the shop be for?"),
+    # The model writes the nationality as the community: code never reads it as China Cluster.
+    "shops-track-from-china": answer("Great! What business will the shop be for?", facts={"community": "China"}),
+    "shops-track-studio-sale-listing": answer("Great! What business will the shop be for?"),
+    "shops-track-englund-1bhk-49": answer(
+        "Great! What business will the shop be for?",
+        facts={"for_client": False, "property_type": "shop", "business_activity": "room", "intent": "rent", "bedrooms": "1bhk", "community": "England"},
+    ),
+    "shops-track-continuity-448": booked("2026-10-12", "17:00"),
+    "shops-track-villa-jvc": answer("Great! What business will the shop be for?"),
+    "shops-track-2br": answer("Great! What business will the shop be for?"),
 }
 
 
@@ -645,10 +681,14 @@ class EvalCommandTests(TestCase):
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
                 "shops-a-yes-known", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
                 # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
-                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page", "shops-no-thankyou-120", "shops-not-now",
-                "shops-not-now-no", "shops-not-now-yes",
+                "shops-book-tap", "shops-licence-copy", "shops-licence-second-page",
+                # Batch 2e: the mixed template's first answer, "Not now" and "Stop messages" are code's.
+                "shops-mixed-not-now", "shops-mixed-stop", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic", "shops-mixed-yes-buyer-lead",
+                "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead", "shops-mixed-yes-studio-lead",
+                "shops-mixed-yes-tap",
+                "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no", "shops-not-now-yes",
                 "shops-other-types-tap", "shops-rented-no", "shops-rented-reach-out-63", "shops-rented-soft-no-63", "shops-spam", "shops-stop",
-                "shops-type-tap",
+                "shops-track-shop-yes", "shops-type-tap",
                 "shops-type-tap-again", "shops-yes-tap", "stop-all", "stop-arabic-after-english", "wrong-number",
             ],
         )
@@ -665,7 +705,7 @@ class EvalCommandTests(TestCase):
             sorted(corrected),
             [
                 "lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english",
-                "shops-arabic", "shops-want-flat-arabic",
+                "shops-arabic", "shops-track-room-and-hall-arabic", "shops-want-flat-arabic",
             ],
         )
         self.assertEqual(model.call_count, total - len(settled) + len(corrected))

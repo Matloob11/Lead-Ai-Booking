@@ -110,15 +110,27 @@ def drop_quoted(reply: str, notes: str, known: str) -> tuple[str, bool]:
     return " ".join(kept), True
 
 
+def keep(state, row, now) -> tuple[dt.date | None, str]:
+    """Store (first asked, notes) of a lead read just now (here, or by lead_context's read of the same lead: batch 2e)."""
+    from ..models import LeadAiChatState
+
+    asked = asked_on(row.get("DATE_CREATE")) if isinstance(row, dict) else None
+    notes = clean_notes(row.get("COMMENTS")) if isinstance(row, dict) else ""
+    LeadAiChatState.objects.filter(pk=state.pk).update(lead_asked_on=asked, lead_notes=notes, lead_info_at=now)
+    state.lead_asked_on, state.lead_notes, state.lead_info_at = asked, notes, now
+    return asked, notes
+
+
 def for_turn(conversation, chat, state, now) -> tuple[dt.date | None, str]:
     """(first asked, notes) of this shops chat's lead: the stored ones, else read once now.
 
     Read only while not read yet and fewer than TRIES reads failed. A chat with no Bitrix lead
-    (or no Bitrix configured) is looked at once and has none. Never raises."""
+    (or no Bitrix configured) is looked at once and has none. Never raises. The same read keeps the
+    lead's context too (lead_context.keep), so that one is not read again (batch 2e)."""
     from apps.crmlink import client
 
     from ..models import LeadAiChatState
-    from . import crm, crm_fields
+    from . import crm, crm_fields, lead_context
 
     if state.lead_info_at is not None or state.lead_info_tries >= TRIES:
         return state.lead_asked_on, state.lead_notes or ""
@@ -141,8 +153,7 @@ def for_turn(conversation, chat, state, now) -> tuple[dt.date | None, str]:
         state.lead_info_tries += 1
         LeadAiChatState.objects.filter(pk=state.pk).update(lead_info_tries=state.lead_info_tries)
         return None, ""
-    asked = asked_on(row.get("DATE_CREATE")) if isinstance(row, dict) else None
-    notes = clean_notes(row.get("COMMENTS")) if isinstance(row, dict) else ""
-    LeadAiChatState.objects.filter(pk=state.pk).update(lead_asked_on=asked, lead_notes=notes, lead_info_at=now)
-    state.lead_asked_on, state.lead_notes, state.lead_info_at = asked, notes, now
+    asked, notes = keep(state, row, now)
+    if getattr(state, "lead_context_at", None) is None and getattr(state, "lead_context_tries", 0) < lead_context.TRIES:
+        lead_context.keep(state, row, now)  # the same read: lead_context never reads this lead again
     return asked, notes

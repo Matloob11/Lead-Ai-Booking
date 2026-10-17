@@ -269,11 +269,15 @@ def is_acceptance(text: str) -> bool:
 # The shops playbook -----------------------------------------------------------------
 
 # Template A's buttons are [Yes, show me shops] [Not now] [Stop messages] and
-# Template B's [Yes, book a viewing] [Not now]; the live campaign's own is "Interested".
+# Template B's [Yes, book a viewing] [Not now]; the live campaign's own is "Interested"; the mixed template's
+# (batch 2e, ic_templates) [Yes, still looking] [Not now] [Stop messages].
 SHOPS_OPT_OUT = {normalize_text("stop messages"): STOP_ALL, normalize_text("stop message"): STOP_ALL}
 POSITIVE_TAPS = {
     normalize_text(p)
-    for p in ("yes, show me shops", "yes show me shops", "show me shops", "yes, book a viewing", "book a viewing", "interested", "i am interested", "im interested")
+    for p in (
+        "yes, show me shops", "yes show me shops", "show me shops", "yes, book a viewing", "book a viewing", "interested", "i am interested",
+        "im interested", "yes, still looking", "still looking",
+    )
 }
 # Template B's yes: a viewing to book, not shops to look at.
 BOOK_TAPS = {normalize_text(p) for p in ("yes, book a viewing", "book a viewing")}
@@ -627,6 +631,16 @@ LINES = {
         "ur": "شکریہ! کیا دکان آپ کے اپنے لیے ہے، یا آپ کسی کلائنٹ کے لیے دیکھ رہے ہیں؟",
         "hi_latin": "Shukriya! Kya shop aapke apne liye hai, ya aap kisi client ke liye dekh rahe hain?",
         "hi": "शुक्रिया! क्या दुकान आपके अपने लिए है, या आप किसी क्लाइंट के लिए देख रहे हैं?",
+    },
+    # The mixed template (batch 2e, spec §1.4.2): its first yes from someone whose need nobody knows yet, never the shops'
+    # for-whom line (tracks.first_yes; the opener for a known studio or one-bedroom is tracks.open_lead_text).
+    "res_what_need": {
+        "en": "Great! What are you looking for: a shop, a studio or a one-bedroom, to rent or to buy?",
+        "ar": "رائع! ما الذي تبحث عنه: محل، أم استوديو، أم شقة بغرفة نوم واحدة، للإيجار أم للشراء؟",
+        "ur_latin": "Behtareen! Aap kya dhoond rahe hain: shop, studio ya one-bedroom, kiraye par ya khareedne ke liye?",
+        "ur": "بہترین! آپ کیا ڈھونڈ رہے ہیں: دکان، اسٹوڈیو یا ون بیڈروم، کرائے پر یا خریدنے کے لیے؟",
+        "hi_latin": "Badhiya! Aap kya dhoondh rahe hain: shop, studio ya one-bedroom, kiraye par ya kharidne ke liye?",
+        "hi": "बढ़िया! आप क्या ढूँढ रहे हैं: दुकान, स्टूडियो या वन-बेडरूम, किराए पर या ख़रीदने के लिए?",
     },
     # Shops: "Not now".
     "check_back": {

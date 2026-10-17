@@ -53,6 +53,50 @@ def default_shops_facts() -> dict:
     return copy.deepcopy(DEFAULT_SHOPS_FACTS)
 
 
+# What the International City studios and one-bedrooms may quote (batch 2e spec §2.2; the rental brief
+# v2.1 as Matloob confirmed it, Q27 and Q28, with Q41's studio rent of 2026-10-17). The owner edits them
+# in the Lead AI settings; anything missing or broken falls back to these, key by key. Rents are per
+# year in AED, sale prices in AED; the commission ranges are before VAT, and VAT is on the commission
+# only (Q28). ``clusters`` also names International City for assistant/tracks.py.
+DEFAULT_RESIDENTIAL_FACTS = {
+    "clusters": ["Spain", "France", "England", "China", "Persia", "Morocco", "Emirates", "Greece", "Russia", "Italy"],
+    "european_clusters": ["Spain", "France", "England", "Greece", "Italy", "Russia"],
+    "rent": {
+        "studio": {"from": 29000, "to": 33000, "average": 31000},  # Q41: A7's live studios ask 29,000 and 32,000
+        "one_br": {"from": 40000, "to": 45000},
+        "one_br_european": {"from": 42000, "to": 43000},
+    },
+    "sale": {
+        "studio": {"from": 330000, "to": 350000},
+        "studio_morocco": {"from": 310000, "to": 350000},
+        "one_br": {"from": 450000, "to": 550000},
+    },
+    "charges": {
+        "deposit": {"from": 2500, "to": 3000},
+        "commission": {"studio": {"from": 2000, "to": 2500}, "one_br": {"from": 3000, "to": 3500}},
+        "vat_percent": 5,
+        "ejari": 350,
+        "dewa_deposit": 2000,
+        "cheques": "1 to 4 cheques, depending on the owner",
+        "chiller": (
+            "Depends on the building: included in many International City buildings, charged separately in others; "
+            "our agent confirms it for the unit."
+        ),
+        "documents": (
+            "Passport, UAE residence visa and Emirates ID; for a company contract, the trade licence and the signatory's "
+            "documents. Our agent collects them in person."
+        ),
+    },
+}
+
+
+def default_residential_facts() -> dict:
+    """A fresh copy, as default_shops_facts."""
+    import copy
+
+    return copy.deepcopy(DEFAULT_RESIDENTIAL_FACTS)
+
+
 class LeadAiCampaign(models.Model):
     """A campaign whose chats belong to the Lead AI screen (the popup checkbox)."""
 
@@ -189,6 +233,19 @@ class LeadAiChatState(models.Model):
     lead_notes = models.CharField(max_length=400, blank=True, default="", db_default="")
     lead_info_at = models.DateTimeField(null=True, blank=True)
     lead_info_tries = models.PositiveSmallIntegerField(default=0, db_default=0)
+    # Shops-playbook chats, batch 2e (one bot for every need, assistant/tracks.py): which need the chat serves, as
+    # code decided it ("shop", "rent", "sale", "other", or "" while nobody knows yet), the unit on a home track
+    # ("studio", "one_br", "two_plus" or ""), and when the track last changed. Code's own: the model never writes
+    # them. Database defaults: rows the old code inserts during a deploy name none.
+    track = models.CharField(max_length=16, blank=True, default="", db_default="")
+    unit = models.CharField(max_length=16, blank=True, default="", db_default="")
+    track_changed_at = models.DateTimeField(null=True, blank=True)
+    # The Bitrix lead's own words on what they asked about (assistant/lead_context.py; board T91): the portal, the
+    # listing ref and link, the unit, the cluster, rent or sale, the budget, read once (``lead_context_at``) with
+    # three tries (``lead_context_tries``), as data. None until read.
+    lead_context = models.JSONField(null=True, blank=True)
+    lead_context_at = models.DateTimeField(null=True, blank=True)
+    lead_context_tries = models.PositiveSmallIntegerField(default=0, db_default=0)
     # The CRM record's responsible person, looked up once and cached.
     responsible_bitrix_user_id = models.CharField(max_length=16, blank=True)
     responsible_agent = models.ForeignKey(
@@ -244,6 +301,9 @@ class LeadAiSettings(models.Model):
     # quote (DEFAULT_SHOPS_FACTS shows the shape), the brand it speaks for and the
     # agent a booked client meets ("" is "our agent").
     shops_facts = models.JSONField(default=default_shops_facts, blank=True)
+    # Batch 2e: what the International City studios and one-bedrooms may quote (DEFAULT_RESIDENTIAL_FACTS shows
+    # the shape). Its clusters also tell assistant/tracks.py what is International City.
+    residential_facts = models.JSONField(default=default_residential_facts, blank=True)
     brand_name = models.CharField(max_length=80, default=DEFAULT_BRAND_NAME, db_default=DEFAULT_BRAND_NAME)
     viewing_agent_name = models.CharField(max_length=60, blank=True, default="", db_default="")
     # Circuit breaker: after repeated OpenAI failures the assistant pauses itself.

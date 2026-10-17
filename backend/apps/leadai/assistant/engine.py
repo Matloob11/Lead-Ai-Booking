@@ -138,6 +138,14 @@ Its review (2026-10-17): in a chat a person holds, or one whose answer or facts 
 false, their business known, "for myself"), only "I am / we are a broker" counts; our agent ("agent not here", "Office
 mein agent hai?"), an owner's own client ("I have a client at 3"), a no or a fee ("not as an agent", "as broker
 commission") never; a bare "Agent" answers our for-whom question only.
+
+One bot for every need, batch 2e slice A (2026-10-17; tracks.py, lead_context.py): a shops chat's track (shop, rent, sale,
+other, or not known yet) and unit are code's, decided before the model from the burst's words, the stored track, 2d's
+facts.need, the lead context (read from Bitrix only when a step needs it, once per chat) and the campaign template's kind
+(ic_templates), and again after the model with its tag; _apply stores them (state.track, state.unit, track_changed_at) and
+the turn's actions carry them, in shadow: no reply changes, except the first yes to the mixed template, which is never the
+shops' for-whom line by default (shops_rule's MIXED_YES: the opener for the studio or one-bedroom the lead asked about, or
+"What are you looking for ...?"; a shop lead keeps the for-whom line).
 """
 
 from __future__ import annotations
@@ -158,7 +166,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
-from .. import lane
+from .. import ic_templates, lane
 from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 from . import (
     alerts,
@@ -170,6 +178,7 @@ from . import (
     crm_fields,
     filters,
     hours,
+    lead_context,
     lead_history,
     live,
     lost,
@@ -185,6 +194,7 @@ from . import (
     script,
     shop_flow,
     shops,
+    tracks,
     transcribe,
     transcript,
 )
@@ -1071,6 +1081,8 @@ RENTED_REASON = "already rented"
 NOT_NOW = "not_now"
 FOR_WHOM = "for_whom"
 SPAM_RULE = "spam"
+# The mixed template's first yes (batch 2e, spec §1.4.2): "mixed_yes:res_open_lead" or "mixed_yes:res_what_need".
+MIXED_YES = "mixed_yes"
 # What a lead in discovery has told us, in the build pack's order (business, size or budget,
 # licence): with two of these, spam words are the model's to judge, never code's.
 _DISCOVERY = (("business_activity",), ("size_sqft",), ("budget_aed",), ("licence_kind", "trade_licence"))
@@ -1139,6 +1151,8 @@ def shops_rule(
     quiet: bool = False,
     facts: dict | None = None,
     end_user: bool = False,
+    template_kind: str = ic_templates.SHOP,
+    mixed: str = "",
 ) -> str:
     """Which of the shops rules settles this burst without the model, else ''.
 
@@ -1163,6 +1177,12 @@ def shops_rule(
     "Interested") are the first yes: "for yourself, or a client?" while we do
     not know; from an end user, [Yes, book a viewing] gets the two free slots
     and the others the shop types list, never that question again.
+
+    The mixed template's yes ([Yes, still looking], a typed yes; ``template_kind``
+    not a shops one, batch 2e) is never the for-whom line by default: ``mixed`` is
+    tracks.first_yes of the chat's track, the opener for the studio or one-bedroom
+    the lead asked about (MIXED_YES), "What are you looking for ...?", the shops'
+    own rules for a shop chat, or nothing (the model) for a need the chat knows.
     """
     words = (text or "").strip()
     if quiet or not single or not words:
@@ -1177,6 +1197,11 @@ def shops_rule(
         return RENTED_NO
     if ((tapped and not meeting_open) or not visit_on_table) and rules.is_not_now(words):
         return NOT_NOW
+    if (
+        first_answer and template_kind != ic_templates.SHOP and mixed != tracks.FOR_WHOM
+        and (rules.is_positive_tap(words) or rules.is_acceptance(words))
+    ):
+        return f"{MIXED_YES}:{mixed}" if mixed else ""
     if first_answer and not for_client_known and (rules.is_positive_tap(words) or rules.is_acceptance(words)):
         return FOR_WHOM
     if first_answer and tapped and end_user and not meeting_open and rules.is_positive_tap(words):
@@ -1536,12 +1561,34 @@ def tap_with_words(
     return ""
 
 
-def shops_answer(rule: str, language: str, words: str = "", known: dict | None = None) -> dict:
+def _mixed_answer(line_kind: str, language: str, decision) -> dict:
+    """The mixed template's first yes (MIXED_YES): code's opener for the studio or one-bedroom we know (``open_lead``:
+    tracks.open_lead_text, in the language code writes in), else "What are you looking for ...?" (rules)."""
+    if line_kind != tracks.OPEN_LEAD or decision is None or decision.unit not in tracks.UNITS:
+        line_kind = tracks.WHAT_NEED
+    segment = "other"
+    if line_kind == tracks.OPEN_LEAD:
+        segment = "buyer" if decision.deal == tracks.SALE else "residential_tenant"
+    answer = schema.normalize({"language": language, "segment": segment, "send": True, "reply": "-"}, shops=True)
+    answer["rule"] = f"{MIXED_YES}:{line_kind}"
+    answer["converted"] = line_kind
+    if line_kind == tracks.OPEN_LEAD:
+        answer["open_lead"] = {"unit": decision.unit, "clusters": list(decision.clusters)}
+        answer["reply"] = tracks.open_lead_text(language, decision.unit, decision.clusters)
+    else:
+        answer["reply"] = rules.line(line_kind, language)
+    return answer
+
+
+def shops_answer(rule: str, language: str, words: str = "", known: dict | None = None, decision=None) -> dict:
     """What code answers for a shops rule, shaped like a model's answer: a fixed line
     (``converted``), or for a no the not-interested opt-out with the reason
     (``lost_reason``). ``followup`` tells _apply what to do with the check-back:
     "ask", "schedule" (in a month) or "clear". A tap on the shops list or a card, and
-    the licence copy, get a step (``shop_step``; _flow_answer); ``known`` is the chat's facts."""
+    the licence copy, get a step (``shop_step``; _flow_answer); ``known`` is the chat's facts.
+    The mixed template's first yes reads the chat's track (``decision``: tracks.decide)."""
+    if rule.partition(":")[0] == MIXED_YES:
+        return _mixed_answer(rule.partition(":")[2], language, decision)
     if rule.partition(":")[0] in (TYPE_TAP, BOOK_TAP, TYPES_TAP, LICENCE_RECEIVED):
         return _flow_answer(rule, language, known)
     answer = schema.normalize({"language": language, "segment": "commercial_tenant", "send": True, "reply": "-"}, shops=True)
@@ -3598,13 +3645,15 @@ def _asked_second_shop(message) -> bool:
 
 def _shops_rule_for(
     conversation, state, burst, said, appointment, last_ours, campaign_templates, *, licence_alone: bool = False,
-    licence_reply: bool = False,
+    licence_reply: bool = False, template_kind: str = ic_templates.SHOP, decision=None,
 ) -> tuple[str, str, str]:
     """(rule, its line's language, the customer's words) when a shops rule settles this burst.
 
     ``licence_alone``: the licence copy came, with nothing else said (LICENCE_RECEIVED);
     ``licence_reply``: they answered our request for it with a no, which is the
     model's to answer: no shops rule reads it as "Not now" or a decline of the offer.
+    ``template_kind`` / ``decision``: the campaign template's kind and the chat's track (batch 2e), which the mixed
+    template's first yes reads (tracks.first_yes).
     """
     key = said[-1] if said else burst[-1]
     label = _tap_label(key)
@@ -3623,6 +3672,9 @@ def _shops_rule_for(
         return LICENCE_RECEIVED, state.language or "en", ""
     if licence_reply:
         return "", state.language or "en", ""
+    mixed = ""
+    if template_kind != ic_templates.SHOP and decision is not None:
+        mixed = tracks.first_yes(decision, for_client_known=facts.get("for_client") is not None)
     rule = shops_rule(
         text,
         tapped=tapped,
@@ -3640,6 +3692,8 @@ def _shops_rule_for(
         quiet=quiet,
         facts=facts,
         end_user=facts.get("for_client") is False,
+        template_kind=template_kind,
+        mixed=mixed,
     )
     return rule, shops_language(text, tapped, state.language), _their_words(burst)
 
@@ -3772,13 +3826,22 @@ def _run_claimed(
     # words this burst (needs.detect), or as the chat knows it (facts.need).
     words_now = need_texts(said or burst, heard) if shops_chat else []
     need_seen = (needs.detect(words_now) or needs.of(facts)) if shops_chat else None
+    # Which need the chat serves (batch 2e, assistant/tracks.py): code decides the track and the unit; slice A stores them in
+    # shadow (_apply) and only the mixed template's first yes reads them. The lead context is read only when a step needs it.
+    template_kind = ic_templates.kind_of(campaign_msg) if shops_chat else ic_templates.SHOP
+    track_inputs = {
+        "stored": state.track, "stored_unit": state.unit, "template_kind": template_kind,
+        "first_answer": last_ours is not None and transcript.who(last_ours, campaign_templates) == "campaign",
+        "lead": tracks.lazy(lambda: lead_context.for_turn(conversation, chat, state, now)), "clusters": tracks.cluster_names(settings_row),
+    }
+    decision = tracks.decide(words=words_now, facts=facts, **track_inputs) if shops_chat else None
     need = None
     brokered = ""  # what handed a broker over that the model did not (brokers.backstop)
     shops_rule_name, shops_words = "", ""
     if shops_chat:
         shops_rule_name, rule_language, shops_words = _shops_rule_for(
             conversation, state, burst, said, appointment, last_ours, campaign_templates,
-            licence_alone=licence_alone, licence_reply=licence_reply,
+            licence_alone=licence_alone, licence_reply=licence_reply, template_kind=template_kind, decision=decision,
         )
     deferred = "" if shops_rule_name or licence_reply else deferral(
         [(item.body or "") if item.kind == "text" else "" for item in said],
@@ -3794,7 +3857,7 @@ def _run_claimed(
         # types list or a type's card, the licence copy arriving): settled like a
         # deferral, before the model, and shaped like its answer, so the same path
         # sends and stores it.
-        answer = shops_answer(shops_rule_name, rule_language, shops_words, facts)
+        answer = shops_answer(shops_rule_name, rule_language, shops_words, facts, decision=decision)
         when, completions, rejected, still_invalid = None, [], "", False
         tapped_media = answer.get("shop_step") or {}
         if tapped_media.get("kind") == shop_flow.MEDIA:
@@ -3871,6 +3934,10 @@ def _run_claimed(
             brokered = brokers.backstop(
                 answer, facts, words_now, labelled=lambda: conversation.labels.filter(name__iexact=BROKER_LABEL).exists(),
                 held=state.handed_over_at is not None, our_last=our_last,
+            )
+            # The track again, with the model's tag and what it recorded this turn (spec §1.4, hook point 5).
+            decision = tracks.decide(
+                words=words_now, facts=facts, model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **track_inputs
             )
         if shops_chat and not still_invalid:
             # Their own exact day and hour, which the model confirmed at another time ("4:30 PM today is fine" booked at 4:00 PM).
@@ -4101,6 +4168,8 @@ def _run_claimed(
         plan["window"] = answer["window"]  # their own window today, booked at its start (book_window)
     if brokered:
         plan["broker_backstop"] = brokered  # a broker the model served as an end user, handed over by code (brokers.py)
+    if decision is not None:
+        plan["track"] = decision.as_dict()  # the chat's track and unit as code decided them (batch 2e, tracks.py; shadow)
     # Their words, for the alerts a person must act on (a handover, a chase, a call's time).
     answer["their_words"] = _their_words(burst, heard)
     # Lines code writes follow the script the customer types in (T19): "توقف" or a booking
@@ -4313,6 +4382,10 @@ def _run_claimed(
     elif answer.get("price"):
         # The price line (claims.price_turn, launch review issue 12): our lowest type, honestly, or a colleague offered.
         text = claims.price_text(answer["price"], language, settings_row.shops_facts)
+    elif answer.get("open_lead"):
+        # The mixed template's first yes from a lead whose studio or one-bedroom we know (batch 2e, tracks.first_yes):
+        # code's opener, in the language code writes in.
+        text = tracks.open_lead_text(language, answer["open_lead"].get("unit", ""), answer["open_lead"].get("clusters") or ())
     elif answer.get("converted"):
         # A fixed line, never the model's words: a confirmation the office could
         # not take (_shape, written as a confirmation), a deferral, a shops broker,
@@ -4410,7 +4483,7 @@ def _run_claimed(
                 logger.warning("Lead AI could not send the words before the shop media on conversation %s: %s", conversation.pk, exc)
         done = _apply(
             conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=False, playbook=playbook,
-            taken=taken,
+            taken=taken, decision=decision,
         )
         done.update(plan)
         LeadAiTurn.objects.filter(pk=turn.pk).update(
@@ -4432,7 +4505,7 @@ def _run_claimed(
     if not text and not list_step:
         done = _apply(
             conversation, chat, state, answer, action, when, appointment, now, sent=False, holding=False, playbook=playbook,
-            taken=taken,
+            taken=taken, decision=decision,
         )
         done.update(plan)
         return _skip("no reply needed", **done)
@@ -4483,7 +4556,7 @@ def _run_claimed(
         answer.pop("line_language", None)
     done = _apply(
         conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=holding, playbook=playbook,
-        taken=taken,
+        taken=taken, decision=decision,
     )
     if hold is not None:
         hold.close()  # the booking is stored: the next one may look at the slots
@@ -4571,7 +4644,7 @@ def _details(facts: dict) -> dict:
 
 def _apply(
     conversation, chat, state, answer, action, when, appointment, now, *, sent: bool, holding: bool, playbook: str = lane.GENERAL,
-    taken=(),
+    taken=(), decision=None,
 ) -> dict:
     """Store what this turn decided, after the reply went out (or when none was needed).
 
@@ -4585,7 +4658,9 @@ def _apply(
     office starts; a tentative visit never keeps one of those as its time. A shops
     customer who wants no shop to rent, or now wants something else (facts.wanted
     new or changed: who_they_are), is told to the team (_wanted_alert) and written on
-    the lead's timeline, whatever went out.
+    the lead's timeline, whatever went out. A shops chat's track and unit (``decision``:
+    tracks.decide, batch 2e) are stored whatever went out, and when the track moves,
+    its moment (track_changed_at).
     """
     from ..tasks import record_crm_note, sync_appointment_crm
 
@@ -4659,6 +4734,14 @@ def _apply(
         if sent and action in ("confirm", "reschedule") and when is not None and fresh.not_interested_at is not None:
             fresh.not_interested_at = None  # they declined once, and have now booked
             fields.append("not_interested_at")
+        if decision is not None and (decision.track, decision.unit) != (fresh.track or "", fresh.unit or ""):
+            # Which need the chat serves (tracks.decide): code's own, stored in shadow in slice A.
+            if decision.track != (fresh.track or ""):
+                fresh.track_changed_at = now
+                fields.append("track_changed_at")
+                done["track_changed"] = {"from": fresh.track or "", "to": decision.track}
+            fresh.track, fresh.unit = decision.track, decision.unit
+            fields += ["track", "unit"]
         fresh.save(update_fields=sorted(set(fields)))
         facts = fresh.facts
         if shops_chat and sent and facts.get("already_rented") is True and facts_before.get("already_rented") is not True:

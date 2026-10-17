@@ -19,6 +19,11 @@ from .assistant import shops
 
 MIXED_NAME = "intl_city_property_reconnect"
 NAMES = (MIXED_NAME,)
+# What kind() says of a campaign template (2e spec §6.1).
+SHOP = "shop"
+MIXED = "mixed"
+# The template names kind() reads as no shops one: Template B never follows them (followups).
+NOT_SHOP_NAMES = (MIXED_NAME,)
 CATEGORY = "MARKETING"
 LANGUAGE = "en"
 MIXED_BUTTONS = ("Yes, still looking", "Not now", "Stop messages")
@@ -61,4 +66,11 @@ def mixed_form(facts) -> dict:
 
 def kind(name: str) -> str:
     """'mixed' for the mixed template, 'shop' for every other campaign template (2e spec §6.1)."""
-    return "mixed" if str(name or "").strip() == MIXED_NAME else "shop"
+    return MIXED if str(name or "").strip() == MIXED_NAME else SHOP
+
+
+def kind_of(message) -> str:
+    """kind() of the template a campaign message (or the follow-ups' Template B) went out with: 'shop' when there is
+    none, as for any template this module does not name."""
+    template = getattr(message, "template", None) if message is not None and getattr(message, "template_id", None) else None
+    return kind(getattr(template, "name", "") if template is not None else "")

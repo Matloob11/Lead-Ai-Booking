@@ -46,6 +46,11 @@ the gateway's credit is out (gateway.credit, board C16): it waits.
   made once and never retried (board C12). A meeting on the lead or a closed stage holds it too,
   and for a customer who wants no shop to rent a person's work on the lead in the last days
   (review 2d). A lead that cannot be read now: the send waits.
+- Template B and the check-back follow a shops template only (batch 2e spec §6.1, ic_templates.kind):
+  Template B is all shops, so a chat whose newest campaign template is the mixed one never gets it
+  (``reengage_due``; ``holds``: HELD_NOT_SHOP_TEMPLATE), nobody who never answered the mixed template
+  gets anything (the brief, Part 12.5), a check-back planned there is dropped on its day until slice B
+  sends the mixed template instead, and its row shows no "waits for approval" note (``panel_note``).
 
 The sweep (tasks.send_due_reminders, every minute) only finds who is due and queues one task per
 chat (tasks.send_follow_up), at most PER_SWEEP at a time. What keeps a chat from being due for
@@ -78,7 +83,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
-from . import lane, shop_templates
+from . import ic_templates, lane, shop_templates
 from .assistant import hours, needs, nudges, rules, shops, transcript
 from .models import LeadAiAlert, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiOptOut, LeadAiSettings, LeadAiTurn
 
@@ -124,6 +129,10 @@ HELD_DECLINED = "they turned our offer down"
 HELD_NOT_NOW = "they said not now"
 HELD_CAPPED = "their message waits for the reply cap"
 HELD_QUESTION = "a question of theirs waits for a colleague's answer"
+# Batch 2e (spec §6.1): Template B is all shops, so it follows a shops campaign template only, never the mixed one.
+HELD_NOT_SHOP_TEMPLATE = "the campaign template was not a shops one (Template B is all shops)"
+# The guard, one constant: Template B and the check-back only after a shops template.
+TEMPLATE_B_AFTER_SHOPS_ONLY = True
 # A follow-up reads back at most this many of the chat's newest messages (a shops chat has far fewer).
 READ_BACK = 200
 # How much of their words an open-question alert carries (a person answers them: chat 95 asked nine).
@@ -238,7 +247,8 @@ def reengage_due(conversation, state, now) -> bool:
     (a lead sent the campaign again a month later gets its own). A campaign sent with Template B
     itself (Matloob may pick it in the popup) gets no second copy of it. Never to a chat ``holds``
     turns down: what an earlier round of it told us (no shop wanted, a shop rented elsewhere, a
-    "Not now" whose check-back question is still open) stands."""
+    "Not now" whose check-back question is still open) stands, and never after the mixed template
+    (batch 2e: HELD_NOT_SHOP_TEMPLATE)."""
     campaign = campaign_template(conversation)
     if campaign is None or campaign.status not in SENT_STATUSES or campaign.reactions:
         return False
@@ -295,6 +305,7 @@ class Reading:
     ours_since: list  # the words of our side's messages after the customer's newest words
     customer_newest: Message | None = None
     ours_newest: Message | None = None
+    template_kind: str = ic_templates.SHOP  # ic_templates.kind of the template it reads from (batch 2e)
 
     @cached_property
     def words(self) -> list:
@@ -341,7 +352,7 @@ def read_since(conversation) -> Reading:
     boundary = _boundary(conversation, templates)
     rows = list(_rows_since(conversation, boundary).select_related("lead_ai_transcript", "template").order_by("-pk")[:READ_BACK])
     rows.reverse()
-    reading = Reading(bursts=[], ours_since=[], ours_newest=boundary)
+    reading = Reading(bursts=[], ours_since=[], ours_newest=boundary, template_kind=ic_templates.kind_of(boundary))
     before = transcript.outbound_text(boundary) if boundary is not None else ""
     offer = boundary is not None
     current = None
@@ -533,6 +544,8 @@ def holds(conversation, state, now, kind: str, reading: Reading | None = None) -
     reading = reading if reading is not None else read_since(conversation)
     if kind in (NUDGE_1, NUDGE_2, OPEN_QUESTION) and question_left(conversation, reading):
         return HELD_QUESTION
+    if TEMPLATE_B_AFTER_SHOPS_ONLY and kind in (REENGAGE, CHECK_BACK) and reading.template_kind != ic_templates.SHOP:
+        return HELD_NOT_SHOP_TEMPLATE
     if rented_still(facts, reading):
         return HELD_RENTED
     if kind in (REENGAGE, CHECK_BACK) and wants_no_shop(facts, reading):
@@ -676,6 +689,8 @@ def panel_note(conversation, state, approved: set) -> str:
     never_answered = (state is None or state.template_b_sent_at is None) and conversation.last_inbound_at is None
     if not (check_back or never_answered):
         return ""
+    if TEMPLATE_B_AFTER_SHOPS_ONLY and ic_templates.kind_of(campaign_template(conversation)) != ic_templates.SHOP:
+        return ""  # the mixed template's chats never get Template B (holds), approved or not (batch 2e)
     return f"{TEMPLATE_B} is not approved on this number yet, so the automatic follow-up waits until Meta approves it."
 
 
@@ -790,6 +805,9 @@ def due_now(now=None) -> list[tuple[int, str]]:
                 | Q(lead_ai_state__template_b_sent_at__lt=F("last_created") - SLACK)
             )
         )
+        if TEMPLATE_B_AFTER_SHOPS_ONLY:
+            # The mixed template's non-repliers get nothing (reengage_due says so too): never read here every minute.
+            quiet = quiet.exclude(last_template__in=ic_templates.NOT_SHOP_NAMES)
         walk(quiet, template_kind(REENGAGE), "Template B")
     # Only chats whose newest message is the assistant's own, delivered, two hours old, with nothing
     # booked, no "Not now" and no second refusal (nudge_due decides the rest: the nudges, and the alert
