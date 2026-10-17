@@ -17,19 +17,32 @@
  * (GET/PUT /api/leadai/settings/) for everyone; what may be changed there is
  * decided by the server, the dialog only hides what the agent cannot change.
  * "Shop media" opens the shops media library (shop-media.js) the same way.
+ *
+ * The agent desk (desk.js, batch 2e): "Needs a person" and "Today" in the rail
+ * are list views of the same chats (the server's order: the longest wait, the
+ * start time), with their counts; Shops, Rent, Sale and Other beside Brokers
+ * filter by track. An agent with Lead AI access sees every Lead AI chat here.
  */
 
 import { el, clear, debounce, initials, stamp, toast } from "../../core/dom.js";
 import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
+import { deskEmptyText, deskLine, deskParams, deskRail, isDeskTab, trackFilters } from "./desk.js";
 import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
 import { shopsForm, shopsValues } from "./shops.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
 const PAGE = 40;
+// The desk's wait times and counts are drawn again this often while the screen is open.
+const DESK_TICK_MS = 60000;
 
 /** The list's marker for an assistant that is not answering a chat. */
 const ROW_MARK = { paused: "AI paused", stopped: "AI stopped", handed_over: "Handed over" };
+
+/** The rail views that list Lead AI chats: all of them, or the desk's two. */
+function isListTab(tab) {
+  return tab === "chats" || isDeskTab(tab);
+}
 
 let screen = null;
 
@@ -73,6 +86,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     exhausted: false,
     q: "",
     brokers: false, // only the chats labelled Broker
+    track: "", // the desk's track filter: "shop", "rent", "sale", "other" or none
     activeId: conversationId ? Number(conversationId) : null,
     pendingHighlight: highlightMessageId || null,
     thread: null,
@@ -99,20 +113,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   });
   const tabChats = railButton("chats", "messageSquare", "Chats");
   const tabSara = railButton("sara", "users", "Sara leads");
-  // Agent desk (batch 2e). Present so the rail has their place, and hidden
-  // until that batch turns them on. They do not load a list.
-  const needsButton = el("button.lai-rail__btn", {
-    type: "button",
-    hidden: true,
-    disabled: true,
-    title: "Opens when the agent desk ships",
-  }, [icon("bell", { size: 16 }), el("span.lai-rail__label", {}, ["Needs a person"])]);
-  const todayButton = el("button.lai-rail__btn", {
-    type: "button",
-    hidden: true,
-    disabled: true,
-    title: "Opens when the agent desk ships",
-  }, [icon("clock", { size: 16 }), el("span.lai-rail__label", {}, ["Today"])]);
+  // The agent desk (desk.js): Needs a person and Today, each a view of the chats; pressed again, back to Chats.
+  const rail = deskRail({ onSelect: (tab) => setTab(state.tab === tab ? "chats" : tab) });
   const brokersButton = el("button.lai-filter", {
     type: "button",
     "aria-pressed": "false",
@@ -124,21 +126,14 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   }, ["Brokers"]);
-  // Same hold as the rail's desk views: the track filters wait for ?track=.
-  const deskFilter = (label) => el("button.lai-filter", {
-    type: "button",
-    hidden: true,
-    disabled: true,
-    title: "Opens when the agent desk ships",
-    "aria-pressed": "false",
-  }, [label]);
-  const filters = el("div.lai-filters", {}, [
-    brokersButton,
-    deskFilter("Shops"),
-    deskFilter("Rent"),
-    deskFilter("Sale"),
-    deskFilter("Other"),
-  ]);
+  // The desk's track filters (?track=), one at a time.
+  const tracks = trackFilters({
+    onChange: (track) => {
+      state.track = track;
+      loadChats();
+    },
+  });
+  const filters = el("div.lai-filters", {}, [brokersButton, ...tracks.buttons]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -163,7 +158,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       ]),
     ]),
     el("div.lai-body", {}, [
-      el("nav.lai-rail", { "aria-label": "Lead AI views" }, [tabChats, needsButton, todayButton, tabSara]),
+      el("nav.lai-rail", { "aria-label": "Lead AI views" }, [tabChats, ...rail.buttons, tabSara]),
       el("aside.lai-side", {}, [
         search,
         filters,
@@ -183,6 +178,16 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   host.append(root);
   document.addEventListener("keydown", onKey);
   document.addEventListener("visibilitychange", onVisible);
+  // The desk's waits grow and today's list moves on with no event: drawn again, and its counts read again, every minute.
+  const deskTimer = setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (isDeskTab(state.tab)) renderRows();
+    rail.refresh();
+  }, DESK_TICK_MS);
+  // A desk view reads its list again shortly after a change that may move it (a handover, a booking, a reply).
+  const reloadDeskSoon = debounce(() => {
+    if (screen === self && isDeskTab(state.tab)) loadChats({ keep: true });
+  }, 700);
 
   const self = {
     onEvent,
@@ -214,11 +219,11 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
 
   function onVisible() {
     // A socket gap means missed events; the list is refetched on return.
-    if (document.visibilityState === "visible" && state.tab === "chats") loadChats({ keep: true });
+    if (document.visibilityState === "visible" && isListTab(state.tab)) loadChats({ keep: true });
   }
 
   function resync() {
-    if (state.tab === "chats") loadChats({ keep: true });
+    if (isListTab(state.tab)) loadChats({ keep: true });
     state.thread?.reload();
   }
 
@@ -226,6 +231,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     if (screen !== self) return;
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("visibilitychange", onVisible);
+    clearInterval(deskTimer);
+    rail.destroy();
     for (const timer of rowTimers.values()) clearTimeout(timer);
     rowTimers.clear();
     // Opened from this screen: it would stay over the inbox an alert opened.
@@ -253,12 +260,15 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   }
 
   function setTab(tab) {
+    const switched = state.tab !== tab;
     state.tab = tab;
     tabChats.classList.toggle("is-on", tab === "chats");
     tabSara.classList.toggle("is-on", tab === "sara");
-    search.hidden = tab !== "chats";
-    filters.hidden = tab !== "chats";
-    if (tab === "chats") loadChats({ keep: true });
+    rail.active(tab);
+    search.hidden = !isListTab(tab);
+    filters.hidden = !isListTab(tab);
+    // Another view's rows must not stand in for this one's while it loads.
+    if (isListTab(tab)) loadChats({ keep: !switched });
     else loadSara();
   }
 
@@ -275,18 +285,26 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     const offset = append ? state.offset : 0;
     if (!append && !keep) clear(listNode);
     statusNode.textContent = "Loading…";
+    const tab = state.tab;
     try {
-      const payload = await leadAiApi.chats({ q: state.q, label: state.brokers ? BROKER_LABEL : "", limit: PAGE, offset });
+      const payload = await leadAiApi.chats({
+        q: state.q,
+        label: state.brokers ? BROKER_LABEL : "",
+        ...deskParams(tab, state.track),
+        limit: PAGE,
+        offset,
+      });
       // A newer load, another tab, or a closed screen wins over this answer.
-      if (seq !== state.loadSeq || screen !== self || state.tab !== "chats") return;
+      if (seq !== state.loadSeq || screen !== self || state.tab !== tab) return;
       const page = asList(payload, "results");
       state.rows = append ? mergeRows(state.rows, page) : page;
       state.offset = offset + page.length;
       state.exhausted = page.length < PAGE;
       // Only an unfiltered first page counts every unread Lead AI chat.
-      if (!append && !state.q && !state.brokers && typeof payload?.unread_chats === "number") {
+      if (!append && tab === "chats" && !state.q && !state.brokers && !state.track && typeof payload?.unread_chats === "number") {
         onUnreadChanged?.(payload.unread_chats);
       }
+      if (payload?.desk_counts) rail.setCounts(payload.desk_counts);
       renderRows();
       if (state.activeId && !state.thread) openThread(state.activeId);
     } catch (error) {
@@ -309,8 +327,9 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   }
 
   function renderRows() {
-    if (state.tab !== "chats") return;
-    sortRows();
+    if (!isListTab(state.tab)) return;
+    // The desk's views keep the server's order: the longest wait, the start time.
+    if (state.tab === "chats") sortRows();
     clear(listNode);
     // A row that lost its Broker label meanwhile leaves the Brokers list.
     const shown = state.brokers ? state.rows.filter(isBrokerChat) : state.rows;
@@ -319,9 +338,11 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       ? ""
       : state.q
         ? "No Lead AI chat matches that search."
-        : state.brokers
-          ? "No broker chats. The AI labels a chat Broker when the customer is a broker or asks for a client."
-          : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
+        : isDeskTab(state.tab) || state.track
+          ? deskEmptyText(state.tab, state.track)
+          : state.brokers
+            ? "No broker chats. The AI labels a chat Broker when the customer is a broker or asks for a client."
+            : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
     moreButton.hidden = state.exhausted || !shown.length;
   }
 
@@ -342,6 +363,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
           el("span.lai-row__side", {}, [meetingMarker(row), el("span.lai-row__time", {}, [stamp(row.last_message_at)])]),
         ]),
         el("div.lai-row__preview", {}, [row.last_message_preview || "No messages yet"]),
+        // Needs a person and Today: why the chat is there ("Handed over: asked for a call · waiting 25 min").
+        isDeskTab(state.tab) ? deskLine(row) : null,
         el("div.lai-row__meta", {}, [
           aiMarker(row),
           row.number?.title || row.number?.phone_number ? el("span", {}, [row.number.title || `+${row.number.phone_number}`]) : null,
@@ -373,7 +396,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   }
 
   function select(id, { highlightMessageId: highlight } = {}) {
-    if (state.tab !== "chats") setTab("chats");
+    // A row of Needs a person or Today opens where it is; from Sara leads, back to the chats.
+    if (!isListTab(state.tab)) setTab("chats");
     if (String(state.activeId) === String(id) && state.thread) {
       if (highlight) state.thread.highlight(highlight);
       return;
@@ -401,12 +425,14 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     if (!conversation?.id) return;
     const index = state.rows.findIndex((row) => String(row.id) === String(conversation.id));
     if (index === -1) {
+      // The desk's views and a track filter are the server's lists: a chat joins them when they are read again.
+      if (state.tab !== "chats" || state.track) return;
       state.rows.unshift(conversation);
     } else {
       // Keep the campaign details the list endpoint gave; live payloads lack them.
       state.rows[index] = { ...state.rows[index], ...conversation, lead_ai_info: state.rows[index].lead_ai_info };
     }
-    if (!quiet || state.tab === "chats") renderRows();
+    if (!quiet || isListTab(state.tab)) renderRows();
   }
 
   function removeRow(id, note = "Select a chat from the left.") {
@@ -466,13 +492,19 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
 
     // "The AI is writing" concerns only the open chat.
     if (event === "leadai.ai.state") return;
+    // A message, a handover, a booking or a take may move the desk's counts, and a desk view's own list.
+    if (event === "leadai.message.new" || event === "leadai.ai.changed" || event === "leadai.alert" || String(event).startsWith("leadai.conversation.")) {
+      rail.refresh();
+      if (isDeskTab(state.tab)) reloadDeskSoon();
+    }
     if (event === "leadai.ai.changed" || event === "leadai.alert") {
       if (String(state.activeId) !== String(id)) refreshRowSoon(id);
       return;
     }
 
-    // A search or the Brokers filter narrows the list; a chat that does not match it stays out.
-    if ((state.q || state.brokers) && !state.rows.some((row) => String(row.id) === String(id))) return;
+    // A search, the Brokers or a track filter, or a desk view narrows the list; a chat that does not match it stays out.
+    const narrowed = state.q || state.brokers || state.track || isDeskTab(state.tab);
+    if (narrowed && !state.rows.some((row) => String(row.id) === String(id))) return;
 
     if (event === "leadai.message.new" && conversation) {
       const reading = String(state.activeId) === String(id) && document.visibilityState === "visible";
@@ -697,6 +729,17 @@ function alertRecipientsText(data) {
     .join(", ");
 }
 
+/**
+ * Who has Lead AI access (the agent desk, Q37): they open every Lead AI chat
+ * and get its alerts. Granted per agent in Agents & access.
+ */
+function deskAgentsText(data) {
+  const names = (Array.isArray(data.desk_agents) ? data.desk_agents : [])
+    .map((row) => String(row?.name ?? "").trim())
+    .filter(Boolean);
+  return names.length ? names.join(", ") : "Nobody yet (Agents & access, Lead AI)";
+}
+
 /** What the settings are, for an agent who cannot change them. */
 function valuesSection(data) {
   const closed = data.closed_dates || [];
@@ -712,6 +755,7 @@ function valuesSection(data) {
       ["Test numbers", tests ? String(tests) : "None"],
       ["Daily call limit", count(data.daily_call_limit)],
       ["Also alerted", alertRecipientsText(data)],
+      ["Lead AI access", deskAgentsText(data)],
     ])
   );
 }
@@ -977,12 +1021,15 @@ function formSection(data, { onSaved, onClose }) {
     field(
       "alert_bitrix_user_ids",
       "Also alert (Bitrix user ids)",
-      "Bitrix user ids separated by commas, at most 10. Besides the chat's owner and the CRM responsible, they get " +
-        "every booking, handover (a broker too) and unanswered-message alert, as a Bitrix notification and, when they " +
-        "can open the chat, in this panel.",
+      "Bitrix user ids separated by commas, at most 10. Besides the chat's owner, the CRM responsible and the agents " +
+        "with Lead AI access, they get every booking, handover (a broker too) and unanswered-message alert, as a Bitrix " +
+        "notification and, when they can open the chat, in this panel.",
       { value: (data.alert_bitrix_user_ids || []).join(", "), placeholder: "2311" }
     ),
     el("div.lai-set__hint", {}, [`Now: ${alertRecipientsText(data)}.`]),
+    el("div.lai-set__hint", {}, [
+      `Lead AI access (every Lead AI chat and its alerts, given in Agents & access): ${deskAgentsText(data)}.`,
+    ]),
     shopsPart.node,
     note,
     el("div.lai-set__actions", {}, [

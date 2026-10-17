@@ -13,7 +13,10 @@
  * while its automatic follow-up waits for Template B's approval),
  * lead_ai_appointment (the open meeting, or null) and the inbox's own labels
  * ([{id, name, colour}]). The settings carry the shops playbook's
- * shops_facts, brand_name and viewing_agent_name.
+ * shops_facts, brand_name and viewing_agent_name, and desk_agents (who has
+ * Lead AI access). The agent desk (desk.js): lead_ai_ai carries a shops chat's
+ * track, unit and track_label; a call carries call_label, taken_by, taken_at
+ * and takeable on its appointment.
  *
  * The shops media library (shop-media.js): every agent reads it; a panel admin
  * adds, replaces, deletes and reorders its files. Each call that changes it
@@ -39,13 +42,27 @@ function mediaId(id) {
 }
 
 export const leadAiApi = {
-  /** `label` keeps only the chats carrying that label ("Broker"). */
-  chats({ q = "", label = "", limit = 40, offset = 0 } = {}) {
+  /**
+   * `label` keeps only the chats carrying that label ("Broker"). The agent desk
+   * (desk.js): `track` ("shop", "rent", "sale", "other") keeps one track's chats;
+   * `needs` lists the chats that need a person, `today` the visits and calls of
+   * today, each row with lead_ai_desk. The first page carries desk_counts.
+   */
+  chats({ q = "", label = "", track = "", needs = false, today = false, limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit, offset });
     if (q) query.set("q", q);
     if (label) query.set("label", label);
+    if (track) query.set("track", track);
+    if (needs) query.set("needs", "1");
+    else if (today) query.set("today", "1");
     return apiFetch(`/api/leadai/chats/?${query}`);
   },
+
+  /** The numbers on the desk's Needs a person and Today buttons: {needs, today}. */
+  deskCounts: () => apiFetch("/api/leadai/desk/"),
+
+  /** I'll call: takes the chat's open call. Returns the row; 409 {detail, taken_by} when someone has it. */
+  takeCall: (id) => apiFetch(`/api/leadai/chats/${id}/appointment/take/`, { method: "POST", body: {} }),
 
   chat: (id) => apiFetch(`/api/leadai/chats/${id}/`),
 

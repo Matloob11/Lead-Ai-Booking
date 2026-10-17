@@ -9,7 +9,8 @@ filters by label (?label=Broker: the chats the assistant handed over as a
 broker's).
 
 Permissions: anyone who can open a chat may pause, resume or cancel its
-meeting. Settings: every agent may read them (the test numbers, which are
+meeting, and take its call (I'll call). Settings: every agent may read them
+(the test numbers, which are
 private phone numbers, only as a count); anyone with admin rights may
 switch the assistant OFF (an emergency stop); switching it ON and every
 other change needs a panel admin (is_wa_admin) or a superuser. The shops
@@ -17,6 +18,13 @@ playbook's facts, brand and viewing agent are settings too (shops.validate
 checks them); a shops chat's row says when it is due a follow-up, and when its
 automatic follow-up waits because Template B is not approved on its number
 (followups.panel_note: a note on the row, never an alert).
+
+The agent desk (batch 2e, desk.py): a shops chat's row carries its track
+(lead_ai_ai.track, unit, track_label), the list filters by it (?track=), and
+lists the chats that need a person (?needs=1) or have a visit or call today
+(?today=1), each row with why (lead_ai_desk). The first page carries the
+counts of those two (desk_counts; GET desk/ alone). An agent with Lead AI
+access opens every Lead AI chat (lane.desk_q, Q37).
 """
 
 import datetime as dt
@@ -38,6 +46,7 @@ from apps.inbox.serializers import serialize_conversation
 from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
+from . import desk, ic_templates
 from .assistant import hours, openai_client, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
@@ -75,7 +84,7 @@ def _visible(user):
             ),
             Prefetch(
                 "lead_ai_appointments",
-                queryset=LeadAiAppointment.objects.filter(status__in=OPEN_STATUSES).order_by("-id"),
+                queryset=LeadAiAppointment.objects.filter(status__in=OPEN_STATUSES).select_related("taken_by").order_by("-id"),
                 to_attr="lead_ai_open_appointments",
             ),
         )
@@ -115,6 +124,12 @@ def serialize_appointment(appointment) -> dict | None:
         "crm_synced_at": _iso(appointment.crm_synced_at),
         "crm_error": appointment.crm_error,
         "crm_stage_moved": appointment.crm_stage_moved_at is not None,
+        # A call (the agent desk): "Sales call" or "Call", who took it with I'll call, and whether it can be taken.
+        "call_label": desk.call_label(appointment),
+        "taken_by": desk.agent_name(appointment.taken_by) if appointment.taken_by_id else "",
+        "taken_by_id": appointment.taken_by_id,
+        "taken_at": _iso(appointment.taken_at),
+        "takeable": desk.takeable(appointment),
     }
 
 
@@ -238,14 +253,16 @@ def _lead_ai_part(chat: LeadAiChat, playbook: str = GENERAL) -> dict:
 
 
 def serialize_lead_ai_conversation(
-    conversation, settings_row=None, *, thinking=None, note=None, playbook=None, approved=None
+    conversation, settings_row=None, *, thinking=None, note=None, playbook=None, approved=None, kinds=None
 ) -> dict:
     """The inbox's own shape (with its lead_ai flag and labels), plus where the chat
     came from and its playbook, the assistant's state and the open appointment.
 
     ``playbook`` may be worked out once for a whole list (lane.playbooks), and so may
     ``approved``, the WABAs Template B can go from (followups.approved_wabas): a shops
-    chat's ``followup_note`` says when its automatic follow-up waits for Meta.
+    chat's ``followup_note`` says when its automatic follow-up waits for Meta. So may
+    ``kinds``, the campaign templates' kinds (desk.template_kinds), which a shops chat
+    with no stored track reads its track from (lead_ai_ai.track, unit, track_label).
     """
     row = serialize_conversation(conversation)
     chat = getattr(conversation, "lead_ai_chat", None)
@@ -253,6 +270,10 @@ def serialize_lead_ai_conversation(
         playbook = playbooks([conversation.pk]).get(conversation.pk, GENERAL)
     row["lead_ai_info"] = _lead_ai_part(chat, playbook) if chat is not None else None
     row["lead_ai_ai"] = serialize_ai(conversation, settings_row, thinking=thinking, note=note)
+    state = _state(conversation)
+    if kinds is None and desk.needs_template_kind(playbook, state):
+        kinds = desk.template_kinds([conversation.pk])
+    row["lead_ai_ai"].update(desk.track_part(playbook, state, (kinds or {}).get(conversation.pk, ic_templates.SHOP)))
     followup_note = ""
     if playbook == IC_SHOPS:
         from . import followups
@@ -267,8 +288,16 @@ def serialize_lead_ai_conversation(
 
 @api_view(["GET"])
 def chat_list(request):
-    """The Lead AI screen's own list, same order and search as the main inbox."""
-    queryset = only_lead_ai(_visible(request.user))
+    """The Lead AI screen's own list, same order and search as the main inbox.
+
+    The agent desk (desk.py): ``?track=shop|rent|sale|other|unknown`` keeps one track's chats;
+    ``?needs=1`` lists the chats that need a person, the longest wait first, and ``?today=1``
+    the visits and calls that start today, by time, each row saying why (lead_ai_desk). The
+    first page carries the counts of those two lists (desk_counts), over every chat the agent
+    may open here, whatever the search or filters.
+    """
+    base = only_lead_ai(_visible(request.user))
+    queryset = base
 
     number_id = request.GET.get("number", "").strip()
     if number_id:
@@ -300,16 +329,40 @@ def chat_list(request):
             return Response({"detail": f"label is at most {LABEL_MAX} characters."}, status=status.HTTP_400_BAD_REQUEST)
         queryset = queryset.filter(labels__name__iexact=label)
 
+    # ?track=: the desk's Shops, Rent, Sale and Other filters (desk.chat_track).
+    track = request.GET.get("track", "").strip().lower()
+    if track:
+        if track not in desk.TRACK_FILTERS:
+            return Response(
+                {"detail": "track is one of shop, rent, sale, other or unknown."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        queryset = queryset.filter(pk__in=desk.track_ids(queryset, track))
+    needs = request.GET.get("needs") == "1"
+    today = request.GET.get("today") == "1"
+    if needs and today:
+        return Response({"detail": "Ask for needs or today, not both."}, status=status.HTTP_400_BAD_REQUEST)
+
     queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
     try:
         limit = min(max(int(request.GET.get("limit", 50)), 1), 200)
         offset = max(int(request.GET.get("offset", 0)), 0)
     except ValueError:
         return Response({"detail": "limit and offset must be numbers."}, status=status.HTTP_400_BAD_REQUEST)
-    total = queryset.count()
+    now = timezone.now()
+    desk_rows = None
+    if needs or today:
+        # The desk's own order: the longest wait first, or the start time; a page of it.
+        rows = desk.needs_rows(queryset, now) if needs else desk.today_rows(queryset, now)
+        total = len(rows)
+        chosen = rows[offset : offset + limit]
+        found = {c.pk: c for c in queryset.filter(pk__in=[row.conversation_id for row in chosen])}
+        page = [found[row.conversation_id] for row in chosen if row.conversation_id in found]
+        desk_rows = {row.conversation_id: row.as_dict() for row in chosen}
+    else:
+        total = queryset.count()
+        page = list(queryset[offset : offset + limit])
     unread = queryset.filter(unread_count__gt=0).count() if offset == 0 else None
     settings_row = LeadAiSettings.load()
-    page = list(queryset[offset : offset + limit])
     thinking = _thinking(c.pk for c in page)
     note = _silent_note(settings_row) if page else ""
     scripts = playbooks(c.pk for c in page)
@@ -318,18 +371,26 @@ def chat_list(request):
         from . import followups
 
         approved = followups.approved_wabas()
-    return Response(
-        {
-            "count": total,
-            "unread_chats": unread,
-            "results": [
-                serialize_lead_ai_conversation(
-                    c, settings_row, thinking=c.pk in thinking, note=note, playbook=scripts.get(c.pk, GENERAL), approved=approved
-                )
-                for c in page
-            ],
-        }
-    )
+    kinds = desk.template_kinds(c.pk for c in page if desk.needs_template_kind(scripts.get(c.pk, GENERAL), _state(c)))
+    results = []
+    for c in page:
+        row = serialize_lead_ai_conversation(
+            c, settings_row, thinking=c.pk in thinking, note=note, playbook=scripts.get(c.pk, GENERAL), approved=approved,
+            kinds=kinds,
+        )
+        if desk_rows is not None:
+            row["lead_ai_desk"] = desk_rows.get(c.pk)
+        results.append(row)
+    body = {"count": total, "unread_chats": unread, "results": results}
+    if offset == 0:
+        body["desk_counts"] = desk.counts(base, now)
+    return Response(body)
+
+
+@api_view(["GET"])
+def desk_counts(request):
+    """The numbers on the desk's Needs a person and Today buttons, over every Lead AI chat the agent may open."""
+    return Response(desk.counts(only_lead_ai(_visible(request.user))))
 
 
 @api_view(["GET"])
@@ -417,6 +478,26 @@ def appointment_cancel(request, pk):
     return Response(serialize_lead_ai_conversation(conversation))
 
 
+@api_view(["POST"])
+def appointment_take(request, pk):
+    """I'll call (spec §3.3 step 5): the agent takes the chat's open call, first come first served
+    (desk.take_call, under a row lock). Anyone who can open the chat may, as for cancelling its
+    meeting: never only the settings admins. A call someone else took answers 409 with their name
+    (taken_by); the customer is never told who."""
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    result = desk.take_call(conversation, request.user)
+    if result.error == desk.NO_CALL:
+        return Response({"detail": "This chat has no open call."}, status=status.HTTP_409_CONFLICT)
+    if result.error == desk.TAKEN:
+        return Response(
+            {"detail": f"{result.taken_by} has already taken this call.", "taken_by": result.taken_by},
+            status=status.HTTP_409_CONFLICT,
+        )
+    _changed(conversation.pk)
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    return Response(serialize_lead_ai_conversation(conversation))
+
+
 # Settings ---------------------------------------------------------------------------------
 
 
@@ -467,6 +548,15 @@ def _alert_recipients(row: LeadAiSettings) -> list[dict]:
     ]
 
 
+def _desk_agents() -> list[dict]:
+    """The agents with Lead AI access (Agents & access), who follow every Lead AI chat and get its alerts (Q37)."""
+    from .assistant import alerts
+
+    return [
+        {"name": desk.agent_name(agent), "bitrix_user_id": agent.bitrix_user_id or ""} for agent in alerts.desk_agents()
+    ]
+
+
 def serialize_settings(row: LeadAiSettings, user) -> dict:
     data = {
         "assistant_enabled": row.assistant_enabled,
@@ -482,6 +572,8 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "daily_call_limit": row.daily_call_limit,
         "alert_bitrix_user_ids": row.alert_user_ids(),
         "alert_recipients": _alert_recipients(row),
+        # The agent desk (Q37): who follows every Lead AI chat; granted per agent in Agents & access.
+        "desk_agents": _desk_agents(),
         # The shops playbook: what it may quote, the brand it speaks for, who a booked client meets.
         "shops_facts": shops.facts_of(row.shops_facts),
         "brand_name": shops.brand_of(row),

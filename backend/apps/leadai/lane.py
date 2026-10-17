@@ -12,6 +12,10 @@ ever holds one-line calls into this module:
   before its first message is broadcast; ``mark_campaign`` also takes the
   script (playbook) the popup chose, which ``playbook_for`` reads per chat.
 - ``move_to_inbox``: the one way back to the main inbox.
+- ``desk_q`` / ``desk_groups`` / ``desk_event_groups``: the Lead AI desk (batch
+  2e, Q37). An agent with Lead AI access (``Agent.can_lead_ai``) opens every
+  chat on the Lead AI screen, whatever its number, and hears its live events;
+  the main inbox list still leaves those chats out (``hide_lead_ai``).
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from __future__ import annotations
 import logging
 
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import LeadAiCampaign, LeadAiChat
@@ -28,6 +33,9 @@ logger = logging.getLogger(__name__)
 EVENT_PREFIX = "leadai."
 GENERAL = LeadAiCampaign.Playbook.GENERAL
 IC_SHOPS = LeadAiCampaign.Playbook.IC_SHOPS
+# The live channel of the agents with Lead AI access who are not panel admins (a panel admin hears
+# every number's group already): every Lead AI chat's "leadai.*" events, and nothing else.
+DESK_GROUP = "wa.leadai.desk"
 
 
 def _digits(raw) -> str:
@@ -104,6 +112,45 @@ def handles_failed_outbound(message) -> bool:
 def hide_lead_ai(queryset):
     """The main inbox list: every chat except the ones the Lead AI screen holds."""
     return queryset.exclude(lead_ai_chat__active=True)
+
+
+# The Lead AI desk (batch 2e spec §2.12, board T100; Q37) --------------------
+
+
+def has_desk_access(user) -> bool:
+    """The agent follows every Lead AI chat (Matloob, Q37, 2026-10-17: the chats are not assigned; the agents
+    with Lead AI access follow them on the Lead AI screen). Granted per agent in "Agents & access"
+    (``Agent.can_lead_ai``), and only with the Official API inbox, which every Lead AI chat belongs to."""
+    return bool(
+        user is not None
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_active", False)
+        and getattr(user, "can_lead_ai", False)
+        and getattr(user, "can_official_api", True)
+    )
+
+
+def desk_q(user):
+    """inbox.visibility's clause for the desk: every active Lead AI chat, on any number, for an agent with Lead AI
+    access; None for anyone else, whose visibility stays exactly what it was (not even a query more). The main
+    inbox list leaves these chats out all the same (hide_lead_ai)."""
+    if not has_desk_access(user):
+        return None
+    return Q(pk__in=LeadAiChat.objects.filter(active=True).values("conversation_id"))
+
+
+def desk_groups(user) -> list[str]:
+    """The live group a desk agent joins (inbox.consumers): only one who is no panel admin, since a panel admin
+    hears every number's group, and would get each event twice."""
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    return [DESK_GROUP] if has_desk_access(user) and not sees_all_inbox_chats(user) else []
+
+
+def desk_event_groups(event: str) -> list[str]:
+    """The groups besides the number's and the owner's that hear an event (inbox.events.publish): a Lead AI chat's
+    own ("leadai.*") reach the desk. A chat back in the main inbox is no desk chat, and its plain events never do."""
+    return [DESK_GROUP] if str(event or "").startswith(EVENT_PREFIX) else []
 
 
 def only_lead_ai(queryset):

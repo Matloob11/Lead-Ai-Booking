@@ -64,11 +64,14 @@ def publish(conversation, event, data):
 
     # A chat in the Lead AI screen is heard there, under "leadai.<event>"; the
     # main inbox does not listen for those, so it never shows the chat. Routing
-    # must never stop a live event, so any failure keeps the plain name.
+    # must never stop a live event, so any failure keeps the plain name. The
+    # agents with Lead AI access hear those events on the desk's own group.
+    extra_groups = []
     try:
-        from apps.leadai.lane import event_name
+        from apps.leadai.lane import desk_event_groups, event_name
 
         event = event_name(conversation, event)
+        extra_groups = desk_event_groups(event)
     except Exception:  # noqa: BLE001
         logger.exception("Lead AI routing failed for conversation %s", getattr(conversation, "pk", None))
     message = {
@@ -82,6 +85,8 @@ def publish(conversation, event, data):
         agent_id = getattr(conversation, "assigned_agent_id", None)
         if agent_id:
             async_to_sync(layer.group_send)(group_for_agent(agent_id), message)
+        for group in extra_groups:
+            async_to_sync(layer.group_send)(group, message)
     except Exception:  # noqa: BLE001 - a dead socket must not fail the write path
         logger.exception("Failed to publish %s for conversation %s", event, conversation.pk)
 

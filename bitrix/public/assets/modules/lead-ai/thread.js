@@ -28,6 +28,7 @@ import { numberNameWithDial } from "../../core/number-label.js";
 import { bindFileSources, openAttachmentDialog } from "../attach.js";
 import { openTemplateComposer } from "../template-composer.js";
 import { asList, inbox, leadAiApi } from "./api.js";
+import { callParts, trackChip } from "./desk.js";
 import { followUpChip, followUpNote } from "./shops.js";
 
 const PAGE_SIZE = 40;
@@ -144,13 +145,17 @@ export function isBrokerChat(conversation) {
 }
 
 /**
- * Small chips for a chat: "IC shops" when the assistant follows the shops
- * script there, then its inbox labels (the first few). A label's own colour
- * tints its chip only when it is a plain hex colour.
+ * Small chips for a chat: its track on the shops script ("Rent · Studio",
+ * "Shop", "Not known yet"; desk.js), or "IC shops" from a server that sends no
+ * track, then its inbox labels (the first few). A label's own colour tints its
+ * chip only when it is a plain hex colour.
  */
 export function chatChips(conversation) {
   const chips = [];
-  if (conversation?.lead_ai_info?.playbook === "ic_shops") {
+  const track = trackChip(conversation);
+  if (track) {
+    chips.push(track);
+  } else if (conversation?.lead_ai_info?.playbook === "ic_shops") {
     chips.push(
       el("span.lai-chip.lai-chip--playbook", { title: "The assistant follows the International City shops script in this chat" }, [
         "IC shops",
@@ -710,7 +715,8 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const main = confirmed ? when || "Time not set" : note || when || "No time agreed yet";
     const lines = [];
     if (!confirmed && note && when) lines.push(apptLine("clock", `Time mentioned: ${when}`, { title: "Dubai time" }));
-    if (appointment.place && appointment.place !== "office") {
+    // A call says so in its status ("Sales call") once the server names it.
+    if (appointment.place && appointment.place !== "office" && !appointment.call_label) {
       lines.push(apptLine("mapPin", appointment.place_label || appointment.place));
     }
     if (appointment.customer_state) {
@@ -723,27 +729,29 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const reminder = reminderLine(appointment);
     if (reminder) lines.push(reminder);
     lines.push(crmLine(appointment));
+    // A call (the agent desk, desk.js): "Sales call", I'll call until someone takes it, then who has it.
+    const call = callParts(appointment, {
+      me,
+      take: () => leadAiApi.takeCall(state.id),
+      onRow: (row) => {
+        detailSeq += 1;
+        applyLeadAi(row);
+      },
+      onStale: () => refreshDetail(),
+      isGone: () => state.destroyed,
+    });
 
     return el("div.lai-appt", { class: confirmed ? "lai-appt--confirmed" : "lai-appt--tentative" }, [
-      el("div.lai-appt__icon", { "aria-hidden": "true" }, [icon("clock", { size: 16 })]),
+      el("div.lai-appt__icon", { "aria-hidden": "true" }, [icon(call.status ? "phone" : "clock", { size: 16 })]),
       el("div.lai-appt__body", {}, [
         el("div.lai-appt__top", {}, [
-          el("span.lai-appt__status", {}, [confirmed ? "Meeting confirmed" : "Tentative"]),
+          el("span.lai-appt__status", {}, [call.status || (confirmed ? "Meeting confirmed" : "Tentative")]),
           el("span.lai-appt__when", { title: confirmed && when ? "Dubai time" : null }, [main]),
         ]),
         el("div.lai-appt__lines", {}, lines),
-        // Filled when the agent desk ships. Hidden, and not wired to a request.
-        el("span.lai-appt__taken", { hidden: true }, [
-          "Taken by ",
-          el("span.lai-appt__taken-name", {}, [""]),
-        ]),
+        call.taken,
       ]),
-      el("button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-appt__call", {
-        type: "button",
-        hidden: true,
-        disabled: true,
-        title: "Opens when the agent desk ships",
-      }, ["I'll call"]),
+      call.button,
       el("button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-appt__cancel", {
         type: "button",
         title: "Cancel this meeting. No reminder goes out for it.",

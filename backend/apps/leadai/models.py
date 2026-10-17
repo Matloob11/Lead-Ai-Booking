@@ -450,6 +450,13 @@ class LeadAiAppointment(models.Model):
     cancelled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # A call (place "call"): the agent who pressed "I'll call" on the Lead AI screen, and when (batch 2e, the
+    # agent desk: desk.take_call, first come first served). The customer is never told who. Nullable: the old
+    # code that inserts appointments during a deploy names neither.
+    taken_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    taken_at = models.DateTimeField(null=True, blank=True)
     history = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -4,8 +4,13 @@ Who: the chat's owner (who sent the campaign and can open the chat) AND the
 CRM record's responsible person (owner's choice), each once. Bookings and
 the other appointment events, handovers (a broker among them) and messages
 nobody answered also reach every active agent whose Bitrix id the Lead AI
-settings list (owner's choice 2026-10-13: Matloob). System alerts (OpenAI
+settings list (owner's choice 2026-10-13: Matloob), and every agent with Lead
+AI access while the chat is on the Lead AI screen (``desk_agents``; batch 2e,
+Q37: they follow the Lead AI chats from the desk). System alerts (OpenAI
 down, no credit, daily ceiling) go to the panel admins.
+
+A rent or sale chat's alert title starts with its track ("Rent · Studio · ",
+"Sale · 1BR · "; spec §2.11), so the desk sees which flow it is about.
 
 How (owner's choice): the WhatsApp panel, as a live ``leadai.alert`` to an
 agent who can open the chat, and Bitrix, as a notification with mobile push
@@ -23,6 +28,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 
 import httpx
@@ -63,6 +69,9 @@ LISTED_KINDS = frozenset(
         "lost",
         # A shops customer's must-answer questions, while the assistant goes on with the chat (engine._questions_alert).
         "questions",
+        # A booked call nobody has taken with "I'll call": 15 minutes before it, and (urgent) 10 minutes after its start
+        # (desk.call_alerts; Q39: nothing goes to the customer about it).
+        "call_soon", "call_untaken",
     }
 )
 # The alerts that go to the panel admins, not to a chat's people (a chat's responsible never needs them).
@@ -93,7 +102,8 @@ def _bitrix_target(bitrix_user_id) -> str:
 
 def recipients(conversation, *, listed: bool = False) -> list:
     """[(agent or None, bitrix_user_id)]: the chat owner, then the CRM responsible if
-    different, then (``listed``) each agent the settings list who is neither."""
+    different, then (``listed``) each agent the settings list who is neither, then each
+    agent with Lead AI access while the chat is on the Lead AI screen (desk_agents)."""
     out = []
     owner = conversation.assigned_agent
     if owner is not None:
@@ -107,9 +117,9 @@ def recipients(conversation, *, listed: bool = False) -> list:
             if (agent is None or agent.pk not in known) and bitrix_id not in known:
                 out.append((agent, bitrix_id))
     if listed:
-        for agent in listed_agents():
+        for agent in [*listed_agents(), *desk_agents(conversation)]:
             target = _bitrix_target(agent.bitrix_user_id)
-            # One row per person: the owner or the responsible already has it.
+            # One row per person: the owner, the responsible or the list already has it.
             if any(a is not None and a.pk == agent.pk for a, _ in out) or (target and target in {b for _, b in out}):
                 continue
             out.append((agent, target))
@@ -126,6 +136,35 @@ def listed_agents() -> list:
     if not ids:
         return []
     return list(get_user_model().objects.filter(is_active=True, bitrix_user_id__in=ids).order_by("pk"))
+
+
+def desk_agents(conversation=None) -> list:
+    """The active agents with Lead AI access (Agent.can_lead_ai, with the Official API inbox: lane.has_desk_access),
+    who follow the Lead AI chats from the desk (Q37). With a ``conversation``, only while it is on the Lead AI
+    screen: back in the main inbox it is no desk chat, and they could not open it."""
+    from django.contrib.auth import get_user_model
+
+    from ..models import LeadAiChat
+
+    if conversation is not None and not LeadAiChat.objects.filter(conversation_id=conversation.pk, active=True).exists():
+        return []
+    return list(get_user_model().objects.filter(is_active=True, can_lead_ai=True, can_official_api=True).order_by("pk"))
+
+
+# A title that names its track already: an alert raised again for another person (reach_responsible), or one
+# whose writer put the track first itself ("Rent · Studio: ...", "Sale: ..."). "Sales call" and "Rented" are no track.
+TRACK_TITLE = re.compile(r"^(?:Rent|Sale)\b")
+
+
+def track_prefix(conversation) -> str:
+    """"Rent · Studio · " or "Sale · 1BR · " for a chat code put on the rent or sale track (tracks.label; spec §2.11),
+    else '' (the shop and other tracks keep 2d's titles, byte for byte)."""
+    from . import tracks
+
+    state = LeadAiChatState.objects.filter(conversation_id=getattr(conversation, "pk", None)).only("track", "unit").first()
+    if state is None or state.track not in (tracks.RENT, tracks.SALE):
+        return ""
+    return f"{tracks.label(state.track, state.unit)} · "
 
 
 def admin_recipients() -> list:
@@ -158,6 +197,8 @@ def raise_alert(
 
     base = (dedupe_key or f"{kind}:{conversation.pk}:{timezone.now():%Y%m%d%H%M%S%f}")[:180]
     targets = admin_recipients() if admins else recipients(conversation, listed=kind in LISTED_KINDS if listed is None else listed)
+    if not admins and targets and not TRACK_TITLE.match(title):
+        title = track_prefix(conversation) + title
     created = []
     for agent, bitrix_id in targets:
         who = f"a{agent.pk}" if agent is not None else f"b{bitrix_id}"

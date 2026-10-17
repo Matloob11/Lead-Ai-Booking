@@ -52,6 +52,14 @@ class Agent(AbstractUser):
     can_linked_devices = models.BooleanField(
         default=True, help_text="May open Linked phones (OpenWA)"
     )
+    # Lead AI (apps/leadai; batch 2e, Q37): the agents who follow the Lead AI chats from the Lead AI
+    # screen. They open every chat there, on any number, and get its alerts; the main inbox list still
+    # leaves those chats out. Off by default: panel admins see every chat anyway. A database default
+    # too: sign-in creates agents, and the old code running between the migration and the restart
+    # names no such column.
+    can_lead_ai = models.BooleanField(
+        default=False, db_default=False, help_text="May follow every Lead AI chat (the Lead AI desk)"
+    )
 
     last_seen_at = models.DateTimeField(null=True, blank=True)
 
