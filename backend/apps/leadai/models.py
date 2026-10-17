@@ -567,9 +567,60 @@ class LeadAiAlert(models.Model):
         return f"Alert {self.kind} on conversation {self.conversation_id}"
 
 
+class LeadAiUnitMediaSet(models.Model):
+    """One photo set of an International City studio or one-bedroom (batch 2e slice E, spec §4; board T96, Q36).
+
+    The library is built from A7's own portal listings (``backend/Types shops/Residential sets/``, gitignored): each
+    folder's ``set.json`` is imported by ``leadai_media_import`` (unit_media.import_directory), never read from the
+    folder's name. A listing often has no photos of its own and A7 uses a related unit's, which inside are almost the
+    same, so every set is the same type of unit, never the exact one (Q36): ``label`` "standard". "exact" and
+    "matching" stay here for later (an inventory feed, T101); the import refuses them, and no set uses them today.
+
+    unit_media.pick gives a lead the set whose ``for_listing_refs`` holds its listing ref (the photos it saw on the
+    portal), else the unit's ``default_for_unit`` set; never another unit's. The photos are LeadAiShopMedia rows of
+    shop "studio" or "one_br" that point here (``photos``), sent in their ``order``. ``name`` is the folder's, for
+    people (never rendered as HTML). ``cluster``, ``listing_ref`` (an exact set's own unit) and ``available`` (an exact
+    unit's) are blank on every set today. ``verified_at`` is set.json's ``built_on``; it makes an exact or matching set
+    stale after unit_media.MEDIA_FRESH, and never a standard one, which never claims to be the unit.
+    """
+
+    class Unit(models.TextChoices):
+        STUDIO = "studio", "Studio"
+        ONE_BR = "one_br", "One-bedroom"
+
+    class Label(models.TextChoices):
+        EXACT = "exact", "Exact available unit"
+        MATCHING = "matching", "Matching unit, same building and layout"
+        STANDARD = "standard", "Same type of unit (standard layout)"
+        REFERENCE = "reference", "Reference only"
+
+    unit = models.CharField(max_length=16, choices=Unit.choices, db_index=True)
+    name = models.CharField(max_length=120, unique=True)
+    label = models.CharField(max_length=16, choices=Label.choices, default=Label.STANDARD)
+    default_for_unit = models.BooleanField(default=False)
+    # The A7 listing refs ("a7group-1726") whose leads get this set: a JSON list, each ref in one set of a unit at most.
+    for_listing_refs = models.JSONField(default=list, blank=True)
+    cluster = models.CharField(max_length=40, blank=True)
+    listing_ref = models.CharField(max_length=24, blank=True)
+    available = models.BooleanField(null=True, blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["unit", "-default_for_unit", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["unit"], condition=Q(default_for_unit=True), name="leadai_one_default_set_per_unit"),
+        ]
+
+    def __str__(self):
+        return f"{self.get_unit_display()} set: {self.name}"
+
+
 class LeadAiShopMedia(models.Model):
     """One file of the shops playbook's media library (board T30): a shop type's
-    video or photo, or the office photo.
+    video or photo, or the office photo; and since batch 2e slice E, a photo (or the
+    video) of a studio or one-bedroom set (``shop`` "studio" / "one_br", ``unit_set``).
 
     The bot sends a type's files when a customer picks the type (shop_media.py):
     the video first, then the photos in ``order`` (file-name order by default),
@@ -577,6 +628,8 @@ class LeadAiShopMedia(models.Model):
     the name it was uploaded with, for people (never rendered as HTML). The same
     content twice in one type is one row (``sha256``). ``asset`` is the inbox
     attachment the sent messages link to, so the thread shows what went out.
+    The shop media library (media_views) shows the shop types and the office only:
+    a set's photos come with their set (unit_media.py) and go in by its import.
     """
 
     class Shop(models.TextChoices):
@@ -584,6 +637,8 @@ class LeadAiShopMedia(models.Model):
         TYPE_2 = "type_2", "Type 2"
         TYPE_3 = "type_3", "Type 3"
         OFFICE = "office", "Office"
+        STUDIO = "studio", "Studio"
+        ONE_BR = "one_br", "One-bedroom"
 
     class Kind(models.TextChoices):
         VIDEO = "video", "Video"
@@ -601,6 +656,8 @@ class LeadAiShopMedia(models.Model):
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # A studio or one-bedroom set's photo (batch 2e slice E); null for the shop types and the office.
+    unit_set = models.ForeignKey(LeadAiUnitMediaSet, null=True, blank=True, on_delete=models.CASCADE, related_name="photos")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

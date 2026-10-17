@@ -1,4 +1,5 @@
-"""The shops media library in the Lead AI screen (board T30; shop_media.py holds the rules).
+"""The shops media library in the Lead AI screen (board T30; shop_media.py holds the rules), and the
+studio and one-bedroom photo sets (batch 2e slice E, board T96; unit_media.py holds the rules).
 
 GET    /api/leadai/shop-media/                 every type's files, in sending order (every agent)
 POST   /api/leadai/shop-media/                 add a file: multipart "shop" (type_1..type_3, office) and "file"
@@ -6,9 +7,13 @@ POST   /api/leadai/shop-media/<id>/replace/    the same place in the order, anot
 DELETE /api/leadai/shop-media/<id>/            take a file out
 POST   /api/leadai/shop-media/reorder/         {"shop": "type_1", "ids": [3, 1, 2]}
 GET    /api/leadai/shop-media/<id>/file/       the file itself (every agent: it is what customers get)
+GET    /api/leadai/unit-media/                 the studio and one-bedroom sets by unit (every agent; read only)
+GET    /api/leadai/unit-media/<id>/file/       one set photo (every agent: it is what customers get)
 
 Changes need a panel admin, the gate of the AI settings (views._can_edit). A
-refused file answers 400 {"detail": why}, in words an admin can act on.
+refused file answers 400 {"detail": why}, in words an admin can act on. The sets
+change only by their import (leadai_media_import), never here: a set's photos
+are not the shop library's, so its routes never take them either.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from . import shop_media
+from . import shop_media, unit_media
 from .assistant import shops
 from .models import LeadAiSettings, LeadAiShopMedia
 from .views import _can_edit
@@ -54,7 +59,7 @@ def _row(row: LeadAiShopMedia) -> dict:
 def serialize_library(user) -> dict:
     facts = LeadAiSettings.load().shops_facts
     groups = []
-    for shop in shop_media.Shop.values:
+    for shop in shop_media.SHOP_LIBRARY:
         rows = shop_media.rows_for(shop)
         office = shop == shop_media.Shop.OFFICE
         groups.append(
@@ -112,7 +117,7 @@ def library(request):
 def item(request, pk):
     if not _can_edit(request.user):
         return _forbidden()
-    row = get_object_or_404(LeadAiShopMedia, pk=pk)
+    row = get_object_or_404(LeadAiShopMedia, pk=pk, shop__in=shop_media.SHOP_LIBRARY)
     shop_media.delete(row)
     return Response(serialize_library(request.user))
 
@@ -122,7 +127,7 @@ def item(request, pk):
 def replace(request, pk):
     if not _can_edit(request.user):
         return _forbidden()
-    row = get_object_or_404(LeadAiShopMedia, pk=pk)
+    row = get_object_or_404(LeadAiShopMedia, pk=pk, shop__in=shop_media.SHOP_LIBRARY)
     upload, error = _read_upload(request)
     if error:
         return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
@@ -140,7 +145,7 @@ def reorder(request):
         return _forbidden()
     data = request.data if isinstance(request.data, dict) else {}
     shop = str(data.get("shop") or "").strip()
-    if shop not in shop_media.Shop.values:
+    if shop not in shop_media.SHOP_LIBRARY:
         return Response({"detail": "Choose Type 1, Type 2, Type 3 or the office."}, status=status.HTTP_400_BAD_REQUEST)
     ids = data.get("ids")
     if not isinstance(ids, list):
@@ -152,9 +157,7 @@ def reorder(request):
     return Response(serialize_library(request.user))
 
 
-@api_view(["GET"])
-def file(request, pk):
-    row = get_object_or_404(LeadAiShopMedia, pk=pk)
+def _file_response(row: LeadAiShopMedia):
     if not row.file:
         return Response({"detail": "The file is not available."}, status=status.HTTP_404_NOT_FOUND)
     try:
@@ -162,3 +165,21 @@ def file(request, pk):
     except OSError:
         return Response({"detail": "The file is not available."}, status=status.HTTP_404_NOT_FOUND)
     return FileResponse(handle, content_type=row.mime_type or "application/octet-stream", filename=row.file_name)
+
+
+@api_view(["GET"])
+def file(request, pk):
+    return _file_response(get_object_or_404(LeadAiShopMedia, pk=pk, shop__in=shop_media.SHOP_LIBRARY))
+
+
+# The studio and one-bedroom sets (batch 2e slice E): read only, every agent. ---------------------------------------
+
+
+@api_view(["GET"])
+def unit_library(request):
+    return Response(unit_media.serialize_sets(request.user))
+
+
+@api_view(["GET"])
+def unit_file(request, pk):
+    return _file_response(get_object_or_404(LeadAiShopMedia, pk=pk, unit_set__isnull=False))

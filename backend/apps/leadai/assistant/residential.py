@@ -1368,6 +1368,20 @@ def claims_done(sentence: str) -> bool:
     return bool(_CLAIM.search(text)) and not _NEGATED_CLAIM.search(text)
 
 
+_PHOTO_CLAIM = re.compile(
+    r"\bhere\s+(?:are|is)\s+(?:the\s+)?(?:photos?|pictures?|pics|videos?|images?)\b"
+    r"|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b[^.?!]{0,30}\b(?:photos?|pictures?|pics|videos?|images?)\b",
+    re.IGNORECASE,
+)
+
+
+def photo_claim_only(sentence: str) -> bool:
+    """The sentence claims only that photos are here or sent ("Here are the photos."): true when a step sends them this
+    turn (the studio and one-bedroom sets, unit_media), never a booking claim with it."""
+    text = " ".join(str(sentence or "").replace("’", "'").split())
+    return bool(_PHOTO_CLAIM.search(text)) and not claims_done(_PHOTO_CLAIM.sub(" ", text))
+
+
 # PDPL asks (guard 8): never for a passport, an Emirates ID, a visa copy or number, bank or card details, an OTP, a password
 # or a salary. "Our agent collects them in person" names them and asks nothing.
 _PRIVATE = re.compile(
@@ -1654,8 +1668,9 @@ def settle(
       "rented elsewhere").
     - Otherwise the model's sentences lose: a figure of the other unit's band (guard 2), a figure of the wrong deal
       (guard 3), any commission or VAT words (guard 4: code's line for the current track goes instead when they asked),
-      shop words (guard 5), an availability claim (guard 6), a "booked" or "sent" claim unless code ``booked`` or a step
-      is ``sending`` (guard 7), a document, ID, bank or salary ask (guard 8), screening (guard 9). Two questions at most
+      shop words (guard 5), an availability claim (guard 6), a "booked" or "sent" claim unless code ``booked`` (or, for a
+      claim of photos alone, a step is ``sending`` them: unit_media's set this turn) (guard 7), a document, ID, bank or
+      salary ask (guard 8), screening (guard 9). Two questions at most
       and the amounts by track are clean_reply's (max_questions, amount_floor), at the send.
     ``when`` / ``still_invalid``: a booking, or a time to refuse, goes instead of any of these lines (code writes it)."""
     done: list[str] = []
@@ -1716,8 +1731,8 @@ def settle(
         reply, changed = _drop(reply, claims_availability)
         if changed:
             cut.append("availability")
-        if not (booked or sending):
-            reply, changed = _drop(reply, claims_done)
+        if not booked:
+            reply, changed = _drop(reply, lambda s: claims_done(s) and not (sending and photo_claim_only(s)))
             if changed:
                 cut.append("claim")
         reply, changed = _drop(reply, asks_private)

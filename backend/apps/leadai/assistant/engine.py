@@ -179,7 +179,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
-from .. import ic_templates, lane
+from .. import ic_templates, lane, unit_media
 from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 from . import (
     alerts,
@@ -208,6 +208,7 @@ from . import (
     sales,
     schema,
     script,
+    shop_buyer,
     shop_flow,
     shops,
     tracks,
@@ -2879,6 +2880,8 @@ def not_a_shop_text(spec: dict, language: str, now) -> str:
         offer = shops.slot_offer(language, slots, now)
     else:
         offer = rules.line("ask_time", language) if spec.get("ask", True) else ""
+    if spec.get("price"):
+        return shop_buyer.price_line(spec, language, offer)  # Q43: a shop buyer's price question (shop_buyer.py)
     return needs.line(language, need, offer, sorry=bool(spec.get("sorry")))
 
 
@@ -4312,10 +4315,16 @@ def _run_claimed(
     if res and not shops_rule_name and not deferred:
         # The rent flow's guards (spec §2.9, hook point 7): figures by unit and deal, code's commission and VAT lines, no
         # shop words, no availability or booking claimed, no document asks, no screening; and its special cases' lines.
+        # The rent track's photos going this turn (unit_media's set, slice E): the model's "Here are the photos." stays.
+        photos_going = bool(unit_media.turn_step(
+            answer, conversation, decision, words=words_now, earlier=earlier, known=facts, lead=track_inputs["lead"], now=now,
+            quiet=state.handed_over_at is not None, when=when, still_invalid=still_invalid, appointment=appointment,
+            may_invite=may_invite, dry_run=True,
+        ))
         res_cut = residential.settle(
             answer, earlier, [transcript.inbound_text(item, heard.get(item.pk)) for item in burst], track=decision.track,
             unit=decision.unit, clusters=decision.clusters, facts=facts, residential_facts=settings_row.residential_facts,
-            shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid,
+            shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid, sending=photos_going,
         )
         # 2d's facts.need and facts.wanted stay set on the rent and sale tracks (followups.holds, the nudges, panel_note).
         residential.record_need(answer, facts, decision, words_now)
@@ -4370,6 +4379,14 @@ def _run_claimed(
     ):
         # The cuts left them an apology or nothing (review 2d: chat 114's "Sorry for the confusion."): the owner's line.
         who = WHO_NOT_A_SHOP
+    if shops_chat and not res and not shops_rule_name and not deferred and shop_buyer.settle(
+        # Q43 (shop_buyer.py): a shop buyer hears no figure; their price question gets code's answer, the invitation, an alert.
+        # Off the residential path, as who_they_are and bare_need_reply (a shop buyer is on the other track).
+        answer, needs.of({**facts, **answer["facts"]}) or need, facts, words_now,
+        track=decision.track if decision is not None else "", invites=state.invites, slots=need_slots,
+        plain=not (state.handed_over_at is not None or when is not None or still_invalid or appointment is not None),
+    ) == shop_buyer.PRICE_LINE:
+        shop_buyer.alert(conversation, chat, _their_words(burst, heard))
     priced = tapped = ""
     if shops_chat and not res and not shops_rule_name and not deferred:
         # The price (launch review issue 12): a price objection, or a budget below our lowest, gets code's honest line.
@@ -4408,6 +4425,15 @@ def _run_claimed(
             media_today=_media_today(conversation, now),
             shops_facts=settings_row.shops_facts,
         )
+    # Batch 2e slice E (unit_media.py, spec §4): on the rent track, photos asked for (or a unit and cluster confirmed by a
+    # direct customer) get their unit's set after the model's statements, then its question or code's two free slots; with
+    # no set imported, "I don't have approved pictures for this one yet ...". Never over a line code writes.
+    unit_media.turn_step(
+        answer, conversation, decision, words=words_now, earlier=earlier, known=facts,
+        lead=track_inputs["lead"] if shops_chat else None, now=now, quiet=state.handed_over_at is not None, when=when,
+        still_invalid=still_invalid, appointment=appointment, may_invite=may_invite, ruled=bool(shops_rule_name or deferred),
+        slots=lambda: hours.offer_pair(now, settings_row.closed_dates, taken),
+    )
     # A step's words replace the model's, and its invitation and location with them.
     shop_flow.step_flags(answer)
     # The licence copy came with other words: the thanks opens the model's reply, when its words go out.
@@ -4611,6 +4637,7 @@ def _run_claimed(
     appended = ""  # the Maps link or the address code added to the reply
     media_type = ""  # a shop type whose video, photos and card go out (tasks.send_shop_media)
     media_files = True  # False: its card alone (its files went out today)
+    media_unit = None  # a studio or one-bedroom set whose photos go out (unit_media.deliver; batch 2e slice E)
     list_step = False  # the shop types list goes out instead of a text
     step_marker = ""  # a shops step our message is (payload "shop_step"), read back by a later turn
     res_step = ""  # the rent flow's step our message is (payload "res_step": the full-name ask), read back by the next turn
@@ -4773,6 +4800,18 @@ def _run_claimed(
         holding = answer["converted"] in (people.HOLDING, people.CALL_PASSED, people.CALL_ASK, people.MUST_ANSWER) and (
             answer["converted"] != people.MUST_ANSWER or answer["handover"]["needed"]
         )
+    elif answer.get(unit_media.STEP):
+        # Batch 2e slice E (unit_media.py): their unit's set goes from its own task (below); with none imported, code's
+        # "I don't have approved pictures for this one yet, but we can show you in person." and two free slots, now.
+        if answer[unit_media.STEP].get("set"):
+            media_unit = answer[unit_media.STEP]
+        else:
+            text = unit_media.text_without_set(
+                answer[unit_media.STEP], language, now, clean=lambda words: filters.clean_reply(words, rows_context)[0], ours=f"{ours}\n{our_last}"
+            )
+            answer["invited_to_meeting"] = bool(answer.get("invited_to_meeting") or answer[unit_media.STEP].get("slots"))
+            plan["invited_to_meeting"] = answer["invited_to_meeting"]
+            plan["unit_media"] = unit_media.plan_of(answer[unit_media.STEP])
     elif answer.get("shop_step"):
         # The shops steps (shop_flow): the list of types, a type's media (sent by its
         # task, outside this turn), the two slots for [Book viewing], the licence.
@@ -4847,6 +4886,27 @@ def _run_claimed(
         step_words, _ = filters.clean_reply(answer["step_words"], rows_context)
         if step_words:
             plan["step_words"] = True
+
+    if media_unit is not None:
+        # Batch 2e slice E (unit_media.py): the model's statements now, then the set's photos (the caption on the first)
+        # and the question after them from their own task (tasks.send_unit_media), as a shop type's media go.
+        answer["invited_to_meeting"] = bool(answer.get("invited_to_meeting") and media_unit.get("after")) or bool(media_unit.get("slots"))
+        answer["share_office_location"] = False
+        plan["invited_to_meeting"] = answer["invited_to_meeting"]
+        plan["unit_media"] = unit_media.plan_of(media_unit)
+        done = _apply(
+            conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=False, playbook=playbook,
+            taken=taken, decision=decision,
+        )
+        done.update(plan)
+        words_sent = unit_media.deliver(conversation, media_unit, turn.pk, language, clean=lambda words: filters.clean_reply(words, rows_context)[0])
+        LeadAiTurn.objects.filter(pk=turn.pk).update(
+            actions={**(turn.actions or {}), **done}, **({"reply_message": words_sent} if words_sent is not None else {})
+        )
+        return Outcome(
+            LeadAiTurn.Status.REPLIED, f"unit photos queued ({media_unit.get('name')})", reply_message_id=words_sent.pk if words_sent else None,
+            actions=done,
+        )
 
     if media_type:
         # Nothing goes out in this turn: the video, the photos and the detail card follow from

@@ -192,6 +192,13 @@ what engine._apply queues (``run.crm``: crm_fields.residential_writes, with the 
 it stores; a broker's turn keeps its Purpose Broker). Every shops scenario checks that the Lead fields tool would take
 them (crm_ok: one field or value off its allow-list refuses the whole batch, Bot Status included); the shops-crm-*
 scenarios check the values (crm_writes, no_crm_write).
+
+Batch 2e slice E (the studio and one-bedroom photo sets, unit_media.py; Q36, Q43), mirrored the same way: after the
+shops steps, unit_media.settle reads the rent track's turn with the scenario's values (``media``: the units whose set
+went to the chat already, and when; ``unit_library``: the sets, UNIT_LIBRARY by default, as the library's sets.json
+holds them, since the eval never reads the database) and outgoing reports the photos as "[N photos of the same type of
+...; caption: ...]" between the model's statements and the question after them. Right after engine.bare_need_reply,
+shop_buyer.settle gives a shop buyer no figure, and their price question code's answer (engine.not_a_shop_text).
 """
 
 from __future__ import annotations
@@ -209,7 +216,7 @@ from dataclasses import dataclass, field
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connections
 
-from apps.leadai import ic_templates, shop_templates
+from apps.leadai import ic_templates, shop_templates, unit_media
 from apps.leadai.assistant import (
     brokers,
     calls,
@@ -230,6 +237,7 @@ from apps.leadai.assistant import (
     rules,
     sales,
     schema,
+    shop_buyer,
     shop_flow,
     shops,
     tracks,
@@ -1277,6 +1285,67 @@ def crm_ok() -> Check:
     return _check("crm_ok", test)
 
 
+# Batch 2e slice E: the studio and one-bedroom sets as the library holds them (backend/Types shops/Residential sets/
+# sets.json, D11; every set the same type of unit, never the exact one, Q36). The eval never reads the database.
+UNIT_LIBRARY = (
+    {"id": 1, "name": "Studio - standard - a7group-1726 (default)", "unit": "studio", "label": "standard", "default_for_unit": True,
+     "for_listing_refs": ["a7group-1726"], "photo_count": 4},
+    {"id": 2, "name": "Studio - standard - a7group-1713", "unit": "studio", "label": "standard", "default_for_unit": False,
+     "for_listing_refs": ["a7group-1713", "a7group-1727"], "photo_count": 4},
+    {"id": 3, "name": "Studio - standard - a7group-1722", "unit": "studio", "label": "standard", "default_for_unit": False,
+     "for_listing_refs": ["a7group-1722"], "photo_count": 5},
+    {"id": 4, "name": "Studio - standard - a7group-1891", "unit": "studio", "label": "standard", "default_for_unit": False,
+     "for_listing_refs": ["a7group-1891", "a7group-1737"], "photo_count": 4},
+    {"id": 5, "name": "Studio - standard - a7group-1828", "unit": "studio", "label": "standard", "default_for_unit": False,
+     "for_listing_refs": ["a7group-1828"], "photo_count": 4},
+    {"id": 6, "name": "1BR - standard - a7group-1618 (default)", "unit": "one_br", "label": "standard", "default_for_unit": True,
+     "for_listing_refs": ["a7group-1618"], "photo_count": 4},
+    {"id": 7, "name": "1BR - standard - a7group-1856", "unit": "one_br", "label": "standard", "default_for_unit": False,
+     "for_listing_refs": ["a7group-1855", "a7group-1856"], "photo_count": 4},
+)
+
+
+def sends_unit_set(name: str) -> Check:
+    """The rent track's media step sends this set's photos (unit_media.settle: the lead's own listing's set, else the
+    unit's default; never another unit's)."""
+
+    def test(run):
+        step = run.answer.get(unit_media.STEP) or {}
+        if not step:
+            return f"no photos sent, expected the set '{name}'"
+        if step.get("name") != name:
+            return f"sends the set '{step.get('name') or 'none'}', expected '{name}'"
+        return None
+
+    return _check("media", test)
+
+
+def no_unit_set(*, asked: bool = False) -> Check:
+    """No set's photos go (``asked``: the step answers a request with the no-media line instead, unit_media's)."""
+
+    def test(run):
+        step = run.answer.get(unit_media.STEP) or {}
+        if step.get("set"):
+            return f"sends the set '{step.get('name')}', expected none"
+        if asked and not step:
+            return "no media step, expected the no-media line for a request"
+        if not asked and step:
+            return f"a media step ({step.get('trigger')}), expected none"
+        return None
+
+    return _check("media", test)
+
+
+def no_amount_out() -> Check:
+    """Nothing that goes out carries a figure (Q43: a shop buyer hears no price)."""
+
+    def test(run):
+        found = amounts(run.out or "")
+        return f'what goes out carries a figure ("{found[0]}")' if found else None
+
+    return _check("send", test)
+
+
 # Shop talk to someone who wants no shop to rent (the owner's rule, 2026-10-15), in what goes out.
 SHOP_TALK = re.compile(
     r"\btype\s*[123]\b|\btypes?\s+of\s+shops\b|\bshops?\s+available\b|\bfor\s+yourself\b|\bfor\s+a\s+client\b|\bdrive\s+you\b"
@@ -1633,6 +1702,9 @@ class Scenario:
     held: dict | None = None
     # Batch 2e slice C: other buyers' booked sales calls (their starts), the call pool's taken slots (calls.taken).
     call_taken: tuple = ()
+    # Slice E (unit_media.py): {unit: when its set went to the chat}, and the library's sets (UNIT_LIBRARY when None).
+    media: dict = field(default_factory=dict)
+    unit_library: tuple | None = None
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -1842,6 +1914,31 @@ RENT_NAME_ASKED = RENT_INVITED + [("customer", "6 PM"), ("assistant", residentia
 HELD_6PM = {"start": at(12, 18), "words": "6 PM", "asks": 1}
 SPAIN_LEAD = {"source": "Bayut", "listing_ref": "a7group-1722", "unit": "studio", "property": "apartment", "cluster": "Spain", "deal": "rent"}
 
+# Batch 2e slice E (unit_media.py): rent chats that answered our questions, a lead on a7group-1722, a shop buyer's facts.
+RENT_STUDIO_CHAT = [
+    ("customer", "[tapped: Yes, still looking]"),
+    ("assistant", tracks.open_lead_text("en", "studio", ("Spain",))),
+    ("customer", "For myself"),
+    ("assistant", "Perfect, the Spain Cluster studio. Do you prefer a balcony, and when are you planning to move?"),
+]
+RENT_1BR_CHAT = [
+    ("customer", "[tapped: Yes, still looking]"),
+    ("assistant", tracks.open_lead_text("en", "one_br", ("England",))),
+    ("customer", "Myself"),
+    ("assistant", "Perfect, the England Cluster one-bedroom. Do you prefer a balcony, and when are you planning to move?"),
+]
+RENT_ANY_CLUSTER_CHAT = [
+    ("customer", "[tapped: Yes, still looking]"),
+    ("assistant", rules.line("res_what_need", "en")),
+    ("customer", "A studio to rent, for myself"),
+    ("assistant", "Great! Any cluster you prefer, or are you flexible?"),
+]
+SPAIN_STUDIO_LEAD = {"source": "Bayut", "listing_ref": "a7group-1722", "unit": "studio", "property": "apartment", "cluster": "Spain", "deal": "rent"}
+# As a rent chat holds them in 2e: code's track, and 2d's facts.need and facts.wanted kept beside it (spec §1.4.10).
+RENT_FACTS = {"need": "home", "wanted": "a studio", "for_client": False, "property_type": "studio", "intent": "rent"}
+RENT_1BR_FACTS = {"need": "home", "wanted": "a 1-bedroom flat", "for_client": False, "property_type": "1-bedroom flat", "intent": "rent"}
+BUYER_SHOP_FACTS = {"need": "buy", "wanted": "to buy a shop", "intent": "buy", "property_type": "shop"}
+CAPTION_STUDIO = r"These are photos of the same type of studio\. Inside they are almost the same"
 # The launch chats where a person had to act (people.py), as they went live up to the message a scenario answers.
 CALL_WORDS_88 = "We can have a call at 11.30 - 12 PM"
 CHAT_88 = [
@@ -5296,6 +5393,186 @@ SCENARIOS = [
         ],
         words=CODE,
     ),
+    # Batch 2e slice E (unit_media.py, spec §4; Q36): the rent track's photos are their unit's set (the lead's own listing's,
+    # else the unit's default; never another unit's), captioned as the same type of unit, never the exact one, and
+    # followed by one question; with no set imported, the no-media line. Never to a broker, never twice in a day.
+    Scenario(
+        "shops-unit-photos-lead-set",
+        "rent: 'Can you send photos first?' from a Bayut lead on a7group-1722 gets that listing's studio set, as the same type",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=RENT_STUDIO_CHAT,
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        lead_context=SPAIN_STUDIO_LEAD,
+        new=["Can you send photos first?"],
+        expect=[
+            sends_unit_set("Studio - standard - a7group-1722"), out_says(CAPTION_STUDIO, "caption the photos as the same type of studio"),
+            never_out(r"\bthis is the (?:exact )?(?:unit|studio|apartment)\b", "call the photos the exact unit"),
+            never_out(r"\bfurnish", "promise furniture from the photos"), track("rent", "studio"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-unit-photos-1br-default",
+        "rent: a one-bedroom lead on an expired listing (a7group-1759) asking for pictures gets the 1BR default set",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=RENT_1BR_CHAT,
+        track="rent",
+        unit="one_br",
+        facts=RENT_1BR_FACTS,
+        lead_context={"source": "Property Finder", "listing_ref": "a7group-1759", "unit": "one_br", "property": "apartment", "cluster": "England", "deal": "rent"},
+        new=["Please share pictures of the 1 bedroom"],
+        expect=[
+            sends_unit_set("1BR - standard - a7group-1618 (default)"),
+            out_says(r"These are photos of the same type of one-bedroom apartment\.", "caption them as the same type of one-bedroom"),
+            track("rent", "one_br"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-unit-photos-never-other-unit",
+        "rent: a studio seeker whose lead was on a 1BR listing (a7group-1618) gets the studio default set, never the 1BR's",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=RENT_STUDIO_CHAT,
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        lead_context={"source": "Bayut", "listing_ref": "a7group-1618", "unit": "one_br", "property": "apartment", "cluster": "Greece", "deal": "rent"},
+        new=["send me pics of the studio"],
+        expect=[sends_unit_set("Studio - standard - a7group-1726 (default)"), out_says(CAPTION_STUDIO, "caption the photos as the same type of studio")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-unit-photos-unit-unknown",
+        "rent: 'Send pictures please' before the unit is known sends no set (the unit is asked first)",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="rent",
+        facts={"need": "home", "wanted": "an apartment", "for_client": False, "property_type": "apartment", "intent": "rent"},
+        new=["Send pictures please"],
+        expect=[no_unit_set()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-unit-photos-no-set",
+        "rent: photos asked for with no set of the unit imported get 'I don't have approved pictures for this one yet'",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=RENT_STUDIO_CHAT,
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        unit_library=(),
+        new=["Do you have photos of it?"],
+        expect=[
+            no_unit_set(asked=True),
+            out_says(r"I don't have approved pictures for this one yet, but we can show you in person\.", "say there are no approved pictures yet"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-unit-photos-confirmed-cluster",
+        "rent: a direct customer who confirms 'Spain cluster' for their studio gets the studio set, then the model's question",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=RENT_ANY_CLUSTER_CHAT,
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        new=["Spain cluster"],
+        expect=[sends_unit_set("Studio - standard - a7group-1726 (default)"), out_says(CAPTION_STUDIO, "caption the photos as the same type of studio")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-unit-photos-broker",
+        "rent: a broker asking for photos for a client gets no set (brokers are handed over, brief step 1)",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        track="rent",
+        unit="studio",
+        facts={**RENT_FACTS, "for_client": True},
+        new=["Send photos, my client wants a studio"],
+        expect=[no_unit_set()],
+        words=EITHER,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-unit-photos-sent-today",
+        "rent: 'send more photos' an hour after the studio set went out sends it no second time",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[*RENT_STUDIO_CHAT, ("assistant", f"[sent a photo] {unit_media.caption('studio', 'en')}"), ("assistant", "[sent a photo]")],
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        media={"studio": NOW - dt.timedelta(hours=1)},
+        new=["send more photos"],
+        expect=[no_unit_set()],
+        words=EITHER,
+    ),
+    Scenario(
+        "shops-unit-photos-arabic",
+        "rent: 'ممكن ترسل صور الاستوديو؟' gets the studio set with the caption in Arabic",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        name="Khalid Hassan",
+        track="rent",
+        unit="studio",
+        facts=RENT_FACTS,
+        new=["ممكن ترسل صور الاستوديو؟"],
+        language="ar",
+        expect=[sends_unit_set("Studio - standard - a7group-1726 (default)"), out_says(r"هذه صور لاستوديو من النوع نفسه", "caption the photos in Arabic")],
+        words=CODE,
+        loose=("language",),
+    ),
+    # Q43 (shop_buyer.py): a shop buyer hears no price: their price question gets code's answer and the invitation, and no
+    # figure of the model's goes to them.
+    Scenario(
+        "shops-buyer-price-again",
+        "Q43: a known shop buyer asking 'What is the price of the shop?' gets code's no-price answer and no figure",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Manager",
+        chat=[("customer", "To buy"), ("assistant", not_a_shop_sent("buy", "shop"))],
+        facts=BUYER_SHOP_FACTS,
+        invites=1,
+        new=["What is the price of the shop?"],
+        expect=[
+            out_says(r"The price depends on the shop, so our agent will go through the options and prices with you at our office\.", "answer the price with code's line"),
+            no_amount_out(), never_out(r"\brent(?:ing|al)?\b", "talk rent to a buyer"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-buyer-price-first",
+        "Q43: 'I want to buy a shop, what is the price?' gets the owner's line with the no-price answer and two free slots",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Manager",
+        new=["I want to buy a shop, what is the price?"],
+        expect=[
+            not_a_shop_line(), wants("buy"), out_says(r"options to buy a shop", "say we have options to buy"),
+            out_says(r"The price depends on the shop", "answer the price with code's line"), offers_free(), no_amount_out(),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-buyer-no-figure",
+        "Q43: a shop buyer asking where and how big the shops are hears no figure (a rent read as a price is cut)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        name="Manager",
+        chat=[("customer", "To buy"), ("assistant", not_a_shop_sent("buy", "shop"))],
+        facts=BUYER_SHOP_FACTS,
+        invites=1,
+        new=["Which clusters are the shops in, and how big are they?"],
+        expect=[no_amount_out(), never_out(r"\brent(?:ing|al)?\b", "talk rent to a buyer")],
+        words=EITHER,
+    ),
 ]
 
 
@@ -5890,6 +6167,22 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
             kept, run.removed = filters.clean_reply(answer["must_answer_kept"], run.context_words)
             text = people.with_kept(text, kept)
         return CODE, text
+    unit_step = answer.get(unit_media.STEP)
+    if unit_step:
+        # As live (batch 2e slice E, unit_media.deliver / text_without_set): the model's statements, the set's photos with
+        # the caption on the first, then its question or code's visit question and two free slots; with no set, the
+        # no-media line in one message.
+        def clean(words):
+            return filters.clean_reply(words, built.context_words)[0]
+
+        if not unit_step.get("set"):
+            return CODE, unit_media.text_without_set(unit_step, lang, scenario.now, clean=clean, ours=f"{our_words(scenario)}\n{our_last(scenario)}")
+        before = clean(unit_step["before"]) if unit_step.get("before") else ""
+        questions = clean(unit_step["after"]) if unit_step.get("after") else ""
+        after = unit_media.follow_up(
+            lang, photos_sent=True, questions=questions, invite=bool(unit_step.get("invite")), slots=unit_step.get("slots") or (), now=scenario.now
+        )
+        return CODE, "\n".join(part for part in (before, unit_media.media_report(unit_step, lang), after) if part)
     step = answer.get("shop_step") or {}
     if step.get("kind"):
         # The shops steps (shop_flow), as engine._run_claimed sends them.
@@ -6082,6 +6375,22 @@ def run_once(scenario: Scenario, label: str) -> Run:
         reoffer_now = reoffered(scenario)
         may_invite = scenario.handed_over == "no" and not scenario.not_interested and (agreed_now or reoffer_now or scenario.invites < 2)
         run.may_invite = may_invite
+
+        def media_step(answer, known, may_invite, *, dry_run=False):
+            """As live (unit_media.turn_step on the scenario's values): the rent track's photo step, or its dry run."""
+            if run.decision is None:
+                return ""
+            lead_cluster = scenario.lead_context.get("cluster")
+            return unit_media.settle(
+                answer, track=run.decision.track, unit=run.decision.unit,
+                clusters=tuple(run.decision.clusters) or ((lead_cluster,) if lead_cluster else ()), words=words,
+                earlier=[(item[0], item[1]) for item in scenario.chat], known=known,
+                library=UNIT_LIBRARY if scenario.unit_library is None else scenario.unit_library,
+                listing_ref=scenario.lead_context.get("listing_ref") or "", sent=dict(scenario.media), now=scenario.now,
+                quiet=scenario.handed_over != "no", when=when, still_invalid=still_invalid, appointment=built.appointment,
+                may_invite=may_invite, slots=hours.offer_pair(scenario.now, list(scenario.closed), taken), dry_run=dry_run,
+            )
+
         body = scenario.campaign.body.format(name=(scenario.name.split() or [""])[0])
         earlier = [("campaign", body)] + [(item[0], item[1]) for item in scenario.chat]
         if settled is None or settled.get("converted"):
@@ -6119,11 +6428,13 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 f"{built.base_words} {residential.known_amounts(settings_for(scenario), run.decision.track, run.decision.unit, run.decision.clusters)}"
             )
         if res and settled is None:
-            # As live (batch 2e, hook point 7): the rent flow's guards and lines, then 2d's facts.need kept on its tracks.
+            # As live (batch 2e, hook point 7): the rent flow's guards and lines, then 2d's facts.need kept on its tracks; the
+            # rent track's photos going this turn keep the model's "Here are the photos." (unit_media's dry run, slice E).
+            photos_going = bool(media_step(answer, scenario.facts, may_invite, dry_run=True))
             residential.settle(
                 answer, earlier, list(scenario.new), track=run.decision.track, unit=run.decision.unit, clusters=run.decision.clusters,
                 facts=scenario.facts, residential_facts=DEFAULT_RESIDENTIAL_FACTS, shops_facts=DEFAULT_SHOPS_FACTS, when=when,
-                still_invalid=still_invalid,
+                still_invalid=still_invalid, sending=photos_going,
             )
             residential.record_need(answer, scenario.facts, run.decision, words)
         if copies and not answer.get("licence"):
@@ -6168,6 +6479,12 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 answer, needs.of({**known, **answer["facts"]}) or need, need_slots, invites=scenario.invites, misread=misread,
                 plain=not (scenario.handed_over != "no" or when is not None or still_invalid or built.appointment is not None),
             )
+            # As live (Q43, shop_buyer.settle): a shop buyer hears no figure; their price question gets code's answer.
+            shop_buyer.settle(
+                answer, needs.of({**known, **answer["facts"]}) or need, known, words,
+                track=run.decision.track if run.decision is not None else "", invites=scenario.invites, slots=need_slots,
+                plain=not (scenario.handed_over != "no" or when is not None or still_invalid or built.appointment is not None),
+            )
         if shops_chat and not res and settled is None:
             # As live (claims.price_turn): a price objection, or a budget below our lowest, gets code's honest line.
             claims.price_turn(
@@ -6203,6 +6520,10 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 media_today=scenario.media_today,
                 shops_facts=DEFAULT_SHOPS_FACTS,
             )
+        if settled is None and run.decision is not None:
+            # As live (batch 2e slice E, unit_media.turn_step): the rent track's studio or one-bedroom photos, from the
+            # scenario's library and the lead context's listing ref; a cluster their words name, else the lead's.
+            media_step(answer, known, may_invite)
         shop_flow.step_flags(answer)
         if copies and when is None and not still_invalid and scenario.handed_over == "no":
             shop_flow.thank_first(answer, answer["language"])  # as live: when the model's words go out
@@ -6291,6 +6612,9 @@ def brief(run: Run) -> str:
     step = answer.get("shop_step") or {}
     if step.get("kind"):
         text += f" step={step['kind']}" + (f":{step['type']}" if step.get("type") else "") + (" (card only)" if step.get("files") is False else "")
+    unit_step = answer.get(unit_media.STEP) or {}
+    if unit_step:
+        text += f" photos={unit_step.get('name') or 'none'} ({unit_step.get('trigger')})"  # unit_media.settle (batch 2e slice E)
     if answer.get("script_fix"):
         text += f" script={answer['script_fix']}"
     if answer.get("unasked"):

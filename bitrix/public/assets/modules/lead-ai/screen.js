@@ -16,7 +16,8 @@
  * "AI settings" in the bar opens the assistant's status and settings
  * (GET/PUT /api/leadai/settings/) for everyone; what may be changed there is
  * decided by the server, the dialog only hides what the agent cannot change.
- * "Shop media" opens the shops media library (shop-media.js) the same way.
+ * "Shop media" opens the shops media library (shop-media.js) the same way, and
+ * "Apartment photos" the studio and one-bedroom sets (unit-media.js, read only).
  *
  * The agent desk (desk.js, batch 2e): "Needs a person" and "Today" in the rail
  * are list views of the same chats (the server's order: the longest wait, the
@@ -29,6 +30,7 @@ import { icon } from "../../core/icons.js";
 import { asList, inbox, leadAiApi } from "./api.js";
 import { deskEmptyText, deskLine, deskParams, deskRail, isDeskTab, trackFilters } from "./desk.js";
 import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
+import { closeUnitMediaDialog, unitMediaButton } from "./unit-media.js";
 import { shopsForm, shopsValues } from "./shops.js";
 import { residentialForm, residentialValues } from "./residential.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
@@ -149,6 +151,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
         title: "The videos and photos the assistant sends for each shop type",
         onclick: () => openShopMediaDialog(),
       }, [icon("image", { size: 15 }), "Shop media"]),
+      unitMediaButton(),
       el("button.lai-btn.lai-btn--ghost.lai-bar__settings", {
         type: "button",
         title: "The Lead AI assistant's status and settings",
@@ -239,6 +242,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     // Opened from this screen: it would stay over the inbox an alert opened.
     settingsDialog?.close();
     closeShopMediaDialog();
+    closeUnitMediaDialog();
     state.thread?.destroy();
     state.thread = null;
     root.remove();
