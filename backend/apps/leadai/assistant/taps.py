@@ -11,6 +11,10 @@ around now (reminders.tap_on_reminder) is left to the assistant's normal
 turn, like any message. A customer who then types their new arrival time or a
 new day is answered by the assistant's normal turn (on the Lead AI screen) or
 by the agent.
+
+Reminder v2's fourth quick reply, [Office Location] (board T45, batch 2e), asks
+for the way: it changes nothing on the meeting and alerts nobody, and is
+answered with the office's address and Maps link, then the pin.
 """
 
 from __future__ import annotations
@@ -84,6 +88,8 @@ def handle(message_id: int) -> str:
 
     conversation = message.conversation
     now = timezone.now()
+    if action == reminders.LOCATION:
+        return _answer_location(message, conversation, appointment, turn, now)
     outcome = LeadAiTurn.Status.SKIPPED
     reply_id = None
     with transaction.atomic():
@@ -120,6 +126,44 @@ def handle(message_id: int) -> str:
 
     LeadAiTurn.objects.filter(pk=turn.pk).update(
         status=outcome, reason=reason[:255], reply_message_id=reply_id, actions={"tap": action}, finished_at=timezone.now()
+    )
+    return reason
+
+
+def _answer_location(message, conversation, appointment, turn, now) -> str:
+    """[Office Location] on reminder v2 (T45): the office's address and Maps link in the customer's language, then the
+    pin when the settings hold one. The meeting stays as it is and nobody is alerted (they are on their way, or about to
+    be: "On My Way" says so). Only while the assistant may speak and the window is open, as any tap's reply."""
+    from apps.inbox import services as inbox_services
+
+    with transaction.atomic():
+        current = LeadAiAppointment.objects.select_for_update().get(pk=appointment.pk)
+        current.log("tap", action=reminders.LOCATION, message=message.pk)
+        current.save(update_fields=["history", "updated_at"])
+    reason = f"tap: {reminders.LOCATION}"
+    outcome, reply_id = LeadAiTurn.Status.SKIPPED, None
+    settings_row = LeadAiSettings.load()
+    if settings_row.answers(conversation.contact.wa_id) and _window_open(conversation, now):
+        language = LeadAiChatState.objects.filter(conversation=conversation).values_list("language", flat=True).first() or "en"
+        payload = {"source": SOURCE, "turn": turn.pk}
+        try:
+            sent = inbox_services.send_text(conversation, None, reminders.location_reply(settings_row, language), payload=payload)
+            reply_id, outcome = sent.pk, LeadAiTurn.Status.REPLIED
+        except Exception as exc:  # noqa: BLE001 - nothing else hangs on it
+            logger.warning("Lead AI could not answer the location tap on conversation %s: %s", conversation.pk, exc)
+            outcome, reason = LeadAiTurn.Status.FAILED, f"tap reply failed: {type(exc).__name__}"
+        if reply_id is not None and settings_row.has_pin:
+            try:
+                inbox_services.send_location(
+                    conversation, None, float(settings_row.office_latitude), float(settings_row.office_longitude),
+                    name="Our office", address=settings_row.office_address, payload=payload,
+                )
+            except Exception as exc:  # noqa: BLE001 - the address and the link went out already
+                logger.warning("Lead AI could not send the office pin for the location tap on conversation %s: %s", conversation.pk, exc)
+    else:
+        reason += " (no reply: assistant off or window closed)"
+    LeadAiTurn.objects.filter(pk=turn.pk).update(
+        status=outcome, reason=reason[:255], reply_message_id=reply_id, actions={"tap": reminders.LOCATION}, finished_at=timezone.now()
     )
     return reason
 

@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 Shop = LeadAiShopMedia.Shop
 Kind = LeadAiShopMedia.Kind
 TYPE_SHOPS = (Shop.TYPE_1, Shop.TYPE_2, Shop.TYPE_3)
+# What this library holds: the shop types and the office. A studio or one-bedroom set's photos (shop "studio" /
+# "one_br", batch 2e slice E) come with their set and go in by its import (unit_media.py), never through here.
+SHOP_LIBRARY = (*TYPE_SHOPS, Shop.OFFICE)
 MB = 1024 * 1024
 VIDEO_MAX = 16 * MB
 PHOTO_MAX = 5 * MB
@@ -213,7 +216,7 @@ def _next_order(shop: str) -> int:
 def add(shop: str, name: str, data: bytes, *, uploaded_by=None, order: int | None = None) -> tuple[LeadAiShopMedia, bool]:
     """Put one file in the library: (row, created). The same bytes in this shop already: that
     row, unchanged. Raises MediaRejected for a file it cannot hold or a shop that is full."""
-    if shop not in Shop.values:
+    if shop not in SHOP_LIBRARY:
         raise MediaRejected("Choose Type 1, Type 2, Type 3 or the office.")
     kind, mime, found = check_file(name, data, shop)
     sha = hashlib.sha256(data).hexdigest()
@@ -320,6 +323,10 @@ def import_directory(path: str, *, dry_run: bool = False, uploaded_by=None) -> l
     lines: list[str] = []
     if not os.path.isdir(path):
         raise MediaRejected(f"{path} is not a directory.")
+    from . import unit_media
+
+    if unit_media.holds_set(path) or unit_media.holds_sets(path):
+        return []  # the studio and one-bedroom sets ("Residential sets"): unit_media.import_directory's, nothing of the shops
     planned: dict = {}  # (shop, kind) -> files this run adds (or would add)
     top = sorted(os.listdir(path), key=_natural)
     # The office photo at the top first, then the folders, all in name order.
@@ -332,6 +339,8 @@ def import_directory(path: str, *, dry_run: bool = False, uploaded_by=None) -> l
             if folder not in loose:
                 lines.append(f"skipped file '{clean_name(folder)}': not in a 'Type 1/2/3 ...' or 'office' folder")
             continue
+        if unit_media.holds_set(full) or unit_media.holds_sets(full):
+            continue  # a studio or one-bedroom set, or a folder of them: unit_media.import_directory reports it
         shop = folder_shop(folder)
         if not shop:
             lines.append(f"skipped folder '{clean_name(folder)}': not 'Type 1/2/3 ...' or 'office'")
@@ -433,8 +442,9 @@ def _payload(turn_id, **extra) -> dict:
     return {"source": transcript.ASSISTANT, "turn": turn_id, **extra}
 
 
-def send_file(conversation, row: LeadAiShopMedia, *, turn_id=None, shop_type: str = "", caption: str = ""):
-    """One library file to the customer, stored as ours before the gateway is called."""
+def send_file(conversation, row: LeadAiShopMedia, *, turn_id=None, shop_type: str = "", caption: str = "", extra: dict | None = None):
+    """One library file to the customer, stored as ours before the gateway is called. ``extra``: more for the
+    message's payload (a studio or one-bedroom set's id and unit: unit_media.send_set)."""
     from apps.gateway.client import AlotsClient, AlotsError
     from apps.inbox import services as inbox_services
     from apps.inbox.events import publish_message, publish_status
@@ -453,7 +463,7 @@ def send_file(conversation, row: LeadAiShopMedia, *, turn_id=None, shop_type: st
         media=asset,
         payload=_payload(
             turn_id, shop_media=shop_type or row.shop, shop_media_id=row.pk, media_id=gateway_id, asset_id=asset.pk,
-            filename=row.file_name, gateway_kind=kind,
+            filename=row.file_name, gateway_kind=kind, **(extra or {}),
         ),
         status=Message.Status.QUEUED,
     )

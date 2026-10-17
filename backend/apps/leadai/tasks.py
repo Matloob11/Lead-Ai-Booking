@@ -23,7 +23,8 @@ meeting reminder.
                          (a shops "no" moves its lead only when nobody works it:
                          assistant/lost.py);
 - write_licence_file     a shops customer's trade licence copy, to the lead;
-- send_shop_media        a shop type's video, photos and detail card (shop_media.py).
+- send_shop_media        a shop type's video, photos and detail card (shop_media.py);
+- send_unit_media        a studio or one-bedroom set's photos and the question after them (unit_media.py).
 """
 
 from __future__ import annotations
@@ -1326,6 +1327,43 @@ def send_shop_media(conversation_id: int, shop_type: str, turn_id: int | None = 
         logger.info("Lead AI stopped sending the %s media to conversation %s: %s", shop_type, conversation_id, result["stopped"])
 
 
+@shared_task(ignore_result=True, soft_time_limit=300, time_limit=330)
+def send_unit_media(conversation_id: int, set_id: int, turn_id: int | None = None, language: str = "en", questions: str = "", invite: bool = False) -> None:
+    """A studio or one-bedroom set's photos, then the question after them (unit_media.send_set; batch 2e slice E), on
+    the leadai queue and outside the turn that asked for them. A photo the gateway refuses is skipped; when nothing
+    can go, the agents are told."""
+    from apps.inbox.models import Conversation
+
+    from . import unit_media
+    from .assistant import alerts
+    from .models import LeadAiChat
+
+    try:
+        result = unit_media.send_set(conversation_id, set_id, turn_id, language, questions, invite)
+    except SoftTimeLimitExceeded:
+        logger.warning("Lead AI ran out of time sending set %s to conversation %s", set_id, conversation_id)
+        return
+    except Exception as exc:  # noqa: BLE001 - told to the agents below
+        logger.warning("Lead AI could not send set %s to conversation %s: %s", set_id, conversation_id, exc)
+        conversation = Conversation.objects.select_related("contact", "assigned_agent").filter(pk=conversation_id).first()
+        if conversation is None:
+            return
+        chat = LeadAiChat.objects.filter(conversation=conversation).first()
+        who = conversation.contact.display_name or f"+{conversation.contact.wa_id}"
+        alerts.raise_alert(
+            kind="send_failed",
+            conversation=conversation,
+            title="Lead AI could not send the apartment photos",
+            text=f"The assistant could not send {who} the photos of the same type of apartment they asked about "
+            f"({type(exc).__name__}). Please send them by hand.",
+            dedupe_key=f"unit_media:{conversation_id}:{turn_id or set_id}",
+            crm_url=alerts.crm_path(chat.crm_entity if chat else "", chat.crm_id if chat else None),
+        )
+        return
+    if result.get("stopped"):
+        logger.info("Lead AI stopped sending set %s to conversation %s: %s", set_id, conversation_id, result["stopped"])
+
+
 FIELD_NAMES = {
     "UF_CRM_A7_BOT_STATUS": "Bot Status",
     "UF_CRM_A7_SHOP_TYPE": "Shop Type Wanted",
@@ -1519,7 +1557,7 @@ def outbound_failed(message_id: int) -> None:
                 _reminder_problem_alert(appointment.pk)
                 live.appointment_changed(conversation.pk)
                 return
-            template = reminders.approved_template(conversation)
+            template = reminders.approved_template(conversation, location_button=reminders.to_the_office(appointment))
             if template is not None:
                 # Take the failed row off first: a second copy of this status then finds nothing to retry.
                 if not LeadAiAppointment.objects.filter(pk=appointment.pk, reminder_message=message).update(reminder_message=None):

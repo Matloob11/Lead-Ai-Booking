@@ -7,25 +7,22 @@ wording names no company. v1 went to every active number (the owner's choice of 
 goes where the Lead AI campaigns go now, the eight sending numbers (board D4); run it again if
 that ever widens.
 
-The assistant keeps sending v1 until batch 2e switches a number to v2 once v2 is APPROVED there;
-until then this only starts Meta's review. Idempotent: a WABA that already has v2 (any status) is
-skipped.
+Since batch 2e the assistant sends v2 wherever it is APPROVED on the chat's number, else v1
+(reminders.approved_template), and answers [Office Location] with the office pin and Maps link
+(taps.py). Idempotent: a WABA that already has v2 (any status) is skipped.
 """
 
 from django.core.management.base import BaseCommand
 
 from apps.catalog.models import WabaNumber, WaTemplate
 from apps.catalog.views import _submit_template_to_waba
+from apps.leadai.assistant import reminders
 from apps.leadai.management.commands.submit_shops_templates import SENDING_NUMBERS
 
-V2_NAME = "a7_leadai_meeting_reminder_v2"
-# (action, button title): v1's three, then the office location. Titles fit WhatsApp's 20 characters.
-V2_BUTTONS = (
-    ("on_my_way", "On My Way"),
-    ("running_late", "Running Late"),
-    ("reschedule", "Need to Reschedule"),
-    ("location", "Office Location"),
-)
+V2_NAME = reminders.TEMPLATE_V2_NAME
+# (action, button title): v1's three, then the office location. Titles fit WhatsApp's 20 characters. The assistant reads
+# a tap by these labels (reminders.ACTION_BY_LABEL), so they live there.
+V2_BUTTONS = reminders.V2_BUTTONS
 BODY = "Hi {{1}}, a reminder of your meeting today at {{2}} at {{3}}. Please tap below to let us know."
 EXAMPLE = ["Ahmed", "5:00 PM", "Russia Cluster, Building V03, Shop 20, Dubai International City"]
 
@@ -90,4 +87,4 @@ class Command(BaseCommand):
                 submitted += 1
                 self.stdout.write(self.style.SUCCESS(f"{waba} ({label}) submitted {template.status}"))
         self.stdout.write(f"submitted={submitted} skipped={skipped} failed={failed}")
-        self.stdout.write("Meta must APPROVE v2 before use; the assistant keeps sending v1 until 2e switches to v2.")
+        self.stdout.write("Meta must APPROVE v2 before use; until then the assistant sends v1 on that number.")

@@ -8,10 +8,14 @@ the claim and re-arms the reminder for the new time.
 While the customer's 24-hour window is open (with a 10-minute margin) the
 reminder is a free-form message in the customer's language with three reply
 buttons. When it is closed WhatsApp only allows an approved template, so the
-UTILITY template ``a7_leadai_meeting_reminder`` (English, same three quick
-replies) is used if it is approved on the chat's number; with no template and
-a few minutes of window left, the buttons still go. If neither is possible
-the agents are told to remind the customer by hand.
+UTILITY template ``a7_leadai_meeting_reminder_v2`` (board T45: v1's three quick
+replies and [Office Location]) is used where it is approved on the chat's
+number, else v1, ``a7_leadai_meeting_reminder`` (English, the same three); with
+no template and a few minutes of window left, the buttons still go. If neither
+is possible the agents are told to remind the customer by hand. A tap on
+[Office Location] is answered with the office's address, its Maps link and the
+pin (taps.py); a free-form reminder carries the address and the link already
+(WhatsApp's reply buttons are three at most).
 
 Reminders go out for a booked visit even after "Move to inbox" (the meeting
 still stands), but never to a customer who asked us to stop, and not while
@@ -42,6 +46,8 @@ from . import filters, hours, live, rules, transcript
 logger = logging.getLogger(__name__)
 
 TEMPLATE_NAME = "a7_leadai_meeting_reminder"
+# v1 with a fourth quick reply, [Office Location] (board T45; submit_leadai_reminder_v2_template): sent where approved.
+TEMPLATE_V2_NAME = "a7_leadai_meeting_reminder_v2"
 SOURCE = transcript.REMINDER
 STALE_CLAIM = dt.timedelta(minutes=10)
 TOO_LATE = dt.timedelta(minutes=10)
@@ -66,7 +72,10 @@ BUTTONS = (
     ("running_late", "Running Late"),
     ("reschedule", "Need to Reschedule"),
 )
-ACTION_BY_LABEL = {label.lower(): action for action, label in BUTTONS}
+# v2's fourth quick reply (template only: a free-form message takes three reply buttons at most).
+LOCATION = "location"
+V2_BUTTONS = (*BUTTONS, (LOCATION, "Office Location"))
+ACTION_BY_LABEL = {label.lower(): action for action, label in V2_BUTTONS}
 
 # The free-form reminder, in the customer's language: (first line, last line).
 # The buttons stay in English, as in the template.
@@ -225,19 +234,38 @@ def blocked(appointment: LeadAiAppointment) -> str:
     return ""
 
 
-def approved_template(conversation):
+def approved_template(conversation, *, location_button: bool = True):
+    """The reminder template approved on the chat's number (its WABA): v2 where it is (T45), else v1, else None.
+    ``location_button`` False (a call: nobody comes to the office) asks for v1 only."""
     from apps.catalog.models import WaTemplate
 
-    return (
+    names = (TEMPLATE_V2_NAME, TEMPLATE_NAME) if location_button else (TEMPLATE_NAME,)
+    rows = list(
         WaTemplate.objects.filter(
-            name=TEMPLATE_NAME,
+            name__in=names,
             waba_business_id=conversation.number.waba_business_id,
             status=WaTemplate.Status.APPROVED,
             category__iexact="UTILITY",
-        )
-        .order_by("-id")
-        .first()
+        ).order_by("-id")
     )
+    return next((row for row in rows if row.name == TEMPLATE_V2_NAME), None) or next(iter(rows), None)
+
+
+def to_the_office(appointment) -> bool:
+    """The meeting is at our office (v2's [Office Location] fits it), not a call."""
+    return getattr(appointment, "place", "") != LeadAiAppointment.Place.CALL
+
+
+def location_reply(settings_row, language: str = "en") -> str:
+    """A tap on v2's [Office Location]: the office's address and its Maps link, labelled as our office's, in the
+    customer's language (the pin follows: taps.py)."""
+    from . import offers
+
+    address = (settings_row.office_address or "").strip()
+    maps = (settings_row.office_maps_url or "").strip()
+    if maps:
+        return offers.with_location(address, maps, language)
+    return offers.with_location("", address, language)
 
 
 def send(appointment_id: int, claimed_at: dt.datetime, starts_at: dt.datetime) -> str:
@@ -276,7 +304,7 @@ def send(appointment_id: int, claimed_at: dt.datetime, starts_at: dt.datetime) -
     route = "failed"
     error = ""
     try:
-        template = None if roomy else approved_template(conversation)
+        template = None if roomy else approved_template(conversation, location_button=to_the_office(appointment))
         if roomy or (window_open and template is None):
             # Under ten minutes of window left and no approved template: the
             # buttons still beat no reminder (a failure reaches the agents).

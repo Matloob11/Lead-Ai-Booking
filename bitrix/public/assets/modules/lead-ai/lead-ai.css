@@ -2019,3 +2019,126 @@ a.lai-media__name:hover {
     margin-left: 40px;
   }
 }
+
+/* -------------------------------------------------- apartment photos */
+/* The studio and one-bedroom photo sets (unit-media.js, batch 2e slice E): read only, in a dialog like Shop media. */
+
+.lai-um__caption {
+  margin: 0;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.lai-um__caption-label {
+  color: #9fb0c4;
+}
+
+.lai-um__sets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lai-um__set {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.lai-um__set-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.lai-um__name {
+  font-weight: 700;
+  color: #eef3f9;
+  overflow-wrap: anywhere;
+}
+
+.lai-um__marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lai-um__mark {
+  padding: 1px 7px;
+  border: 1px solid rgb(196 181 253 / 35%);
+  border-radius: 999px;
+  font-size: 11px;
+  color: #c4b5fd;
+}
+
+.lai-um__mark--default {
+  border-color: rgb(187 247 208 / 40%);
+  color: #bbf7d0;
+}
+
+.lai-um__mark--off {
+  border-color: rgb(248 113 113 / 45%);
+  color: #fecaca;
+}
+
+.lai-um__photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lai-um__photo {
+  position: relative;
+}
+
+.lai-um__link {
+  display: block;
+  border-radius: 8px;
+}
+
+.lai-um__link:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+.lai-um__thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgb(255 255 255 / 6%);
+}
+
+.lai-um__pos {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  background: rgb(6 10 20 / 70%);
+  color: #eef3f9;
+  pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  /* Two media buttons side by side: only the first is pushed to the right end of the bar. */
+  .lai-bar__media + .lai-bar__media {
+    margin-left: 0;
+  }
+}

@@ -18,6 +18,9 @@ urlpatterns = [
     path("shop-media/<int:pk>/", media_views.item, name="shop-media-item"),
     path("shop-media/<int:pk>/replace/", media_views.replace, name="shop-media-replace"),
     path("shop-media/<int:pk>/file/", media_views.file, name="shop-media-file"),
+    # The studio and one-bedroom photo sets (batch 2e slice E, board T96): read only.
+    path("unit-media/", media_views.unit_library, name="unit-media"),
+    path("unit-media/<int:pk>/file/", media_views.unit_file, name="unit-media-file"),
     # A person's Bot Status in Bitrix (board T52, C12): signed, no session.
     path("bitrix/bot-status/", bitrix_views.bot_status, name="bitrix-bot-status"),
 ]

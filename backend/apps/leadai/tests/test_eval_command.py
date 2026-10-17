@@ -553,6 +553,23 @@ RIGHT = {
     "shops-track-continuity-448": booked("2026-10-12", "17:00"),
     "shops-track-villa-jvc": answer("Great! What business will the shop be for?"),
     "shops-track-2br": answer("Great! What business will the shop be for?"),
+    # Batch 2e slice E (unit_media.py): the rent track's photos, whatever the model says; Q43 (shop_buyer.py): no figure.
+    "shops-unit-photos-lead-set": answer("Sure! Here are the photos.", segment="residential_tenant"),
+    "shops-unit-photos-1br-default": answer("Sure!", segment="residential_tenant"),
+    "shops-unit-photos-never-other-unit": answer("Sure, here you go.", segment="residential_tenant"),
+    "shops-unit-photos-unit-unknown": answer("Sure! Are you looking for a studio or a one-bedroom?", segment="residential_tenant"),
+    "shops-unit-photos-no-set": answer("Sure!", segment="residential_tenant"),
+    "shops-unit-photos-confirmed-cluster": answer(
+        "Perfect, the Spain Cluster studio. Do you prefer a balcony, and when are you planning to move?", segment="residential_tenant"
+    ),
+    "shops-unit-photos-broker": answer(SPECIALIST_REPLIES, handover="broker_or_for_client", segment="residential_tenant"),
+    "shops-unit-photos-sent-today": answer("The photos are in the messages above.", segment="residential_tenant"),
+    "shops-unit-photos-arabic": answer("بالتأكيد!", language="ar", reply_en="Sure!", segment="residential_tenant"),
+    "shops-buyer-price-again": answer("Our agent will share the details with you.", segment="buyer"),
+    "shops-buyer-price-first": answer("Great! What size are you looking for?", segment="buyer"),
+    "shops-buyer-no-figure": answer(
+        "Our shops are in Russia and England Cluster, from 400 sq ft. Small shops are AED 33,000 a year.", segment="buyer"
+    ),
 }
 
 
@@ -705,7 +722,7 @@ class EvalCommandTests(TestCase):
             sorted(corrected),
             [
                 "lang-arabic", "lang-arabic-booking", "lang-arabic-yes", "lang-hindi-devanagari", "lang-urdu", "lang-urdu-after-english",
-                "shops-arabic", "shops-track-room-and-hall-arabic", "shops-want-flat-arabic",
+                "shops-arabic", "shops-track-room-and-hall-arabic", "shops-unit-photos-arabic", "shops-want-flat-arabic",
             ],
         )
         self.assertEqual(model.call_count, total - len(settled) + len(corrected))
