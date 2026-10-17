@@ -1874,7 +1874,10 @@ def _reply_with(answer: dict, add: list[str]) -> None:
 # (spec §3.2), code's commission or VAT line (spec §2.4). Taken off only when their words ask for no person, call or
 # complaint's answer, are no broker's and no payment, and ask for what code answers; a legal or a price handover never over
 # photos, nor over a buyer's own negotiation, mortgage, DLD or legal words (sales.handover_topic).
-UNASKED_HANDOVERS = ("customer_asked_human", "unclear", "legal_visa_licence_contract", "price_or_details_insisted")
+# media_received too (2e round 3: "Please share pictures of the 1 bedroom" was handed over as media_received with "I can't
+# share pictures here", so no set went): only over a photo request, and only when the burst holds no photo, video,
+# document, location, contact or unheard voice note of theirs (received_media), which a person must still see or hear.
+UNASKED_HANDOVERS = ("customer_asked_human", "unclear", "legal_visa_licence_contract", "price_or_details_insisted", "media_received")
 TOPIC_NUMBER = "number"
 TOPIC_MEDIA = "media"
 TOPIC_MONEY = "money"
@@ -1895,6 +1898,31 @@ _HANDS_OVER = re.compile(
 def hands_over(sentence: str) -> bool:
     """The sentence hands them to a person of ours, now or later (_HANDS_OVER)."""
     return bool(_HANDS_OVER.search(" ".join(str(sentence or "").replace("’", "'").split())))
+
+
+# What they sent in the burst that the model could not take in, as transcript.inbound_text writes it ("[photo you cannot
+# see; caption: ...]", a voice note no transcript heard, a message type we cannot open).
+_RECEIVED_MEDIA = re.compile(
+    r"^\[(?:(?:photos?|video|document)\s+you\s+cannot\s+see|shared\s+a\s+(?:location|contact\s+card)"
+    r"|voice\s+note\s+could\s+not\s+be\s+heard|a\s+message\s+type\s+we\s+cannot\s+open)",
+    re.IGNORECASE,
+)
+# "I can't share pictures here", "we are unable to send photos": untrue where code sends their unit's set.
+_REFUSES_MEDIA = re.compile(
+    r"\b(?:can'?t|cannot|can\s+not|unable\s+to|not\s+able\s+to|don'?t|do\s+not)\s+(?:share|send|show|provide)\b[^.?!]{0,40}?"
+    r"\b(?:pictures?|photos?|images?|videos?|pics?)\b",
+    re.IGNORECASE,
+)
+
+
+def received_media(texts) -> bool:
+    """The burst holds a photo, video, document, location or contact card of theirs (_RECEIVED_MEDIA)."""
+    return any(_RECEIVED_MEDIA.match(str(text or "").strip()) for text in texts or ())
+
+
+def refuses_media(sentence: str) -> bool:
+    """The sentence says we cannot share or send photos or videos (_REFUSES_MEDIA)."""
+    return bool(_REFUSES_MEDIA.search(" ".join(str(sentence or "").replace("’", "'").split())))
 
 
 # A colleague named (Q30, RES_SYSTEM rule 13; batch 2e review: "Our agent Shoaib will meet you", "Manhial from our team will
@@ -2024,6 +2052,8 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
     topic = code_topic(words, track, unit)
     if not topic or (reason in ("legal_visa_licence_contract", "price_or_details_insisted") and topic == TOPIC_MEDIA):
         return ""
+    if reason == "media_received" and (topic != TOPIC_MEDIA or received_media(words)):
+        return ""  # a photo, document or location of theirs a person must see, or no photo request: the handover stays
     if track == SALE:
         from . import sales
 
@@ -2031,7 +2061,10 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
             return ""
     answer["handover"] = {"needed": False, "reason": None}
     if answer.get("reply"):
-        answer["reply"] = " ".join(sentence for sentence in _split(answer["reply"]) if not hands_over(sentence))
+        answer["reply"] = " ".join(
+            sentence for sentence in _split(answer["reply"])
+            if not hands_over(sentence) and not (topic == TOPIC_MEDIA and refuses_media(sentence))
+        )
         if not answer["reply"]:
             answer["send"] = False
     return reason
