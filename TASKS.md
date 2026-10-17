@@ -1,3 +1,13 @@
+## 2026-10-17 — Lead AI batch 2d is live (Claude Code)
+
+- **Deployed** `e867e4b` at 08:12 UTC: build of every service, `migrate-new-image` (leadai 0007, the V03 office default), `up app`. No campaign was sending.
+- **Proof:** Postgres tests on the new image (1314 leadai, 118 crmlink, OK); all four services Up, worker-leadai included; the sweep ran at 08:12:58; `django-check` "No changes detected"; the live image's 95 leadai files equal the repo; `probe-leadai-turn` 19/19; real-model eval on the build context 331/340 and on the deployed image 332/340 (97.6%), model-written 155/160 (96.9%). No live chat holds for_client true unhanded (the broker backstop has nothing to catch up).
+- **Logs after up:** no error in web, beat or worker-leadai. worker shows two older warnings unrelated to 2d: an inbound media filelink answering 401 (retried) and the Alots panel session keepalive failing (session expired?).
+- **Known follow-ups** (fail every repeat in the eval): shops-gate-half-hour, shops-invitation-cut-88, review-why-did-you-call. Carried into 2e.
+- **Shared files:** `SHOPS-BOT-BOARD.md` (2d is live, lock released), `TASKS.md`.
+
+---
+
 ## 2026-10-17 — T73 weekly funnel, WhatsApp half: `ops/wa.sh probe-leadai-funnel` (Claude Code)
 
 New read-only probe `ops/catalog/probe-leadai-funnel.py` and the verb `probe-leadai-funnel [--weeks N]` (1-26, default 8) in `ops/wa.sh`, next to `probe-leadai-turn`. It runs in the `web` container inside one transaction set READ ONLY and rolled back. Output is counts only: no phone numbers, names or message text.
