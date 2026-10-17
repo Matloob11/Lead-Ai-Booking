@@ -5,8 +5,11 @@ Code decides the sale steps; the model writes the words of the questions (RES_SY
 - **The buyer's five questions, in three messages** (``MESSAGES``): who it is for; cash or finance and how soon; a rented or
   a vacant unit (with the balcony for a one-bedroom) and investment or own use. What the chat knows is skipped
   (``next_questions``, ``step_line`` for the context), and a question of the model's about something they told us already
-  is cut (``drop_known_questions``). Then the price, then the meeting: a 5-minute call with our sales team or a visit to our
-  office, the full name, the booking (calls.py, the full-name gate).
+  is cut (``drop_known_questions``). The model's words that skip the step's questions get them in the brief's own words
+  (``ask_next``, ``next_question_line``; what their words just answered counts as known: ``answered``). Then the price,
+  then the meeting: a 5-minute call with our sales team or a visit to our office, the full name, the booking (calls.py, the
+  full-name gate); asked for at once ("just tell me the price and book", ``asks_to_meet``), the meeting goes now
+  (``book_now``).
 - **The price is never hidden** (``asks_price``, ``price_line``): a buyer who asks the price gets the band of their unit (a
   studio's, from around AED 310,000 in Morocco Cluster, a one-bedroom's; both, each labelled, while the unit is unknown),
   code's line when the model's words carry none.
@@ -58,6 +61,7 @@ PRICE = "price"
 COMMISSION = "commission"
 KNOWN = "known_question"
 MEETING = "meeting_slots"
+NEXT = "next_questions"  # code asked the SALE STEP's questions the model skipped (ask_next)
 
 # The handover reasons the brief's sales handover takes (the existing ones: spec §3.1).
 REASON_PRICE = "price_or_details_insisted"
@@ -175,7 +179,7 @@ _ASKS_ABOUT = {
         re.IGNORECASE,
     ),
     STATUS: re.compile(
-        r"\brented\b|\bvacant\b|\btenanted\b|\bempty\b|\bwith\s+a\s+tenant\b|\bkhali\b|خالي|خالية|شاغر|شاغرة|مؤجر|مؤجرة|خالی|کرائے\s+پر|ख़ाली|खाली|किराए\s+पर",
+        r"\brented\b|\bvacant\b|\btenanted\b|\bempty\b|\bwith\s+a\s+tenant\b|\bkhaa?li\b|\bkiraye\s+par\b|خالي|خالية|شاغر|شاغرة|مؤجر|مؤجرة|خالی|کرائے\s+پر|ख़ाली|खाली|किराए\s+पर",
         re.IGNORECASE,
     ),
     BALCONY: re.compile(r"\bbalcon\w*|بلكون|شرفة|بالکونی|बालकनी", re.IGNORECASE),
@@ -204,6 +208,193 @@ def drop_known_questions(reply: str, facts: dict) -> tuple[str, bool]:
                 continue
         kept.append(sentence)
     return (" ".join(kept).strip() if cut else str(reply or "").strip()), cut
+
+
+# The next questions, in code's words when the model skips them. The 2e real-model gate (round 1) answered "Within 2 months"
+# (cash known) with the cluster or the meeting, never the brief's message 3, in both runs of shops-sale-known-question-cut:
+# SALE STEP in the context says what to ask, and the model does not always ask it. _Q_TIMELINE and _Q_PURPOSE hold the
+# question alone and as a message's second ("And how soon ...?"); _Q_STATUS alone and with a one-bedroom's balcony. Message
+# 2 asked whole is residential._SALE_NEXT, word for word.
+_Q_PAYMENT = {
+    "en": "Are you a cash buyer or planning to use finance?",
+    "ar": "هل ستشتري نقداً أم بتمويل؟",
+    "ur_latin": "Kya aap cash buyer hain ya finance (mortgage) lenge?",
+    "ur": "کیا آپ کیش خریدار ہیں یا فنانس (مارگیج) لیں گے؟",
+    "hi_latin": "Kya aap cash buyer hain ya finance (mortgage) lenge?",
+    "hi": "क्या आप कैश ख़रीदार हैं या फ़ाइनेंस (मॉर्गेज) लेंगे?",
+}
+_Q_TIMELINE = {
+    "en": ("How soon are you looking to buy?", "And how soon are you looking to buy?"),
+    "ar": ("متى تخطط للشراء؟", "ومتى تخطط للشراء؟"),
+    "ur_latin": ("Aap kitni jaldi khareedna chahte hain?", "Aur aap kitni jaldi khareedna chahte hain?"),
+    "ur": ("آپ کتنی جلدی خریدنا چاہتے ہیں؟", "اور آپ کتنی جلدی خریدنا چاہتے ہیں؟"),
+    "hi_latin": ("Aap kitni jaldi kharidna chahte hain?", "Aur aap kitni jaldi kharidna chahte hain?"),
+    "hi": ("आप कितनी जल्दी ख़रीदना चाहते हैं?", "और आप कितनी जल्दी ख़रीदना चाहते हैं?"),
+}
+# Question 4 (a one-bedroom's balcony in its own sentence: two questions to a message, brief Part 5B).
+_Q_STATUS = {
+    "en": ("Do you prefer a rented unit or a vacant one?", "Do you prefer a rented unit or a vacant one, and would you like a balcony?"),
+    "ar": ("هل تفضّل وحدة مؤجرة أم شاغرة؟", "هل تفضّل وحدة مؤجرة أم شاغرة، وهل تريدها مع شرفة؟"),
+    "ur_latin": (
+        "Kya aap kiraye par di hui unit pasand karenge ya khali?",
+        "Kya aap kiraye par di hui unit pasand karenge ya khali, aur kya balcony chahiye?",
+    ),
+    "ur": ("کیا آپ کرائے پر دی ہوئی یونٹ پسند کریں گے یا خالی؟", "کیا آپ کرائے پر دی ہوئی یونٹ پسند کریں گے یا خالی، اور کیا بالکونی چاہیے؟"),
+    "hi_latin": (
+        "Kya aap kiraye par di hui unit pasand karenge ya khaali?",
+        "Kya aap kiraye par di hui unit pasand karenge ya khaali, aur kya balcony chahiye?",
+    ),
+    "hi": ("क्या आप किराए पर दी हुई यूनिट पसंद करेंगे या ख़ाली?", "क्या आप किराए पर दी हुई यूनिट पसंद करेंगे या ख़ाली, और क्या बालकनी चाहिए?"),
+}
+_Q_BALCONY = {
+    "en": "Do you prefer a balcony?",
+    "ar": "هل تفضّل شقة مع شرفة؟",
+    "ur_latin": "Kya aap balcony pasand karenge?",
+    "ur": "کیا آپ بالکونی پسند کریں گے؟",
+    "hi_latin": "Kya aap balcony pasand karenge?",
+    "hi": "क्या आप बालकनी पसंद करेंगे?",
+}
+_Q_PURPOSE = {
+    "en": ("Is this for investment or for your own use?", "And is this for investment or for your own use?"),
+    "ar": ("هل هي للاستثمار أم للاستخدام الشخصي؟", "وهل هي للاستثمار أم للاستخدام الشخصي؟"),
+    "ur_latin": ("Kya yeh investment ke liye hai ya apne istemal ke liye?", "Aur kya yeh investment ke liye hai ya apne istemal ke liye?"),
+    "ur": ("کیا یہ سرمایہ کاری کے لیے ہے یا اپنے استعمال کے لیے؟", "اور کیا یہ سرمایہ کاری کے لیے ہے یا اپنے استعمال کے لیے؟"),
+    "hi_latin": ("Kya yeh investment ke liye hai ya apne istemaal ke liye?", "Aur kya yeh investment ke liye hai ya apne istemaal ke liye?"),
+    "hi": ("क्या यह निवेश के लिए है या अपने इस्तेमाल के लिए?", "और क्या यह निवेश के लिए है या अपने इस्तेमाल के लिए?"),
+}
+
+
+def next_question_line(language: str, questions) -> str:
+    """The brief's own words for the questions of the next message (next_questions), in the customer's language: "Do you
+    prefer a rented unit or a vacant one? And is this for investment or for your own use?" (message 3)."""
+    lang = _lang(language)
+    keys = tuple(questions or ())
+    if not keys:
+        return ""
+    if keys[0] == FOR_CLIENT:
+        return residential._FOR_WHOM[lang]
+    if PAYMENT in keys and TIMELINE in keys:
+        return residential._SALE_NEXT[lang]
+    parts = []
+    if PAYMENT in keys:
+        parts.append(_Q_PAYMENT[lang])
+    if TIMELINE in keys:
+        parts.append(_Q_TIMELINE[lang][1 if parts else 0])
+    if STATUS in keys:
+        parts.append(_Q_STATUS[lang][1 if BALCONY in keys else 0])
+    elif BALCONY in keys:
+        parts.append(_Q_BALCONY[lang])
+    if PURPOSE in keys:
+        parts.append(_Q_PURPOSE[lang][1 if parts else 0])
+    return " ".join(parts)
+
+
+# A buyer who will not answer is not pushed (brief Part 5B: "don't push. Move on and offer the meeting").
+_REFUSES = re.compile(
+    r"\b(?:rather\s+not|prefer\s+not|no\s+comment|not\s+(?:your|ur)\s+(?:business|concern)|why\s+do\s+you\s+(?:need|want|ask)"
+    r"|(?:do\s*n'?t|dont|do\s+not)\s+want\s+to\s+(?:say|share|answer|tell)|won'?t\s+(?:say|share|answer|tell)|skip\s+(?:it|this|that|the\s+questions?)"
+    r"|nahi\s+bata\w*|nahin\s+bata\w*|mat\s+pooch\w*)\b|لا\s+أريد\s+(?:أن\s+)?(?:أقول|أجيب)|نہیں\s+بتا|नहीं\s+बता",
+    re.IGNORECASE,
+)
+
+
+def refuses(texts) -> bool:
+    return any(_REFUSES.search(_flat(text)) for text in texts or ())
+
+
+# Their own words answering a question of the five, in a sentence that asks nothing ("Within 2 months", "cash", "vacant,
+# for investment"): read beside the facts the model recorded, so code never asks again what they just said.
+_ANSWERS = {
+    PAYMENT: _ASKS_ABOUT[PAYMENT],
+    TIMELINE: re.compile(
+        r"\bwithin\b|\bin\s+(?:a|an|one|two|three|four|five|six|\d+)\s+(?:days?|weeks?|months?|years?)\b|\b(?:next|this|coming)\s+(?:week|month|year)\b"
+        r"|\b\d+\s*(?:-\s*\d+\s*)?(?:days?|weeks?|months?|years?)\b|\basap\b|\bimmediately\b|\burgent\w*|\bright\s+away\b|\bno\s+rush\b"
+        r"|\bjaldi\b|\bfauran\b|خلال|فوراً|فورا|جلد|ہفتے|مہینے|महीने|हफ़्ते|जल्दी",
+        re.IGNORECASE,
+    ),
+    STATUS: re.compile(
+        r"\bvacant\b|\brented\b|\btenanted\b|\bempty\b|\beither\b|\bwith\s+(?:a\s+)?tenants?\b|\bkhaa?li\b|\bkiraye\s+par\b"
+        r"|خالي|خالية|شاغر|شاغرة|مؤجر|مؤجرة|خالی|کرائے\s+پر|खाली|ख़ाली|किराए\s+पर",
+        re.IGNORECASE,
+    ),
+    PURPOSE: re.compile(_ASKS_ABOUT[PURPOSE].pattern + r"|\brent\s+(?:it\s+)?out\b|\bto\s+live\b", re.IGNORECASE),
+}
+
+
+def answered(texts) -> set:
+    """The buyer's questions their words answer (_ANSWERS), in sentences that ask nothing."""
+    found = set()
+    for text in texts or ():
+        for sentence in filters.split_sentences(str(text or "")):
+            if not rules.asks_question(sentence):
+                found |= {key for key, pattern in _ANSWERS.items() if pattern.search(sentence)}
+    return found
+
+
+def ask_next(
+    reply: str, facts: dict, unit: str, language: str, texts=(), *, cut_known: bool = False, progressed: bool = False,
+) -> tuple[str, bool]:
+    """The reply with the questions SALE STEP names (next_questions), in code's words (next_question_line), where its own
+    questions or offered times ask none of them (the brief's order: a later question waits for these): those go, its
+    statements stay; and where it asks nothing after code cut its only question as one the chat knows (``cut_known``), or
+    after they answered a question this turn (``progressed``). ``facts`` holds what their words answered this turn too
+    (answered), so nothing they just said is asked again. Untouched while no question is left or they refuse to answer.
+    (reply, changed)."""
+    keys = next_questions(facts, unit)
+    if not keys or refuses(texts):
+        return str(reply or "").strip(), False
+    sentences = filters.split_sentences(reply)
+    offering = [
+        sentence for sentence in sentences
+        if rules.asks_question(sentence) or asks_when_to_meet(sentence) or (filters.offers_time(sentence) and not offers.states_hours(sentence))
+    ]
+    if any(asked_keys(sentence) & set(keys) for sentence in offering if rules.asks_question(sentence)):
+        return str(reply or "").strip(), False
+    if not offering and not (cut_known or progressed):
+        return str(reply or "").strip(), False
+    kept = [sentence for sentence in sentences if sentence not in offering]
+    return " ".join([*kept, next_question_line(language, keys)]).strip(), True
+
+
+# A buyer who asks to come to the office now ("I prefer to visit your office"), never one who cannot ("I can't come").
+_CANNOT_COME = re.compile(
+    r"\b(?:can'?t|cannot|can\s+not|won'?t|unable\s+to|not\s+able\s+to|do\s*n'?t\s+want\s+to|no\s+time\s+to)\s+(?:\w+\s+){0,2}?(?:come|visit|meet|travel)\b"
+    r"|لا\s+أستطيع|نہیں\s+آ\s+سکتا|नहीं\s+आ\s+सकता",
+    re.IGNORECASE,
+)
+
+
+def asks_to_meet(said: str) -> bool:
+    """Their words ask for the meeting now: to book ("just tell me the price and book"), or to come to the office."""
+    return asks_to_book(said) or (wants_office(said) and not _CANNOT_COME.search(_flat(said)))
+
+
+# "Just tell me the price and book" (brief Part 5B: the price, then the booking; the agent collects the rest on the call).
+_BOOK = re.compile(
+    r"\bbook(?:ing)?\b|\bschedul\w*|\b(?:arrange|set\s+up|fix|organi[sz]e)\s+(?:a|the|an|my)\s+(?:call|meeting|time|slot|appointment|visit|viewing)\b"
+    r"|\bappointment\b|\breserve\s+(?:a|the|my)\s+(?:slot|time)\b|\bbook\s+kar\w*|احجز|حجز|موعد|بک\s+کر|بکنگ|बुक|बुकिंग",
+    re.IGNORECASE,
+)
+_BOOKED = re.compile(r"\b(?:already|have|has|had)\s+(?:\w+\s+)?booked\b|\bbooked\s+(?:already|it)\b", re.IGNORECASE)
+
+
+def asks_to_book(said: str) -> bool:
+    """Their words ask us to book ("book", "schedule a call", "an appointment"), never "I already booked"."""
+    words = _flat(said)
+    return bool(_BOOK.search(words)) and not _BOOKED.search(words)
+
+
+def book_now(reply: str, line: str) -> tuple[str, bool]:
+    """A buyer who asked to book: the reply's questions and offered times go, code's two free slots (``line``) close it.
+    (reply, changed)."""
+    if not line:
+        return str(reply or "").strip(), False
+    sentences = filters.split_sentences(reply)
+    kept = [
+        sentence for sentence in sentences
+        if not (rules.asks_question(sentence) or asks_when_to_meet(sentence) or (filters.offers_time(sentence) and not offers.states_hours(sentence)))
+    ]
+    return " ".join([*kept, line]).strip(), True
 
 
 # The price ---------------------------------------------------------------------------------------------------------
@@ -705,6 +896,15 @@ def settle(
     if not plain(answer, when=when, still_invalid=still_invalid, quiet=quiet):
         return ""
     known_now = {**(facts or {}), **{key: value for key, value in answer["facts"].items() if value not in (None, "", [])}}
+    # What their words in this burst answered counts too, recorded by the model or not: never asked again (ask_next).
+    said_now = answered(texts)
+    for key in said_now:
+        if not known(known_now, key):
+            known_now[key] = "said"
+    # They answered one of the five this turn: the next ones follow, even after a reply of the model's that asks nothing.
+    progressed = bool(said_now) or any(
+        known(answer["facts"], key) and answer["facts"].get(key) != (facts or {}).get(key) for key in QUESTIONS
+    )
     language = answer["language"]
     topic = handover_topic(texts)
     if topic or answer["handover"]["needed"]:
@@ -738,11 +938,26 @@ def settle(
         reply, dropped = drop_known_questions(reply, known_now)
         if dropped:
             done.append(KNOWN)
-        if pair:
-            reply, offered = offer_slots(reply, slots_line(language, pair, now, office=office))
-            if offered:
-                done.append(MEETING)
-                answer["invited_to_meeting"] = True
+        line = slots_line(language, pair, now, office=office) if pair else ""
+        if line and asks_to_meet(said):
+            # They ask for the meeting now ("Just tell me the price and book", "I prefer to visit your office"): code's two
+            # free slots, in place of the model's open "when", or else of its questions (the 2e real-model gate, round 1, asked
+            # cash or finance instead, both runs of shops-sale-price-and-book); our agent asks the rest on the call.
+            reply, offered = offer_slots(reply, line)
+            if not offered:
+                reply, offered = book_now(reply, line)
+            done.append(MEETING)
+            answer["invited_to_meeting"] = True
+        else:
+            reply, asked_next = ask_next(reply, known_now, unit, language, texts, cut_known=dropped, progressed=progressed)
+            if asked_next:
+                done.append(NEXT)
+                answer["invited_to_meeting"] = False  # the meeting waits for the questions (brief Part 5B's order)
+            elif line:
+                reply, offered = offer_slots(reply, line)
+                if offered:
+                    done.append(MEETING)
+                    answer["invited_to_meeting"] = True
         if asked_price and price and not priced(reply, unit, clusters, residential_facts):
             reply = _with_line(reply, price)
             done.append(PRICE)

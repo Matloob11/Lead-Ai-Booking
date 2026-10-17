@@ -208,6 +208,17 @@ shops-gate-half-hour); engine.licence_first asks the licence before the first in
 where we are in so many words only (offers.asks_where_we_are: chat 88's "Preferable Location - France" asks nothing;
 shops-invitation-cut-88); engine.settle_handover takes an "unclear" or a "customer_asked_human" off "Who is this? Why did you
 call me?", with the reply's sentence that says a colleague will reply (engine.who_we_are_reply; review-why-did-you-call).
+
+Batch 2e's real-model gate, round 1 (2026-10-17: 94.5% overall, 92.4% of the model's own words), mirrored the same way with
+no call of its own (test_gate_2e_round1 holds each failing run's answer): residential.settle takes a handover nobody asked
+for off words code answers itself (the owner's number, photos, the commission), cuts a charge line they did not ask about
+and an injected figure, keeps the documents named and a price's terms ("whether the unit is vacant or rented"), and asks
+the cluster before who will stay; sales.settle asks the SALE STEP's questions the model skipped (never one their words just
+answered) and gives the meeting when they ask for it; engine.settle counts the rent track's invitation and checks its times
+as a shops chat's; engine.passed_over_hour reads the slots before their half hour too; a residential answer may run to
+openai_client.RES_MAX_TOKENS. Three checks judged the wrong thing and judge the words now: our sales team's handover by
+either writer (sends_sales_handover), the for-whom question asked again, never their answer said back (FOR_WHOM_ASKED),
+and question 4 in any words (NEXT_QUESTION_4); no_document_ask reads our need for the documents as the guard does.
 """
 
 from __future__ import annotations
@@ -1196,8 +1207,12 @@ def no_availability_claim() -> Check:
 
 
 def no_document_ask() -> Check:
+    """Nothing that goes out asks for documents or bank details (residential.asks_private, as the guard reads it: asked
+    what documents the contract needs, our need for them is the answer, never an ask)."""
+
     def test(run):
-        bad = next((sentence for sentence in _sentences_out(run) if residential.asks_private(sentence)), "")
+        naming = "documents" in (residential.charges_asked(run.scenario.new) or ())
+        bad = next((sentence for sentence in _sentences_out(run) if residential.asks_private(sentence, naming=naming)), "")
         return f'asks for documents or bank details: "{_short(bad, 70)}"' if bad else None
 
     return _check("reply", test)
@@ -1588,6 +1603,28 @@ def sends_sale(kind: str) -> Check:
         if got != kind:
             return f"sale step {got}, expected {kind}"
         return None if run.out_by == CODE and run.out else "the sale step's words do not go out"
+
+    return _check("send", test)
+
+
+def sends_sales_handover() -> Check:
+    """Our sales team's handover line goes out, code's (spec §3.1: negotiation, the mortgage process, DLD fees and legal
+    questions): the sale step's (sales.settle, for words the model left unhanded) or the rent flow's res_handover on the
+    sale track (residential.settle, for the model's own handover, which it reaches first since the 2e merge). Both write
+    residential.handover_line(language, sale), and a complaint's apology may open it. sends_sale(sales.HANDOVER) alone
+    failed every run of the 2e gate's round 1 where the model handed the chat over itself, with these very words out."""
+
+    def test(run):
+        sale = (run.answer.get("sale") or {}).get("kind") == sales.HANDOVER
+        spec = run.answer.get("res_line") or {}
+        res = spec.get("kind") == "res_handover" and spec.get("track") == tracks.SALE
+        if not (sale or res):
+            got = (run.answer.get("sale") or {}).get("kind") or spec.get("kind") or "none"
+            return f"code's line {got}, expected our sales team's handover"
+        expected = residential.handover_line(run.line_language or run.answer["language"], tracks.SALE)
+        if run.out_by != CODE or not (run.out or "").endswith(expected):
+            return f'sends "{_short(run.out, 60)}", expected our sales team\'s handover line'
+        return None
 
     return _check("send", test)
 
@@ -2220,6 +2257,14 @@ BUYER_ASKED = [
     ("assistant", "Sure! We can help you buy a studio or a one-bedroom in International City. Are you looking for yourself or for a client?"),
 ]
 CALL_OFFERED = [("customer", "Just tell me the price and book"), ("assistant", f"{STUDIO_PRICE} {CALL_SLOTS_OFFER}")]
+# The for-whom question asked again ("Is this for yourself or for a client?"), never their answer said back to them ("Perfect,
+# you're looking to buy a studio for yourself.": the 2e gate's round 1 failed that acknowledgement, which the brief asks for,
+# "Show you understood", as asking again).
+FOR_WHOM_ASKED = r"\bfor\s+(?:yourself|you)\s*,?\s+or\s+(?:\w+\s+){0,3}?(?:a\s+)?clients?\b"
+# Question 4 asked, in the brief's words (code's, sales.next_question_line) or the model's own ("a vacant unit or a tenanted
+# one?"): RES_SYSTEM's sale section has the model write message 3, so its words are judged by what they ask, as
+# shops-sale-rented-or-vacant judges them, never by the brief's exact phrase.
+NEXT_QUESTION_4 = r"\b(?:rented|vacant|tenanted)\b[^.?!؟]*[?؟]"
 RENT_FIGURES = r"\b(?:29|30|31|33|40|42|43|45),000\b"
 SALE_SCENARIOS = [
     # The five questions in three messages (brief Part 5B), skipping what is known.
@@ -2246,7 +2291,7 @@ SALE_SCENARIOS = [
         facts={**BUYER},
         new=["For myself"],
         expect=[says(r"\bcash\b|financ|mortgage", "ask cash or finance"), says(r"how soon|when", "ask how soon they buy"),
-                never_out(r"for yourself|for a client", "ask who it is for again"), questions_at_most(2), track("sale", "studio")],
+                never_out(FOR_WHOM_ASKED, "ask who it is for again"), questions_at_most(2), track("sale", "studio")],
     ),
     Scenario(
         "shops-sale-rented-or-vacant",
@@ -2271,7 +2316,7 @@ SALE_SCENARIOS = [
         chat=[*BUYER_ASKED, ("customer", "For myself, cash")],
         facts={**BUYER, "payment": "cash"},
         new=["Within 2 months"],
-        expect=[never_out(r"cash buyer|financ", "ask what the chat knows (cash or finance)"), out_says(r"rented unit or a vacant one", "ask the next question"),
+        expect=[never_out(r"cash buyer|financ", "ask what the chat knows (cash or finance)"), out_says(NEXT_QUESTION_4, "ask the next question"),
                 questions_at_most(2)],
     ),
     # Prices: the band of their unit, at once when asked, never hidden; never a rent figure.
@@ -2464,7 +2509,7 @@ SALE_SCENARIOS = [
         chat=BUYER_ASKED,
         facts={**BUYER},
         new=["Can the owner do 300k for the studio?"],
-        expect=[handover(sales.REASON_PRICE), sends_sale(sales.HANDOVER), out_says(r"passed your details to our sales team", "hand over to the sales team"),
+        expect=[handover(sales.REASON_PRICE), sends_sales_handover(), out_says(r"passed your details to our sales team", "hand over to the sales team"),
                 no_person_named()],
         words=CODE,
     ),
@@ -2478,7 +2523,7 @@ SALE_SCENARIOS = [
         chat=BUYER_ASKED,
         facts={**BUYER},
         new=["How does the mortgage process work if I buy?"],
-        expect=[handover(sales.REASON_LEGAL), sends_sale(sales.HANDOVER), never_out(r"\d+\s*%", "answer the mortgage process itself")],
+        expect=[handover(sales.REASON_LEGAL), sends_sales_handover(), never_out(r"\d+\s*%", "answer the mortgage process itself")],
         words=CODE,
     ),
     Scenario(
@@ -2491,7 +2536,7 @@ SALE_SCENARIOS = [
         chat=BUYER_ASKED,
         facts={**BUYER},
         new=["What is the DLD transfer fee?"],
-        expect=[handover(sales.REASON_LEGAL), sends_sale(sales.HANDOVER), never_out(r"\d+\s*%", "a DLD figure")],
+        expect=[handover(sales.REASON_LEGAL), sends_sales_handover(), never_out(r"\d+\s*%", "a DLD figure")],
         words=CODE,
     ),
     Scenario(

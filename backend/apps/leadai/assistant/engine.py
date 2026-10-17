@@ -2124,7 +2124,12 @@ def settle(
         # Where we are, asked by a known end user, answered with no invitation: code's two slots close it (the launch gate's
         # eval shops-location-counted-81).
         trimmed.append("location_invitation")
-    if shop_guards and answer["reply"] and not answer.get("converted") and now is not None:
+    # Batch 2e: the rent track's invitation is the model's words with code's slots (spec §2.1 step 4, §2.5), as a shops
+    # chat's: its own times checked and an offer of two counted as the invitation it is (the 2e real-model gate, round 1:
+    # shops-res-invitation-two-slots offered "today at 3:00 PM or 4:00 PM" with invited_to_meeting false, both runs). The
+    # sale track's meeting is sales.settle's (the call slots).
+    rent_slots = shops_chat and residential and track in (tracks.RENT, tracks.UNKNOWN)
+    if (shop_guards or rent_slots) and answer["reply"] and not answer.get("converted") and now is not None:
         # Launch review issue 17: the model's own times, an hour ahead and an hour apart at least, never past or taken;
         # a time they named stands (unless it has passed), and so does any time ahead when they want to come now.
         lately = [text for author, text in earlier if author == "customer"][-6:]
@@ -2280,9 +2285,11 @@ def ask_model(
         cache_key = openai_client.RES_CACHE_KEY
     else:
         cache_key = openai_client.SHOPS_CACHE_KEY if shops_chat else openai_client.CACHE_KEY
+    # RES_SCHEMA's answer is the longest (openai_client.RES_MAX_TOKENS); the other playbooks' requests stay as they were.
+    limit = {"max_tokens": openai_client.RES_MAX_TOKENS} if residential else {}
     messages = [{"role": "system", "content": system}, {"role": "user", "content": context}]
     completions = []
-    first = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
+    first = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key, **limit)
     completions.append(first)
 
     def shaped(data) -> dict:
@@ -2318,7 +2325,7 @@ def ask_model(
             {"role": "user", "content": check},
         ]
         try:
-            again = openai_client.complete_json(asked, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
+            again = openai_client.complete_json(asked, answer_schema, user=user, deadline=deadline, cache_key=cache_key, **limit)
         except SoftTimeLimitExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 - the first answer is usable: it goes as it was (SPEC A, T19)
@@ -2375,7 +2382,7 @@ def ask_model(
         {"role": "assistant", "content": json.dumps(first.data, ensure_ascii=False)},
         {"role": "user", "content": prompt.CORRECTION.format(reason=reason)},
     ]
-    second = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key)
+    second = openai_client.complete_json(messages, answer_schema, user=user, deadline=deadline, cache_key=cache_key, **limit)
     completions.append(second)
     answer = shaped(second.data)
     try:
@@ -2469,7 +2476,8 @@ def upgrade_exact_time(
 
 def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | None, now) -> dt.time | None:
     """The one hour of their own that a tentative on their day (``day``) left out (``model_at`` None) or put beside it,
-    when the reply offers only the slots either side of it; else None (upgrade_exact_time books it when it is free).
+    when the reply offers only the slots either side of it, or the nearest ones on one side of it; else None
+    (upgrade_exact_time books it when it is free).
 
     FREE SLOTS lists starts an hour apart, so a half hour they ask for looks taken to the model: the deployed gate's eval
     shops-gate-half-hour answered "Can I come today at 4:30?" with "The closest available slot is 4:00 PM or 5:00 PM" (or
@@ -2491,9 +2499,20 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
         for on in days
         for at in times
     } - {start}
-    if not others or any(slot.date() != day or abs(slot - start) > hours.SLOT for slot in others):
+    if not others or any(slot.date() != day for slot in others):
         return None
-    return theirs
+    if all(abs(slot - start) <= hours.SLOT for slot in others):
+        return theirs
+    # ... or the nearest slots on one side of it, the first beside theirs and each next an hour on at most: the 2e real-model
+    # gate (round 1, shops-gate-half-hour #2) answered "Can I come today at 4:30?" with "The closest available slot is 4:00
+    # PM. I can hold that for you or 3:00 PM if you prefer." and a tentative for today with no hour. A slot on the other side
+    # an hour off ("4:00 PM or 6:00 PM") is no such offer, nor one after a gap.
+    ordered = sorted(others, key=lambda slot: abs(slot - start))
+    one_side = len({slot < start for slot in ordered}) == 1
+    steps = all(abs(later - sooner) <= hours.MIN_GAP for sooner, later in zip(ordered, ordered[1:]))
+    if one_side and steps and abs(ordered[0] - start) <= hours.SLOT:
+        return theirs
+    return None
 
 
 def own_time(

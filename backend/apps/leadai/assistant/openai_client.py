@@ -36,6 +36,12 @@ CACHE_KEY = "leadai-v2"
 SHOPS_CACHE_KEY = "leadai-shops-v1"
 # ... and the residential one (batch 2e: a rent, sale or not-known chat of the International City campaign, prompt.RES_SYSTEM).
 RES_CACHE_KEY = "leadai-res-v1"
+# The most a model's answer may be (max_completion_tokens). RES_SCHEMA's answer is the longest: 25 facts and the need tag
+# before the reply and its English gloss, and the 2e real-model gate (round 1) had one cut off at 700 (OpenAI's "length":
+# too_long, a turn with no reply at all, shops-res-name-gate-new #2). What goes out stays code's to bound: RES_SYSTEM's
+# 60 words, filters.REPLY_MAX, code's own lines. The other playbooks keep 700.
+MAX_TOKENS = 700
+RES_MAX_TOKENS = 1100
 CONNECT_TIMEOUT = 5.0
 RETRY_PAUSE = 2.0
 # Below this, a call cannot finish before the turn's deadline: it is not made.
@@ -171,7 +177,7 @@ def complete_json(
     *,
     name: str = "leadai_turn",
     temperature: float = 0.3,
-    max_tokens: int = 700,
+    max_tokens: int = MAX_TOKENS,
     user: str = "",
     deadline: float | None = None,
     cache_key: str = CACHE_KEY,
