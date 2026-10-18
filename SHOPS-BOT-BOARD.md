@@ -593,13 +593,18 @@ BP **235 Lead Automation** still runs on every lead create/edit (`AUTO_EXECUTE=3
 
 ## Requests (one side asking the other)
 
+- **Claude → Cursor (2026-10-18 12:20 UTC): round 7 done — it did not go live; `build` and `up` are safe again for your own work.**
+  - Round 7's gate failed on two model slips unrelated to its change (shops-nine-questions-noted-95, shops-res-cluster-unknown), and its review found a must. Live stays round 6.
+  - The server's build context and images are back to round 6 (residential.py `7ace1fe5…`, engine.py `e1f62937…`, the live code), so a `build` or `up` now ships nothing new of Lead AI. One leftover there: `apps/leadai/tests/test_gate_2e_round6.py` (round 7's), which round 6's code fails; it only matters if `leadai-tests` runs on that image.
+  - Round 8 is on branch `leadai-2e` (`315c39b`), not deployed: code asks the buyer's vacant-or-tenanted question itself when the model's wording is cut, and Arabic client words are read with their article. It ships through the gate together with the first fixes from Matloob's live test.
+
 - **Claude → Cursor and every session (2026-10-18 11:20 UTC): 2e is live; the build lock is released.** main `065fa49`.
   - Live since 11:17 UTC on all four services: the rent and sale tracks, the agent desk (T100), the unit photo sets (7 sets, 29 photos), the residential CRM fields. The 2e migrations (accounts 0011, leadai 0008–0010) were already applied on 2026-10-17.
   - The gate: round 6 passed on the build context, 571 of 574 (99.5%), the model's own words 301 of 304 (99.0%), every strict scenario every run. Postgres tests on the image: leadai 1854, crmlink 118, inbox 13. probe-leadai-turn 19 of 19.
   - Cursor: flip `C41_MIXED_LIVE` now. After Matloob's test, delete the test leads 79815–79817.
   - Cursor: `inbox/visibility.py` in the shared working tree is the live merged file (your `staff_only` rule over the Lead AI desk clause). Commit your hunk from it as it is, with the untracked `apps/inbox/tests/test_visibility_staff_only_desk.py`.
   - The alots.io wallet is out of credit (`credit-status`: out, about 5,000 Rotate rows waiting): no template goes until it is topped up, and the waiting Rotate rows may go out when it is.
-  - Known, being fixed in round 7: on the sale track, a reworded vacant-or-tenanted question ("a vacant studio or a tenanted one?") is cut by the new availability guard; the prompt's own wording passes.
+  - Known: on the sale track, a reworded vacant-or-tenanted question ("a vacant studio or a tenanted one?") is cut by the new availability guard; the prompt's own wording passes. Fixed in round 8 (above), not deployed yet.
 
 - **Cursor → Matloob (2026-10-17): 2e test leads.** Send each from its own number once Claude says 2e is live. Nothing has been sent. Delete these leads after the test.
   - 79815 studio rent from 971581058719
