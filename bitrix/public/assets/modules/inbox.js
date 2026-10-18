@@ -15,7 +15,7 @@
  *  - transfer is admin-only.
  */
 
-import { access, auth, catalog, crm, inbox, asList } from "../api/api.js";
+import { access, auth, catalog, crm, inbox, asList } from "../api/api.js?v=rotate2";
 import { openAccessRequests, renderNoNumbersScreen } from "./access-requests.js";
 import { bindFileSources, checkFile, openAttachmentDialog } from "./attach.js";
 import { ensureSession } from "../core/bitrix-sso.js";
@@ -25,7 +25,7 @@ import { buttonReplyTag, templateButtonsRow, templateFooterNode } from "../core/
 import { specialMessageNode } from "../core/message-special.js";
 import { numberNameWithDial } from "../core/number-label.js";
 import { createNumberPicker } from "../core/number-picker.js";
-import { createQuickFilters, renderTagMenu } from "../core/list-quick-filters.js";
+import { createQuickFilters, renderTagMenu } from "../core/list-quick-filters.js?v=rotate1";
 import { openNumbersAdmin } from "./numbers-admin.js";
 import { openLinkedPhonesAdmin } from "./linked-phones-admin.js";
 import { openContactPanel, closeContactPanel } from "./contact-panel.js";
@@ -249,11 +249,11 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   const quickFilters = createQuickFilters({
     getActive: () => state.listFilter,
-    onChange: (id) => {
-      state.listFilter = id;
-      quickFilters.render();
-      renderConversations();
-    },
+      onChange: (id) => {
+        state.listFilter = id;
+        quickFilters.render();
+        loadConversations({ keepActive: false });
+      },
   });
 
   const numberPicker = createNumberPicker({
@@ -459,6 +459,7 @@ export function mountInbox(root, { me, openRequest = null }) {
         q: state.search || undefined,
         limit: LIST_PAGE_SIZE,
         offset,
+        rotate: state.listFilter === "rotate",
       });
       const page = asList(payload, "conversations");
       state.conversations = append
@@ -488,7 +489,11 @@ export function mountInbox(root, { me, openRequest = null }) {
   function renderListStatus() {
     clear(ui.listStatus);
     if (!state.conversations.length) {
-      ui.listStatus.append("No conversations.");
+      ui.listStatus.append(
+        state.listFilter === "rotate"
+          ? "No rotate campaign chats."
+          : "No conversations."
+      );
       return;
     }
     if (state.listExhausted) return;
@@ -968,12 +973,16 @@ export function mountInbox(root, { me, openRequest = null }) {
 
   function applyListFilter(conversations) {
     let rows = conversations.slice();
-    if (state.listFilter === "unread") {
-      rows = rows.filter((c) => Number(c.unread_count || 0) > 0);
+    if (state.listFilter === "rotate") {
+      rows = rows.filter((c) => c.staff_only);
+    } else if (state.listFilter === "unread") {
+      rows = rows.filter((c) => !c.staff_only && Number(c.unread_count || 0) > 0);
     } else if (state.listFilter === "pinned") {
-      rows = rows.filter((c) => c.is_pinned);
+      rows = rows.filter((c) => !c.staff_only && c.is_pinned);
     } else if (state.listFilter === "transferred") {
-      rows = rows.filter((c) => isTransferredIn(c));
+      rows = rows.filter((c) => !c.staff_only && isTransferredIn(c));
+    } else {
+      rows = rows.filter((c) => !c.staff_only);
     }
     if (state.tagFilter) {
       rows = rows.filter((c) => (c.labels || []).some((l) => l.name === state.tagFilter));
@@ -2683,6 +2692,7 @@ export function mountInbox(root, { me, openRequest = null }) {
       state.conversations.unshift(conversation);
     } else {
       const prev = state.conversations[index];
+      if (prev.staff_only) conversation = { ...conversation, staff_only: true };
       const prevAt = Date.parse(prev.last_message_at || "") || 0;
       const nextAt = Date.parse(conversation.last_message_at || "") || 0;
       // Opening a chat (or a stale WS payload) must not bury a thread we just

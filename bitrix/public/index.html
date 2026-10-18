@@ -37,6 +37,7 @@
     <link rel="stylesheet" href="/app/assets/modules/template-center.css" />
     <link rel="stylesheet" href="/app/assets/modules/campaigns.css" />
     <link rel="stylesheet" href="/app/assets/modules/bulk-campaign.css" />
+    <link rel="stylesheet" href="/app/assets/modules/rotate-campaign.css?v=2" />
     <link rel="stylesheet" href="/app/assets/modules/numbers-admin.css" />
     <link rel="stylesheet" href="/app/assets/modules/agent-numbers.css" />
     <link rel="stylesheet" href="/app/assets/modules/contact-panel.css" />
@@ -197,7 +198,7 @@
           // Inbox is a large module graph. Load it after SSO so a broken
           // import cannot stall BX24.init — that handshake already ran from
           // bx24-early.js; this only paints the panel.
-          const { mountInbox } = await import("/app/assets/modules/inbox.js");
+          const { mountInbox } = await import("/app/assets/modules/inbox.js?v=rotate2");
           await mountInbox(root, { me, openRequest });
         } catch (error) {
           fail(step, error);
@@ -210,6 +211,7 @@
     <script type="module" src="/app/assets/modules/inbox-ai.js"></script>
     <script type="module" src="/app/assets/modules/report-feedback.js"></script>
     <script type="module" src="/app/assets/modules/bulk-campaign.js"></script>
+    <script type="module" src="/app/assets/modules/rotate-campaign.js?v=3"></script>
     <script type="module" src="/app/assets/modules/credit-banner.js"></script>
     <!-- Lead AI: its own folder and its own entry, so it can never stop the inbox loading. -->
     <script type="module" src="/app/assets/modules/lead-ai/lead-ai.js"></script>

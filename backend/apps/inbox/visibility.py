@@ -40,7 +40,11 @@ def visible_conversation_q(user, held=None):
     from apps.leadai.lane import desk_q
 
     desk = desk_q(user)
-    return visible | desk if desk is not None else visible
+    if desk is not None:
+        visible |= desk
+    # staff_only is a rotate-campaign thread. The assignee of that number must
+    # not see it, including when the chat is still unclaimed.
+    return visible & ~Q(staff_only=True)
 
 
 def primary_agent_for(number):

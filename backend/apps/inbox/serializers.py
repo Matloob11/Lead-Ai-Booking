@@ -178,6 +178,7 @@ def serialize_conversation(conversation):
         "is_session_open": conversation.is_session_open,
         "is_pinned": conversation.is_pinned,
         "is_archived": conversation.is_archived,
+        "staff_only": bool(conversation.staff_only),
         "is_transferred": bool(getattr(conversation, "linked_conversation_id", None)),
         "linked_conversation_id": getattr(conversation, "linked_conversation_id", None),
         "labels": [

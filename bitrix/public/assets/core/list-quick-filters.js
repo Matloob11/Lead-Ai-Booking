@@ -9,6 +9,7 @@ const FILTERS = [
   { id: "unread", label: "Unread" },
   { id: "pinned", label: "Pinned" },
   { id: "transferred", label: "Transferred" },
+  { id: "rotate", label: "Rotate WhatsApp" },
 ];
 
 /**

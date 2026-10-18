@@ -1,3 +1,17 @@
+## 2026-10-18 — C41 mixed popup live, and Rotate committed (Cursor)
+
+`C41_MIXED_LIVE` is true on the Bitrix popups. The Script label is "International City — all" and the value stays `ic_shops`. `intl_city_property_reconnect` shows on a sending number. Choosing it refreshes the breakdown (the preview was still showing the shops warning). On the live Leads popup, with every send blocked in the page and at the network, the line was "Shop 0 · Studio/1BR 1 · Other 0 · 0 being worked by an agent" plus Leave them out. The same template is absent on a number whose WABA does not have it. Campaigns 517→517, recipients 32298→32298. No `ops/wa.sh build` or `up`. Live md5: lead JS `166854828b80a2423f934980d080f383`, renewals JS `ab2316512e7987a0df8d617f0fc6f550`.
+
+Test leads 79815, 79816 and 79817 are still there. They get deleted after Matloob finishes the live test.
+
+Rotate was already live and is now in git: `staff_only` on new rotate chats, kept together with the Lead AI desk rule in `visibility.py`. The 5 tests in `test_visibility_staff_only_desk.py` cover both. The High quality button on template create is included; it was already Cursor's uncommitted panel work. `ops/wa.sh` and `a7_probe_init_includes.php` were left unstaged because they hold other sessions' edits.
+
+About 5,000 Rotate rows are waiting because the alots.io wallet has no credit. They can go out when it is topped up. Matloob still needs to say whether to release or cancel them first.
+
+**Shared:** popup JS, Rotate backend and panel files, `template-composer.js` / `.css`, `SHOPS-BOT-BOARD.md`, `TASKS.md`. Official AI files were not touched.
+
+---
+
 ## 2026-10-18 — Lead AI batch 2e is live: one bot for shops, studios and one-bedrooms (Claude Code)
 
 main `065fa49` (leadai-2e merged and pushed). All four app services run one image since 11:17 UTC.

@@ -13,12 +13,12 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_LEAD_WA_V16) {
+  if (window.A7_LEAD_WA_V18) {
     return;
   }
-  window.A7_LEAD_WA_V16 = true;
-  // C41 mixed popup. Stays false until Claude writes "2e is live".
-  var C41_MIXED_LIVE = false;
+  window.A7_LEAD_WA_V18 = true;
+  // C41 mixed popup. 2e is live (2026-10-18).
+  var C41_MIXED_LIVE = true;
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -1567,6 +1567,7 @@
     }
 
     function renderPreview() {
+      renderShopsWarn();
       while (phoneHead.firstChild) {
         phoneHead.removeChild(phoneHead.firstChild);
       }

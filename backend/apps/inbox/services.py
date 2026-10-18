@@ -563,6 +563,13 @@ def send_template(
         template, variables, header_variables, header_media_id, button_variables
     )
     preview = render_body(template, variables) or template.name
+    # The upload keeps a local copy under this gateway id. Without it on the
+    # row, the thread shows the template text and the header picture looks lost.
+    asset = None
+    if header_media_id:
+        asset = (
+            MediaAsset.objects.filter(alots_media_id=header_media_id).order_by("-id").first()
+        )
 
     message = Message.objects.create(
         conversation=conversation,
@@ -570,6 +577,7 @@ def send_template(
         kind=Message.Kind.TEMPLATE,
         body=preview,
         template=template,
+        media=asset,
         payload={
             **(payload or {}),
             "variables": variables or {},
@@ -615,17 +623,28 @@ def start_conversation(
     header_variables=None,
     header_media_id=None,
     button_variables=None,
+    hide_new_from_inbox=False,
 ):
-    """Open a brand-new chat. A template is the only lawful first message."""
+    """Open a brand-new chat. A template is the only lawful first message.
+
+    ``hide_new_from_inbox`` marks a chat that this call just created, so the
+    number's agent does not see a rotate-campaign thread. A chat that already
+    existed stays visible — hiding it would hide that customer's real history.
+    """
     wa_id = "".join(ch for ch in to if ch.isdigit())
     if len(wa_id) < 8:
         raise SendBlocked("Enter a valid phone number with country code.")
 
     contact, _ = Contact.objects.get_or_create(wa_id=wa_id)
-    conversation, _ = Conversation.objects.get_or_create(
-        number=number, contact=contact, defaults={"assigned_agent": agent}
+    conversation, created = Conversation.objects.get_or_create(
+        number=number, contact=contact, defaults={"assigned_agent": None if hide_new_from_inbox else agent}
     )
-    if conversation.assigned_agent is None:
+    if created and hide_new_from_inbox:
+        if not conversation.staff_only:
+            conversation.staff_only = True
+            conversation.assigned_agent = None
+            conversation.save(update_fields=["staff_only", "assigned_agent"])
+    elif conversation.assigned_agent is None and not conversation.staff_only:
         conversation.assigned_agent = agent
         conversation.save(update_fields=["assigned_agent"])
 

@@ -9,12 +9,12 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_RENEWALS_WA_V8) {
+  if (window.A7_RENEWALS_WA_V9) {
     return;
   }
-  window.A7_RENEWALS_WA_V8 = true;
-  // C41 mixed popup. Stays false until Claude writes "2e is live".
-  var C41_MIXED_LIVE = false;
+  window.A7_RENEWALS_WA_V9 = true;
+  // C41 mixed popup. 2e is live (2026-10-18).
+  var C41_MIXED_LIVE = true;
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
