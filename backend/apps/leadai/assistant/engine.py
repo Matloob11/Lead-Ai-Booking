@@ -2041,6 +2041,15 @@ def settle(
     residential = residential or (shops_chat and track == tracks.SALE)
     shop_guards = shops_chat and not residential
     shop_facts = shops_facts or DEFAULT_SHOPS_FACTS
+    untagged = ""
+    if shops_chat and residential and not broker_labelled:
+        # The 2e real-model gate, round 4 (shops-res-owner-number): the model's broker tag over a number ask alone comes off
+        # before anything reads the handover, so the turn goes as one with no handover: residential.settle answers the number
+        # (res_no_number, Q38). Any other word of theirs keeps it (residential.unasked_broker); a chat labelled Broker is the
+        # agents'.
+        from . import residential as res_broker
+
+        untagged = res_broker.unasked_broker(answer, new_texts, earlier, known=facts, track=track)
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites)
     if shops_chat:
         # Launch review issues 15 and 26: only what is theirs goes on the record, before code adds notes of its own
@@ -2054,6 +2063,8 @@ def settle(
     if written in ("ar", "ur", "hi") and answer["language"] != written:
         answer["language"] = written
     trimmed = []
+    if untagged:
+        trimmed.append("unasked_broker")  # the broker tag came off, with its words that hand them to a person
     if shops_chat and residential and answer["reply"] and not answer.get("converted"):
         # The rent flow: the old lead's CRM notes are never quoted, as in a shops chat; the residential facts are ours.
         from . import residential as res_facts

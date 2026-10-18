@@ -2070,6 +2070,73 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
     return reason
 
 
+# A broker tag over a number ask alone (the 2e real-model gate, round 4: "Give me the owner's number please", in a rent
+# chat that had said "for myself", was tagged broker_or_for_client in one run of two, so the broker line, a pause and the
+# Broker label went where code answers: no number, our team replies here, our office; Q38). It comes off only when the
+# burst is a number ask and nothing else (number_ask_alone): any other word of theirs, a broker's, a complaint, a legal
+# question, a time or a person asked for, leaves the model's tag as it is. No list of broker words decides Q11 (round 5's
+# review: each list tried missed brokers whose words it did not hold). Never when the chat says for a client, when an
+# earlier message of theirs says broker (brokers.declares), or when the answer books, moves or stops something.
+_ASK_FILLER = frozenset(
+    (
+        "please pls plz plez kindly give send share provide get need want can could would may will do does have is what "
+        "i me us you u your ur the a an owner owners landlord landlords hi hello hey dear sir madam maam mam bro brother "
+        "bhai ji jee sahab thanks thank thx ok okay salam salaam assalamualaikum aoa dein dena dijiye dijye bhejo bhej "
+        "chahiye chaiye zara"
+    ).split()
+)
+_ASK_WORD = re.compile(r"[^\W\d_]+")
+
+
+def number_ask_alone(texts) -> bool:
+    """The burst asks for a phone number (asks_for_number) and says nothing else: once the number asks (_NUMBER_ASK) are
+    taken out, every word of every message left is a courtesy, a request word or whose number (_ASK_FILLER)."""
+    words = [" ".join(str(text or "").replace("’", "'").split()) for text in texts or () if str(text or "").strip()]
+    if not words or not asks_for_number(words):
+        return False
+    for text in words:
+        rest = _NUMBER_ASK.sub(" ", text).replace("'s", " ").replace("'", "")
+        if any(word.casefold() not in _ASK_FILLER for word in _ASK_WORD.findall(rest)):
+            return False
+    return True
+
+
+def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = "") -> str:
+    """The model's broker tag taken off over a number ask alone on the rent or sale track (number_ask_alone), with its
+    words that hand them to a person (hands_over), so residential.settle answers the number (res_no_number, Q38). Kept when
+    the chat says for a client, an earlier message of theirs says broker, or the answer books, moves or stops something;
+    the model's own for_client true only where the chat already said for themselves. Returns the reason taken off, else
+    ''. ``texts``: their words in the burst; ``earlier``: the conversation before it, (author, text) pairs; ``known``: the
+    chat's facts."""
+    from . import brokers
+
+    handover = answer.get("handover") or {}
+    if not handover.get("needed") or handover.get("reason") != brokers.REASON or track not in (RENT, SALE):
+        return ""
+    chat_for_client = (known or {}).get("for_client")
+    if chat_for_client is True or not number_ask_alone(texts):
+        return ""
+    if (answer.get("appointment") or {}).get("action", "none") != "none" or answer.get("opt_out", "none") != "none":
+        return ""
+    ours = ""
+    for author, text in earlier or ():
+        if author == "customer" and brokers.declares([str(text or "")], our_last=ours):
+            return ""
+        if author != "customer":
+            ours = str(text or "")
+    facts = answer.get("facts") or {}
+    if facts.get("for_client") is True:
+        if chat_for_client is not False:
+            return ""  # the model reads a client nothing earlier ruled out: theirs to say
+        facts["for_client"] = False  # a number ask alone changed nothing they said about themselves
+    answer["handover"] = {"needed": False, "reason": None}
+    if answer.get("reply"):
+        answer["reply"] = " ".join(sentence for sentence in _split(answer["reply"]) if not hands_over(sentence))
+        if not answer["reply"]:
+            answer["send"] = False
+    return brokers.REASON
+
+
 # The charges they ask about (brief Part 7: give the approved range of what they ask). The gate answered "Is there any
 # commission?" with every CHARGE LINE (the deposit, Ejari, DEWA, the chiller, the cheques: 850-960 characters, both runs
 # of shops-res-commission-first and of shops-res-commission-1br), which pushed code's commission line past the reply's
