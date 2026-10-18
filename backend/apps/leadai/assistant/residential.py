@@ -1498,7 +1498,13 @@ _AVAILABILITY_ALLOWED = re.compile(
     r"\b(?:may|might|could|can)\s+(?:also\s+)?be\s+(?:available|vacant)\b|\bif\s+(?:it'?s\s+|they'?re\s+)?(?:still\s+)?available\b"
     r"|\bthe\s+(?:exact\s+)?available\s+(?:apartments?|options?|units?|flats?|studios?)\b|\bwhat'?s\s+available\b|\bavailability\b"
     r"|\bvacant\s+or\s+(?:rented|tenanted)\b|\b(?:rented|tenanted)\s+or\s+(?:a\s+)?vacant\b|\bvacant\s+(?:unit|one)\s+or\b|\bor\s+a\s+vacant\s+one\b"
-    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b",
+    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b"
+    # Their choice between vacant and tenanted is the sale flow's own question, however worded (round 6's review: "Do you
+    # prefer a vacant studio or a tenanted one?" was cut, so shops-sale-rented-or-vacant lost its question); asked with a
+    # wish of theirs before it, never "We have vacant or tenanted studios".
+    r"|\b(?:prefer|like|want|need|looking\s+for|interested\s+in|go\s+for|choose)\b[^.?!]{0,30}?"
+    r"(?:\bvacant\b[^.?!]{0,40}\bor\b[^.?!]{0,40}\b(?:tenanted|rented|tenants?|occupied|leased)\b"
+    r"|\b(?:tenanted|rented|occupied|leased)\b[^.?!]{0,40}\bor\b[^.?!]{0,40}\bvacant\b)",
     re.IGNORECASE,
 )
 
@@ -2112,7 +2118,7 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
 # (number_ask_alone): any other word of theirs, a broker's, a complaint, a legal question, a time, a person asked for, an
 # offer or a "No", leaves the model's tag as it is. Round 5's review: lists of broker words missed brokers, in the burst and
 # in earlier messages alike, so neither a list nor an unknown chat may take a broker tag off; brokers.declares over their
-# earlier messages, and someone else named in them (_CLIENT_TALK) where the model says for a client, only keep it.
+# earlier messages, and someone else named in them (_CLIENT_TALK), only keep it.
 _ASK_FILLER = frozenset(
     (
         "please pls plz plez kindly give send share provide get need want can could would may do does is what me you u "
@@ -2123,12 +2129,15 @@ _ASK_FILLER = frozenset(
 )
 _ASK_WORD = re.compile(r"[^\W\d_]+")
 _STARTS_NO = re.compile(r"^\W*no\b", re.IGNORECASE)
-# Someone else named as the one it is for, in their earlier messages: the model's for_client true stands over it (round
-# 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare number ask).
+# Someone else named as the one it is for, in their earlier messages: the model's tag stands over it, whatever its
+# for_client says (round 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare
+# number ask; round 6's: the same with the model's for_client null). Arabic and Urdu words stand alone, never inside another
+# word ("طلبت", I asked for).
 _CLIENT_TALK = re.compile(
     r"\b(?:clients?|buyers?|tenants?|investors?|applicants?|party|parties|customers?|requirements?|someone|somebody"
     r"|agents?|brokers?|brokerage|agency|dalaa?l|dalaali|commission)\b"
-    r"|عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|طلب|کلائنٹ|گاہک|ایجنٹ|ग्राहक|क्लाइंट|एजेंट|दलाल",
+    r"|(?<![؀-ۿ])(?:عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|طلب|کلائنٹ|گاہک|ایجنٹ)(?![؀-ۿ])"
+    r"|ग्राहक|क्लाइंट|एजेंट|दलाल",
     re.IGNORECASE,
 )
 
@@ -2153,8 +2162,8 @@ def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = 
     """The model's broker tag taken off over a number ask alone on the rent or sale track (number_ask_alone), in a chat
     that already said they are the end user (``known`` for_client false), with its words that hand them to a person
     (hands_over), so residential.settle answers the number (res_no_number, Q38). Kept when an earlier message of theirs
-    says broker (brokers.declares), when the model says for a client and an earlier message of theirs names someone else
-    (_CLIENT_TALK), or when the answer books, moves or stops something. Returns the reason taken off, else ''. ``texts``:
+    says broker (brokers.declares) or names someone else (_CLIENT_TALK), or when the answer books, moves or stops
+    something. Returns the reason taken off, else ''. ``texts``:
     their words in the burst; ``earlier``: the conversation before it, (author, text) pairs; ``known``: the chat's facts."""
     from . import brokers
 
@@ -2174,10 +2183,10 @@ def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = 
         if brokers.declares([str(text or "")], our_last=ours):
             return ""
         theirs.append(str(text or ""))
+    if any(_CLIENT_TALK.search(text) for text in theirs):
+        return ""  # someone else named earlier: the model's broker is theirs to read
     facts = answer.get("facts") or {}
     if facts.get("for_client") is True:
-        if any(_CLIENT_TALK.search(text) for text in theirs):
-            return ""  # someone else named earlier: the model's client is theirs to read
         facts["for_client"] = False  # a number ask alone changed nothing they said about themselves
     answer["handover"] = {"needed": False, "reason": None}
     answer.pop("broker_backstop", None)  # brokers.backstop's facts path handed over on that very for_client: undone with it

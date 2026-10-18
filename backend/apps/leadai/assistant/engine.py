@@ -4697,8 +4697,10 @@ def _run_claimed(
         plan["tap_step"] = tapped  # a tap sent with typed words kept its step (tap_with_words)
     if answer.get("window"):
         plan["window"] = answer["window"]  # their own window today, booked at its start (book_window)
-    if brokered:
-        plan["broker_backstop"] = brokered  # a broker the model served as an end user, handed over by code (brokers.py)
+    if brokered and answer.get("broker_backstop"):
+        # A broker the model served as an end user, handed over by code (brokers.py); residential.unasked_broker drops the
+        # record with the tag it takes off (round 6's review).
+        plan["broker_backstop"] = brokered
     if answer.get("broker_held"):
         plan["broker_held"] = True  # a broker's booking kept as a tentative for our agent (broker_holds, Q11)
     if decision is not None:
