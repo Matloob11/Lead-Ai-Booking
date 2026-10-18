@@ -286,7 +286,9 @@ class GuardTests(SimpleTestCase):
         self.assertTrue(residential.claims_availability("There is a vacant studio in Spain Cluster right now."))
         self.assertTrue(residential.claims_availability("We currently have two studios in France Cluster."))
         self.assertFalse(residential.claims_availability("Do you prefer a vacant unit or a tenanted one?"))
-        self.assertFalse(residential.claims_availability("Got it, a vacant unit for your own use."))
+        # A buyer's own wish said back reads as a claim to the policy check (leadai_eval.no_availability_claim), so since the
+        # gate's round 5 the guard cuts it too (availability_talk); their next question still goes.
+        self.assertTrue(residential.claims_availability("Got it, a vacant unit for your own use."))
         self.assertTrue(residential.screens("The owner prefers families."))
         self.assertTrue(residential.asks_private("Please WhatsApp me a photo of your Emirates ID."))
         self.assertFalse(residential.asks_private("Please bring your passport and Emirates ID to the viewing."))

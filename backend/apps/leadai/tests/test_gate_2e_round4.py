@@ -96,6 +96,14 @@ class NumberAskAloneTests(SimpleTestCase):
             ["Please share pictures of the studio"],
             ["Hi"],
             ["Thank you sir", "Ok"],
+            # An offer or a statement of theirs, and a "No" (round 5's review).
+            ["I have the owner's number"],
+            ["I can share the owner's number"],
+            ["I will send you the owner's number"],
+            ["You have the owner's number"],
+            ["Give us the owner number"],
+            ["No please"],
+            ["No. Please give me the owner's number"],
         ):
             with self.subTest(texts):
                 self.assertFalse(residential.number_ask_alone(texts))
@@ -119,14 +127,41 @@ class QElevenTests(SimpleTestCase):
 
     def test_an_earlier_message_of_theirs_as_a_broker_keeps_it(self):
         for earlier in (
-            [("customer", "I'm a real estate broker")],
-            [("assistant", "Are you looking for yourself or for a client?"), ("customer", "For a client")],
-            [("assistant", "Are you looking for yourself or for a client?"), ("customer", "Agent")],
+            [*FOR_MYSELF, ("customer", "I'm a real estate broker")],
+            [*FOR_MYSELF, ("assistant", "Are you looking for yourself or for a client?"), ("customer", "For a client")],
+            [*FOR_MYSELF, ("assistant", "Are you looking for yourself or for a client?"), ("customer", "Agent")],
         ):
             with self.subTest(earlier):
                 answer = tagged()
-                self.assertEqual(untag(answer, earlier=earlier, known={}), "")
+                self.assertEqual(untag(answer, earlier=earlier), "")
                 self.assertTrue(answer["handover"]["needed"])
+
+    def test_a_chat_that_never_said_for_themselves_keeps_it(self):
+        # Round 5's review: a broker's first message in words brokers.declares does not read, our opener, then a bare ask.
+        for first in (
+            "I'm a property manager, need a studio",
+            "I'm a Dubai based agent, looking for a studio",
+            "I have a cash buyer for a studio",
+            "Dalal hoon, studio chahiye",
+            "أنا وكيل، أبي استوديو",
+        ):
+            with self.subTest(first):
+                for known in ({}, {"for_client": None}):
+                    answer = tagged()
+                    self.assertEqual(untag(answer, texts=["Owner's number?"], earlier=[("customer", first)], known=known), "")
+                    self.assertEqual(answer["handover"]["reason"], BROKER)
+
+    def test_someone_else_named_since_keeps_the_models_client(self):
+        earlier = [*FOR_MYSELF, ("customer", "Actually it's for my buyer")]
+        answer = tagged(for_client=True)
+        self.assertEqual(untag(answer, earlier=earlier), "")
+        self.assertIs(answer["facts"]["for_client"], True)
+
+    def test_the_backstops_own_record_goes_with_the_tag(self):
+        answer = tagged(for_client=True)
+        answer["broker_backstop"] = "facts"
+        self.assertEqual(untag(answer), BROKER)
+        self.assertNotIn("broker_backstop", answer)
 
     def test_the_chat_saying_for_a_client_keeps_it(self):
         answer = tagged()

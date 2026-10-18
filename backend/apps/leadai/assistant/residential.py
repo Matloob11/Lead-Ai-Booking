@@ -1478,10 +1478,45 @@ _A_VACANT = re.compile(
 )
 
 
+# The policy check's own reading (leadai_eval.no_availability_claim, spec §2.9.6): an availability word, "we have" or
+# "there are" beside a unit noun, outside the approved phrases ("the available apartments", "may be available", "vacant or
+# rented", "free slots"). The 2e real-model gate, round 5 (shops-res-invitation-two-slots #2): "Our agent can show you
+# available studios in Spain Cluster." went out, as _MAY_BE took "show you available studios" for our own line. The
+# model's words are cut wherever the check would flag them; code's own lines never pass through this guard.
+_AVAILABILITY_TALK = re.compile(
+    r"\b(?:available|vacant|ready\s+to\s+move|free)\b"
+    r"|\bwe\s+(?:currently\s+|now\s+|still\s+|right\s+now\s+)?(?:have|'ve\s+got|got)\s+(?:\w+\s+){0,3}(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*br)\b"
+    r"|\bthere\s+(?:is|are)\s+(?:a\s+|an\s+|one\s+|two\s+|some\s+|several\s+)?(?:\w+\s+){0,2}(?:studios?|apartments?|flats?|units?|one-?bedrooms?)\b"
+    r"|متاح|متوفر|شاغر|دستیاب|उपलब्ध|खाली\s+है",
+    re.IGNORECASE,
+)
+_UNIT_NOUN = re.compile(
+    r"\b(?:studios?|apartments?|flats?|units?|one-?bedrooms?|1\s*-?\s*br|1\s*-?\s*bhk|propert(?:y|ies)|it|this\s+one|that\s+one)\b",
+    re.IGNORECASE,
+)
+_AVAILABILITY_ALLOWED = re.compile(
+    r"\b(?:may|might|could|can)\s+(?:also\s+)?be\s+(?:available|vacant)\b|\bif\s+(?:it'?s\s+|they'?re\s+)?(?:still\s+)?available\b"
+    r"|\bthe\s+(?:exact\s+)?available\s+(?:apartments?|options?|units?|flats?|studios?)\b|\bwhat'?s\s+available\b|\bavailability\b"
+    r"|\bvacant\s+or\s+(?:rented|tenanted)\b|\b(?:rented|tenanted)\s+or\s+(?:a\s+)?vacant\b|\bvacant\s+(?:unit|one)\s+or\b|\bor\s+a\s+vacant\s+one\b"
+    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b",
+    re.IGNORECASE,
+)
+
+
+def availability_talk(sentence: str) -> bool:
+    """The sentence reads as an availability claim by the policy check's own patterns (_AVAILABILITY_TALK beside a
+    _UNIT_NOUN, outside _AVAILABILITY_ALLOWED)."""
+    text = " ".join(str(sentence or "").replace("’", "'").split())
+    return bool(_AVAILABILITY_TALK.search(text) and _UNIT_NOUN.search(text) and not _AVAILABILITY_ALLOWED.search(text))
+
+
 def claims_availability(sentence: str) -> bool:
     """The sentence says a unit is available, vacant or ready, or "we have a studio in ...", "there is a vacant studio"
-    (spec §2.9.6); "may be available", "our agent will show you the available apartments", a price's terms ("whether the
-    unit is vacant or rented") and a question of which they prefer do not."""
+    (spec §2.9.6), by this guard's reading or the policy check's (availability_talk); "may be available", "our agent will
+    show you the available apartments", a price's terms ("whether the unit is vacant or rented") and a question of which
+    they prefer do not."""
+    if availability_talk(sentence):
+        return True
     text = _EITHER_STATE.sub(" ", " ".join(str(sentence or "").replace("’", "'").split()))
     if _MAY_BE.search(text):
         return False
@@ -2072,29 +2107,42 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
 
 # A broker tag over a number ask alone (the 2e real-model gate, round 4: "Give me the owner's number please", in a rent
 # chat that had said "for myself", was tagged broker_or_for_client in one run of two, so the broker line, a pause and the
-# Broker label went where code answers: no number, our team replies here, our office; Q38). It comes off only when the
-# burst is a number ask and nothing else (number_ask_alone): any other word of theirs, a broker's, a complaint, a legal
-# question, a time or a person asked for, leaves the model's tag as it is. No list of broker words decides Q11 (round 5's
-# review: each list tried missed brokers whose words it did not hold). Never when the chat says for a client, when an
-# earlier message of theirs says broker (brokers.declares), or when the answer books, moves or stops something.
+# Broker label went where code answers: no number, our team replies here, our office; Q38). It comes off only in a chat
+# that already said they are the end user (for_client false), and only when the burst is a number ask and nothing else
+# (number_ask_alone): any other word of theirs, a broker's, a complaint, a legal question, a time, a person asked for, an
+# offer or a "No", leaves the model's tag as it is. Round 5's review: lists of broker words missed brokers, in the burst and
+# in earlier messages alike, so neither a list nor an unknown chat may take a broker tag off; brokers.declares over their
+# earlier messages, and someone else named in them (_CLIENT_TALK) where the model says for a client, only keep it.
 _ASK_FILLER = frozenset(
     (
-        "please pls plz plez kindly give send share provide get need want can could would may will do does have is what "
-        "i me us you u your ur the a an owner owners landlord landlords hi hello hey dear sir madam maam mam bro brother "
-        "bhai ji jee sahab thanks thank thx ok okay salam salaam assalamualaikum aoa dein dena dijiye dijye bhejo bhej "
-        "chahiye chaiye zara"
+        "please pls plz plez kindly give send share provide get need want can could would may do does is what me you u "
+        "your ur the a an owner owners landlord landlords hi hello hey dear sir madam maam mam bro brother bhai ji jee "
+        "sahab thanks thank thx ok okay salam salaam assalamualaikum aoa dein dena dijiye dijye bhejo bhej chahiye chaiye "
+        "zara"
     ).split()
 )
 _ASK_WORD = re.compile(r"[^\W\d_]+")
+_STARTS_NO = re.compile(r"^\W*no\b", re.IGNORECASE)
+# Someone else named as the one it is for, in their earlier messages: the model's for_client true stands over it (round
+# 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare number ask).
+_CLIENT_TALK = re.compile(
+    r"\b(?:clients?|buyers?|tenants?|investors?|applicants?|party|parties|customers?|requirements?|someone|somebody"
+    r"|agents?|brokers?|brokerage|agency|dalaa?l|dalaali|commission)\b"
+    r"|عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|طلب|کلائنٹ|گاہک|ایجنٹ|ग्राहक|क्लाइंट|एजेंट|दलाल",
+    re.IGNORECASE,
+)
 
 
 def number_ask_alone(texts) -> bool:
-    """The burst asks for a phone number (asks_for_number) and says nothing else: once the number asks (_NUMBER_ASK) are
-    taken out, every word of every message left is a courtesy, a request word or whose number (_ASK_FILLER)."""
+    """The burst asks for a phone number (asks_for_number) and says nothing else: no message opens with a "No", and once
+    the number asks (_NUMBER_ASK) are taken out, every word left is a courtesy, a request word or whose number
+    (_ASK_FILLER; never "I", "we", "us", "have" or "will", which make it an offer or a statement of theirs)."""
     words = [" ".join(str(text or "").replace("’", "'").split()) for text in texts or () if str(text or "").strip()]
     if not words or not asks_for_number(words):
         return False
     for text in words:
+        if _STARTS_NO.match(text):
+            return False  # "No please", "No. Please give me the owner's number": an answer of theirs, not a bare ask
         rest = _NUMBER_ASK.sub(" ", text).replace("'s", " ").replace("'", "")
         if any(word.casefold() not in _ASK_FILLER for word in _ASK_WORD.findall(rest)):
             return False
@@ -2102,34 +2150,37 @@ def number_ask_alone(texts) -> bool:
 
 
 def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = "") -> str:
-    """The model's broker tag taken off over a number ask alone on the rent or sale track (number_ask_alone), with its
-    words that hand them to a person (hands_over), so residential.settle answers the number (res_no_number, Q38). Kept when
-    the chat says for a client, an earlier message of theirs says broker, or the answer books, moves or stops something;
-    the model's own for_client true only where the chat already said for themselves. Returns the reason taken off, else
-    ''. ``texts``: their words in the burst; ``earlier``: the conversation before it, (author, text) pairs; ``known``: the
-    chat's facts."""
+    """The model's broker tag taken off over a number ask alone on the rent or sale track (number_ask_alone), in a chat
+    that already said they are the end user (``known`` for_client false), with its words that hand them to a person
+    (hands_over), so residential.settle answers the number (res_no_number, Q38). Kept when an earlier message of theirs
+    says broker (brokers.declares), when the model says for a client and an earlier message of theirs names someone else
+    (_CLIENT_TALK), or when the answer books, moves or stops something. Returns the reason taken off, else ''. ``texts``:
+    their words in the burst; ``earlier``: the conversation before it, (author, text) pairs; ``known``: the chat's facts."""
     from . import brokers
 
     handover = answer.get("handover") or {}
     if not handover.get("needed") or handover.get("reason") != brokers.REASON or track not in (RENT, SALE):
         return ""
-    chat_for_client = (known or {}).get("for_client")
-    if chat_for_client is True or not number_ask_alone(texts):
-        return ""
+    if (known or {}).get("for_client") is not False or not number_ask_alone(texts):
+        return ""  # a chat that never said for themselves keeps the model's tag: a broker's earlier words may be ones no list reads
     if (answer.get("appointment") or {}).get("action", "none") != "none" or answer.get("opt_out", "none") != "none":
         return ""
+    theirs: list[str] = []
     ours = ""
     for author, text in earlier or ():
-        if author == "customer" and brokers.declares([str(text or "")], our_last=ours):
-            return ""
         if author != "customer":
             ours = str(text or "")
+            continue
+        if brokers.declares([str(text or "")], our_last=ours):
+            return ""
+        theirs.append(str(text or ""))
     facts = answer.get("facts") or {}
     if facts.get("for_client") is True:
-        if chat_for_client is not False:
-            return ""  # the model reads a client nothing earlier ruled out: theirs to say
+        if any(_CLIENT_TALK.search(text) for text in theirs):
+            return ""  # someone else named earlier: the model's client is theirs to read
         facts["for_client"] = False  # a number ask alone changed nothing they said about themselves
     answer["handover"] = {"needed": False, "reason": None}
+    answer.pop("broker_backstop", None)  # brokers.backstop's facts path handed over on that very for_client: undone with it
     if answer.get("reply"):
         answer["reply"] = " ".join(sentence for sentence in _split(answer["reply"]) if not hands_over(sentence))
         if not answer["reply"]:

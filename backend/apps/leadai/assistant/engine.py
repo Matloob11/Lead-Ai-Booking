@@ -2043,10 +2043,10 @@ def settle(
     shop_facts = shops_facts or DEFAULT_SHOPS_FACTS
     untagged = ""
     if shops_chat and residential and not broker_labelled:
-        # The 2e real-model gate, round 4 (shops-res-owner-number): the model's broker tag over a number ask alone comes off
-        # before anything reads the handover, so the turn goes as one with no handover: residential.settle answers the number
-        # (res_no_number, Q38). Any other word of theirs keeps it (residential.unasked_broker); a chat labelled Broker is the
-        # agents'.
+        # The 2e real-model gate, round 4 (shops-res-owner-number): the model's broker tag over a number ask alone, in a chat
+        # that said for themselves, comes off before settle_handover and the broker line read it (brokers.backstop has run
+        # already), so the turn goes as one with no handover: residential.settle answers the number (res_no_number, Q38).
+        # Any other word of theirs keeps it (residential.unasked_broker); a chat labelled Broker is the agents'.
         from . import residential as res_broker
 
         untagged = res_broker.unasked_broker(answer, new_texts, earlier, known=facts, track=track)
