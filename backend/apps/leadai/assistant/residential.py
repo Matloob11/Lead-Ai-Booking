@@ -1655,6 +1655,38 @@ def _drop(reply: str, test) -> tuple[str, bool]:
     return " ".join(kept), True
 
 
+# A buyer's vacant-or-tenanted question (the sale flow's question 4), however the model worded it. Guard 6 cuts it whenever
+# the policy check would flag it (round 7's review: an allowance for such questions let a claim in the same sentence out),
+# so on the sale track code's own words take its place (sales.next_question_line), and no claim goes with them (round 6's
+# review: "Do you prefer a vacant studio or a tenanted one?" was cut and shops-sale-rented-or-vacant lost the question;
+# code's own Arabic question, with "شاغرة", was cut the same way).
+_STATUS_CHOICE = re.compile(
+    r"\bvacant\b[^.?!]{0,60}\b(?:or|ya)\b[^.?!]{0,60}\b(?:tenanted|rented|tenants?|occupied|leased)\b"
+    r"|\b(?:tenanted|rented|occupied|leased)\b[^.?!]{0,60}\b(?:or|ya)\b[^.?!]{0,60}\bvacant\b"
+    r"|(?:شاغر|مؤجر)[^.؟?!]{0,40}(?:أم|أو|او)[^.؟?!]{0,40}(?:شاغر|مؤجر)",
+    re.IGNORECASE,
+)
+
+
+def drop_availability(reply: str, track: str, language: str) -> tuple[str, bool]:
+    """Guard 6 over the model's sentences (claims_availability): each claim goes; on the sale track the first one that asks
+    their vacant-or-tenanted choice (_STATUS_CHOICE) gives way to code's own question. (reply, changed)."""
+    from . import sales
+
+    kept: list[str] = []
+    changed = asked = False
+    for sentence in _split(reply):
+        if not claims_availability(sentence):
+            kept.append(sentence)
+            continue
+        changed = True
+        flat = " ".join(str(sentence).replace("’", "'").split())
+        if track == SALE and not asked and rules.asks_question(flat) and _STATUS_CHOICE.search(flat):
+            kept.append(sales.next_question_line(language, (sales.STATUS,)))
+            asked = True
+    return (" ".join(kept) if changed else str(reply or "").strip()), changed
+
+
 def other_unit_figures(track: str, unit: str, facts=None) -> set[int]:
     """The figures a reply on this unit never carries (guard 2): the other unit's bands and commission, less any figure
     this unit's own facts hold too (a deposit of AED 3,000 is no one-bedroom's commission)."""
@@ -2112,7 +2144,7 @@ def unasked_handover(answer: dict, texts, *, track: str, unit: str = "") -> str:
 # (number_ask_alone): any other word of theirs, a broker's, a complaint, a legal question, a time, a person asked for, an
 # offer or a "No", leaves the model's tag as it is. Round 5's review: lists of broker words missed brokers, in the burst and
 # in earlier messages alike, so neither a list nor an unknown chat may take a broker tag off; brokers.declares over their
-# earlier messages, and someone else named in them (_CLIENT_TALK) where the model says for a client, only keep it.
+# earlier messages, and someone else named in them (_CLIENT_TALK), only keep it.
 _ASK_FILLER = frozenset(
     (
         "please pls plz plez kindly give send share provide get need want can could would may do does is what me you u "
@@ -2123,12 +2155,16 @@ _ASK_FILLER = frozenset(
 )
 _ASK_WORD = re.compile(r"[^\W\d_]+")
 _STARTS_NO = re.compile(r"^\W*no\b", re.IGNORECASE)
-# Someone else named as the one it is for, in their earlier messages: the model's for_client true stands over it (round
-# 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare number ask).
+# Someone else named as the one it is for, in their earlier messages: the model's tag stands over it, whatever its
+# for_client says (round 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare
+# number ask; round 6's: the same with the model's for_client null). Arabic and Urdu words are read with their article and
+# endings ("العميل"), but "طلب" (a request) only as a word of its own, never inside "طلبت" (I asked for; round 7's review).
 _CLIENT_TALK = re.compile(
     r"\b(?:clients?|buyers?|tenants?|investors?|applicants?|party|parties|customers?|requirements?|someone|somebody"
     r"|agents?|brokers?|brokerage|agency|dalaa?l|dalaali|commission)\b"
-    r"|عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|طلب|کلائنٹ|گاہک|ایجنٹ|ग्राहक|क्लाइंट|एजेंट|दलाल",
+    r"|عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|کلائنٹ|گاہک|ایجنٹ"
+    r"|(?<![؀-ۿ])(?:ال)?طلب(?![؀-ۿ])"
+    r"|ग्राहक|क्लाइंट|एजेंट|दलाल",
     re.IGNORECASE,
 )
 
@@ -2153,8 +2189,8 @@ def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = 
     """The model's broker tag taken off over a number ask alone on the rent or sale track (number_ask_alone), in a chat
     that already said they are the end user (``known`` for_client false), with its words that hand them to a person
     (hands_over), so residential.settle answers the number (res_no_number, Q38). Kept when an earlier message of theirs
-    says broker (brokers.declares), when the model says for a client and an earlier message of theirs names someone else
-    (_CLIENT_TALK), or when the answer books, moves or stops something. Returns the reason taken off, else ''. ``texts``:
+    says broker (brokers.declares) or names someone else (_CLIENT_TALK), or when the answer books, moves or stops
+    something. Returns the reason taken off, else ''. ``texts``:
     their words in the burst; ``earlier``: the conversation before it, (author, text) pairs; ``known``: the chat's facts."""
     from . import brokers
 
@@ -2174,10 +2210,10 @@ def unasked_broker(answer: dict, texts, earlier=(), *, known=None, track: str = 
         if brokers.declares([str(text or "")], our_last=ours):
             return ""
         theirs.append(str(text or ""))
+    if any(_CLIENT_TALK.search(text) for text in theirs):
+        return ""  # someone else named earlier: the model's broker is theirs to read
     facts = answer.get("facts") or {}
     if facts.get("for_client") is True:
-        if any(_CLIENT_TALK.search(text) for text in theirs):
-            return ""  # someone else named earlier: the model's client is theirs to read
         facts["for_client"] = False  # a number ask alone changed nothing they said about themselves
     answer["handover"] = {"needed": False, "reason": None}
     answer.pop("broker_backstop", None)  # brokers.backstop's facts path handed over on that very for_client: undone with it
@@ -2727,7 +2763,7 @@ def settle(
         reply, changed = drop_shop_words(reply, track, office_address)
         if changed:
             cut.append("shop_words")
-        reply, changed = _drop(reply, claims_availability)
+        reply, changed = drop_availability(reply, track, language)
         if changed:
             cut.append("availability")
         if not booked:
