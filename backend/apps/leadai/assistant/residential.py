@@ -1498,13 +1498,7 @@ _AVAILABILITY_ALLOWED = re.compile(
     r"\b(?:may|might|could|can)\s+(?:also\s+)?be\s+(?:available|vacant)\b|\bif\s+(?:it'?s\s+|they'?re\s+)?(?:still\s+)?available\b"
     r"|\bthe\s+(?:exact\s+)?available\s+(?:apartments?|options?|units?|flats?|studios?)\b|\bwhat'?s\s+available\b|\bavailability\b"
     r"|\bvacant\s+or\s+(?:rented|tenanted)\b|\b(?:rented|tenanted)\s+or\s+(?:a\s+)?vacant\b|\bvacant\s+(?:unit|one)\s+or\b|\bor\s+a\s+vacant\s+one\b"
-    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b"
-    # Their choice between vacant and tenanted is the sale flow's own question, however worded (round 6's review: "Do you
-    # prefer a vacant studio or a tenanted one?" was cut, so shops-sale-rented-or-vacant lost its question); asked with a
-    # wish of theirs before it, never "We have vacant or tenanted studios".
-    r"|\b(?:prefer|like|want|need|looking\s+for|interested\s+in|go\s+for|choose)\b[^.?!]{0,30}?"
-    r"(?:\bvacant\b[^.?!]{0,40}\bor\b[^.?!]{0,40}\b(?:tenanted|rented|tenants?|occupied|leased)\b"
-    r"|\b(?:tenanted|rented|occupied|leased)\b[^.?!]{0,40}\bor\b[^.?!]{0,40}\bvacant\b)",
+    r"|\bwhether\b[^.?!]{0,40}\bvacant\b|\bfree\s+(?:slots?|times?)\b",
     re.IGNORECASE,
 )
 
@@ -1659,6 +1653,38 @@ def _drop(reply: str, test) -> tuple[str, bool]:
     if len(kept) == len(sentences):
         return str(reply or "").strip(), False
     return " ".join(kept), True
+
+
+# A buyer's vacant-or-tenanted question (the sale flow's question 4), however the model worded it. Guard 6 cuts it whenever
+# the policy check would flag it (round 7's review: an allowance for such questions let a claim in the same sentence out),
+# so on the sale track code's own words take its place (sales.next_question_line), and no claim goes with them (round 6's
+# review: "Do you prefer a vacant studio or a tenanted one?" was cut and shops-sale-rented-or-vacant lost the question;
+# code's own Arabic question, with "شاغرة", was cut the same way).
+_STATUS_CHOICE = re.compile(
+    r"\bvacant\b[^.?!]{0,60}\b(?:or|ya)\b[^.?!]{0,60}\b(?:tenanted|rented|tenants?|occupied|leased)\b"
+    r"|\b(?:tenanted|rented|occupied|leased)\b[^.?!]{0,60}\b(?:or|ya)\b[^.?!]{0,60}\bvacant\b"
+    r"|(?:شاغر|مؤجر)[^.؟?!]{0,40}(?:أم|أو|او)[^.؟?!]{0,40}(?:شاغر|مؤجر)",
+    re.IGNORECASE,
+)
+
+
+def drop_availability(reply: str, track: str, language: str) -> tuple[str, bool]:
+    """Guard 6 over the model's sentences (claims_availability): each claim goes; on the sale track the first one that asks
+    their vacant-or-tenanted choice (_STATUS_CHOICE) gives way to code's own question. (reply, changed)."""
+    from . import sales
+
+    kept: list[str] = []
+    changed = asked = False
+    for sentence in _split(reply):
+        if not claims_availability(sentence):
+            kept.append(sentence)
+            continue
+        changed = True
+        flat = " ".join(str(sentence).replace("’", "'").split())
+        if track == SALE and not asked and rules.asks_question(flat) and _STATUS_CHOICE.search(flat):
+            kept.append(sales.next_question_line(language, (sales.STATUS,)))
+            asked = True
+    return (" ".join(kept) if changed else str(reply or "").strip()), changed
 
 
 def other_unit_figures(track: str, unit: str, facts=None) -> set[int]:
@@ -2131,12 +2157,13 @@ _ASK_WORD = re.compile(r"[^\W\d_]+")
 _STARTS_NO = re.compile(r"^\W*no\b", re.IGNORECASE)
 # Someone else named as the one it is for, in their earlier messages: the model's tag stands over it, whatever its
 # for_client says (round 5's review: "Actually it's for my buyer", missed by brokers.declares and by the model, then a bare
-# number ask; round 6's: the same with the model's for_client null). Arabic and Urdu words stand alone, never inside another
-# word ("طلبت", I asked for).
+# number ask; round 6's: the same with the model's for_client null). Arabic and Urdu words are read with their article and
+# endings ("العميل"), but "طلب" (a request) only as a word of its own, never inside "طلبت" (I asked for; round 7's review).
 _CLIENT_TALK = re.compile(
     r"\b(?:clients?|buyers?|tenants?|investors?|applicants?|party|parties|customers?|requirements?|someone|somebody"
     r"|agents?|brokers?|brokerage|agency|dalaa?l|dalaali|commission)\b"
-    r"|(?<![؀-ۿ])(?:عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|طلب|کلائنٹ|گاہک|ایجنٹ)(?![؀-ۿ])"
+    r"|عميل|عملاء|مشتري|مستأجر|وكيل|وسيط|دلال|کلائنٹ|گاہک|ایجنٹ"
+    r"|(?<![؀-ۿ])(?:ال)?طلب(?![؀-ۿ])"
     r"|ग्राहक|क्लाइंट|एजेंट|दलाल",
     re.IGNORECASE,
 )
@@ -2736,7 +2763,7 @@ def settle(
         reply, changed = drop_shop_words(reply, track, office_address)
         if changed:
             cut.append("shop_words")
-        reply, changed = _drop(reply, claims_availability)
+        reply, changed = drop_availability(reply, track, language)
         if changed:
             cut.append("availability")
         if not booked:
