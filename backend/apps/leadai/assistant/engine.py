@@ -2174,6 +2174,15 @@ def settle(
     ):
         # Launch review issue 16: the size and price table our messages gave already, said again unasked.
         trimmed.append(claims.TABLE)
+    if shop_guards and answer["reply"] and not answer.get("converted"):
+        # No stock claimed on the shops track either (the first mixed campaign, 2026-10-19, chat 49958: "The Type 3 large
+        # shops are available in all clusters including China" went out; there is no inventory, D13): claims.claims_stock,
+        # sentence by sentence; the shops' own fixed lines never pass through it.
+        sentences = filters.split_sentences(answer["reply"])
+        kept = [s for s in sentences if shops.is_fixed_line(s) or not claims.claims_stock(s)]
+        if len(kept) != len(sentences):
+            answer["reply"] = " ".join(kept)
+            trimmed.append("availability")
     plain_shops = (
         shop_guards and answer["reply"] and not answer.get("converted") and answer["opt_out"] == "none"
         and not answer["handover"]["needed"] and not agreed

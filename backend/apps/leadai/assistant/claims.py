@@ -118,6 +118,21 @@ _CODE_LINES = (*UNKNOWN.values(), *(line for pair in COMMISSION_LINE.values() fo
 _CODE_KEYS = {_key(line) for line in _CODE_LINES} | {_key(part) for line in _CODE_LINES for part in filters.split_sentences(line)}
 
 
+# Stock claimed on the shops track (the first mixed campaign, 2026-10-19, chat 49958: "The Type 3 large shops are available
+# in all clusters including China" went out; there is no inventory, D13). The residential guard's policy reading
+# (residential._AVAILABILITY_TALK, _AVAILABILITY_ALLOWED) beside a shop noun, which that guard's unit nouns leave out on
+# purpose: a rent chat that mentions shops is not this guard's.
+_SHOP_NOUN = re.compile(r"\b(?:shops?|units?|types?|spaces?|outlets?|showrooms?)\b|محل|محلات|دكان|دکان|दुकान", re.IGNORECASE)
+
+
+def claims_stock(sentence: str) -> bool:
+    """The sentence says shops are available, vacant or "we have ..." (spec §2.9.6's reading on the shops track)."""
+    from . import residential
+
+    text = " ".join(str(sentence or "").replace("’", "'").split())
+    return bool(residential._AVAILABILITY_TALK.search(text) and _SHOP_NOUN.search(text) and not residential._AVAILABILITY_ALLOWED.search(text))
+
+
 def is_code_line(sentence: str) -> bool:
     """One of this module's fixed answers (or one of its sentences): said again whenever the same kind of
     question comes, so the no-repeat guard keeps it, and never cut as a claim."""

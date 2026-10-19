@@ -61,13 +61,15 @@ ROW_DESCRIPTION_MAX = 72
 BUTTON_MAX = 20
 SECTION_MAX = 24
 
+# The header names the three sizes, never stock ("We have 3 types ... available" read as an inventory to the first mixed
+# campaign's customers, 2026-10-19, chat 49958: "which shops are available in China Cluster A/B?" asked three times).
 _LIST = {
-    "en": ("Great! We have 3 types of shops available in International City:", "View shop types", "Shop types"),
-    "ar": ("رائع! لدينا 3 أنواع من المحلات المتاحة في المدينة العالمية:", "عرض أنواع المحلات", "أنواع المحلات"),
-    "ur_latin": ("Behtareen! International City mein hamare paas 3 qisam ki shops dastiyab hain:", "Shop types dekhein", "Shop types"),
-    "ur": ("بہترین! انٹرنیشنل سٹی میں ہمارے پاس 3 قسم کی دکانیں دستیاب ہیں:", "دکانوں کی اقسام", "دکانوں کی اقسام"),
-    "hi_latin": ("Badhiya! International City mein hamare paas 3 tarah ki shops uplabdh hain:", "Shop types dekhiye", "Shop types"),
-    "hi": ("बढ़िया! इंटरनेशनल सिटी में हमारे पास 3 तरह की दुकानें उपलब्ध हैं:", "दुकानों के प्रकार", "दुकानों के प्रकार"),
+    "en": ("Great! Shops in International City come in 3 types:", "View shop types", "Shop types"),
+    "ar": ("رائع! المحلات في المدينة العالمية على 3 أنواع:", "عرض أنواع المحلات", "أنواع المحلات"),
+    "ur_latin": ("Behtareen! International City mein shops 3 qisam ki hoti hain:", "Shop types dekhein", "Shop types"),
+    "ur": ("بہترین! انٹرنیشنل سٹی میں دکانیں 3 قسم کی ہوتی ہیں:", "دکانوں کی اقسام", "دکانوں کی اقسام"),
+    "hi_latin": ("Badhiya! International City mein shops 3 tarah ki hoti hain:", "Shop types dekhiye", "Shop types"),
+    "hi": ("बढ़िया! इंटरनेशनल सिटी में दुकानें 3 तरह की होती हैं:", "दुकानों के प्रकार", "दुकानों के प्रकार"),
 }
 # (Size, Rent, per year, cheapest, Payment, Clusters, the question)
 _CARD = {

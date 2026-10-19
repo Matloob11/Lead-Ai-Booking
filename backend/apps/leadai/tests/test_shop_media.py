@@ -490,7 +490,7 @@ class SendTests(MediaBase):
             message = shop_media.send_list(self.conversation, "en", None, turn_id=48)
         kind, sub, interactive = self.sent[0]
         self.assertEqual((kind, sub), ("interactive", "list"))
-        self.assertEqual(interactive["body"]["text"], "Great! We have 3 types of shops available in International City:")
+        self.assertEqual(interactive["body"]["text"], "Great! Shops in International City come in 3 types:")
         self.assertEqual(interactive["action"]["button"], "View shop types")
         rows = interactive["action"]["sections"][0]["rows"]
         self.assertEqual(
@@ -502,7 +502,7 @@ class SendTests(MediaBase):
             ],
         )
         self.assertEqual((message.payload["source"], message.payload["shop_list"], message.status), ("leadai_ai", True, "sent"))
-        self.assertTrue(message.body.startswith("Great! We have 3 types"))
+        self.assertTrue(message.body.startswith("Great! Shops in International City come in 3 types"))
 
     def test_the_task_tells_the_agents_when_the_card_cannot_go(self):
         self.library()
@@ -541,6 +541,6 @@ class ListAndCardWordsTests(MediaBase):
                     self.assertLessEqual(len(row["description"]), 72)
                 for button in shop_flow.card_buttons(language, "type_1"):
                     self.assertLessEqual(len(button["title"]), 20)
-        self.assertEqual(shop_flow.list_interactive("ar", None)["body"]["text"], "رائع! لدينا 3 أنواع من المحلات المتاحة في المدينة العالمية:")
+        self.assertEqual(shop_flow.list_interactive("ar", None)["body"]["text"], "رائع! المحلات في المدينة العالمية على 3 أنواع:")
         # A row's own words stay English, as the build pack's list does.
         self.assertEqual(shop_flow.list_rows(None)[0]["title"], "Type 1 – Small")
