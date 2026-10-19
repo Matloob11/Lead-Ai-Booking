@@ -36,17 +36,19 @@ settings or process. Severity: how many customers it hurt and how badly.
 ### I02 — the same slot offer four times in ten minutes; two bot messages to one customer line (medium, code)
 - **Chats:** 50390 (3:00/5:00 PM offered at 13:40, 13:45, 13:49, 13:50), 50282 (two messages at 13:12, two at
   13:14), 50157.
-- **Root cause:** each inbound message is its own `assistant_turn`; while turn A thinks, message B arrives and gets
-  turn B. `_newer_inbound` makes A skip *only if B is already stored when A checks*; when B lands during A's model
-  call both reply (50390's 13:38 turn shows "skipped: a newer message arrived while thinking" worked once, then
-  not). The slot line is code's (`shops.slot_offer` via `residential` invitation), re-added on every turn whose
-  reply "has no slots", so each duplicate turn re-offers.
-- **Should have:** one reply per burst; never repeat a line sent in the last few minutes.
-- **Fix:** code: (a) a per-conversation lock around `_run_claimed` (Redis `SET NX`, 60 s) so one turn runs at a
-  time and the second re-reads the burst; (b) in `engine.settle`, drop any sentence equal to one of our last three
-  outbound bodies (`transcript` has them) unless the customer asked for it again; (c) `slot_offer` not re-added
-  when the same pair went out in the last 30 min and the customer has not answered it.
-- **Test:** two inbound rows 2 s apart → one reply; a reply equal to the previous one is dropped.
+- **Root cause (corrected after reading `filters.drop_repeats`):** a text-repeat guard already exists and is
+  right: it keeps questions and code's fixed lines on purpose ("a repeat beats no answer"), and the slot offer is
+  both. The four copies in 50390 were four *separate turns* at 13:40, 13:45, 13:49, 13:50, one per customer
+  message, each legitimately closing with the slot line. The real defect is cadence: each inbound message gets its
+  own `assistant_turn`; `_newer_inbound` skips turn A only if B is stored before A's check, so two turns overlap on a
+  burst (50282: two bot messages at 13:12 and again at 13:14). An extra text filter breaks 10 existing tests and
+  is the wrong layer (tried and reverted, round 10 branch).
+- **Should have:** one reply per burst; a slot pair re-offered only once an answer to it is due.
+- **Fix:** code: (a) a per-conversation lock around `_run_claimed` (Redis `SET NX`, TTL = TURN_BUDGET) so the
+  second turn waits, then re-reads the burst and skips if the first answered it; (b) `slot_offer` not re-added when
+  the same pair went out in the last 30 min and the customer's words answered nothing about it (`offers.count_invitation`
+  already counts invitations: use it).
+- **Test:** two inbound rows 2 s apart → one reply; the same pair not twice within 30 min without an answer.
 
 ## B. Stop, Not now, lost leads
 
@@ -185,8 +187,16 @@ settings or process. Severity: how many customers it hurt and how badly.
 - Rent quoted yearly, no phone number ever given, no colleague named, brokers paused: correct.
 - Photo captions "same type": correct (Q36).
 
-## Order of work
-1. I01 (concurrency + late answers + sweep), I03, I04, I06 — the four that lose customers. Ship together through
-   the gate with round 8 (`leadai-2e` 315c39b).
-2. I02, I05, I07, I09, I13, I14.
-3. I08, I10, I11, I12, I15 (process).
+## Order of work and status (updated 2026-10-19 17:10 UTC)
+1. **Round 9's gate (3e45c79): failed on one money scenario** (shops-res-monthly-figure, 1 of 2 runs: the model gave
+   no band on "how much per month?"); 99.0% overall, 187 of 188 shop scenarios. Nothing deployed; live stays round 6.
+   Its fixes (I01, I03, I04, I06) are carried forward.
+2. **Round 10 on `leadai-2e`, in the gate now:** round 9's fixes + the monthly band + I05 (call requests bypass the
+   cap, proven live) + I07 (one pair of slots: the model's own goes when code's closes the message) + I13 (owner words;
+   a stored home track over a bare other tag, CBD included; `wants_buy`: rent → sale on a wish to buy). 2031 tests OK.
+3. **Reverted after trial:** an I02 text-repeat guard in `engine.settle` (10 tests: `filters.drop_repeats` keeps
+   questions and fixed lines on purpose) and a wider cut inside `filters.offer_slots` (10 slot rules). Both root
+   causes re-stated above.
+4. **Next:** I02 (per-chat turn lock), I09 (answer the exact question; commission words), I14 (availability guard on
+   the shops path; two code lines reworded), CBD as a cluster name in the settings list.
+5. Then I08, I10, I11, I12; I15 is process (agents watch the desk).
