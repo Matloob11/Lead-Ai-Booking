@@ -1229,6 +1229,11 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
   const numberSelect = el("select.field");
   const wabaNote = el("div.tplc-waba-note", {}, ["Loading numbers…"]);
   const deployAllInput = el("input", { type: "checkbox", checked: true, id: "tplc-deploy-all" });
+  const highOnlyBtn = el(
+    "button.tplc-high-only",
+    { type: "button", title: "Select only numbers marked High quality" },
+    ["High quality"]
+  );
   // Closed by default. A hundred rows of checkboxes pushed Name, Body and the
   // Submit button off the screen; one line saying how many are selected is
   // what an admin needs, and the list opens only for someone changing it.
@@ -1262,14 +1267,21 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
           : `${picked} of ${boxes.length} numbers selected`;
   }
 
-  function paintDeployTargets() {
+  const isHighQuality = (number) => {
+    const rating = String(number?.quality_rating || "").toUpperCase();
+    return rating === "HIGH" || rating === "GREEN";
+  };
+
+  function paintDeployTargets(mode) {
     clear(deployList);
     for (const number of allNumbers) {
       const { phone, name } = formatWaNumber(number);
+      const high = isHighQuality(number);
       const box = el("input", {
         type: "checkbox",
-        checked: true,
+        checked: mode === "high" ? high : true,
         "data-number-id": String(number.id),
+        "data-quality": high ? "high" : "",
       });
       box.addEventListener("change", syncDeployAllFromRows);
       deployList.append(
@@ -1283,7 +1295,23 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
       );
     }
     syncDeployAllFromRows();
+    if (mode === "high") {
+      const picked = deployList.querySelectorAll('input[type="checkbox"]:checked').length;
+      if (!picked) deployCount.textContent = "No high quality numbers";
+    }
   }
+
+  highOnlyBtn.addEventListener("click", async () => {
+    highOnlyBtn.disabled = true;
+    try {
+      const rows = await catalog.numbers();
+      if (Array.isArray(rows) && rows.length) allNumbers = rows;
+    } catch {
+      /* The list already on screen is used when the refresh fails. */
+    }
+    paintDeployTargets("high");
+    highOnlyBtn.disabled = false;
+  });
 
   deployAllInput.addEventListener("change", () => {
     for (const box of deployList.querySelectorAll('input[type="checkbox"]')) {
@@ -1341,7 +1369,10 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     ? el("div.tplc-field", {}, [
         el("div.tplc-field__head", {}, [
           el("span", {}, ["Numbers"]),
-          el("label.tplc-deploy-all", {}, [deployAllInput, " Select all"]),
+          el("span.tplc-deploy-tools", {}, [
+            highOnlyBtn,
+            el("label.tplc-deploy-all", {}, [deployAllInput, " Select all"]),
+          ]),
         ]),
         deployToggle,
         deployList,

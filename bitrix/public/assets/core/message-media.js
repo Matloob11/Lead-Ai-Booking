@@ -113,19 +113,31 @@ const SENT_MEDIA_LABEL = {
  */
 export function mediaMessageNode(message, { onImageClick, formatBytes } = {}) {
   const kind = String(message.kind || "").toLowerCase();
-  if (!["image", "audio", "video", "document", "sticker"].includes(kind)) return null;
+  const mime = String(message.media_mime || "");
+  // A template send stores its header file on the same row. The bubble kind
+  // stays "template" (body and buttons), and the picture is drawn above it.
+  let headerKind = "";
+  if (kind === "template" && message.media_url) {
+    if (mime.startsWith("video/")) headerKind = "video";
+    else if (mime.startsWith("audio/")) headerKind = "audio";
+    else if (mime.startsWith("image/")) headerKind = "image";
+    else headerKind = "document";
+  }
+  if (kind === "template" && !headerKind) return null;
+  const showKind = headerKind || kind;
+  if (!["image", "audio", "video", "document", "sticker"].includes(showKind)) return null;
 
   if (message.media_failed) {
     const label =
-      kind === "audio"
+      showKind === "audio"
         ? "Voice message unavailable"
-        : kind === "image" || kind === "sticker"
+        : showKind === "image" || showKind === "sticker"
           ? "Photo unavailable"
-          : kind === "video"
+          : showKind === "video"
             ? "Video unavailable"
             : "File unavailable";
     return el("div.msg__media-failed", {}, [
-      iconForKind(kind, { size: 16 }) || icon("alert", { size: 15 }),
+      iconForKind(showKind, { size: 16 }) || icon("alert", { size: 15 }),
       label,
       el("span.msg__media-failed-hint", {}, ["Media was not saved on the server"]),
     ]);
@@ -134,28 +146,26 @@ export function mediaMessageNode(message, { onImageClick, formatBytes } = {}) {
   if (!message.media_url) {
     if (message.direction === "out") {
       return el("div.msg__sent-media", {}, [
-        iconForKind(kind, { size: 16 }) || icon("paperclip", { size: 16 }),
-        el("span.msg__sent-media-label", {}, [`${SENT_MEDIA_LABEL[kind] || "File"} sent`]),
+        iconForKind(showKind, { size: 16 }) || icon("paperclip", { size: 16 }),
+        el("span.msg__sent-media-label", {}, [`${SENT_MEDIA_LABEL[showKind] || "File"} sent`]),
         el("span.msg__sent-media-hint", {}, ["Sent from this panel — preview not stored"]),
       ]);
     }
     return el("div.msg__pending", {}, [
       el("span.spinner.spinner--sm"),
-      kind === "audio" ? "Downloading voice message…" : "Downloading attachment…",
+      showKind === "audio" ? "Downloading voice message…" : "Downloading attachment…",
     ]);
   }
 
   if (!message.media_ready) {
     return el("div.msg__pending", {}, [
       el("span.spinner.spinner--sm"),
-      kind === "audio" ? "Downloading voice message…" : "Downloading attachment…",
+      showKind === "audio" ? "Downloading voice message…" : "Downloading attachment…",
     ]);
   }
 
-  const outbound = message.direction === "out";
-
-  if (kind === "image" || kind === "sticker") return imageNode(message, onImageClick);
-  if (kind === "audio") {
+  if (showKind === "image" || showKind === "sticker") return imageNode(message, onImageClick);
+  if (showKind === "audio") {
     const name = message.media_name || "voice-message.ogg";
     return createVoicePlayer({
       src: message.media_url,
@@ -163,6 +173,6 @@ export function mediaMessageNode(message, { onImageClick, formatBytes } = {}) {
       outbound: message.direction === "out",
     });
   }
-  if (kind === "video") return videoNode(message);
+  if (showKind === "video") return videoNode(message);
   return documentNode(message, formatBytes);
 }

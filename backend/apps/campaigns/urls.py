@@ -1,10 +1,16 @@
 from django.urls import path
 
-from . import bulk_views, crm_media, views
+from . import bulk_views, crm_media, rotate_views, views
 
 urlpatterns = [
     path("", views.campaign_list, name="campaign-list"),
     path("preview/", views.campaign_preview, name="campaign-preview"),
+    path("rotate/pool/", rotate_views.rotate_pool, name="campaign-rotate-pool"),
+    path("rotate/history/", rotate_views.rotate_history, name="campaign-rotate-history"),
+    path("rotate/start/", rotate_views.rotate_start, name="campaign-rotate-start"),
+    path("rotate/<int:pk>/", rotate_views.rotate_detail, name="campaign-rotate-detail"),
+    path("rotate/<int:pk>/failed.csv", rotate_views.rotate_failed, name="campaign-rotate-failed"),
+    path("rotate/<int:pk>/resend/", rotate_views.rotate_resend, name="campaign-rotate-resend"),
     # Excel batches — one sheet across many numbers. Own module, own screen.
     path("bulk/", bulk_views.batch_list, name="campaign-batch-list"),
     path("bulk/inspect/", bulk_views.batch_inspect, name="campaign-batch-inspect"),

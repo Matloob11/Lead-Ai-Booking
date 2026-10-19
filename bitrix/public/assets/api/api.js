@@ -214,10 +214,11 @@ export const linkedPhones = {
 };
 
 export const inbox = {
-  conversations({ number, q, limit = 40, offset = 0 } = {}) {
+  conversations({ number, q, limit = 40, offset = 0, rotate = false } = {}) {
     const query = new URLSearchParams({ limit, offset });
     if (number) query.set("number", number);
     if (q) query.set("q", q);
+    if (rotate) query.set("rotate", "1");
     return apiFetch(`/api/inbox/conversations/?${query}`);
   },
 
@@ -429,6 +430,18 @@ export const bulkCampaigns = {
   list: () => apiFetch("/api/campaigns/bulk/"),
   get: (id) => apiFetch(`/api/campaigns/bulk/${id}/`),
   cancel: (id) => apiFetch(`/api/campaigns/bulk/${id}/cancel/`, { method: "POST", body: {} }),
+};
+
+export const rotateCampaigns = {
+  pool: () => apiFetch("/api/campaigns/rotate/pool/"),
+  history: () => apiFetch("/api/campaigns/rotate/history/"),
+  get: (id) => apiFetch(`/api/campaigns/rotate/${id}/`),
+  start: ({ file, mapping, header_media_ids }) =>
+    apiFetch("/api/campaigns/rotate/start/", {
+      method: "POST",
+      body: bulkForm({ mapping, header_media_ids }, file),
+    }),
+  resend: (id) => apiFetch(`/api/campaigns/rotate/${id}/resend/`, { method: "POST", body: {} }),
 };
 
 /**

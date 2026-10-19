@@ -126,6 +126,11 @@ class Conversation(models.Model):
         related_name="+",
     )
 
+    # A rotate-campaign chat opened only for that send. The number's agent does
+    # not see it; a panel admin still does. An existing customer thread is never
+    # flagged, so their real history stays where it was.
+    staff_only = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

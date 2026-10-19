@@ -40,6 +40,8 @@ def _serialize(agent):
         "is_wa_admin": agent.has_admin_rights,
         "can_official_api": bool(agent.can_official_api),
         "can_linked_devices": bool(agent.can_linked_devices),
+        # Lead AI access (apps/leadai/lane.has_desk_access): an agent who holds no number still opens the Lead AI screen.
+        "can_lead_ai": bool(getattr(agent, "can_lead_ai", False)) and bool(agent.can_official_api),
         "role": "Administrator" if agent.has_admin_rights else "Agent",
         "numbers": [serialize_number(n) for n in numbers],
         "capabilities": {

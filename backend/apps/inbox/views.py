@@ -154,6 +154,14 @@ def conversation_list(request):
     if label_id:
         queryset = queryset.filter(labels__pk=label_id)
 
+    # Rotate campaign chats have their own chip. The main list skips them so
+    # a page of thirty is thirty normal chats, and Load more keeps moving.
+    rotate = request.GET.get("rotate")
+    if rotate == "1":
+        queryset = queryset.filter(staff_only=True)
+    else:
+        queryset = queryset.filter(staff_only=False)
+
     # Archived chats stay in the list unless the client asks for archived-only.
     archived = request.GET.get("archived")
     if archived == "1":

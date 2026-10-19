@@ -785,6 +785,38 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
+  leadai-grant-access)
+    # Give Lead AI access (Agent.can_lead_ai) to agents by Bitrix id, as "Agents & access"
+    # would (ops/catalog/leadai-grant-access.py). Ids only; the script skips an agent
+    # without Official API access and says so.
+    [[ $# -ge 1 ]] || die "leadai-grant-access takes one or more Bitrix ids"
+    ids=""
+    for id in "$@"; do
+      [[ "$id" =~ ^[0-9]{1,8}$ ]] || die "a Bitrix id is a number: '$id'"
+      ids="${ids:+$ids,}$id"
+    done
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-grant-access.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-grant-access.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e GRANT_IDS=$ids web python manage.py shell"
+    ;;
+
+  leadai-answer-late)
+    # One-off (2026-10-19): answer the replies to campaigns 549-553 that the Lead AI
+    # dropped as too old in the reply burst after the send, through the normal engine
+    # turn (ops/catalog/leadai-answer-late.py). "list" prints what it would answer and
+    # sends nothing; "send" answers them. An optional limit caps how many one run takes.
+    mode="${1:-list}"; limit="${2:-100}"
+    [[ "$mode" == list || "$mode" == send ]] || die "leadai-answer-late takes list or send, then an optional limit"
+    [[ "$limit" =~ ^[0-9]{1,3}$ ]] || die "the limit must be a number up to 999"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-answer-late.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-answer-late.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e LATE_MODE=$mode -e LATE_LIMIT=$limit web python manage.py shell"
+    ;;
+
   probe-leadai-funnel)
     # Read-only (board T73, the WhatsApp half of the weekly funnel): per ISO week (Asia/Dubai), per
     # playbook and in total, Lead AI campaign messages sent / delivered / read / failed, and the chats

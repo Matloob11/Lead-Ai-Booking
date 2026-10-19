@@ -592,6 +592,29 @@
   color: var(--muted);
 }
 
+.tplc-deploy-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tplc-high-only {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.tplc-high-only:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .tplc-deploy-all {
   display: inline-flex;
   align-items: center;

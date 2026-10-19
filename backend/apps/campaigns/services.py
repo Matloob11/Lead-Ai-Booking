@@ -646,6 +646,8 @@ def process_recipient(recipient_id: int) -> None:
 
         with transaction.atomic():
             before_campaign_send(campaign, recipient)
+            batch = campaign.batch
+            hide_new = bool(batch and str(batch.name or "").startswith("Rotate ·"))
             conversation = inbox_services.start_conversation(
                 campaign.number,
                 campaign.created_by,
@@ -655,6 +657,7 @@ def process_recipient(recipient_id: int) -> None:
                 campaign.header_variables,
                 campaign.header_media_id,
                 campaign.button_variables,
+                hide_new_from_inbox=hide_new,
             )
         recipient.conversation = conversation
         recipient.status = CampaignRecipient.Status.SENT

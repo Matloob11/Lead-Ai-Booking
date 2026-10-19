@@ -320,6 +320,23 @@ body {
   min-height: 96px;
 }
 
+/* Lead AI access without a number: the desk opens from the no-number card. */
+.access__leadai {
+  margin: 0 0 18px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--menu-line);
+  background: color-mix(in srgb, var(--navy) 6%, transparent);
+}
+
+.access__leadai .access__lead {
+  margin-bottom: 10px;
+}
+
+.access__leadai-btn {
+  margin: 0;
+}
+
 .access__actions {
   display: flex;
   justify-content: flex-end;
