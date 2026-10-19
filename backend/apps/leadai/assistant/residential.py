@@ -1312,7 +1312,8 @@ def is_fixed_line(sentence: str) -> bool:
 # Commission and VAT: only code's lines (spec §2.4). The commission by any name (batch 2e review: "any agent fee?", "what is
 # your fee?" got no line of code's, and the model's "It's usually 5% of the annual rent." and "around one month's rent" went).
 _COMMISSION_WORDS = (
-    r"\bcommi?ss?ion\w*|\bagency\s+fees?\b|\bbrokerage\b|\bbroker'?s?\s+(?:fees?|charges?)\b|\bagent'?s?\s+(?:fees?|charges?)\b"
+    # "agency charges" (the first mixed campaign, 2026-10-19, chat 50390: it got every charge line and no commission).
+    r"\bcommi?ss?ion\w*|\bagency\s+(?:fees?|charges?)\b|\bbrokerage\b|\bbroker'?s?\s+(?:fees?|charges?)\b|\bagent'?s?\s+(?:fees?|charges?)\b"
     r"|\byour\s+(?:fees?|charges?\s+for\s+(?:this|it|that))\b|\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:annual\s+|yearly\s+|total\s+)?rent\b"
     r"|عمولة|العمولة|کمیشن|कमीशन"
 )
@@ -1324,6 +1325,8 @@ _COMMISSION = re.compile(rf"{_COMMISSION_WORDS}|\b(?:one|1)\s+month'?s\s+rent\b"
 _VAT = re.compile(r"\bvat\b|\bvalue\s+added\s+tax\b|ضريبة|ویٹ|वैट", re.IGNORECASE)
 _ASKS_FIGURE = re.compile(
     r"\bhow\s+much\b|\bwhat\s+is\s+the\s+(?:exact\s+)?(?:amount|figure|commission)\b|\bexact\b|\bfigure\b|\bamount\b|\bpercent|\b%"
+    # "Normally it ranges from?", "what range?", "roughly?", "approximately?" (the first mixed campaign, chat 50390).
+    r"|\branges?\s+(?:from|between)\b|\bwhat\s+range\b|\broughly\b|\bapprox\w*|\bballpark\b|\bestimate\b"
     r"|\bkitn[aie]\b|\bkitni\b|\bkya\s+hai\b|كم|کتن|कितन",
     re.IGNORECASE,
 )
@@ -1647,8 +1650,30 @@ _SCREENING = re.compile(
 )
 
 
+# A sentence that answers their own question of a building's occupancy without ruling anyone out: "the agent confirms the
+# building's rules", "depends on the building", "mixed buildings", "both families and bachelors live there" (the first
+# mixed campaign, 2026-10-19, chat 50093: "is it a family building or bachelors as well?" was asked three times and the
+# model's every answer was cut as screening, so the customer never got one). A restriction said ("families only", "no
+# bachelors", "the owner prefers families") is still cut: _SCREENING's own words for those stand.
+_OCCUPANCY_ANSWER = re.compile(
+    r"\b(?:depends?\s+on|vary|varies|differs?\s+(?:by|from)|confirm|check|share|explain|tell\s+you|let\s+you\s+know)\b"
+    r"[^.?!]{0,60}\b(?:building|tower|owner|unit|rules?|policy|policies)\b"
+    r"|\bmixed\b|\bboth\s+famil(?:y|ies)\s+and\s+bachelors?\b|\bfamil(?:y|ies)\s+(?:and|or|as\s+well\s+as)\s+bachelors?\b"
+    r"|\bbachelors?\s+(?:and|or|as\s+well\s+as)\s+famil(?:y|ies)\b",
+    re.IGNORECASE,
+)
+_RESTRICTS = re.compile(
+    r"\bonly\b|\bnot\s+allowed\b|\bno\s+(?:bachelors?|singles?|famil)|\bprefer|\bpreferred\b|\bstrictly\b|\bmust\s+be\b|فقط|صرف",
+    re.IGNORECASE,
+)
+
+
 def screens(sentence: str) -> bool:
-    return bool(_SCREENING.search(" ".join(str(sentence or "").split())))
+    text = " ".join(str(sentence or "").split())
+    if not _SCREENING.search(text):
+        return False
+    # Their question answered, no restriction stated: not screening.
+    return not (_OCCUPANCY_ANSWER.search(text) and not _RESTRICTS.search(text))
 
 
 def _drop(reply: str, test) -> tuple[str, bool]:
