@@ -1528,6 +1528,10 @@ def claims_availability(sentence: str) -> bool:
 _MEDIA = r"(?:photos?|pictures?|pics|videos?|images?)"
 _CLAIM = re.compile(
     r"\b(?:booked|confirmed|reserved|scheduled)\b|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:just\s+|already\s+)?(?:sent|shared|forwarded)\b"
+    # "I have tentatively held the 4:00 PM slot", "I'll hold 7 PM for you": a hold code never made (the first mixed campaign,
+    # 2026-10-19, chat 49569: said on a bare "Okey" to two slots, with no appointment stored, so nothing was asked or booked).
+    r"|\b(?:i'?ve|i\s+have|we'?ve|we\s+have|i|we)\s+(?:tentatively\s+|provisionally\s+)?(?:held|kept|blocked|locked)\b[^.?!]{0,30}?\b(?:slot|time|appointment|viewing)\b"
+    r"|\b(?:i'?ll|i\s+will|we'?ll|we\s+will)\s+(?:tentatively\s+)?(?:hold|keep|block)\b[^.?!]{0,30}?\b(?:slot|time|appointment|viewing)\b\s*(?:for\s+you)?\s*(?:\.|$|[,;])"
     # "Here are some photos of our apartments", "Here are a few pictures", "Sending you the photos now" (batch 2e review).
     rf"|\bhere\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+few\s+|a\s+couple\s+of\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"
     rf"|\b(?:sending|sharing|forwarding)\s+(?:you\s+)?(?:the\s+|some\s+|a\s+few\s+)?(?:\w+\s+){{0,2}}?{_MEDIA}\b"

@@ -106,7 +106,9 @@ services:
     volumes:
       - ../media:/app/media
     stop_grace_period: 240s
-    command: ["celery", "-A", "a7wa", "worker", "-Q", "leadai", "-n", "leadai@%h", "-l", "info", "--concurrency", "2"]
+    # Six slots: a turn waits on the model for most of its time, and the first mixed campaign (2026-10-19) brought
+    # 222 replies in half an hour, which two slots answered 15 minutes late or not at all (apps/leadai/tasks.py).
+    command: ["celery", "-A", "a7wa", "worker", "-Q", "leadai", "-n", "leadai@%h", "-l", "info", "--concurrency", "6"]
 
   beat:
     build:

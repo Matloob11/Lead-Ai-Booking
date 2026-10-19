@@ -94,12 +94,14 @@ class NudgeYesTurnTests(GateBase):
         self.assertTrue(self.actions(message)["nudge_yes"])
         self.assertIsNone(LeadAiAppointment.objects.get().starts_at)  # nothing held at 3:00 PM
 
-    def test_without_the_guard_the_model_holds_its_own_time(self):
-        # The cluster known: the model's words go out as they are, with no step-2 question of code's (residential.cluster_first).
+    def test_without_the_guard_the_models_hold_claim_is_still_cut(self):
+        # The cluster known: the model's words go out with no step-2 question of code's (residential.cluster_first); its
+        # "I held the 3:00 PM slot" is a hold code never made, cut since the first mixed campaign (residential._CLAIM).
         self.nudged(clusters=["Spain"])
         with patch.object(engine, "nudge_yes", return_value=False):
             outcome, _, _, _ = self.turn(self.inbound("Yes"), [held_one()])
-        self.assertEqual(self.body(outcome), HELD_ONE)  # "I held the 3:00 PM slot", and nothing is held there
+        self.assertNotIn("I held the 3:00 PM slot", self.body(outcome))
+        self.assertIn("See you then!", self.body(outcome))
         self.assertIsNone(LeadAiAppointment.objects.get().starts_at)
 
     def test_chat_100s_ok_to_the_typed_nudge(self):
@@ -121,7 +123,8 @@ class NudgeYesEvalTests(SimpleTestCase):
         self.assertEqual(run_eval("shops-options-nudge-yes", held_one()).failures, [])
         with patch.object(engine, "nudge_yes", return_value=False):
             failures = run_eval("shops-options-nudge-yes", held_one()).failures
-        self.assertIn("offers 1 exact time(s), expected two free slots", failures)
+        # Its "I held the 3:00 PM slot" is cut as a hold code never made (residential._CLAIM), so no time is offered at all.
+        self.assertIn("offers 0 exact time(s), expected two free slots", failures)
         # Chat 100's "Ok": code's slots whatever the model words.
         live = eval_answer("Thanks, Saif. What business will the shop be for?", facts={"for_client": False, "shop_type": "type_2"})
         self.assertEqual(run_eval("shops-nudge-ok-100", live).failures, [])

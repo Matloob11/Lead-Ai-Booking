@@ -324,7 +324,10 @@ def _queue_missed_turns() -> None:
             continue
         if LeadAiTurn.objects.filter(inbound=message).exists():
             continue
-        if Message.objects.filter(conversation_id=message.conversation_id, pk__gt=message.pk).exists():
+        # Only our side's later messages close it: a later message of theirs is in the same burst, and the newest
+        # answerable one is what run_turn answers (the first mixed campaign, 2026-10-19: a customer who typed twice was
+        # never queued again, as any later row ruled the chat out).
+        if Message.objects.filter(conversation_id=message.conversation_id, pk__gt=message.pk, direction=Message.Direction.OUTBOUND).exists():
             continue
         assistant_turn.apply_async(args=[message.pk])
 

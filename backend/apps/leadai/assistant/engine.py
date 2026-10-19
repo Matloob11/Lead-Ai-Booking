@@ -226,6 +226,8 @@ CAP_PER_HOUR = 6
 # chat's is taken up again once the cap frees: caps.to_answer, caps.reclaim).
 CAPPED_REASON = "reply limit reached"
 STALE_AFTER = dt.timedelta(minutes=15)
+# A message nobody answered is still answered up to this long after it came (run_turn): past it, a person decides.
+LATE_UNTIL = dt.timedelta(hours=20)
 STILL_TYPING = dt.timedelta(seconds=8)
 MAX_DEBOUNCE = dt.timedelta(seconds=40)
 WINDOW_MARGIN = dt.timedelta(minutes=2)
@@ -466,12 +468,28 @@ def _item_opt_out(item, meeting_open: bool, shops_chat: bool = False) -> str | N
     return None
 
 
+# The opt-outs by weight: a stop anywhere in the burst outranks a softer word after it.
+_OPT_OUT_RANK = {rules.STOP_ALL: 4, rules.WRONG_NUMBER: 3, rules.NOT_INTERESTED: 2}
+
+
 def _burst_opt_out(burst, meeting_open: bool, shops_chat: bool = False) -> str | None:
     """An opt-out is the last thing the customer said ("STOP" then "🙏" is still a
-    STOP; "Stop" then "sending studios, I need a 2BR" is not)."""
+    STOP; "Stop" then "sending studios, I need a 2BR" is not), except that a stop
+    anywhere in the burst wins: the first mixed campaign (2026-10-19, chat 50108)
+    delivered "Stop messages" and "Not now" out of order, the last item read as
+    "Not now", and the studio price went to a customer who had just said stop."""
     said = _said(burst)
     key = said[-1] if said else burst[-1]
-    return _item_opt_out(key, meeting_open, shops_chat)
+    found = _item_opt_out(key, meeting_open, shops_chat)
+    # Taps only: typed words after a stop may take it back ("Stop" then "sending me studios, I need a 2BR"), a tap
+    # on the template's button never does.
+    for item in said or burst:
+        if item.kind not in ("button", "interactive"):
+            continue
+        other = _item_opt_out(item, meeting_open, shops_chat)
+        if other and _OPT_OUT_RANK.get(other, 1) > _OPT_OUT_RANK.get(found, 0):
+            found = other
+    return found
 
 
 def _their_words(burst, heard: dict | None = None) -> str:
@@ -3432,16 +3450,30 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "", re
     elif now - message.created_at > STALE_AFTER:
         if Message.objects.filter(conversation=conversation, direction=Message.Direction.OUTBOUND, pk__gt=message.pk).exists():
             return _skip("the message is too old to answer")
+        # Nobody answered since: the customer still waits, so the turn goes on late rather than drop them (the first
+        # mixed campaign, 2026-10-19: 92 replies in the burst after the send waited past the limit on a two-slot worker
+        # and were dropped; 86 were answered by hand-run turns hours later and read fine). The agents still hear that
+        # it was late. Older than LATE_UNTIL, it is history: a person decides.
+        if now - message.created_at > LATE_UNTIL:
+            alerts.raise_alert(
+                kind="stale",
+                conversation=conversation,
+                title="Lead AI did not answer an old message",
+                text=f"A message from {_who(conversation)} waited too long for the assistant (the system was busy). "
+                "Please reply by hand.",
+                dedupe_key=f"stale:{conversation.pk}:{message.pk}",
+                crm_url=_crm_url(chat),
+            )
+            return _skip("the message is too old to answer")
         alerts.raise_alert(
             kind="stale",
             conversation=conversation,
-            title="Lead AI did not answer an old message",
-            text=f"A message from {_who(conversation)} waited too long for the assistant (the system was busy). "
-            "Please reply by hand.",
+            title="Lead AI answered late",
+            text=f"A message from {_who(conversation)} waited over {int(STALE_AFTER.total_seconds() // 60)} minutes for the "
+            "assistant (the system was busy). It is answered now; please read the chat.",
             dedupe_key=f"stale:{conversation.pk}:{message.pk}",
             crm_url=_crm_url(chat),
         )
-        return _skip("the message is too old to answer")
 
     heard: dict[int, str] = {}
     give_up = attempt >= len(AUDIO_WAITS)

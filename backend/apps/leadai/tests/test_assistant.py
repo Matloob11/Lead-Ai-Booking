@@ -696,10 +696,21 @@ class TurnTests(Base):
         _, calls, _, _ = self.turn(voice, [answer()])
         self.assertIn("[voice note] I need a shop of 500 square feet", calls[0][1]["content"])
 
-    def test_transferred_and_stale_chats_are_left_to_people(self):
+    def test_a_stale_message_nobody_answered_is_answered_late_and_the_agents_told(self):
+        # The first mixed campaign (2026-10-19): 92 replies waited past STALE_AFTER on a busy worker and were dropped.
         message = self.inbound("hello", seconds_ago=20 * 60)
+        outcome, calls, _, _ = self.turn(message, [answer("Hi! How can we help?")])
+        self.assertEqual(outcome.status, "replied")
+        self.assertEqual(len(calls), 1)
+        alert = LeadAiAlert.objects.get(kind="stale")
+        self.assertEqual(alert.title, "Lead AI answered late")
+
+    def test_a_message_older_than_late_until_is_left_to_people(self):
+        message = self.inbound("hello", seconds_ago=21 * 3600)  # past LATE_UNTIL (20 h): history, a person decides
         self.assertEqual(engine.run_turn(message.pk).reason, "the message is too old to answer")
-        self.assertTrue(LeadAiAlert.objects.filter(kind="stale").exists())
+        self.assertEqual(LeadAiAlert.objects.get(kind="stale").title, "Lead AI did not answer an old message")
+
+    def test_transferred_chats_are_left_to_people(self):
         other = Conversation.objects.create(number=WabaNumber.objects.create(phone_number="971500000009", phone_number_id="pn9", waba_business_id="waba9"), contact=self.contact)
         Conversation.objects.filter(pk=self.conversation.pk).update(linked_conversation=other)
         fresh = self.inbound("hello again", seconds_ago=30)

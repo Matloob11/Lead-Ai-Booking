@@ -282,6 +282,10 @@ _CALL_REQUEST = re.compile(
     r"|\b(?:can|could|would|will)\s+(?:you|u|someone|somebody|anyone|your\s+(?:agent|team|specialist))\s+(?:please\s+|pls\s+|kindly\s+)?(?:call|ring|phone)\b"
     r"|\b(?:pls|please|plz|kindly)\s+(?:call|ring|phone)\b"
     r"|\b(?:have|need|want|prefer|like|do|arrange|schedule|set\s+up)\s+(?:a\s+|an\s+)?(?:quick\s+|short\s+)?(?:call|phone\s+call|voice\s+call)\b"
+    # "Urgent for call", "for a call please", "call please", "need call" (the first mixed campaign, 2026-10-19, chat 50005:
+    # "Urgent ‼️ for call" got the studio price and nobody was told).
+    r"|\b(?:urgent|urgently|asap)\b[^.?!]{0,20}?\b(?:for\s+(?:a\s+)?)?call\b|\bfor\s+(?:a\s+)?(?:quick\s+)?call\s*(?:please|pls|plz)?\s*$"
+    r"|\bcall\s+(?:please|pls|plz)\s*$|\bneed\s+call\b"
     r"|\bcall\s+(?:kar(?:o|en|ein|lo|do|dein|na|iye|ein\s+ge)?|krna|kr\s+do|kr\s+lo)\b|\bmujhe\s+(?:call|phone)\b|\bphone\s+(?:kar|karo|karein|kr)\b"
     r"|اتصل\s*(?:بي|علي|عليا|فيني)|اتصلوا|كلمني|ممكن\s*(?:اتصال|مكالمة|تتصل)|(?:أريد|اريد|ابغى|أبغى)\s*(?:اتصال|مكالمة)"
     r"|کال\s*(?:کریں|کرو|کر\s*دیں|کر\s*لیں)|مجھے\s*کال|फ़ोन\s*(?:करें|करो)|फोन\s*(?:करें|करो)|कॉल\s*(?:करें|करो|कर\s*दें|कर\s*लें)|मुझे\s*कॉल",
