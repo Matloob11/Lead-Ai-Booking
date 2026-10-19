@@ -1,3 +1,17 @@
+## 2026-10-19 — Lead AI round 12 is live: the first mixed campaign's fixes and rounds 7–11 of the 2e gate (Claude Code)
+
+main `94d21f7` (leadai-2e `b71a30a` merged), live 18:50 UTC, all four services up together; `worker-leadai` now runs with concurrency 6 (compose).
+
+- **What changed, from the first mixed campaign (549–553; `docs/superpowers/specs/2026-10-19-leadai-campaign-1-issues.md`):** I01 a reply up to 20 hours old is answered late with an alert, never dropped as stale (the campaign's 92 were answered by `leadai-answer-late`); I03 a Stop tap anywhere in the burst wins over a later "Not now"; I04 "for call", "call please", "need a call" are call requests (hand-over with the call line), a media-only burst is a hand-over too; I05 a call request is never held by the reply cap; I06 a hold claimed with nothing saved ("tentatively held", "kept for you") is cut; I07 one slot pair per message (the model's goes when code's closes it); I09 "agency charges", "ranges from / roughly" after our commission line and the family-or-bachelors answer are answered, not cut; I13 an owner offering a unit is no tenant, a wish to buy moves a rent chat to the sale track, a stored home track survives a bare other tag; I14 no stock claimed on the shops track either; the monthly band answers "how much per month?"; I10's second half: a reply over 600 characters ends at a sentence, never mid-word, and code's slot line is kept over the model's sentences.
+- **From the gate itself (rounds 7–11):** code asks the buyer's vacant-or-tenanted question when the model's wording is cut; Arabic client words are read with their article; a broker tag over a number ask alone comes off; "No thank you, I already rented a shop last month" is not interested in any length (read after the model, so a shops chat still asks about a second shop first); their half hour is booked when the reply says our slots start on the hour.
+- **The gate (round 12, on the build context):** 569 of 574 (99.1%), the model's own words 299 of 304 (98.4%), every code, money and policy scenario every run (the five failing runs were the model's own words: shops-old-lead quoted the old lead's CRM budget in both runs and `drop_quoted` cut it both times; shops-sale-price-and-book #2 gave the Morocco floor with the band's top, both from the facts; lang-voice-urdu and shops-tap-and-question-81 one run each). Postgres tests on the image: leadai 1920, crmlink 118, inbox 13, all OK; locally 2060 OK. `probe-leadai-turn` 19 of 19, PROBE_OK.
+- **Proof live:** `ps` all four `Up` together; `leadai-switch status` `last_sweep_at` 18:50:58 UTC, 45 s after up; `django-check` "No changes detected"; the `worker-leadai` log shows `concurrency: 6`.
+- **Not tested:** a real customer turn on round 12 (the next campaign is the test; the desk is watched by Hina Sultan, Mohammad Farhan and Shoaib Malik).
+- **Known, outside compose:** Cursor's `a7wa-worker-hooks` container (the webhook drain) stays on the round-6 image until it is recreated; round 12 carries no migration, so it keeps working.
+- **Shared files touched:** `TASKS.md`, `SHOPS-BOT-BOARD.md`, `deploy/docker-compose.yml` (one line), the issue list above. Everything else is under `backend/apps/leadai`.
+
+---
+
 ## 2026-10-19 — Lead AI access for Hina Sultan, Mohammad Farhan and Shoaib Malik; the desk opens with no number (Claude Code)
 
 main `3c767a6`, live 15:52 UTC (all four services up together).

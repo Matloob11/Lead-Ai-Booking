@@ -136,9 +136,11 @@ settings or process. Severity: how many customers it hurt and how badly.
 - **Chats:** 49804, 49818, 50051, 50054, 50282 ("…passp" cut).
 - **Root cause:** `charges_asked` returns a set for a price question too (`_CHARGES_IN_GENERAL` matches "how
   much"), so every charge line goes; `filters.clean_reply` ends with `text[:REPLY_MAX]` (600) — a hard cut.
-- **Fix:** code: the charge paragraph only when a charge word was asked (deposit, Ejari, DEWA, chiller, cheques,
-  fees), never on "how much" (that is the band); `clean_reply` cuts at the last sentence end before 600.
-- **Test:** "how much?" → band only; a 700-char reply → ends at a full stop.
+- **Fix:** code: `clean_reply` cuts at the last sentence end before 600 (done, round 11). The charge paragraph unasked:
+  an `unasked_charge` cut on an empty set was tried and reverted — rounds 1 and 2 of the gate settled that an empty set
+  cuts nothing (the paragraph is tolerated); a reply it pushes over the limit keeps code's own line through
+  `residential._fit` (round 11, the slot pair too). The paragraph itself stays a prompt matter.
+- **Test:** a 700-char reply → ends at a full stop (done); "how much?" → band only (open).
 
 ### I11 — mixed language: code's Roman-Urdu slot line inside an English reply (low, code)
 - **Chat:** 50157 (`language` = ur_latin from one Urdu word; the model wrote English).
@@ -187,7 +189,7 @@ settings or process. Severity: how many customers it hurt and how badly.
 - Rent quoted yearly, no phone number ever given, no colleague named, brokers paused: correct.
 - Photo captions "same type": correct (Q36).
 
-## Order of work and status (updated 2026-10-19 17:10 UTC)
+## Order of work and status (updated 2026-10-19 18:27 UTC)
 1. **Round 9's gate (3e45c79): failed on one money scenario** (shops-res-monthly-figure, 1 of 2 runs: the model gave
    no band on "how much per month?"); 99.0% overall, 187 of 188 shop scenarios. Nothing deployed; live stays round 6.
    Its fixes (I01, I03, I04, I06) are carried forward.
@@ -197,6 +199,41 @@ settings or process. Severity: how many customers it hurt and how badly.
 3. **Reverted after trial:** an I02 text-repeat guard in `engine.settle` (10 tests: `filters.drop_repeats` keeps
    questions and fixed lines on purpose) and a wider cut inside `filters.offer_slots` (10 slot rules). Both root
    causes re-stated above.
-4. **Next:** I02 (per-chat turn lock), I09 (answer the exact question; commission words), I14 (availability guard on
-   the shops path; two code lines reworded), CBD as a cluster name in the settings list.
-5. Then I08, I10, I11, I12; I15 is process (agents watch the desk).
+4. **I09 done on `leadai-2e` (after round 10's commit; ships in round 11):** "agency charges" is a commission ask;
+   "ranges from / roughly" after our commission line gets the figure; an answer to the customer's own family-or-
+   bachelors question is no longer cut as screening (it was, three times in chat 50093: a code bug, not a model slip).
+   Parking: the model answers when it chooses to (chat 50244) and the prompt already says "answer their question
+   first" — no guard.
+5. **I14 done on `leadai-2e` (after round 10's commit; ships in round 11):** a stock claim on the shops track is cut
+   (`claims.claims_stock`, with a shop noun, so the residential guard's reach is unchanged); the shop-types card says
+   "Shops come in 3 types" instead of "We have 3 types available". The rent confirmation's "take you to the available
+   apartments" stays on purpose: it is the policy check's own approved phrase and nine fixtures pin it.
+6. **Round 10's gate (context 318b295): failed on three scenarios, one run each** — declines (the ten-word "No thank
+   you, I already rented a shop last month" is past `opt_out_from_text`'s whole-message limit, and the model tagged it
+   unclear), shops-res-invitation-two-slots (a 698-character reply: `clean_reply`'s 600 cut took code's two slots, last
+   in the message), shops-res-cluster-unknown (the same reply passes its round-2 fixture: variance, no gap found).
+   99.1% overall, 187 of 188 shop scenarios. Absorbed in c719291: `rules.declines` is read after the model in
+   `engine.settle` (never code-first, so a shops chat still asks about a second shop first, T27); the slot block fits
+   the reply with code's pair kept (`residential._fit`); `clean_reply` cuts at a sentence end (I10's second half).
+   2056 tests OK.
+7. **Round 11's gate (context c719291): failed on one strict scenario, one run** — shops-gate-half-hour #1: "viewings
+   start on the hour. I can hold a slot for you at 4:00 PM or 6:00 PM" and a tentative with no hour; code cut the hourly
+   sentence, but `passed_over_hour` read the offer's shape alone, and one slot beside theirs plus one an hour and a half
+   off is no passing-over by round 1's rule. 99.3% overall, 186 of 188 shop scenarios; the other three failing runs were
+   the model's own (shop-invite, shops-same-day-window-96, lang-inshallah-english), each passing its other run. Absorbed
+   in b71a30a: the reply's own hourly sentence makes their off-the-hour time the visit's (`claims.says_hourly`, read
+   before the cut). 2060 tests OK. Nothing went live; the build context and images hold round 11 (`up` never ran).
+8. **Round 12 is live (2026-10-19 18:50 UTC, main `94d21f7`):** round 11 + item 7. The gate: 569 of 574 (99.1%), the
+   model's own words 299 of 304 (98.4%), every strict scenario every run; Postgres tests on the image leadai 1920, crmlink
+   118, inbox 13; `probe-leadai-turn` 19 of 19; no migration. `worker-leadai` runs with concurrency 6 (compose).
+9. **Next:** I02 (per-chat turn lock), CBD as a cluster name in the settings list.
+10. Then I08, I10's first half, I11, I12; I15 is process (agents watch the desk).
+11. Seen in round 11, not strict, no code yet: shops-same-day-window-96 #1 — the model proposed no appointment at all for
+    "barah saadhay barah baje ja ke check kar loon ga" (its reply asked the business), so T18 had no tentative to upgrade;
+    code books only what the model proposes. A rule for "their own day and hour said plainly, the model proposing nothing"
+    would be a new step, not a guard — weigh it against chats where that silence was right.
+12. Seen in round 12, not strict, no code: shops-old-lead failed both runs because the model quoted the old lead's CRM
+    budget ("around AED 40,000 a year"); `lead_history.drop_quoted` cut it both times, so the customer saw no CRM figure
+    (the eval counts the quote itself). shops-sale-price-and-book #2 said "AED 310,000 to AED 350,000 depending on the
+    cluster" — the Morocco floor and the general band's top, both from the facts; `sales` reads 310,000 as a band figure,
+    the eval wants 330,000. Neither is a code gap; both are the model's own words.
