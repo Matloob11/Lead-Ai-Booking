@@ -379,6 +379,10 @@ _SELL = re.compile(
     # "I want to sell", "looking to sell a shop", "planning to rent out"
     rf"|\b(?:{_WISH}|need|needs)\s+(?:to\s+|in\s+|of\s+|for\s+|on\s+)?(?:sell|selling|rent\s+out|renting\s+out|lease\s+out|let\s+out)"
     rf"(?:{_SELL_TAIL}|\s+(?:it|one|them|this|that){_SELL_TAIL}|\s+(?:off\s+)?(?:my\s+|our\s+)?{_FILL}{_PROPERTY})"
+    # "I am the owner, I want to rent it", "I'm owner of a studio", "owner here" (the first mixed campaign, 2026-10-19,
+    # chat 50020: an owner offering a studio got tenant photos and a viewing slot).
+    r"|\b(?:i\s*am|i'm|im|we\s*are|we're)\s+(?:the\s+|an?\s+)?(?:owner|landlord|landlady)s?\b(?!\s+of\s+(?:a\s+)?(?:company|business|shop\s+licen))"
+    r"|\b(?:owner|landlord)\s+here\b|\bmain\s+(?:owner|malik)\s+hoo?n\b|\bأنا\s+(?:المالك|صاحب\s+(?:الشقة|الاستوديو|العقار))"
     # "my villa is for sale", "I have a shop for sale", "I have a flat for rent"
     r"|\b(?:my|our)\b[^.?!]{0,30}\b(?:for|on)\s+sale\b"
     r"|\b(?:i|we)\s+(?:have|got|own)\s+(?:a\s+|an\s+|one\s+|two\s+|\d+\s+)?(?:\w+\s+){0,2}?(?:for|on)\s+sale\b"

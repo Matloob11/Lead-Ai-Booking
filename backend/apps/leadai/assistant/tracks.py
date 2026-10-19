@@ -698,6 +698,12 @@ def decide(
     # a studio seeker's "Yes" to a shops template was tagged wants_shop in both runs (shops-res-yes-to-shops-template).
     if decision is None and model_tag and not (template_yes(texts, first_answer) and _home_known(stored, facts, known, lead, kwargs)):
         tagged = _from_tag(model_tag, known, lead, **kwargs)
+        # A home track already stored stays over a bare other_need / other_area tag: words that name another property
+        # moved the track in step 1 already, so here the tag stands alone (the first mixed campaign, 2026-10-19, chat
+        # 50169: "we need a decent family space" on a stored studio-rent track was tagged other_need, and the customer
+        # got the "options across Dubai" line instead of the one-bedroom; chat 49953: "any units in cbd" the same).
+        if tagged is not None and tagged.track == OTHER and stored in (RENT, SALE):
+            tagged = None
         if tagged is not None and tagged.track != UNKNOWN:
             decision = dataclasses.replace(tagged, reason=tagged.reason if tagged.reason == LEAD else TAG)
 
