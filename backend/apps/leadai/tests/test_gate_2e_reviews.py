@@ -791,7 +791,8 @@ class EvalMirrorTests(SimpleTestCase):
 
     def test_each_fails_without_its_fix(self):
         for scenario_id, patches in (
-            ("shops-mixed-buy-one-bedroom", [patch.object(needs, "_BUY", needs.re.compile(r"$^"))]),
+            # Two readers of a wish to buy: needs._BUY, and tracks.wants_buy since the first mixed campaign (chat 49732).
+            ("shops-mixed-buy-one-bedroom", [patch.object(needs, "_BUY", needs.re.compile(r"$^")), patch.object(tracks, "wants_buy", return_value=False)]),
             ("shops-sale-not-for-rent", [patch.object(tracks, "wants_rent", tracks.said_rent), patch.object(tracks, "_RENT_NOT_A_WISH", tracks.re.compile(r"$^"))]),
             ("shops-res-booked-got-location", [patch.object(residential, "lost_to_elsewhere", return_value=True)]),
             ("shops-res-name-insha-allah", [patch.object(residential, "name_from_reply", return_value="Insha Allah")]),

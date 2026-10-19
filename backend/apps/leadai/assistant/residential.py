@@ -2739,13 +2739,18 @@ def settle(
         if track == RENT:
             # Rent is yearly (spec §2.10): an amount by the month goes, and the yearly band with how it is paid comes instead.
             reply, changed = _drop(reply, monthly_figure)
+            # Asked by the month, the answer is the yearly band and how it is paid: when a monthly figure was cut, and
+            # when the model gave no figure at all (the 2e real-model gate, round 9: "how much per month?" got "Rent is
+            # yearly in International City, usually paid in 1 to 4 cheques", with no band, in one run of two).
+            band = rent_band(unit, clusters, residential_facts) if (changed or asks_monthly(texts)) else None
             if changed:
                 cut.append("monthly")
-                band = rent_band(unit, clusters, residential_facts)
-                if band and not ({band["from"], band["to"]} <= {value for value, _ in filters.numbers_in(reply)}):
-                    yearly_line = f"{band_answer(language, track, unit, clusters, residential_facts)} {_YEARLY[_lang(language)]}"
-                elif band:
-                    yearly_line = _YEARLY[_lang(language)]
+            if band and not ({band["from"], band["to"]} <= {value for value, _ in filters.numbers_in(reply)}):
+                yearly_line = f"{band_answer(language, track, unit, clusters, residential_facts)} {_YEARLY[_lang(language)]}"
+                if not changed:
+                    cut.append("monthly_band")
+            elif band and changed:
+                yearly_line = _YEARLY[_lang(language)]
         # No colleague named (Q30): a capitalised name beside agent or team, or a name they used for one of ours (never their own).
         own = [(source or {}).get(key) for source in (facts, answer["facts"]) for key in ("customer_name", "full_name")]
         staff = staff_names([*texts, *(text for author, text in earlier or () if author == "customer")], own=own)

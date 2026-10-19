@@ -2187,6 +2187,14 @@ def settle(
         answer["reply"], rewritten = filters.offer_slots(answer["reply"], shops.slot_offer(answer["language"], slots, now))
         if rewritten:
             trimmed.append("slots")
+            # Code's pair closes the message: the model's own pair beside it goes (the first mixed campaign, 2026-10-19,
+            # chat 49818: "I can offer 3:00 PM or 4:00 PM today" and then code's "3:00 PM or 5:00 PM" in one message).
+            timed = {sentence for sentence, _, _ in offers.offered(answer["reply"], now)} if now is not None else set()
+            line = shops.slot_offer(answer["language"], slots, now)
+            timed.discard(line)
+            if timed:
+                answer["reply"] = " ".join(s for s in filters.split_sentences(answer["reply"]) if s not in timed)
+                trimmed.append(offers.TIMES)
             if not (agreed or reoffer):
                 answer["invited_to_meeting"] = True  # code's two slots are an invitation (launch review issue 24)
     if shops_chat and slots and location_invitation(
@@ -4156,6 +4164,8 @@ def _run_claimed(
     # The per-chat caps (caps.limits: a shops chat may send more); a shops chat's capped message is answered
     # once the cap frees (caps.to_answer), and its alert says so.
     which = caps.reached(conversation, playbook, now)
+    if which and people.asks_for_call(" ".join(need_texts(_said(burst) or burst))):
+        which = ""  # a call asked for is handed to a person now, never held by the cap (the first mixed campaign: 20 min)
     if which:
         caps.alert(conversation, chat, playbook, _their_words(burst, heard), now, which)
         return _skip(CAPPED_REASON)

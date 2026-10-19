@@ -31,6 +31,29 @@ class OwnerWordsTests(SimpleTestCase):
                 self.assertTrue(need is None or need.kind != needs.SELL)
 
 
+class BuyWordsTests(SimpleTestCase):
+    def test_a_wish_to_buy_on_the_rent_track_switches_to_sale(self):
+        # Chat 49732: a buyer on a stored rent track got the yearly rent band.
+        for said in (
+            "I would like to buy an inexpensive studio apartment in the French Quarter; let me know how much you are asking for it.",
+            "Looking to purchase a studio",
+            "buy, not rent",
+            "Studio kharidna hai",
+            "أريد شراء استوديو",
+        ):
+            with self.subTest(said):
+                self.assertTrue(tracks.wants_buy([said]))
+                decision = tracks.decide(
+                    words=[said], facts={"intent": "rent", "property_type": "studio"}, lead={}, stored=tracks.RENT, stored_unit=tracks.STUDIO,
+                )
+                self.assertEqual((decision.track, decision.deal), (tracks.SALE, tracks.SALE))
+
+    def test_no_wish_to_buy_is_read_in_rent_talk(self):
+        for said in ("I don't want to buy, just rent", "rent to own?", "is the owner buying new furniture?", "what is the rent"):
+            with self.subTest(said):
+                self.assertFalse(tracks.wants_buy([said]))
+
+
 class StoredHomeTrackTests(SimpleTestCase):
     def test_a_bare_other_tag_does_not_move_a_stored_rent_track(self):
         decision = tracks.decide(

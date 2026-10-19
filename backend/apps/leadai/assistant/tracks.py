@@ -453,6 +453,27 @@ def said_rent(words) -> bool:
     return any(_RENT_WORD.search(_RENT_NOT_A_WISH.sub(" ", _flat(text))) for text in words or ())
 
 
+# An explicit wish to buy, the mirror of _RENT_WISH: "I would like to buy", "looking to purchase", "buy, not rent",
+# "kharidna hai", "أريد شراء". Never "rent to buy" talk about the unit's yield, nor a no ("not buying").
+_BUY_WISH = re.compile(
+    r"\b(?:want|wants|wanted|wanna|need|needs|looking|look|searching|prefer|planning|plan|interested|like|would\s+like|rather)\b"
+    r"(?:\s+\w+){0,3}?\s+(?:to\s+buy|to\s+purchase|in\s+buying|buying|purchasing|to\s+own|for\s+sale)\b"
+    r"|\b(?:buy|buying|purchase)\s+(?:it\s+)?instead\b|\binstead\s+(?:i\s+(?:want|need)\s+to\s+)?(?:buy|purchase)\b"
+    r"|\b(?:buy|buying|purchase)\s*,?\s+(?:not|no|instead\s+of)\s+(?:to\s+)?(?:rent|renting|lease)\b"
+    r"|^\W*(?:(?:to|for)\s+)?(?:buy|buying|purchase|sale)(?:\s+(?:please|pls|only|it))?\W*$"
+    r"|\bkhari?d(?:na|ni|ne|ein|o)\b|\bkhareed(?:na|ni|ne)\b|(?:أريد|اريد|أبي|ابغى|أبغى|نريد)\s+(?:أن\s+)?(?:أشتري|اشتري|شراء|نشتري)|خریدن|खरीदन",
+    re.IGNORECASE,
+)
+_BUY_NOT_A_WISH = re.compile(r"\b(?:not|no|never|don'?t|do\s+not|can'?t|cannot)\s+(?:\w+\s+){0,2}?(?:buy|buying|purchase)\b|\brent\s+to\s+(?:own|buy)\b", re.IGNORECASE)
+
+
+def wants_buy(words) -> bool:
+    """An explicit wish to buy ("I would like to buy a studio", "looking to purchase", "buy, not rent"): on a stored rent
+    track this switches the chat to sale (the first mixed campaign, 2026-10-19, chat 49732). Never a no ("not buying") nor
+    "rent to own" talk."""
+    return any(_BUY_WISH.search(_BUY_NOT_A_WISH.sub(" ", _flat(text))) for text in words or ())
+
+
 def wants_rent(words) -> bool:
     """An explicit wish to rent ("I want to rent instead", "looking to rent", "rent, not buy"): on a stored sale track only
     this switches the chat to rent (batch 2e review: "No, not for rent. Vacant, own use", "Rented one is fine, I will lease
@@ -685,6 +706,10 @@ def decide(
             else:
                 decision = Decision(SHOP, reason=BOTH)
     elif need is not None:
+        if need.kind == needs.HOME and SALE_LIVE and wants_buy(texts):
+            # "I would like to buy a studio apartment": a home named with a wish to buy is the buyer's need, whatever track
+            # the chat had (the first mixed campaign, 2026-10-19, chat 49732: a buyer on a stored rent track got the rent band).
+            need = needs.Need(needs.BUY, need.noun, need.denies)
         decision = from_need(need, known, lead, rent_said=rent_said, **kwargs)
         sorry = need.denies
         if decision.reason != LEAD:
@@ -692,6 +717,10 @@ def decide(
     elif rent_said and stored == SALE:
         # "to rent instead": a rent word on the sale track switches it (a buyer's own words beat what we knew).
         decision = Decision(RENT, deal=RENT, deal_from=WORDS, reason=WORDS)
+    elif stored == RENT and SALE_LIVE and wants_buy(texts):
+        # "I would like to buy a studio": a wish to buy on the rent track switches it the same way (the first mixed
+        # campaign, 2026-10-19, chat 49732: a buyer on a stored rent track got the yearly rent band).
+        decision = Decision(SALE, deal=SALE, deal_from=WORDS, reason=WORDS)
 
     # 2. The model's tag; never over a home the chat knows when all they said is a yes to the template (template_yes: a yes
     # names no new need, and spec §1.4.2 gives a known track's yes that track's next step). The 2e real-model gate, round 2:
