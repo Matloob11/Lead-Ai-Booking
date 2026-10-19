@@ -785,6 +785,23 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
+  leadai-grant-access)
+    # Give Lead AI access (Agent.can_lead_ai) to agents by Bitrix id, as "Agents & access"
+    # would (ops/catalog/leadai-grant-access.py). Ids only; the script skips an agent
+    # without Official API access and says so.
+    [[ $# -ge 1 ]] || die "leadai-grant-access takes one or more Bitrix ids"
+    ids=""
+    for id in "$@"; do
+      [[ "$id" =~ ^[0-9]{1,8}$ ]] || die "a Bitrix id is a number: '$id'"
+      ids="${ids:+$ids,}$id"
+    done
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-grant-access.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-grant-access.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e GRANT_IDS=$ids web python manage.py shell"
+    ;;
+
   leadai-answer-late)
     # One-off (2026-10-19): answer the replies to campaigns 549-553 that the Lead AI
     # dropped as too old in the reply burst after the send, through the normal engine

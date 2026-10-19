@@ -50,11 +50,25 @@ export function renderNoNumbersScreen(host, { me, onAssigned, onLinkedDevices } 
     }
   });
 
+  // Lead AI access (Agents & access) needs no number: the agent follows every Lead AI chat on the Lead AI screen
+  // (apps/leadai/lane.has_desk_access), so the door to it opens here, before any number is assigned.
+  const leadAi = me.can_lead_ai
+    ? el("div.access__leadai", {}, [
+        el("p.access__lead", {}, ["You have Lead AI access. Open the Lead AI screen to follow its chats; no number is needed for that."]),
+        el(
+          "button.btn.btn--primary.access__leadai-btn",
+          { type: "button", onclick: () => window.a7wa?.openLeadAi?.() },
+          [icon("smartphone", { size: 15 }), "Open Lead AI"]
+        ),
+      ])
+    : null;
+
   clear(host).append(
     el("div.access", {}, [
       el("div.access__card", {}, [
         el("div.access__icon", {}, [icon("hash", { size: 26 })]),
         el("h2.access__title", {}, ["No WhatsApp number assigned yet"]),
+        leadAi,
         el("p.access__lead", {}, [
           `${me.display_name || "Agent"} — no conversations will be visible until a number is assigned to your account. ` +
             "Please specify below which number you require so an administrator can assist you.",

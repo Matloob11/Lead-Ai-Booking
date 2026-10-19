@@ -353,6 +353,9 @@ export function mountInbox(root, { me, openRequest = null }) {
     // No Official number, and no chat transferred to them either — ask for a number.
     if (!state.numbers.length && !state.conversations.length) {
       root.className = "";
+      // Lead AI access needs no number: the companion (modules/lead-ai) still learns who is signed in, so its screen
+      // opens from the no-number card's "Open Lead AI" (publishApi fires wa:ready, which that module waits for).
+      publishApi();
       renderNoNumbersScreen(root, {
         me,
         onAssigned: () => window.location.reload(),
