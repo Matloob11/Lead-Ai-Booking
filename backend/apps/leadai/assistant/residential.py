@@ -2317,7 +2317,9 @@ def asked_charges(texts, money_line: str = "") -> set[str] | None:
 
 def unasked_charge(sentence: str, asked, facts=None) -> bool:
     """The sentence quotes a charge (_CHARGE_SAID) none of whose kind they asked about, while they asked about another
-    (``asked``: charges_asked; None or empty cuts nothing), and carries no band figure of ours."""
+    (``asked``: charges_asked; None or empty cuts nothing), and carries no band figure of ours. An empty set cuts nothing
+    on purpose (the 2e gate's rounds 1 and 2 settled it): the charges paragraph said unasked is tolerated, and a reply it
+    pushes past the limit keeps code's own lines through _fit, never the model's."""
     if not asked:
         return False
     text = " ".join(str(sentence or "").replace("’", "'").split())

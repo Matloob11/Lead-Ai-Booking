@@ -2068,6 +2068,15 @@ def settle(
         from . import residential as res_broker
 
         untagged = res_broker.unasked_broker(answer, new_texts, earlier, known=facts, track=track)
+    # A no opening their last message with the reason they are done after it ("No thank you, I already rented a shop
+    # last month") is not interested whatever the model tagged (the 2e real-model gate, round 10, declines #1: unclear),
+    # set before the handover and the rest read the answer, as the model's own tag would be. Past opt_out_from_text's
+    # whole-message limit on purpose: the turn still reads the words (a shops chat asks about a second shop first,
+    # who_they_are, board T27).
+    last_said = next((text for text in reversed(new_texts or ()) if not rules.is_acknowledgement(text)), "")
+    declined = answer["opt_out"] == "none" and rules.declines(last_said)
+    if declined:
+        answer["opt_out"] = rules.NOT_INTERESTED
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites)
     if shops_chat:
         # Launch review issues 15 and 26: only what is theirs goes on the record, before code adds notes of its own
@@ -2083,6 +2092,8 @@ def settle(
     trimmed = []
     if untagged:
         trimmed.append("unasked_broker")  # the broker tag came off, with its words that hand them to a person
+    if declined:
+        trimmed.append("declines")  # their no with its reason: code's not interested over the model's none
     if shops_chat and residential and answer["reply"] and not answer.get("converted"):
         # The rent flow: the old lead's CRM notes are never quoted, as in a shops chat; the residential facts are ours.
         from . import residential as res_facts
@@ -2204,6 +2215,15 @@ def settle(
             if timed:
                 answer["reply"] = " ".join(s for s in filters.split_sentences(answer["reply"]) if s not in timed)
                 trimmed.append(offers.TIMES)
+            if len(answer["reply"]) > filters.REPLY_MAX:
+                # Over the limit with code's pair last, clean_reply's cut would take the pair: the model's sentences go
+                # instead, its statements from the last one up and then its questions, never the pair (the 2e real-model
+                # gate, round 10: shops-res-invitation-two-slots #1 was 698 characters, the charges paragraph plus the
+                # invitation, and "offers 0 exact time(s)" went out).
+                from . import residential as res_fit
+
+                answer["reply"] = res_fit._fit(answer["reply"], [line])
+                trimmed.append("length")
             if not (agreed or reoffer):
                 answer["invited_to_meeting"] = True  # code's two slots are an invitation (launch review issue 24)
     if shops_chat and slots and location_invitation(

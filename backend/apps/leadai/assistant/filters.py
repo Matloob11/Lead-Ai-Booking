@@ -138,7 +138,14 @@ def clean_reply(reply: str, context_text: str, *, max_questions: int = 1, amount
         single.append(sentence)
     text = " ".join(single)
     text = re.sub(r"[ \t]{2,}", " ", text).strip()
-    return text[:REPLY_MAX], notes
+    if len(text) > REPLY_MAX:
+        # Over the limit, the cut falls at the last sentence end before it, never mid-word (the first mixed campaign,
+        # 2026-10-19: a message went out ending "Documents needed are passp"); a single sentence that long is cut as before.
+        head = text[:REPLY_MAX]
+        end = max(head.rfind(mark) for mark in (". ", "! ", "? ", "؟ ", "۔ ", "। "))
+        text = head[: end + 1].rstrip() if end > 0 else head
+        notes.append("length")
+    return text, notes
 
 
 QUESTION_MARKS = ("?", "؟", "？")

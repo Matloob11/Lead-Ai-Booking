@@ -182,7 +182,7 @@ def _opt_out_in(message) -> str | None:
         return rules.opt_out_from_button(reply.get("title") or text)
     if message.kind == "text" and not rules.is_meeting_cancel(text):
         # "الغاء" / "cancel" alone, with a meeting booked, cancels the meeting, not the chat.
-        return rules.opt_out_from_text(text)
+        return rules.opt_out_from_text(text) or (rules.NOT_INTERESTED if rules.declines(text) else None)
     return None
 
 

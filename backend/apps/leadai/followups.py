@@ -410,7 +410,10 @@ def _says_no(text: str) -> bool:
     """A no to our offer: a plain refusal, "not interested", "no thanks" (a "Not now" is _says_not_now's)."""
     if _says_not_now(text):
         return False
-    return rules.is_refusal(text) or rules.opt_out_from_text(text) == rules.NOT_INTERESTED or bool(_DECLINE_SAID.search(text or ""))
+    return (
+        rules.is_refusal(text) or rules.opt_out_from_text(text) == rules.NOT_INTERESTED or rules.declines(text)
+        or bool(_DECLINE_SAID.search(text or ""))
+    )
 
 
 def _says_yes(words) -> bool:

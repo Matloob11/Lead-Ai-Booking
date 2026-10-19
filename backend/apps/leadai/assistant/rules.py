@@ -111,6 +111,14 @@ def _phrase_index():
 
 PHRASE_INDEX = _phrase_index()
 WRONG_NUMBER_INDEX = tuple(normalize_text(p) for p in PHRASES[WRONG_NUMBER])
+NOT_INTERESTED_INDEX = tuple(normalize_text(p) for p in PHRASES[NOT_INTERESTED])
+# The reason they are done, after a no: they rented, found, got or took a place already (declines).
+_LOST_REASON = re.compile(
+    r"\b(?:already|alredy|allready)\s+(?:have\s+|got\s+|ve\s+)?(?:rented|found|took|taken|got|leased|booked|bought|purchased|moved)\b"
+    r"|\b(?:rented|found|took|got|leased|booked|bought)\s+(?:one|a|an|another|it|a\s+flat|a\s+shop|a\s+studio|a\s+place)\b[^.?!]{0,20}?\b(?:already|last\s+(?:week|month)|yesterday)\b"
+    r"|\bmil\s+gay[ai]\b|\ble\s+liy[ai]\b|\bho\s+gay[ai]\b|وجدت|استأجرت|اشتريت",
+    re.IGNORECASE,
+)
 
 
 # Alone, these mean "cancel". With a meeting booked that is the meeting, not
@@ -145,7 +153,8 @@ FILLERS = (
 
 def opt_out_from_text(text: str) -> str | None:
     """Only a whole short message counts: "stop sending 1BR, I need 2BR" is not an opt-out
-    (except a request for no messages at all, which counts in any length)."""
+    (except a request for no messages at all, which counts in any length). A no with the reason they are
+    done after it is ``declines``', read after the model (engine.settle), never code's before it."""
     words = normalize_text(text)
     if words and any(f" {phrase} " in f" {words} " for phrase in STOP_ANYWHERE):
         return STOP_ALL
@@ -163,6 +172,17 @@ def opt_out_from_text(text: str) -> str | None:
             if candidate != words and candidate in PHRASE_INDEX:
                 return PHRASE_INDEX[candidate]
     return None
+
+
+def declines(text: str) -> bool:
+    """A no opening the message, the rest the reason they are done ("No thank you, I already rented a shop last month"):
+    not interested, in any length, unless it asks something too. Not opt_out_from_text's (code's before any model): the
+    model and the shops' who_they_are still read it, so a shops chat asks about a second shop first (board T27). The 2e
+    real-model gate, round 10 (declines #1): ten words, past the whole-message limit, and the model tagged it unclear."""
+    words = normalize_text(text)
+    if not words or asks_question(text) or not _LOST_REASON.search(words):
+        return False
+    return any(words.startswith(phrase + " ") for phrase in NOT_INTERESTED_INDEX)
 
 
 def _whole_short_message(text: str, index, fillers) -> bool:
