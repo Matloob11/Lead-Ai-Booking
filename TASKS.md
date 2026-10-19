@@ -1,3 +1,15 @@
+## 2026-10-19 — Lead AI access for Hina Sultan, Mohammad Farhan and Shoaib Malik; the desk opens with no number (Claude Code)
+
+main `3c767a6`, live 15:52 UTC (all four services up together).
+
+- **Given:** Lead AI access (`Agent.can_lead_ai`, Q37) to Hina Sultan (Bitrix 454), Mohammad Farhan (2633) and Shoaib Malik (2694), with `ops/wa.sh leadai-grant-access 454 2633 2694` (as "Agents & access" would; an agent without Official API access is skipped and named). Muhammad Shoaib (2308) is a different person and was not given it.
+- **Why code changed:** an agent with Lead AI access who holds no number saw only the "No WhatsApp number assigned yet" card, with no door to the Lead AI screen. Now `/api/auth/me/` carries `can_lead_ai`; the card shows "Open Lead AI" for such an agent; and `modules/inbox.js` publishes its API (`wa:ready`) on that path too, so `modules/lead-ai` learns who is signed in. Hina and Farhan are Bitrix portal admins, so their panel opens fully and "Lead AI" sits in the hamburger menu as before; Shoaib Malik holds no number and gets the button.
+- **Proof:** `probe-leadai-access` as the real agents through the test client in `web`: `me.can_lead_ai` true for the three, false for Muhammad Shoaib; `/api/leadai/chats/` 200 with rows for the three and 0 rows for Muhammad Shoaib; `/api/leadai/desk/` 200. The three panel files served at their local sizes (6379, 111776, 46226 bytes), md5 equal. `apps.accounts` tests 4 OK. The build context's `leadai` stayed at round 6 (live): only `accounts/views.py` was pushed, checked by md5 before the build.
+- **Not tested:** the "Open Lead AI" button in a browser inside Bitrix as Shoaib Malik.
+- **Shared files touched:** `modules/inbox.js` (3 lines in `boot()`), `modules/access-requests.js`, `modules/inbox.css`, `accounts/views.py`, `ops/wa.sh` (one verb), `TASKS.md`.
+
+---
+
 ## 2026-10-18 — C41 mixed popup live, and Rotate committed (Cursor)
 
 `C41_MIXED_LIVE` is true on the Bitrix popups. The Script label is "International City — all" and the value stays `ic_shops`. `intl_city_property_reconnect` shows on a sending number. Choosing it refreshes the breakdown (the preview was still showing the shops warning). On the live Leads popup, with every send blocked in the page and at the network, the line was "Shop 0 · Studio/1BR 1 · Other 0 · 0 being worked by an agent" plus Leave them out. The same template is absent on a number whose WABA does not have it. Campaigns 517→517, recipients 32298→32298. No `ops/wa.sh build` or `up`. Live md5: lead JS `166854828b80a2423f934980d080f383`, renewals JS `ab2316512e7987a0df8d617f0fc6f550`.
