@@ -262,6 +262,12 @@ _HOURLY = re.compile(
     r"|\bhar\s+ghante\b|\bghante\s+ke\s+hisaab\b|كل\s+ساعة|على\s+رأس\s+الساعة|ہر\s+گھنٹے|हर\s+घंटे",
     re.IGNORECASE,
 )
+
+
+def says_hourly(text: str) -> bool:
+    """The text says our slots start only on the hour (_HOURLY): never true of them (hours.SLOT, every 30 minutes). Read by
+    engine.passed_over_hour on the reply before settle cuts the sentence: it says why their half hour was passed over."""
+    return bool(_HOURLY.search(" ".join(str(text or "").replace("’", "'").split())))
 # What they asked about, read in their own words (the topic of a claim).
 _ASKED = {
     "location": re.compile(

@@ -2619,7 +2619,12 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
     an hour (hours.spoken_times: never a bare number, "slot 2"); every other start the reply names (offers.offered: their
     own may be named, as taken) is on their day within half an hour of it, and the model's own hour, if any, is beside it
     too. So the hour of something else in their words is never read as the visit's: "My shop closes at 10, I can come
-    tomorrow" answered with tomorrow's 11:00 AM or 5:00 PM offers more than the slots beside 10."""
+    tomorrow" answered with tomorrow's 11:00 AM or 5:00 PM offers more than the slots beside 10.
+
+    A reply that says itself why their half hour was passed over, our slots starting on the hour (claims.says_hourly: never
+    true, cut by claims.settle after this), makes their own hour the visit's whatever else it offers on their day, or nothing:
+    the 2e real-model gate, round 11 (shops-gate-half-hour #1), "viewings start on the hour. I can hold a slot for you at
+    4:00 PM or 6:00 PM", a shape the rules below read as no passing-over. Their time on the hour has no such reason."""
     spoken = hours.spoken_times(said)
     if len(spoken) != 1:
         return None
@@ -2633,7 +2638,11 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
         for on in days
         for at in times
     } - {start}
-    if not others or any(slot.date() != day for slot in others):
+    if any(slot.date() != day for slot in others):
+        return None
+    if theirs.minute and claims.says_hourly(answer["reply"] or ""):
+        return theirs
+    if not others:
         return None
     if all(abs(slot - start) <= hours.SLOT for slot in others):
         return theirs
