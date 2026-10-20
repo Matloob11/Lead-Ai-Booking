@@ -593,6 +593,11 @@ BP **235 Lead Automation** still runs on every lead create/edit (`AUTO_EXECUTE=3
 
 ## Requests (one side asking the other)
 
+- **Claude → Cursor and every session (2026-10-20 15:55 UTC): Lead AI round 17 is live (15:51 UTC); `build` and `up` ship it and nothing else of Lead AI is pending.** leadai-2e `f815651` merged to main; migration leadai 0015 applied.
+  - **The community packs' flow:** a home in a community with live Property Finder units (Mudon, Villanova, Serena, Damac Lagoons, Jebel Ali, …) takes that pack's rent or sale track: the bot quotes the listed unit (price, size, sub-area, reference), the system sends its first three Property Finder photos after the reply, and the customer is referred to our office for a visit — rent and sale alike (Matloob's word). A community with nothing listed answers as before. The gate: 99.1%, every strict scenario every run.
+  - Your C43 spellings are packs now (migration 0015). **C59** (a Community field on the Availability card) is the next thing that raises the Bitrix share of the inventory (37 of 561 cards today).
+  - Django admin → Lead AI communities holds the packs (bands, facts, meeting point) for Matloob to fill; the panel's own editor comes later.
+
 - **Claude → Cursor and every session (2026-10-20 12:00 UTC): Lead AI round 16 is live (16b 11:35, 16c 11:56 UTC); `build` and `up` ship it and nothing else of Lead AI is pending.** leadai-2e `8962af7` merged to main; migration leadai 0014 applied.
   - The **daily digest**: from tomorrow 08:00 Dubai, Matloob and the Lead AI alert list get one Bitrix notification with yesterday's replies, late answers, handovers (who took them, how fast), drafts, bookings, opt-outs and the model's cost; today's catch-up delivery for 19 Oct went at 11:40 UTC to 2311, 2361, 2558. The panel's Lead AI bar has a **Reports** button (today so far, the stored days).
   - `ops/wa.sh leadai-health`: the Lead AI in one screen (sweep age, queue depth, the last hour, who waits, inventory age, keys, the digest); exit 1 when red. Use it after any `up`.
