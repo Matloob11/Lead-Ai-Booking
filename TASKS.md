@@ -1,3 +1,11 @@
+## 2026-10-20 — Lead AI Bot 3 advance plan written (Claude Code)
+
+Matloob's decisions (all communities; Property Finder API now, Bayut/Dubizzle later; Bitrix Owner Data Availability as the current stock; co-pilot handover; unlimited voice notes; a memory and learning system; Cursor's tasks included) → `docs/superpowers/specs/2026-10-20-leadai-bot3-advance-plan.md`: eight workstreams (foundation, community packs, live inventory, co-pilot desk, memory and learning, sales flow, voice and media, reporting), Cursor's C43–C54, Matloob's M1–M7, a nine-week sequence with the gate at every step. Nothing deployed. The Property Finder key is written nowhere; it goes into the server env only when workstream C starts.
+
+**Shared:** `TASKS.md`.
+
+---
+
 ## 2026-10-20 — A7 Lead Guard 1.5.0: booking fields saved on the Booking stage; file fields no longer read as "changed" (Claude Code)
 
 Live on the CRM box (`ops/bitrix.sh put`, md5 checked): `php_interface/include/a7_lead_guard.php` `38dac324…`, `a7_lead_guard_perms.php` `78dec756…`, `tools/a7_lead_guard_api.php` `0ede1c60…`, `js/a7_lead_guard.js` `066e76cb…`. Matloob's report: a guard stopped the booking details from being saved on the lead; team leads and anyone who opens the lead must be able to fill those fields on the Booking stage, everything else as it was.
