@@ -117,6 +117,16 @@ class DraftApiTests(Base):
         self.client.post(f"/api/leadai/chats/{self.conversation.pk}/resume-ai/", {}, format="json")
         self.assertIsNone(LeadAiChatState.objects.get(pk=self.state.pk).draft)
 
+    def test_the_auto_send_minutes_are_an_ai_setting(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get("/api/leadai/settings/").json()["copilot_auto_send_minutes"], 15)
+        response = self.client.put("/api/leadai/settings/", {"copilot_auto_send_minutes": "30"}, content_type="application/json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(LeadAiSettings.load().copilot_auto_send_minutes, 30)
+        response = self.client.put("/api/leadai/settings/", {"copilot_auto_send_minutes": "500"}, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("copilot_auto_send_minutes", response.json().get("errors", response.json()))
+
 
 class AskTests(Base):
     def test_the_agents_question_becomes_a_draft_with_the_question_kept(self):

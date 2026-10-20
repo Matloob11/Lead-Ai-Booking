@@ -627,6 +627,9 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "office_longitude": str(row.office_longitude) if row.office_longitude is not None else "",
         "hours": hours.HOURS_TEXT,
         "daily_call_limit": row.daily_call_limit,
+        # The co-pilot (assistant/copilot.py): an ordinary draft nobody sent or dropped goes out by itself after this many
+        # minutes; 0 never.
+        "copilot_auto_send_minutes": row.copilot_auto_send_minutes,
         "alert_bitrix_user_ids": row.alert_user_ids(),
         "alert_recipients": _alert_recipients(row),
         # The agent desk (Q37): who follows every Lead AI chat; granted per agent in Agents & access.
@@ -860,6 +863,15 @@ def assistant_settings(request):
             errors["daily_call_limit"] = "Give a number from 0 to 20000."
         else:
             change("daily_call_limit", limit)
+    if "copilot_auto_send_minutes" in data:
+        try:
+            minutes = int(data.get("copilot_auto_send_minutes"))
+        except (TypeError, ValueError):
+            minutes = -1
+        if not 0 <= minutes <= 180:
+            errors["copilot_auto_send_minutes"] = "Give a number of minutes from 0 (never) to 180."
+        else:
+            change("copilot_auto_send_minutes", minutes)
     if "alert_bitrix_user_ids" in data:
         ids, error = _bitrix_ids(data.get("alert_bitrix_user_ids"))
         if error:
