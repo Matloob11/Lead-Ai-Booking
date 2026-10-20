@@ -19,6 +19,13 @@
  *     Javeria (U2297) read + update        ->  true only for Mudon leads already in
  *                                              a7_javeria_mudon_lead. Hassan and Hussnain
  *                                              teams are not in that table. Delete stays off.
+ *     Booking stage (2026-10-20)           ->  anyone who can READ a lead that is on the
+ *                                              Booking stage (CONVERTED) may UPDATE it; the
+ *                                              guard then lets only the five booking fields
+ *                                              change (A7LeadShare::bookingGrant / bookingOnly).
+ *                                              A team lead opening a colleague's booked lead
+ *                                              fills Rent or Sale, Commission Zone, Commission
+ *                                              Document, Commission Status and the voucher no.
  *
  * Delete stays blocked for everybody by the guard. Which fields a shared user may
  * actually change is enforced in A7LeadGuard::onBeforeLeadUpdate.
@@ -132,7 +139,7 @@ class A7ItemPermissions extends Item
             if (A7LeadShare::mayUpdate($this->a7UserId, $itemIdentifier->getEntityTypeId(), $itemIdentifier->getEntityId())) {
                 return true;
             }
-            return A7LeadShare::nehaGrantedLead(
+            if (A7LeadShare::nehaGrantedLead(
                 $this->a7UserId,
                 $itemIdentifier->getEntityTypeId(),
                 $itemIdentifier->getEntityId()
@@ -140,10 +147,30 @@ class A7ItemPermissions extends Item
                 $this->a7UserId,
                 $itemIdentifier->getEntityTypeId(),
                 $itemIdentifier->getEntityId()
+            )) {
+                return true;
+            }
+            // The booking fields of a lead on the Booking stage: anyone who can read it (the guard limits the fields).
+            return A7LeadShare::bookingGrant(
+                $this->a7UserId,
+                $itemIdentifier->getEntityTypeId(),
+                $itemIdentifier->getEntityId(),
+                fn() => parent::canReadItemIdentifier($itemIdentifier)
             );
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /** The kernel's own answers, with none of our grants: the guard tells a booking-only update by them. */
+    public function stockCanRead(ItemIdentifier $itemIdentifier): bool
+    {
+        return parent::canReadItemIdentifier($itemIdentifier);
+    }
+
+    public function stockCanUpdate(ItemIdentifier $itemIdentifier): bool
+    {
+        return parent::canUpdateItemIdentifier($itemIdentifier);
     }
 }
 
@@ -154,9 +181,20 @@ final class A7LeadShare
 {
     public const TABLE = 'a7_lead_share';
     public const LEAD = 1;
+    /** The stage on which anyone who can open the lead may fill its booking fields (Booking = CONVERTED). */
+    public const BOOKING_STAGE = 'CONVERTED';
+    /** The booking fields (a7_booking_fields_setup.php); the guard config key booking_fields overrides the list. */
+    public const BOOKING_FIELDS = [
+        'UF_CRM_A7_BOOKING_RENT_SALE', 'UF_CRM_A7_COMMISSION_ZONE', 'UF_CRM_A7_COMMISSION_DOC',
+        'UF_CRM_A7_COMMISSION_STATUS', 'UF_CRM_A7_COMMISSION_VOUCHER',
+    ];
 
     /** @var array<string,bool> per-request cache "uid:lead" => allowed */
     private static array $cache = [];
+    /** @var array<string,bool> per-request cache "uid:lead" => the booking-fields grant applies */
+    private static array $bookingGranted = [];
+    /** @var array<int,bool> per-request cache leadId => on the Booking stage */
+    private static array $bookingLead = [];
     /** @var array<int,array<int,bool>> per-request preload: userId => [leadId => true] */
     private static array $userLeads = [];
     /** @var bool|null table exists (checked once per request) */
@@ -348,7 +386,9 @@ final class A7LeadShare
             return false;
         }
         $hasShare = (bool) self::leadsOf($userId);
-        if (!$hasShare && $userId !== 2251 && $userId !== 2297) {
+        // The booking grant needs the backtrace for every non-admin, so only on a request that can carry a lead write.
+        $booking = self::requestMayWriteLead();
+        if (!$hasShare && !$booking && $userId !== 2251 && $userId !== 2297) {
             return false;
         }
         foreach (debug_backtrace(0, 12) as $f) {
@@ -372,9 +412,111 @@ final class A7LeadShare
             if (in_array($perm, ['READ', 'WRITE'], true) && self::javeriaMudonLead($userId, self::LEAD, $id)) {
                 return true;
             }
+            if ($perm === 'WRITE' && $booking && self::bookingGrant($userId, self::LEAD, $id, static fn() => self::stockRead($userId, $id))) {
+                return true;
+            }
             return false;
         }
         return false;
+    }
+
+    /* ---- the booking-fields grant (2026-10-20) ------------------------------------------------------------- */
+
+    /** The booking fields, uppercased: the guard config's booking_fields when set, else BOOKING_FIELDS. */
+    public static function bookingFields(): array
+    {
+        $fields = [];
+        if (class_exists('A7LeadGuard', false)) {
+            $fields = (array) (A7LeadGuard::config()['booking_fields'] ?? []);
+        }
+        $fields = array_values(array_filter(array_map(static fn($f) => strtoupper(trim((string) $f)), $fields)));
+        return $fields ?: self::BOOKING_FIELDS;
+    }
+
+    /** Is the lead on the Booking stage now (the stored stage, never the one an update brings)? One query per lead. */
+    public static function isBookingLead(int $leadId): bool
+    {
+        if ($leadId <= 0) {
+            return false;
+        }
+        if (!isset(self::$bookingLead[$leadId])) {
+            $row = \Bitrix\Main\Application::getConnection()->query('SELECT STATUS_ID FROM b_crm_lead WHERE ID=' . $leadId)->fetch();
+            self::$bookingLead[$leadId] = is_array($row) && (string) ($row['STATUS_ID'] ?? '') === self::BOOKING_STAGE;
+        }
+        return self::$bookingLead[$leadId];
+    }
+
+    /**
+     * The booking-fields grant: a lead already on the Booking stage may be updated by anyone who can read it, and
+     * A7LeadGuard::onBeforeLeadUpdate then lets only the booking fields change. ``$canRead`` is the kernel's own read
+     * check for this user and lead (A7ItemPermissions::stockCanRead), never one that comes back through these grants.
+     */
+    public static function bookingGrant(int $userId, int $entityTypeId, int $entityId, callable $canRead): bool
+    {
+        if ($entityTypeId !== self::LEAD || $userId <= 0 || $entityId <= 0 || !self::isBookingLead($entityId)) {
+            return false;
+        }
+        $key = "$userId:$entityId";
+        if (!isset(self::$bookingGranted[$key])) {
+            try {
+                self::$bookingGranted[$key] = (bool) $canRead();
+            } catch (\Throwable $e) {
+                self::$bookingGranted[$key] = false;
+            }
+        }
+        return self::$bookingGranted[$key];
+    }
+
+    /**
+     * Is this update open to the user through the booking grant alone — no right of their own, no share, no
+     * Neha/Javeria grant? The guard then limits the fields. False when the kernel grants the update itself.
+     */
+    public static function bookingOnly(int $userId, int $leadId): bool
+    {
+        if ($userId <= 0 || $leadId <= 0 || !self::isBookingLead($leadId)) {
+            return false;
+        }
+        try {
+            if (self::stockUpdate($userId, $leadId) || self::mayUpdate($userId, self::LEAD, $leadId)
+                || self::nehaGrantedLead($userId, self::LEAD, $leadId) || self::javeriaMudonLead($userId, self::LEAD, $leadId)) {
+                return false;
+            }
+            return self::stockRead($userId, $leadId);
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /** The kernel's own read answer for a user and lead (our item permissions' parent; the legacy helper if not ours). */
+    public static function stockRead(int $userId, int $leadId): bool
+    {
+        $item = Container::getInstance()->getUserPermissions($userId)->item();
+        if ($item instanceof A7ItemPermissions) {
+            return $item->stockCanRead(new ItemIdentifier(self::LEAD, $leadId));
+        }
+        return (bool) \CCrmLead::CheckReadPermission($leadId, \CCrmPerms::GetUserPermissions($userId));
+    }
+
+    public static function stockUpdate(int $userId, int $leadId): bool
+    {
+        $item = Container::getInstance()->getUserPermissions($userId)->item();
+        if ($item instanceof A7ItemPermissions) {
+            return $item->stockCanUpdate(new ItemIdentifier(self::LEAD, $leadId));
+        }
+        return (bool) \CCrmLead::CheckUpdatePermission($leadId, \CCrmPerms::GetUserPermissions($userId));
+    }
+
+    /** A request that can carry a lead write: the legacy permission check is then worth a backtrace for everyone. */
+    public static function requestMayWriteLead(): bool
+    {
+        static $may = null;
+        if ($may === null) {
+            $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+            $hay = (string) ($_SERVER['SCRIPT_NAME'] ?? '') . ' ' . (string) ($_SERVER['REQUEST_URI'] ?? '');
+            $may = PHP_SAPI === 'cli'
+                || ($method === 'POST' && (bool) preg_match('~/bitrix/(?:components/bitrix/crm\.[a-z0-9_.]+/|services/main/ajax\.php)|/rest/~i', $hay));
+        }
+        return $may;
     }
 
     /**

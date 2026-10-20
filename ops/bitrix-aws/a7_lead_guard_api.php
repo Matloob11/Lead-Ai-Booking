@@ -87,9 +87,14 @@ if ($action === 'info') {
     $canEdit = \CCrmLead::CheckUpdatePermission($id);
     $isObserver = in_array($uid, $observers, true);
     $sharedWrite = $isObserver && !$isAdmin && $responsible !== $uid;
+    // The booking grant (guard 1.5.0): this user may update the lead only because it is on the Booking stage and they
+    // can open it — the page then locks everything but the booking fields, as the server does.
+    $bookingOnly = !$sharedWrite && !$isAdmin && $responsible !== $uid && A7LeadGuard::perms() && A7LeadShare::bookingOnly($uid, $id);
     a7lg_json([
         'sharedWrite' => $sharedWrite,
         'allowedFields' => $sharedWrite ? array_keys(A7LeadGuard::sharedAllowedFields()) : null,
+        'bookingOnly' => $bookingOnly,
+        'bookingFields' => $bookingOnly ? A7LeadShare::bookingFields() : null,
         'ok' => true,
         'id' => $id,
         'title' => (string) ($lead['TITLE'] ?? ''),

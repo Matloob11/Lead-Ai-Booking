@@ -30,6 +30,19 @@
  *   - crm:OnBeforeCrmLeadUpdate      -> an observer who is neither responsible nor admin
  *                                       cannot change the locked (left-side) fields.
  *
+ *  BOOKING FIELDS (2026-10-20)
+ *   - a7_lead_guard_perms.php        -> a lead on the Booking stage (CONVERTED) may be updated
+ *                                       by anyone who can open it (A7LeadShare::bookingGrant).
+ *   - crm:OnBeforeCrmLeadUpdate      -> such an update may change only the five booking fields
+ *                                       (config booking_fields): Rent or Sale, Commission Zone,
+ *                                       Commission Document, Commission Status, Commission
+ *                                       Voucher No. Not the stage, not another field.
+ *   - file fields                    -> the lead form sends an empty upload for every file field
+ *                                       it shows; only a file that arrives, goes or is swapped
+ *                                       counts as a change (fileChanged). Until 1.5.0 that empty
+ *                                       upload read as "Trade License File changed" and refused
+ *                                       every shared user's save on a lead with a file field.
+ *
  *  UI
  *   - main:OnProlog                  -> injects /bitrix/js/a7_lead_guard.js on /crm/lead/
  *                                       pages: "SHARED LEAD" badge, shared-with names next
@@ -53,7 +66,7 @@ define('A7_LEAD_GUARD_LOADED', true);
 
 final class A7LeadGuard
 {
-    public const VERSION = '1.4.2';
+    public const VERSION = '1.5.0';
     public const LEAD = 1;                 // \CCrmOwnerType::Lead
     public const NOTE_TAG = 'A7_GUARD';    // SETTINGS key on our timeline notes
     public const JS_PATH = '/bitrix/js/a7_lead_guard.js';
@@ -332,6 +345,11 @@ final class A7LeadGuard
             'history_notes' => true,
             'history_ignore_fields' => ['ID', 'DATE_MODIFY', 'MODIFY_BY_ID', 'TIMESTAMP_X', 'SEARCH_CONTENT', 'FM', 'OBSERVER_IDS'],
             'observer_locked_fields' => ['TITLE', 'NAME', 'LAST_NAME', 'STATUS_ID', 'ASSIGNED_BY_ID', 'SOURCE_ID', 'OPPORTUNITY', 'FM'],
+            // The fields anyone who can open a lead on the Booking stage may fill (A7LeadShare::bookingFields).
+            'booking_fields' => [
+                'UF_CRM_A7_BOOKING_RENT_SALE', 'UF_CRM_A7_COMMISSION_ZONE', 'UF_CRM_A7_COMMISSION_DOC',
+                'UF_CRM_A7_COMMISSION_STATUS', 'UF_CRM_A7_COMMISSION_VOUCHER',
+            ],
             'log_file' => '',
         ];
         $path = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/php_interface/a7_lead_guard.config.php';
@@ -627,46 +645,29 @@ final class A7LeadGuard
             // left side is locked. Unchanged values that the form sends back are fine.
             // Only for shares made through the guard (a7_lead_share) — historical observers
             // have no write access anyway, so nothing to check and no extra queries for them.
-            if ($uid > 0 && !self::isAdminUser($uid) && (int) $old['ASSIGNED_BY_ID'] !== $uid
-                && self::perms() && A7LeadShare::isShared($id, $uid)) {
-                $observers = self::observerIds($id);
-                if (in_array($uid, $observers, true)) {
-                    $allowed = self::sharedAllowedFields();
-                    $ignore = array_flip(array_map('strtoupper', (array) self::config()['history_ignore_fields']));
-                    $touched = [];
-                    foreach ($arFields as $key => $val) {
-                        $f = strtoupper((string) $key);
-                        if ($f === '' || $f === 'ID' || isset($ignore[$f]) || isset($allowed[$f]) || $f[0] === '~' || str_starts_with($f, 'PERMISSION')) {
-                            continue;
-                        }
-                        if ($f === 'FM') {
-                            if (self::diffMulti($id, is_array($val) ? $val : [])) {
-                                $touched[] = 'Phone/Email';
-                            }
-                            continue;
-                        }
-                        if ($f === 'OBSERVER_IDS') {
-                            $new = array_values(array_unique(array_map('intval', (array) $val)));
-                            $cur = $observers;
-                            sort($new);
-                            sort($cur);
-                            if ($new !== $cur) {
-                                $touched[] = 'Observers';
-                            }
-                            continue;
-                        }
-                        if (array_key_exists($key, $old) && self::norm($old[$key]) !== self::norm($val)) {
-                            $touched[] = self::caption($f);
-                        }
-                    }
-                    if ($touched) {
-                        self::log("BLOCK shared-user edit lead=$id user=$uid fields=" . implode(',', $touched));
-                        $APPLICATION->ThrowException(
-                            'This lead is shared with you. You can change the stage and its details, but not: ' . implode(', ', array_unique($touched)) . '. Only the responsible person or an administrator can edit these.',
-                            'A7_SHARED_READONLY'
-                        );
-                        return false;
-                    }
+            $outsider = $uid > 0 && !self::isAdminUser($uid) && (int) $old['ASSIGNED_BY_ID'] !== $uid && self::perms();
+            if ($outsider && A7LeadShare::isShared($id, $uid) && in_array($uid, self::observerIds($id), true)) {
+                $touched = self::touchedOutside($id, $old, $arFields, self::sharedAllowedFields());
+                if ($touched) {
+                    self::log("BLOCK shared-user edit lead=$id user=$uid fields=" . implode(',', $touched));
+                    $APPLICATION->ThrowException(
+                        'This lead is shared with you. You can change the stage and its details, but not: ' . implode(', ', $touched) . '. Only the responsible person or an administrator can edit these.',
+                        'A7_SHARED_READONLY'
+                    );
+                    return false;
+                }
+            } elseif ($outsider && A7LeadShare::bookingOnly($uid, $id)) {
+                // The booking grant (a7_lead_guard_perms.php): a lead on the Booking stage, opened by someone with no
+                // right of their own to update it, takes the booking fields and nothing else — not the stage, not a note.
+                $touched = self::touchedOutside($id, $old, $arFields, array_flip(A7LeadShare::bookingFields()));
+                if ($touched) {
+                    self::log("BLOCK booking-only edit lead=$id user=$uid fields=" . implode(',', $touched));
+                    $APPLICATION->ThrowException(
+                        'This lead is on the Booking stage. You can fill its booking fields (' . self::bookingCaptions() . '), but not: '
+                        . implode(', ', $touched) . '. Only the responsible person or an administrator can change these.',
+                        'A7_BOOKING_ONLY'
+                    );
+                    return false;
                 }
             }
 
@@ -881,6 +882,158 @@ final class A7LeadGuard
         return $cache;
     }
 
+    /**
+     * The fields an update changes outside ``$allowed`` (keys uppercased), as captions — the shared-user and the
+     * booking-only checks. Unchanged values the form sends back are no change; a file field changes only when a file
+     * arrives, goes or is swapped (fileChanged); the config's history_ignore_fields never count.
+     */
+    private static function touchedOutside(int $id, array $old, array $arFields, array $allowed): array
+    {
+        $ignore = array_flip(array_map('strtoupper', (array) self::config()['history_ignore_fields']));
+        $touched = [];
+        foreach ($arFields as $key => $val) {
+            $f = strtoupper((string) $key);
+            if ($f === '' || $f === 'ID' || isset($ignore[$f]) || isset($allowed[$f]) || $f[0] === '~' || str_starts_with($f, 'PERMISSION')) {
+                continue;
+            }
+            if ($f === 'FM') {
+                if (self::diffMulti($id, is_array($val) ? $val : [])) {
+                    $touched[] = 'Phone/Email';
+                }
+                continue;
+            }
+            if ($f === 'OBSERVER_IDS') {
+                $new = array_values(array_unique(array_map('intval', (array) $val)));
+                $cur = self::observerIds($id);
+                sort($new);
+                sort($cur);
+                if ($new !== $cur) {
+                    $touched[] = 'Observers';
+                }
+                continue;
+            }
+            if (array_key_exists($key, $old) && self::fieldChanged($f, $old[$key], $val)) {
+                $touched[] = self::caption($f);
+            }
+        }
+        return array_values(array_unique($touched));
+    }
+
+    /** The booking fields' captions, for the refusal message. */
+    private static function bookingCaptions(): string
+    {
+        return implode(', ', array_map([__CLASS__, 'caption'], A7LeadShare::bookingFields()));
+    }
+
+    /** Is the lead user field of type file? (the lead form's upload shape needs its own comparison) */
+    private static function isFileField(string $field): bool
+    {
+        if (!str_starts_with($field, 'UF_')) {
+            return false;
+        }
+        static $types = null;
+        if ($types === null) {
+            $types = [];
+            try {
+                global $USER_FIELD_MANAGER;
+                foreach ((array) $USER_FIELD_MANAGER->GetUserFields('CRM_LEAD') as $name => $uf) {
+                    $types[strtoupper((string) $name)] = (string) ($uf['USER_TYPE_ID'] ?? '');
+                }
+            } catch (\Throwable $e) {
+                // no user field info: compare as plain values
+            }
+        }
+        return ($types[$field] ?? '') === 'file';
+    }
+
+    /**
+     * A file field's value read three ways: the file ids it keeps (sorted), whether a new file is uploaded, whether a
+     * file is deleted. The stored value is an id, a list of ids or false/null; the lead form sends one upload slot per
+     * file field it shows (name, tmp_name, error, size, and old_file/del for a kept or removed file) — an empty slot
+     * (error 4, no tmp_name) means "leave it as it is", which CUserTypeFile honours.
+     */
+    private static function fileState($value): array
+    {
+        $ids = [];
+        $upload = false;
+        $delete = false;
+        $walk = static function ($v) use (&$walk, &$ids, &$upload, &$delete): void {
+            if ($v === null || $v === false || $v === '' || $v === '0' || $v === 0) {
+                return;
+            }
+            if (is_int($v) || (is_string($v) && ctype_digit($v))) {
+                $ids[] = (int) $v;
+                return;
+            }
+            if (!is_array($v)) {
+                return;
+            }
+            if (array_key_exists('tmp_name', $v) || array_key_exists('error', $v)) {
+                $tmp = (string) ($v['tmp_name'] ?? '');
+                $err = (int) ($v['error'] ?? 4);
+                if ($tmp !== '' || $err === 0) {
+                    $upload = true;
+                }
+                if (!empty($v['del'])) {
+                    $delete = true;
+                }
+                $kept = $v['old_file'] ?? $v['old_id'] ?? null;
+                if ($kept !== null && (int) $kept > 0) {
+                    $ids[] = (int) $kept;
+                }
+                return;
+            }
+            foreach ($v as $k => $x) {
+                if ($k === 'del') {
+                    if (!empty($x)) {
+                        $delete = true;
+                    }
+                    continue;
+                }
+                if ($k === 'old_file' || $k === 'old_id') {
+                    if ((int) $x > 0) {
+                        $ids[] = (int) $x;
+                    }
+                    continue;
+                }
+                $walk($x);
+            }
+        };
+        $walk($value);
+        $ids = array_values(array_unique($ids));
+        sort($ids);
+        return [$ids, $upload, $delete];
+    }
+
+    /** Does the update change a file field: a file arrives, a file goes, or the kept files differ from the stored ones. */
+    private static function fileChanged($old, $new): bool
+    {
+        [$oldIds] = self::fileState($old);
+        [$newIds, $upload, $delete] = self::fileState($new);
+        if ($upload || $delete) {
+            return true;
+        }
+        if (!$newIds) {
+            return false; // nothing uploaded, nothing deleted, no list of kept files: the stored file stays
+        }
+        return $newIds !== $oldIds;
+    }
+
+    /** Does the update change the field? File fields by fileChanged; the rest by norm, where "", "0" and "N" are one nothing. */
+    private static function fieldChanged(string $field, $old, $new): bool
+    {
+        if (self::isFileField($field)) {
+            return self::fileChanged($old, $new);
+        }
+        $a = self::norm($old);
+        $b = self::norm($new);
+        if ($a === $b) {
+            return false;
+        }
+        $nothing = ['', '0', 'N'];
+        return !(in_array($a, $nothing, true) && in_array($b, $nothing, true));
+    }
+
     public static function observerIds(int $leadId): array
     {
         try {
@@ -936,16 +1089,13 @@ final class A7LeadGuard
             if (!array_key_exists($key, $old)) {
                 continue; // unknown / computed field
             }
+            // "" , "0" and "N" are the same "nothing" for ids, sums and Y/N flags — no noise notes; a file field
+            // changes only when a file arrives, goes or is swapped (fieldChanged).
+            if (!self::fieldChanged($k, $old[$key], $val)) {
+                continue;
+            }
             $a = self::norm($old[$key]);
             $b = self::norm($val);
-            if ($a === $b) {
-                continue;
-            }
-            // "" , "0" and "N" are the same "nothing" for ids, sums and Y/N flags — no noise notes.
-            $nothing = ['', '0', 'N'];
-            if (in_array($a, $nothing, true) && in_array($b, $nothing, true)) {
-                continue;
-            }
             $out[] = [self::caption($k), self::pretty($k, $old[$key], $a), self::pretty($k, $val, $b)];
         }
         return $out;
@@ -1008,6 +1158,16 @@ final class A7LeadGuard
     private static function pretty(string $field, $raw, string $norm): string
     {
         try {
+            if (self::isFileField($field)) {
+                [$ids, $upload, $delete] = self::fileState($raw);
+                if ($upload) {
+                    return 'new file';
+                }
+                if ($delete && !$ids) {
+                    return '';
+                }
+                return $ids ? 'file #' . implode(', #', $ids) : '';
+            }
             switch ($field) {
                 case 'STATUS_ID':
                     $list = \CCrmStatus::GetStatusList('STATUS');

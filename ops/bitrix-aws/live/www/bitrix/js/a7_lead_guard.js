@@ -228,20 +228,43 @@
     }
   }
 
+  /**
+   * Booking-only user (guard 1.5.0): the lead is on the Booking stage and they can open it but not edit it
+   * otherwise. Banner + every field but the booking fields locked, the stage too (server enforces anyway).
+   */
+  function renderBooking() {
+    if (!info || !info.bookingOnly) {
+      return;
+    }
+    document.body.classList.add("a7lg-observer");
+    if (!document.querySelector(".a7lg-banner-booking")) {
+      var editor = document.querySelector(".ui-entity-editor-container, .crm-entity-card-container, .crm-entity-section");
+      if (editor) {
+        var b = document.createElement("div");
+        b.className = "a7lg-banner a7lg-banner-booking";
+        b.innerHTML = "📒 This lead is on the <b>Booking</b> stage. You can fill its <b>booking fields</b> " +
+          "(Rent or Sale, Commission Zone, Commission Document, Commission Status, Commission Voucher No). " +
+          "The stage and the other fields are locked. Responsible: <b>" + esc(info.responsible.name) + "</b>.";
+        editor.parentNode.insertBefore(b, editor);
+      }
+    }
+    lockFields(info.bookingFields || [], true);
+  }
+
   /** Visually lock entity-editor fields that the shared user may not change (server enforces anyway). */
-  function lockFields(allowed) {
+  function lockFields(allowed, lockStage) {
     var allow = {};
     allowed.forEach(function (f) { allow[String(f).toUpperCase()] = true; });
     var fields = document.querySelectorAll(".ui-entity-editor-field[data-cid], .ui-entity-editor-content-block[data-cid], [data-cid].ui-entity-editor-block");
     for (var i = 0; i < fields.length; i++) {
       var el = fields[i];
       var cid = String(el.getAttribute("data-cid") || "").toUpperCase();
-      if (!cid || allow[cid] || /^(STATUS_ID|STAGE_ID|OBSERVER)/.test(cid)) {
+      if (!cid || allow[cid] || (!lockStage && /^(STATUS_ID|STAGE_ID|OBSERVER)/.test(cid))) {
         continue;
       }
       if (!el.classList.contains("a7lg-locked")) {
         el.classList.add("a7lg-locked");
-        el.title = "Locked for shared users";
+        el.title = lockStage ? "Locked: only the booking fields can be filled here" : "Locked for shared users";
       }
     }
     // section-level "edit" links / pencils
@@ -260,6 +283,7 @@
         if (d && d.ok) {
           info = d;
           renderCard();
+          renderBooking();
         }
       })
       .catch(function () {});
