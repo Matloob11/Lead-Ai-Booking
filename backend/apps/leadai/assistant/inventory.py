@@ -463,6 +463,9 @@ def known_amounts(rows) -> str:
     from the block is no invention."""
     parts = []
     for row in rows or ():
+        beds = str(row.bedrooms or "").strip()
+        if beds.isdigit():
+            parts.append(beds)  # "a 4-bedroom villa": the count is the unit's own (the residential floor checks from 100 down)
         if row.price:
             parts += [f"{row.price:,}", str(row.price)]
         if row.size_sqft:

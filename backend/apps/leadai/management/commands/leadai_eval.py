@@ -6353,7 +6353,7 @@ def build(scenario: Scenario) -> Built:
         sale_parts = sales.context_parts(
             scenario.facts, pre.unit, pre.clusters, [(item[0], item[1]) for item in scenario.chat if item[0] in ("assistant", "agent")],
             scenario.now, list(scenario.closed), list(scenario.call_taken), DEFAULT_RESIDENTIAL_FACTS,
-        ) if pre.track == tracks.SALE else {}
+        ) if pre.track == tracks.SALE and pack is None else {}
         res_context = residential.context(
             settings_row, pre.track, pre.unit, pre.clusters, scenario.now, list(scenario.taken), lead=dict(scenario.lead_context),
             full_name=residential.full_name_known(scenario.facts, scenario.lead_context), history=history,
@@ -6400,7 +6400,9 @@ def build(scenario: Scenario) -> Built:
     if res:
         # As live, a residential reply may quote that track's and unit's figures only (run_once follows the track after the
         # model, as engine._run_claimed does), and the inventory's units'.
-        context_words = f"{context_words} {residential.known_amounts(settings_row, pre.track, pre.unit, pre.clusters)} {inventory.known_amounts(scenario_units(scenario))}"
+        # A pack chat never carries International City's figures (round 17): only its units' and its bands'.
+        ic_amounts = residential.known_amounts(settings_row, pre.track, pre.unit, pre.clusters) if pack is None else communities.known_amounts(pack)
+        context_words = f"{context_words} {ic_amounts} {inventory.known_amounts(scenario_units(scenario))}"
     elif shops_chat:
         # As live, a shops reply may quote SHOP FACTS' own figures.
         context_words = f"{context_words} {shops.known_amounts(settings_row)}"
@@ -6954,7 +6956,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
         need = None
         # As live (batch 2e slice C): a buyer's turn may book a call in the call pool (the scenario's other buyers' calls), on
         # the residential path only.
-        sale = res and pre is not None and pre.track == tracks.SALE
+        sale = res and pre is not None and pre.track == tracks.SALE and not built.pack  # a pack's buyer: the office, no sale flow
         call_taken = list(scenario.call_taken)
         if settled is not None:
             answer, when, completions, rejected, still_invalid = settled, None, [], "", False
@@ -6987,7 +6989,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 )
                 if switched:
                     when, still_invalid = None, False  # as live: the model's tag moved the chat, code's words go
-                sale = res and run.decision.track == tracks.SALE
+                sale = res and run.decision.track == tracks.SALE and not built.pack
                 if sale and not switched:
                     # As live (sales.call_step): a buyer's call booked at their own day and hour, else two free call slots;
                     # never 2d's call_requested handover, and a buyer abroad gets the call.

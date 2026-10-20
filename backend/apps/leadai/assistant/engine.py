@@ -4356,6 +4356,10 @@ def _run_claimed(
     # pack's facts and INVENTORY in International City's place, with its own prompt (PACK_SYSTEM) and no opener of code's.
     pack = communities.by_name(decision.community) if (decision is not None and decision.community) else None
     pack_flow = bool(res and pack is not None and not pack.default)
+    if pack_flow:
+        # A pack's buyer gets the office visit, like its tenant (Matloob 2026-10-20): none of the sale flow's call pool,
+        # price steps or International City's sales lines.
+        sale, call_taken = False, []
     res_decision = decision  # the track the residential path was chosen for (the model's tag may move it: res_switch)
     res_spec = None  # the rent flow's words before any model (residential_rule)
     if res and not shops_rule_name and not licence_reply:
@@ -4531,7 +4535,7 @@ def _run_claimed(
             # SALE (slice C): the sale steps follow the track as the model's tag leaves it, on the residential path only.
             if res and decision.track == tracks.SALE and not sale:
                 call_taken = calls.taken(conversation, now)
-            sale = res and decision.track == tracks.SALE
+            sale = res and decision.track == tracks.SALE and not pack_flow
             if sale and not switched:
                 # SALE (slice C): a buyer's call: booked at their own day and hour, else two free call slots; never 2d's
                 # call_requested handover, and a buyer abroad gets the call (sales.call_step).

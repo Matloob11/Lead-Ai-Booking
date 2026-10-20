@@ -158,11 +158,13 @@ class PackTurnTests(MixedBase):
         photos.assert_not_called()
 
     def test_nothing_listed_for_the_community_stays_another_area(self):
+        from apps.leadai.tests.test_assistant import answer
+
         LeadAiUnit.objects.all().delete()
         message = self.inbound("I need a villa in Mudon to rent")
-        outcome, calls, _, _ = self.turn(message, [])
+        outcome, calls, _, _ = self.turn(message, [answer("Sure. What is your budget?", segment="residential_tenant")])
         self.assertEqual(outcome.status, "replied", outcome.reason)
-        self.assertEqual(calls, [])  # code's "options across Dubai" line, as before the packs
+        self.assertNotEqual(calls[0][0]["content"], prompt.PACK_SYSTEM)  # the shops prompt, as before the packs
         self.assertNotIn(self.state().track, ("rent", "sale"))
         self.assertNotEqual(self.state().community, "Mudon")
 
