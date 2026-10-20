@@ -747,6 +747,8 @@ RIGHT = {
         "Studios in International City are generally around AED 330,000–350,000.", handover="call_requested", segment="buyer"
     ),
     "shops-res-monthly-figure": answer("Studios here are around AED 29,000–33,000 a year, so roughly AED 2,500 a month.", segment="residential_tenant"),
+    "shops-res-inventory-price": answer("The Spain Cluster studio is AED 31,000 a year. Would you like to see it?", segment="residential_tenant"),
+    "shops-res-memory-asks-not-states": answer("Welcome back! Last time you looked at Spain Cluster — still that one, or another cluster?", segment="residential_tenant"),
     "shops-res-commission-how-much-exactly": answer("It's usually 5% of the annual rent.", segment="residential_tenant"),
     "shops-sale-photos-call-booked": answer("Sure, here are the photos.", segment="buyer"),
     "shops-res-who-will-meet-me": answer(

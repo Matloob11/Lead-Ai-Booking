@@ -355,6 +355,67 @@ class LeadAiSettings(models.Model):
         return bool(digits) and digits in {"".join(c for c in str(n) if c.isdigit()) for n in (self.test_numbers or [])}
 
 
+class LeadAiCustomer(models.Model):
+    """What the assistant remembers of one customer across chats and numbers (assistant/memory.py; the advance plan's
+    workstream E1). Keyed by the phone's digits: a campaign from another of our numbers opens a new conversation, and
+    without this the July studio enquiry is unknown in October. ``chats`` holds one entry per conversation (its number,
+    first and last moment, the facts it learned, its bookings and their outcome); ``facts`` the latest merge. Told to the
+    model as data to confirm as a question, never to state (the issue list's I12). A PDPL deletion removes the row."""
+
+    phone = models.CharField(max_length=32, unique=True)  # digits only
+    facts = models.JSONField(default=dict, blank=True)
+    chats = models.JSONField(default=list, blank=True)
+    language = models.CharField(max_length=16, blank=True)
+    first_seen_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Lead AI memory of {self.phone[-4:].rjust(len(self.phone), '*')}"
+
+
+class LeadAiUnit(models.Model):
+    """One unit the company can offer right now (assistant/inventory.py; the advance plan's workstream C): the agency's
+    live Property Finder listings and the clean Owner Data → Availability cards, refreshed by the sweep. The bot quotes
+    a unit only from here (its price, size, cluster, photos), never one the inventory lacks; with no match it falls back
+    to the band, as before. ``unit`` is the bot's own unit word (tracks: studio, one_br, two_plus; plus villa, townhouse,
+    shop, other); ``photos`` the first few image URLs (Property Finder's CDN); owner numbers are never stored."""
+
+    class Source(models.TextChoices):
+        PF = "pf", "Property Finder"
+        BITRIX = "bitrix", "Bitrix Availability"
+
+    class Deal(models.TextChoices):
+        RENT = "rent", "Rent"
+        SALE = "sale", "Sale"
+
+    source = models.CharField(max_length=8, choices=Source.choices)
+    source_id = models.CharField(max_length=64)
+    reference = models.CharField(max_length=40, blank=True, db_index=True)  # a7group-NNNN
+    community = models.CharField(max_length=80, blank=True, db_index=True)
+    sub_area = models.CharField(max_length=80, blank=True)  # the cluster, phase or tower
+    unit = models.CharField(max_length=16, blank=True, db_index=True)
+    bedrooms = models.CharField(max_length=12, blank=True)
+    deal = models.CharField(max_length=8, choices=Deal.choices, blank=True)
+    price = models.BigIntegerField(null=True, blank=True)  # AED, a year for rent, the total for sale
+    size_sqft = models.PositiveIntegerField(null=True, blank=True)
+    furnished = models.CharField(max_length=20, blank=True)
+    title = models.CharField(max_length=200, blank=True)
+    link = models.URLField(max_length=500, blank=True)
+    photos = models.JSONField(default=list, blank=True)
+    agent_name = models.CharField(max_length=80, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("source", "source_id")]
+        indexes = [models.Index(fields=["active", "community", "unit", "deal"])]
+
+    def __str__(self):
+        return f"{self.reference or self.source_id}: {self.unit} {self.deal} {self.community}"
+
+
 class LeadAiDraftOutcome(models.Model):
     """What became of a co-pilot draft (assistant/copilot.py): the raw material of the knowledge base (the advance plan,
     workstream E). ``draft_text`` is what the assistant proposed, ``sent_text`` what went out (the agent's own words

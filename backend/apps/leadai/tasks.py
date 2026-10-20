@@ -150,6 +150,16 @@ def _copilot_auto_send() -> None:
         logger.info("Lead AI co-pilot sent %s draft(s) by itself", sent)
 
 
+@shared_task(ignore_result=True, soft_time_limit=600, time_limit=660)
+def sync_inventory() -> None:
+    """The units the bot may quote (assistant/inventory.py): Property Finder's live listings and the clean Availability
+    cards, every half hour (CELERY_BEAT_SCHEDULE leadai-sync-inventory)."""
+    from .assistant import inventory
+
+    result = inventory.sync()
+    logger.info("Lead AI inventory sync: %s", result)
+
+
 @shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)
 def copilot_ask(conversation_id: int, question: str, agent_id: int | None = None) -> None:
     """Ask AI (assistant/copilot.py): the agent's question answered as a draft on the chat."""

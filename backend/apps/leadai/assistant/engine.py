@@ -193,10 +193,12 @@ from . import (
     crm_fields,
     filters,
     hours,
+    inventory,
     lead_context,
     lead_history,
     live,
     lost,
+    memory,
     needs,
     nudges,
     offers,
@@ -3719,6 +3721,7 @@ def _rule_opt_out(
     answers = settings_row.answers(conversation.contact.wa_id)
     if deletion:
         _deletion_alert(conversation, chat, _their_words(burst))
+        memory.forget(conversation.contact.wa_id)  # the customer memory goes with the data (memory.py)
         # A C40 to-do for 2311 on the lead (spec §2.10, §6.3), with retries like the lead's fields: someone acts on it.
         crm_fields.queue(conversation, chat, crm_fields.deletion_writes(timezone.now(), settings_row.closed_dates))
     recorded = record_opt_out(
@@ -4368,6 +4371,7 @@ def _run_claimed(
         # A person has the chat, they declined, or they are no customer of ours.
         quiet=state.handed_over_at is not None or state.not_interested_at is not None or segment == "other",
     )
+    units = []  # the inventory's units the model path reads (inventory.matches); none on code's own paths
     if shops_rule_name.startswith(f"{RES_RULE}:"):
         # The rent flow's own words before any model (residential_rule): an opener, a document or voice-note line, the
         # neutral invitation; shaped like the model's answer, so the same path sends and stores it.
@@ -4408,6 +4412,10 @@ def _run_claimed(
         if res:
             # The rent flow's block (spec §2.3): the lead context is read for it (once per chat, lead_context.for_turn).
             lead_now = track_inputs["lead"].get()
+            # The real units the bot may quote (inventory.py): the chat's community, clusters, unit and deal; none, and
+            # the band answers as before.
+            if inventory.LIVE:
+                units = inventory.matches(inventory.DEFAULT_COMMUNITY, decision.clusters, decision.unit, inventory.deal_of(decision.track))
             # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
             sale_parts = sales.context_parts(
                 facts, decision.unit, decision.clusters,
@@ -4417,7 +4425,7 @@ def _run_claimed(
             res_context = residential.context(
                 settings_row, decision.track, decision.unit, decision.clusters, now, taken, lead=lead_now,
                 full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment, now),
-                **sale_parts,
+                inventory=inventory.lines(units), **sale_parts,
             )
         context = prompt.context_message(
             now=now,
@@ -4439,6 +4447,8 @@ def _run_claimed(
             location_sent=location,
             shops=shops.context(settings_row, facts, now, taken, history=history) if shops_chat and not res else None,
             residential=res_context,
+            # The customer's earlier chats on our other numbers (memory.py), as data to confirm as a question.
+            memory=memory.lines(memory.recall(conversation.contact.wa_id, exclude_conversation=conversation.pk)),
         )
         answer, when, completions, rejected, still_invalid = ask_model(
             prompt.system_prompt(playbook, residential=res),
@@ -4917,8 +4927,8 @@ def _run_claimed(
     name = _customer_name(conversation, merged)
     rows_context = _context_words(rows, campaign_msg, burst, heard, facts, campaign_templates)
     if res:
-        # A residential reply may quote that track's and unit's figures only (spec §2.9.1).
-        rows_context = f"{rows_context} {residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters)}"
+        # A residential reply may quote that track's and unit's figures only (spec §2.9.1), and the inventory's units'.
+        rows_context = f"{rows_context} {residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters)} {inventory.known_amounts(units)}"
     elif shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
@@ -5743,6 +5753,11 @@ def _apply(
             )
             if crm_fields.queue(conversation, chat, writes):
                 done["crm_fields"] = [field for field, _, _ in writes]
+    # The customer memory (memory.py): this chat's facts and bookings kept by the phone, for the chats on other numbers.
+    try:
+        memory.remember(conversation, fresh.facts, fresh.language, now, booking=done.get("appointment"))
+    except Exception as exc:  # noqa: BLE001 - the reply went out; the memory is a record
+        logger.warning("Lead AI memory not kept for conversation %s: %s", conversation.pk, exc)
     return done
 
 

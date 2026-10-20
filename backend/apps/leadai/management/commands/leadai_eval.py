@@ -258,6 +258,8 @@ from apps.leadai.assistant import (
     calls,
     claims,
     crm_fields,
+    inventory,
+    memory,
     engine,
     filters,
     hours,
@@ -286,6 +288,7 @@ from apps.leadai.models import (
     DEFAULT_OFFICE_ADDRESS,
     DEFAULT_RESIDENTIAL_FACTS,
     DEFAULT_SHOPS_FACTS,
+    LeadAiUnit,
     LeadAiAppointment,
     LeadAiCrmField,
 )
@@ -418,6 +421,11 @@ MIXED = Campaign(
     buttons=ic_templates.MIXED_BUTTONS,
 )
 IC_SHOPS = "ic_shops"
+
+
+def scenario_units(scenario) -> list:
+    """The scenario's inventory as unsaved LeadAiUnit rows (assistant/inventory.py reads their fields alone)."""
+    return [LeadAiUnit(**dict(fields)) for fields in scenario.units]
 
 
 def settings_for(scenario) -> types.SimpleNamespace:
@@ -1894,6 +1902,10 @@ class Scenario:
     # Slice E (unit_media.py): {unit: when its set went to the chat}, and the library's sets (UNIT_LIBRARY when None).
     media: dict = field(default_factory=dict)
     unit_library: tuple | None = None
+    # The inventory the turn sees (assistant/inventory.py): LeadAiUnit field dicts, as inventory.matches would return them.
+    units: tuple = ()
+    # The customer memory's PREVIOUS CHATS lines (assistant/memory.py), as memory.lines would give them.
+    memory: tuple = ()
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -2083,6 +2095,12 @@ BUYER_42 = [
 ]
 # Batch 2e slice B, the rent flow (spec §2, §8): a studio seeker opened, qualified and invited, on this clock.
 RENT_STUDIO = {"need": "home", "wanted": "a studio", "property_type": "studio", "intent": "rent"}
+# An inventory unit as assistant/inventory.py keeps it (Scenario.units): a Spain Cluster studio for rent.
+SPAIN_STUDIO_UNIT = {
+    "source": "pf", "source_id": "eval-1", "reference": "a7group-1901", "community": "International City", "sub_area": "Spain Cluster",
+    "unit": "studio", "bedrooms": "studio", "deal": "rent", "price": 31000, "size_sqft": 400, "furnished": "unfurnished",
+    "title": "Studio | Spain Cluster | International City", "photos": [], "active": True,
+}
 RENT_OPENED = [("customer", "I need a studio"), ("assistant", residential.opener_text("en", "rent", "studio"))]
 RENT_FOR_MYSELF = RENT_OPENED + [
     ("customer", "For myself"), ("assistant", "Perfect. Do you prefer a balcony, and when are you planning to move?"),
@@ -6043,6 +6061,36 @@ SCENARIOS = [
         expect=[never_out(r"\d[\d,.]*\s*(?:aed\s*)?(?:a|per)\s+month|monthly\s+(?:rent\s+)?(?:of\s+)?(?:aed\s*)?\d", "give a monthly figure"), band("rent", "studio")],
         words=EITHER,
     ),
+    # The inventory (assistant/inventory.py, the advance plan's workstream C, v1): a real unit in the block is quoted with
+    # its own price; a figure of no unit and no band never goes (the amount filter).
+    Scenario(
+        "shops-res-inventory-price",
+        "rent, a Spain Cluster studio in the inventory: 'how much is the rent?' quotes that unit's AED 31,000",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_FOR_MYSELF,
+        facts=RENT_KNOWN,  # the cluster is known: the cluster-first rule has nothing to ask
+        track="rent",
+        unit="studio",
+        units=(SPAIN_STUDIO_UNIT,),
+        new=["how much is the rent?"],
+        expect=[out_says(r"31,000", "quote the inventory unit's price"), questions_at_most(2)],
+    ),
+    # The customer memory (assistant/memory.py, workstream E1, v1): an earlier chat on another number is confirmed as a
+    # question, never stated as fact (the issue list's I12).
+    Scenario(
+        "shops-res-memory-asks-not-states",
+        "rent: a July chat on another number remembered (a Spain Cluster studio): the cluster is asked back as a question",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=RENT_FOR_MYSELF,
+        facts={**RENT_STUDIO, "for_client": False},
+        track="rent",
+        unit="studio",
+        memory=(memory.BLOCK_HEAD, "- July 2026 (our number ending 8720): asked about studio; in Spain; to rent; budget AED 30,000"),
+        new=["I am looking for a studio again, which cluster do you suggest?"],
+        expect=[out_says(r"\bspain\b", "ask about the remembered cluster"), questions_at_most(2), never_says(r"our (?:records|system|crm)", "name our records")],
+    ),
     Scenario(
         "shops-res-commission-how-much-exactly",
         "charges: 'how much exactly?' right after code's first commission line gets the studio's figure, in code's words",
@@ -6233,7 +6281,7 @@ def build(scenario: Scenario) -> Built:
         res_context = residential.context(
             settings_row, pre.track, pre.unit, pre.clusters, scenario.now, list(scenario.taken), lead=dict(scenario.lead_context),
             full_name=residential.full_name_known(scenario.facts, scenario.lead_context), history=history,
-            held=residential.held_start(appointment, scenario.now), **sale_parts,
+            held=residential.held_start(appointment, scenario.now), inventory=inventory.lines(scenario_units(scenario)), **sale_parts,
         )
     context = prompt.context_message(
         now=scenario.now,
@@ -6262,6 +6310,7 @@ def build(scenario: Scenario) -> Built:
         if shops_chat and not res
         else None,
         residential=res_context,
+        memory=list(scenario.memory),
     )
     # As engine._context_words: what the customer, the campaign and colleagues wrote, never the assistant.
     colleagues = [item[1] for item in scenario.chat if item[0] in ("customer", "agent")]
@@ -6269,8 +6318,8 @@ def build(scenario: Scenario) -> Built:
     base_words = context_words
     if res:
         # As live, a residential reply may quote that track's and unit's figures only (run_once follows the track after the
-        # model, as engine._run_claimed does).
-        context_words = f"{context_words} {residential.known_amounts(settings_row, pre.track, pre.unit, pre.clusters)}"
+        # model, as engine._run_claimed does), and the inventory's units'.
+        context_words = f"{context_words} {residential.known_amounts(settings_row, pre.track, pre.unit, pre.clusters)} {inventory.known_amounts(scenario_units(scenario))}"
     elif shops_chat:
         # As live, a shops reply may quote SHOP FACTS' own figures.
         context_words = f"{context_words} {shops.known_amounts(settings_row)}"
@@ -6968,6 +7017,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
             # As live (batch 2e): a residential reply may quote that track's and unit's figures only, after the model.
             run.context_words = (
                 f"{built.base_words} {residential.known_amounts(settings_for(scenario), run.decision.track, run.decision.unit, run.decision.clusters)}"
+                f" {inventory.known_amounts(scenario_units(scenario))}"
             )
         if res and settled is None:
             # As live (batch 2e, hook point 7): the rent flow's guards and lines, then 2d's facts.need kept on its tracks; the

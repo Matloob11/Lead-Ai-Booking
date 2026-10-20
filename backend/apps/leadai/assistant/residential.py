@@ -441,16 +441,18 @@ class Context:
     calls: list = field(default_factory=list)  # CALL SLOTS (the sale track's call pool, slice C)
     held: str = ""  # a time held for the full name ("Monday 12 October 2026, 5:00 PM")
     sale_step: str = ""  # SALE STEP: the buyer's next questions in the brief's order (sales.step_line, slice C)
+    inventory: list = field(default_factory=list)  # INVENTORY lines: the real units the bot may quote (assistant/inventory.py)
 
 
 def context(
     settings_row, track: str, unit: str, clusters, now, taken=(), *, lead=None, full_name: str = "", history=(),
-    calls=(), held=None, sale_step: str = "",
+    calls=(), held=None, sale_step: str = "", inventory=(),
 ) -> Context:
     """The residential block of one turn's context. ``taken``: the other clients' office starts; ``lead``: the lead
     context (lead_context.parse's dict); ``full_name``: the customer's full name when known (full_name_known);
     ``calls``: CALL SLOTS lines (the sale track's, slice C); ``held``: the start held for their full name;
-    ``sale_step``: the sale track's SALE STEP line (sales.context_parts, slice C)."""
+    ``sale_step``: the sale track's SALE STEP line (sales.context_parts, slice C); ``inventory``: the INVENTORY lines
+    (assistant/inventory.py: the real units the bot may quote), none when nothing matches."""
     from . import lead_context, shops
 
     facts = getattr(settings_row, "residential_facts", None)
@@ -479,6 +481,7 @@ def context(
         calls=list(calls or ()),
         held=hours.describe(held) if held is not None else "",
         sale_step=" ".join(str(sale_step or "").split()),
+        inventory=list(inventory or ()),
     )
 
 

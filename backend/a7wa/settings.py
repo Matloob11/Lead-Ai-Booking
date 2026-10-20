@@ -187,6 +187,13 @@ CELERY_BEAT_SCHEDULE = {
     },
     # Lead AI: the customer's WhatsApp reminder 30 minutes before a booked
     # office visit. Checked every minute so it goes out on time.
+    # The units the Lead AI may quote (assistant/inventory.py): Property Finder's live listings and the clean
+    # Availability cards, refreshed every half hour on the leadai queue.
+    "leadai-sync-inventory": {
+        "task": "apps.leadai.tasks.sync_inventory",
+        "schedule": 30 * 60,
+        "options": {"queue": "leadai"},
+    },
     "leadai-due-reminders": {
         "task": "apps.leadai.tasks.send_due_reminders",
         "schedule": 60,
@@ -322,6 +329,9 @@ OPENAI_TIMEOUT = int(env("OPENAI_TIMEOUT", "45"))
 # Lead AI screen's assistant and nothing else. Empty turns the assistant off;
 # it never falls back to OPENAI_API_KEY above.
 LEADAI_OPENAI_API_KEY = env("LEADAI_OPENAI_API_KEY", "")
+# The agency's Property Finder Enterprise API (assistant/inventory.py): the live listings the bot may quote. Empty: no sync.
+LEADAI_PF_API_KEY = env("LEADAI_PF_API_KEY", "")
+LEADAI_PF_API_SECRET = env("LEADAI_PF_API_SECRET", "")
 LEADAI_OPENAI_MODEL = env("LEADAI_OPENAI_MODEL", "gpt-4.1-mini")
 LEADAI_TRANSCRIBE_MODEL = env("LEADAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 # Seconds one attempt of a Lead AI call waits for OpenAI. Every call is also cut

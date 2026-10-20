@@ -392,10 +392,12 @@ def context_message(
     location_sent: bool = False,
     shops=None,
     residential=None,
+    memory=None,
 ) -> str:
     """The turn's user message. ``shops`` (a shops.Context) adds the shops playbook's
     block, ``residential`` (a residential.Context, batch 2e) the rent flow's in its place;
-    without either the message is exactly a general chat's."""
+    without either the message is exactly a general chat's. ``memory``: the PREVIOUS CHATS lines
+    (assistant/memory.py), data from the customer's earlier chats, none for a customer nobody knows."""
     parts = [
         f"NOW: {hours.now_dubai(now):%a %Y-%m-%d %H:%M} (Dubai)",
         "CALENDAR:\n" + "\n".join(hours.calendar_lines(now, closed_dates)),
@@ -419,6 +421,8 @@ def context_message(
         f"INVITES SO FAR: {invites}",
         f"OPEN APPOINTMENT: {appointment_line(appointment)}",
     ]
+    if memory:
+        parts.append("\n".join(memory))
     if events:
         parts.append("EVENTS:\n" + "\n".join(f"- {event}" for event in events))
     parts.append("CONVERSATION (oldest first):\n" + ("\n".join(conversation) if conversation else "(empty)"))
@@ -459,6 +463,8 @@ def residential_lines(ctx) -> list[str]:
         f"TRACK: {ctx.track}",
         "RES FACTS (quote only these; rents are per year, in AED):\n" + ctx.facts,
     ]
+    if getattr(ctx, "inventory", None):
+        lines.append("\n".join(ctx.inventory))  # the real units the bot may quote (assistant/inventory.py), data
     if getattr(ctx, "sale_step", ""):
         lines.append(ctx.sale_step)  # the sale track's next questions (sales.step_line, batch 2e slice C)
     if ctx.charges:

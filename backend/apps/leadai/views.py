@@ -47,7 +47,7 @@ from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
 from . import desk, ic_templates
-from .assistant import hours, openai_client, residential, shops
+from .assistant import hours, memory, openai_client, residential, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
@@ -233,6 +233,9 @@ def serialize_ai(conversation, settings_row=None, *, thinking=None, note=None) -
         "handover_label": _handover_label(state),
         # The co-pilot's draft reply for the agent (assistant/copilot.py), or null.
         "draft": (state.draft or None) if state else None,
+        # The customer's earlier chats on our other numbers (assistant/memory.py), one line each, for the agent: the chat
+        # detail fills it (chat_detail); the list stays one query per page.
+        "memory": [],
         "language": state.language if state else "",
         "facts": {k: v for k, v in ((state.facts if state else {}) or {}).items() if v not in (None, "")},
     }
@@ -398,7 +401,12 @@ def desk_counts(request):
 @api_view(["GET"])
 def chat_detail(request, pk):
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    row = serialize_lead_ai_conversation(conversation)
+    # What the assistant remembers of this customer from chats on our other numbers (assistant/memory.py).
+    row["lead_ai_ai"]["memory"] = [
+        memory.describe(entry) for entry in memory.recall(conversation.contact.wa_id, exclude_conversation=conversation.pk)
+    ]
+    return Response(row)
 
 
 @api_view(["POST"])
