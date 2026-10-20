@@ -221,6 +221,8 @@ def sync_pf() -> dict:
 BITRIX_ENTITY_TYPE = 1042
 BITRIX_CATEGORY = 14
 BITRIX_PAGE = 50
+BITRIX_TRIES = 6
+BITRIX_WAIT = 10
 BITRIX_STAGES = {"DT1042_14:UC_73SP7H": "rent", "DT1042_14:PREPARATION": "sale", "DT1042_14:UC_G0PCBL": "both"}
 BITRIX_FIELDS = {
     "bedrooms": "ufCrm5_1734246780476",
@@ -307,17 +309,26 @@ def sync_bitrix() -> dict:
     for stage in BITRIX_STAGES:
         start = 0
         while True:
-            # client.call gives the result alone (no "next"): Bitrix pages by 50, so a short page is the last one.
-            with bitrix.background():
-                result = bitrix.call(
-                    "crm.item.list",
-                    {
-                        "entityTypeId": BITRIX_ENTITY_TYPE,
-                        "filter": {"categoryId": BITRIX_CATEGORY, "stageId": stage},
-                        "select": ["id", "title", "stageId", "updatedTime", *BITRIX_FIELDS.values()],
-                        "start": start,
-                    },
-                )
+            # client.call gives the result alone (no "next"): Bitrix pages by 50, so a short page is the last one. Background
+            # work takes a request slot only when one is free beyond the reserve; a busy minute (a campaign, the mirror)
+            # says "no slot" — a half-hourly job can wait and ask again (the first live sync, 2026-10-20, timed out at once).
+            payload = {
+                "entityTypeId": BITRIX_ENTITY_TYPE,
+                "filter": {"categoryId": BITRIX_CATEGORY, "stageId": stage},
+                "select": ["id", "title", "stageId", "updatedTime", *BITRIX_FIELDS.values()],
+                "start": start,
+            }
+            result = None
+            for attempt in range(BITRIX_TRIES):
+                try:
+                    with bitrix.background():
+                        result = bitrix.call("crm.item.list", payload)
+                    break
+                except bitrix.BitrixTransient as exc:
+                    if attempt + 1 == BITRIX_TRIES:
+                        raise
+                    logger.info("Lead AI inventory: Bitrix busy (%s); waiting %s s", str(exc)[:80], BITRIX_WAIT)
+                    time.sleep(BITRIX_WAIT)
             items = (result or {}).get("items") or [] if isinstance(result, dict) else []
             for item in items:
                 rows = bitrix_rows(item, stage)
