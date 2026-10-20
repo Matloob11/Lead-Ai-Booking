@@ -759,6 +759,7 @@ function valuesSection(data) {
       ["Closed dates", closed.length ? closed.join(", ") : "None"],
       ["Test numbers", tests ? String(tests) : "None"],
       ["Daily call limit", count(data.daily_call_limit)],
+      ["Co-pilot auto-send", Number(data.copilot_auto_send_minutes) > 0 ? `after ${Number(data.copilot_auto_send_minutes)} min` : "never"],
       ["Also alerted", alertRecipientsText(data)],
       ["Lead AI access", deskAgentsText(data)],
     ])
@@ -929,6 +930,9 @@ function formSection(data, { onSaved, onClose }) {
     const limit = fields.daily_call_limit.input.value.trim();
     if (limit !== String(data.daily_call_limit ?? "")) out.daily_call_limit = limit;
 
+    const autoSend = fields.copilot_auto_send_minutes.input.value.trim();
+    if (autoSend !== String(data.copilot_auto_send_minutes ?? "")) out.copilot_auto_send_minutes = autoSend;
+
     // Sent as typed: the server takes digits only, at most 10, and says which entry is wrong.
     const alertIds = splitList(fields.alert_bitrix_user_ids.input.value, /[\s,;]+/);
     if (!sameList(alertIds, (data.alert_bitrix_user_ids || []).map(String))) out.alert_bitrix_user_ids = alertIds;
@@ -1026,6 +1030,13 @@ function formSection(data, { onSaved, onClose }) {
       "Daily call limit",
       "The most model calls the assistant may make in 24 hours, across all chats (0 to 20000).",
       { type: "number", value: String(data.daily_call_limit ?? ""), min: 0, max: 20000, inputmode: "numeric" }
+    ),
+    field(
+      "copilot_auto_send_minutes",
+      "Co-pilot auto-send (minutes)",
+      "While a person has a chat, the AI's draft reply waits for an agent. An ordinary draft nobody sends or drops goes " +
+        "out by itself after this many minutes; a draft for a call, a complaint, legal or a broker never does. 0 = never.",
+      { type: "number", value: String(data.copilot_auto_send_minutes ?? ""), min: 0, max: 180, inputmode: "numeric" }
     ),
     field(
       "alert_bitrix_user_ids",
