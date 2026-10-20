@@ -258,6 +258,7 @@ from apps.leadai.assistant import (
     calls,
     claims,
     crm_fields,
+    communities,
     inventory,
     memory,
     engine,
@@ -426,6 +427,21 @@ IC_SHOPS = "ic_shops"
 def scenario_units(scenario) -> list:
     """The scenario's inventory as unsaved LeadAiUnit rows (assistant/inventory.py reads their fields alone)."""
     return [LeadAiUnit(**dict(fields)) for fields in scenario.units]
+
+
+# The community packs a scenario's decision may name (communities.pack_of: no database): Mudon and Villanova, as the seed
+# has them. International City stays the default pack, never listed here.
+EVAL_PACKS = (
+    communities.pack_of({"name": "Mudon", "aliases": ["mudon", "مدن"], "units": ["villa", "townhouse", "two_plus"]}),
+    communities.pack_of({"name": "Villanova", "aliases": ["villanova", "villa nova", "la violeta"], "units": ["villa", "townhouse"]}),
+)
+
+
+def scenario_pack(scenario, decision):
+    """The pack a scenario's residential turn is about (the decision's community), else None."""
+    if decision is None or not decision.community:
+        return None
+    return communities.by_name(decision.community, EVAL_PACKS)
 
 
 def settings_for(scenario) -> types.SimpleNamespace:
@@ -1906,6 +1922,9 @@ class Scenario:
     units: tuple = ()
     # The customer memory's PREVIOUS CHATS lines (assistant/memory.py), as memory.lines would give them.
     memory: tuple = ()
+    # The community packs' flow (assistant/communities.py, round 17): the chat's stored community (state.community); the
+    # packs the decision reads are EVAL_PACKS, so a scenario names Mudon or Villanova in words or holds one here.
+    community: str = ""
 
 
 TAPPED_INTERESTED = ("customer", "[tapped: Interested]")
@@ -2100,6 +2119,17 @@ SPAIN_STUDIO_UNIT = {
     "source": "pf", "source_id": "eval-1", "reference": "a7group-1901", "community": "International City", "sub_area": "Spain Cluster",
     "unit": "studio", "bedrooms": "studio", "deal": "rent", "price": 31000, "size_sqft": 400, "furnished": "unfurnished",
     "title": "Studio | Spain Cluster | International City", "photos": [], "active": True,
+}
+# The community packs' units (round 17): a Mudon townhouse to rent and a Villanova villa for sale, as Property Finder lists them.
+MUDON_TOWNHOUSE_UNIT = {
+    "source": "pf", "source_id": "eval-m1", "reference": "a7group-1633", "community": "Mudon", "sub_area": "Mudon Al Ranim 6",
+    "unit": "townhouse", "bedrooms": "3", "deal": "rent", "price": 180000, "size_sqft": 1843, "furnished": "unfurnished",
+    "title": "3BR Townhouse | Mudon Al Ranim 6 | Mudon", "photos": ["https://static.shared.propertyfinder.ae/eval-1.jpg"], "active": True,
+}
+VILLANOVA_VILLA_UNIT = {
+    "source": "pf", "source_id": "eval-v1", "reference": "a7group-1950", "community": "Villanova", "sub_area": "La Violeta",
+    "unit": "villa", "bedrooms": "4", "deal": "sale", "price": 3200000, "size_sqft": 2600, "furnished": "unfurnished",
+    "title": "4BR Villa | La Violeta | Villanova", "photos": ["https://static.shared.propertyfinder.ae/eval-2.jpg"], "active": True,
 }
 RENT_OPENED = [("customer", "I need a studio"), ("assistant", residential.opener_text("en", "rent", "studio"))]
 RENT_FOR_MYSELF = RENT_OPENED + [
@@ -6091,6 +6121,50 @@ SCENARIOS = [
         new=["I am looking for a studio again, which cluster do you suggest?"],
         expect=[out_says(r"\bspain\b", "ask about the remembered cluster"), questions_at_most(2), never_says(r"our (?:records|system|crm)", "name our records")],
     ),
+    # The community packs' flow (assistant/communities.py, round 17; Matloob 2026-10-20: the pictures come from Property
+    # Finder and the customer is referred to our office): a home in Mudon or Villanova quotes the listed unit, never a band.
+    Scenario(
+        "shops-pack-mudon-townhouse-rent-price",
+        "pack: a 3-bedroom townhouse to rent in Mudon, the rent asked: the listed unit's AED 180,000, never International City's bands",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        units=(MUDON_TOWNHOUSE_UNIT,),
+        new=["I need a 3 bedroom townhouse in Mudon to rent, what is the rent?"],
+        expect=[
+            track("rent", "townhouse"), out_says(r"180,000", "quote the listed townhouse's rent"),
+            never_band(29000, 33000, 40000, 45000, 42000, 43000), questions_at_most(2), no_person_named(),
+        ],
+    ),
+    Scenario(
+        "shops-pack-mudon-no-units",
+        "pack: a villa to rent in Mudon with nothing listed: no figure at all, our agent confirms, the office offered",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "[tapped: Yes, still looking]"), ("assistant", rules.line("res_what_need", "en"))],
+        new=["I am looking for a villa in Mudon to rent, how much is the rent?"],
+        expect=[
+            track("rent", "villa"), no_money(), out_says(r"agent|confirm|check", "leave the price to our agent"),
+            out_says(r"office|visit", "refer to our office"), never_band(29000, 33000, 40000, 45000),
+        ],
+    ),
+    Scenario(
+        "shops-pack-villanova-villa-sale-price",
+        "pack: a stored Villanova sale chat, the villa's price asked: the listed villa's AED 3,200,000, never the studio bands",
+        playbook=IC_SHOPS,
+        campaign=MIXED,
+        chat=[("customer", "I want to buy a villa in Villanova"), ("assistant", "Sure. Are you looking for yourself or for a client?"), ("customer", "For myself")],
+        facts={"intent": "buy", "property_type": "villa", "community": "Villanova", "for_client": False},
+        track="sale",
+        unit="villa",
+        community="Villanova",
+        units=(VILLANOVA_VILLA_UNIT,),
+        new=["What is the price of the villa?"],
+        expect=[
+            track("sale", "villa"), out_says(r"3,200,000", "quote the listed villa's price"),
+            never_band(330000, 350000, 310000, 450000, 550000), questions_at_most(2),
+        ],
+    ),
     Scenario(
         "shops-res-commission-how-much-exactly",
         "charges: 'how much exactly?' right after code's first commission line gets the studio's figure, in code's words",
@@ -6154,6 +6228,7 @@ class Built:
     location_sent: bool = False  # as engine.location_sent: one of our lines gave the address
     res: bool = False  # batch 2e: the residential path (residential.live_track of the track decided before the model)
     base_words: str = ""  # context_words before any facts' amounts (the residential ones follow the track after the model)
+    pack: bool = False  # round 17: the community packs' flow (PACK_SYSTEM, the pack's facts, settle's pack guards)
 
 
 def our_last(scenario: Scenario) -> str:
@@ -6270,6 +6345,7 @@ def build(scenario: Scenario) -> Built:
     # As live (batch 2e): the residential path's block in place of the shops one.
     pre = decide(scenario)
     res = shops_chat and pre is not None and residential.live_track(pre.track)
+    pack = scenario_pack(scenario, pre) if res else None  # the community packs' flow (round 17)
     history = lead_history.lines(hours.parse_date(scenario.crm_asked), lead_history.clean_notes(scenario.crm_notes)) if shops_chat else []
     res_context = None
     if res:
@@ -6281,7 +6357,12 @@ def build(scenario: Scenario) -> Built:
         res_context = residential.context(
             settings_row, pre.track, pre.unit, pre.clusters, scenario.now, list(scenario.taken), lead=dict(scenario.lead_context),
             full_name=residential.full_name_known(scenario.facts, scenario.lead_context), history=history,
-            held=residential.held_start(appointment, scenario.now), inventory=inventory.lines(scenario_units(scenario)), **sale_parts,
+            held=residential.held_start(appointment, scenario.now), inventory=inventory.lines(scenario_units(scenario)),
+            # As live (round 17): a pack chat reads the pack's facts in RES FACTS' place, its COMMUNITY lines, no charge lines.
+            facts_override=communities.facts_block(pack, scenario_units(scenario)) if pack is not None else "",
+            community=communities.lines(pack) if pack is not None else (),
+            charges=pack is None,
+            **sale_parts,
         )
     context = prompt.context_message(
         now=scenario.now,
@@ -6323,7 +6404,7 @@ def build(scenario: Scenario) -> Built:
     elif shops_chat:
         # As live, a shops reply may quote SHOP FACTS' own figures.
         context_words = f"{context_words} {shops.known_amounts(settings_row)}"
-    return Built(context, appointment, context_words, location, res=res, base_words=base_words)
+    return Built(context, appointment, context_words, location, res=res, base_words=base_words, pack=pack is not None)
 
 
 _TAP = re.compile(r"^\[tapped: (.+)\]$")
@@ -6422,6 +6503,7 @@ def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | 
         "words": need_words(scenario), "facts": scenario.facts, "stored": scenario.track, "stored_unit": scenario.unit,
         "lead": dict(scenario.lead_context), "template_kind": template_kind(scenario), "first_answer": first_answer(scenario),
         "clusters": tracks.cluster_names(settings_for(scenario)), "shop_tap": shop_taps(scenario),
+        "packs": EVAL_PACKS, "stored_community": scenario.community,
     }
     if answer is None:
         return tracks.decide(**inputs)
@@ -6572,6 +6654,7 @@ def residential_rule(scenario: Scenario, decision) -> dict | None:
         entered=scenario.track != decision.track, plain=plain, ours=ours,
         slots=lambda: hours.offer_pair(scenario.now, list(scenario.closed), list(scenario.taken)), handed_over=scenario.handed_over != "no",
         talked_shops=template_kind(scenario) == ic_templates.SHOP and scenario.track in ("", tracks.SHOP) and ours > 0,
+        pack=bool(decision.community),  # a pack chat has no opener of code's (round 17)
     )
 
 
@@ -6878,12 +6961,12 @@ def run_once(scenario: Scenario, label: str) -> Run:
             run.decision = pre  # as live: a rule's turn stores the track decided before the model
         else:
             answer, when, completions, rejected, still_invalid = engine.ask_model(
-                prompt.system_prompt(scenario.playbook, residential=res), built.context, built.appointment, scenario.now,
+                prompt.system_prompt(scenario.playbook, residential=res, pack=built.pack), built.context, built.appointment, scenario.now,
                 list(scenario.closed), user=SAFETY_ID, codes=run.codes, taken=taken, shops_chat=shops_chat, alternatives=run.alternatives,
                 said=said, customer_script=run.customer_script if scenario.handed_over == "no" else "",
                 name=engine.name_from(scenario.facts.get("customer_name"), scenario.name),
                 need_segment=residential.segment_of(pre.track) if res else (needs.SEGMENTS[need_seen.kind] if need_seen is not None else ""),
-                residential=res, places=calls.places_for(tracks.SALE if sale else ""), call_taken=call_taken,
+                residential=res, places=calls.places_for(tracks.SALE if sale else ""), call_taken=call_taken, pack=built.pack,
             )
             if (copies or pages) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
                 answer["handover"] = {"needed": False, "reason": None}  # as live: the photo is the licence we asked for
@@ -7028,7 +7111,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 answer, earlier, list(scenario.new), track=run.decision.track, unit=run.decision.unit, clusters=run.decision.clusters,
                 facts=scenario.facts, residential_facts=DEFAULT_RESIDENTIAL_FACTS, shops_facts=DEFAULT_SHOPS_FACTS, when=when,
                 still_invalid=still_invalid, sending=photos_going, visit_open=built.appointment is not None, booked_at=confirmed_at,
-                office_address=ADDRESS,
+                office_address=ADDRESS, pack=built.pack, units=scenario_units(scenario) if built.pack else (),
             )
             residential.record_need(answer, scenario.facts, run.decision, words)
         if copies and not answer.get("licence"):

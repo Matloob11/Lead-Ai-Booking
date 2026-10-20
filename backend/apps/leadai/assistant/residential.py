@@ -442,11 +442,12 @@ class Context:
     held: str = ""  # a time held for the full name ("Monday 12 October 2026, 5:00 PM")
     sale_step: str = ""  # SALE STEP: the buyer's next questions in the brief's order (sales.step_line, slice C)
     inventory: list = field(default_factory=list)  # INVENTORY lines: the real units the bot may quote (assistant/inventory.py)
+    community: list = field(default_factory=list)  # COMMUNITY lines: a community pack's chat (assistant/communities.py, round 17)
 
 
 def context(
     settings_row, track: str, unit: str, clusters, now, taken=(), *, lead=None, full_name: str = "", history=(),
-    calls=(), held=None, sale_step: str = "", inventory=(),
+    calls=(), held=None, sale_step: str = "", inventory=(), facts_override: str = "", community=(), charges: bool = True,
 ) -> Context:
     """The residential block of one turn's context. ``taken``: the other clients' office starts; ``lead``: the lead
     context (lead_context.parse's dict); ``full_name``: the customer's full name when known (full_name_known);
@@ -468,8 +469,9 @@ def context(
         brand=brand,
         honesty=honesty_line(brand),
         track=track_line(track, unit, clusters),
-        facts=facts_block(track, unit, clusters, facts, getattr(settings_row, "shops_facts", None)),
-        charges=charge_lines(facts) if track == RENT else [],
+        # A community pack's chat (round 17): the pack's own facts in RES FACTS' place, and no International City charge lines.
+        facts=facts_override or facts_block(track, unit, clusters, facts, getattr(settings_row, "shops_facts", None)),
+        charges=charge_lines(facts) if track == RENT and charges else [],
         lead=lead_context.lines(lead or {}),
         full_name=f"yes ({full_name})" if full_name else "no",
         free=[
@@ -482,12 +484,22 @@ def context(
         held=hours.describe(held) if held is not None else "",
         sale_step=" ".join(str(sale_step or "").split()),
         inventory=list(inventory or ()),
+        community=list(community or ()),
     )
 
 
 # Code's lines (Appendix C), six languages each -------------------------------------------------------------------------
 
 LINES = {
+    # A community pack's chat with nothing listed (round 17): the honest line in place of any figure.
+    "res_pack_no_units": {
+        "en": "Our agent will confirm the available options and prices for you. Would you like to visit our office so we can show you what suits you?",
+        "ar": "سيؤكد لك وكيلنا الخيارات والأسعار المتاحة. هل تود زيارة مكتبنا لنعرض عليك ما يناسبك؟",
+        "ur_latin": "Hamare agent aap ke liye available options aur prices confirm kar denge. Kya aap hamare office aana chahenge taake hum aap ko munasib options dikha sakein?",
+        "ur": "ہمارے ایجنٹ آپ کے لیے دستیاب آپشنز اور قیمتیں کنفرم کر دیں گے۔ کیا آپ ہمارے آفس آنا چاہیں گے تاکہ ہم آپ کو مناسب آپشنز دکھا سکیں؟",
+        "hi_latin": "Hamare agent aapke liye available options aur prices confirm kar denge. Kya aap hamare office aana chahenge taaki hum aapko sahi options dikha sakein?",
+        "hi": "हमारे एजेंट आपके लिए उपलब्ध विकल्प और कीमतें कन्फ़र्म कर देंगे। क्या आप हमारे ऑफ़िस आना चाहेंगे ताकि हम आपको सही विकल्प दिखा सकें?",
+    },
     "res_commission_first": {
         "en": "Our normal agency commission applies once you choose an apartment you like. The exact amount depends on the unit.",
         "ar": "تُطبَّق عمولة الوكالة المعتادة لدينا عندما تختار الشقة التي تعجبك. ويعتمد المبلغ الدقيق على الوحدة.",
@@ -2497,6 +2509,46 @@ def cluster_question(language: str, unit: str, earlier=(), facts=None, reply: st
     return f"{sentence} {CLUSTER_ASK[lang]}"
 
 
+# The community packs' flow (round 17): a price asked, and the unit's own figures from INVENTORY in the reply.
+_PRICE_ASK = re.compile(
+    r"\b(?:price|prices|rent|rental|cost|costs|how\s+much|budget|rate|rates|kitn[ae]|kiraya|kiraaya|qeemat|keemat)\b"
+    r"|سعر|السعر|إيجار|ايجار|كم|قیمت|کرایہ|کتنا|कीमत|किराया|कितना",
+    re.IGNORECASE,
+)
+
+
+def asks_price(texts) -> bool:
+    """Their words ask the price or the rent (any language of ours)."""
+    return any(_PRICE_ASK.search(str(text or "")) for text in texts or ())
+
+
+def _quotes_a_unit(reply: str, units) -> bool:
+    """The reply carries a listed unit's price or reference already."""
+    found = {value for value, _ in filters.numbers_in(reply)}
+    low = str(reply or "").lower()
+    for row in units or ():
+        if row.price and int(row.price) in found:
+            return True
+        if row.reference and row.reference.lower() in low:
+            return True
+    return False
+
+
+def pack_quote(units, reply: str = "") -> str:
+    """One listed unit in a sentence (English; the model's reply carries the customer's language): the unit the reply
+    names by reference, else the first (the cheapest, inventory.matches' order)."""
+    from . import inventory
+
+    row = inventory.by_reference(units, reply)
+    if row is None:
+        return ""
+    where = ", ".join(part for part in (row.sub_area, row.community) if part)
+    size = f", {row.size_sqft:,} sq ft" if row.size_sqft else ""
+    when = " a year" if row.deal == "rent" else ""
+    noun = inventory.UNIT_WORDS.get(row.unit, row.unit)
+    return f"We have a {noun} in {where}{size} at AED {row.price:,}{when} (ref {row.reference or row.source_id}); our agent confirms it is still available."
+
+
 def requirement_asked_last(earlier) -> bool:
     """Our side's last message asked step 2's first half (the balcony, when they move): their answer now leaves the cluster
     as the requirement's next question."""
@@ -2690,6 +2742,8 @@ def settle(
     visit_open: bool = False,
     booked_at=None,
     office_address: str = "",
+    pack: bool = False,
+    units=(),
 ) -> list[str]:
     """The code guards on a rent, sale or not-known answer (spec §2.9), after engine.settle and before people.settle,
     live and in the eval with the same values. Returns what it changed (also in ``answer["trimmed"]``).
@@ -2796,14 +2850,15 @@ def settle(
         if changed:
             cut.append("injected")
             if not reply.strip():
-                reply = band_answer(language, track, unit, clusters, residential_facts)  # the rule: our own band, never silence
+                # The rule: our own band, never silence (a pack chat: the listed unit's figures, else our agent confirms).
+                reply = pack_quote(units) or line("res_pack_no_units", language) if pack else band_answer(language, track, unit, clusters, residential_facts)
         if track == RENT:
             # Rent is yearly (spec §2.10): an amount by the month goes, and the yearly band with how it is paid comes instead.
             reply, changed = _drop(reply, monthly_figure)
             # Asked by the month, the answer is the yearly band and how it is paid: when a monthly figure was cut, and
             # when the model gave no figure at all (the 2e real-model gate, round 9: "how much per month?" got "Rent is
             # yearly in International City, usually paid in 1 to 4 cheques", with no band, in one run of two).
-            band = rent_band(unit, clusters, residential_facts) if (changed or asks_monthly(texts)) else None
+            band = rent_band(unit, clusters, residential_facts) if (changed or asks_monthly(texts)) and not pack else None
             if changed:
                 cut.append("monthly")
             if band and not ({band["from"], band["to"]} <= {value for value, _ in filters.numbers_in(reply)}):
@@ -2818,27 +2873,35 @@ def settle(
         reply, changed = _drop(reply, lambda s: names_colleague(s, staff))
         if changed:
             cut.append("colleague_named")
-        reply, changed = requirement_first(reply, answer, track=track, unit=unit, facts=facts, earlier=earlier, language=language)
-        if changed:
-            cut.append("requirement_first")
-        reply, cluster_line, changed = cluster_first(
-            reply, answer, track=track, unit=unit, clusters=clusters, facts=facts, texts=texts, earlier=earlier, language=language,
-            residential_facts=residential_facts, visit_open=visit_open, sending=sending,
-        )
-        if changed:
-            cut.append("cluster_first")
-        if track == RENT and not cluster_line and not visit_open:
-            # Step 3 for a shared or company stay: whose name goes on the contract (contract_line_kind).
-            kind = contract_line_kind(facts, answer["facts"], texts, earlier, reply)
-            if kind:
-                contract_line = line(kind, language)
-                cut.append("contract")
+        if not pack:
+            # International City's own steps (the balcony and move-in question, the cluster, the contract): not a pack's.
+            reply, changed = requirement_first(reply, answer, track=track, unit=unit, facts=facts, earlier=earlier, language=language)
+            if changed:
+                cut.append("requirement_first")
+            reply, cluster_line, changed = cluster_first(
+                reply, answer, track=track, unit=unit, clusters=clusters, facts=facts, texts=texts, earlier=earlier, language=language,
+                residential_facts=residential_facts, visit_open=visit_open, sending=sending,
+            )
+            if changed:
+                cut.append("cluster_first")
+            if track == RENT and not cluster_line and not visit_open:
+                # Step 3 for a shared or company stay: whose name goes on the contract (contract_line_kind).
+                kind = contract_line_kind(facts, answer["facts"], texts, earlier, reply)
+                if kind:
+                    contract_line = line(kind, language)
+                    cut.append("contract")
         reply, changed = drop_shop_words(reply, track, office_address)
         if changed:
             cut.append("shop_words")
-        reply, changed = drop_availability(reply, track, language)
-        if changed:
-            cut.append("availability")
+        if not (pack and units):
+            # A pack chat with listed units may say we have them: INVENTORY is live (round 17); without units, no claim.
+            reply, changed = drop_availability(reply, track, language)
+            if changed:
+                cut.append("availability")
+        if pack and units and asks_price(texts) and not _quotes_a_unit(reply, units):
+            # The price asked in a pack chat: the matching unit's own figures go, from INVENTORY, never silence or a band.
+            reply = f"{reply} {pack_quote(units, reply)}".strip()
+            cut.append("pack_quote")
         if not booked:
             reply, changed = _drop(reply, lambda s: claims_done(s, booked_at) and not (sending and photo_claim_only(s)))
             if changed:
@@ -3028,7 +3091,7 @@ def opener_spec(decision, facts: dict | None, *, sorry: bool = False, monthly: b
 
 def pre_model_rule(
     decision, facts: dict | None, *, words=(), typed=(), unheard: bool = False, entered: bool = False, plain: bool = False,
-    ours: int = 0, slots=(), handed_over: bool = False, talked_shops: bool = False,
+    ours: int = 0, slots=(), handed_over: bool = False, talked_shops: bool = False, pack: bool = False,
 ) -> dict | None:
     """The rent flow's words before any model (spec §1.4.3, §2.10), else None:
 
@@ -3046,7 +3109,9 @@ def pre_model_rule(
         return {"kind": "res_voice_failed"}
     if any(has_private_number(text) for text in typed or ()):
         return {"kind": "res_no_documents"}
-    if decision.track in (RENT, SALE) and entered and plain:
+    if decision.track in (RENT, SALE) and entered and plain and not pack:
+        # A community pack's chat (``pack``) has no opener of code's: International City's bands are not its, and the model
+        # answers from INVENTORY (round 17).
         sorry = decision.sorry or talked_shops or needs.misread(list(words or ()))
         return opener_spec(decision, facts, sorry=sorry, monthly=asks_monthly(words))
     if decision.track == UNKNOWN and plain and ours >= 2:

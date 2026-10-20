@@ -46,7 +46,7 @@ SEED = (
     {"name": "Damac Lagoons", "aliases": ["damac lagoons", "lagoons", "لاجونز"], "units": ["villa", "townhouse"]},
     {"name": "Villanova", "aliases": ["villanova", "villa nova", "la violeta", "la rosa", "amaranta"], "units": ["villa", "townhouse"]},
     {"name": "Dubai South", "aliases": ["dubai south", "expo village", "the pulse"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
-    {"name": "Arabian Ranches", "aliases": ["arabian ranches", "ranches"], "units": ["villa", "townhouse"]},
+    {"name": "Arabian Ranches", "aliases": ["arabian ranches", "arabian ranches 2", "arabian ranches 3", "ranches"], "units": ["villa", "townhouse"]},
     {"name": "Town Square", "aliases": ["town square", "nshama"], "units": ["townhouse", "two_plus", "one_br", "studio"]},
     {"name": "JVC", "aliases": ["jvc", "jumeirah village circle", "jumeirah village"], "units": ["studio", "one_br", "two_plus", "townhouse"]},
     {"name": "Dubailand", "aliases": ["dubailand", "dubai land", "rukan", "remraam"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
@@ -54,6 +54,31 @@ SEED = (
     {"name": "The Valley", "aliases": ["the valley", "emaar the valley"], "units": ["villa", "townhouse"]},
     {"name": "Haven by Aldar", "aliases": ["haven", "haven by aldar"], "units": ["villa", "townhouse"]},
     {"name": "Yas Island", "aliases": ["yas island", "yas", "جزيرة ياس"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    # Cursor's C43 map (2026-10-20): the Community spellings on leads with 30 or more of them, and the agency's live listings.
+    {"name": "Serena", "aliases": ["serena", "bella casa", "casa dora", "casa viva"], "units": ["villa", "townhouse"]},
+    {"name": "Dubai Hills Estate", "aliases": ["dubai hills estate", "dubai hills"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    {"name": "Nad Al Sheba", "aliases": ["nad al sheba", "nad al shiba", "nas"], "units": ["villa", "townhouse"]},
+    {"name": "Al Jaddaf", "aliases": ["al jaddaf", "jaddaf", "jadaf"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Business Bay", "aliases": ["business bay"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Dubai Creek Harbour", "aliases": ["dubai creek harbour", "creek harbour", "creek harbor"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Liwan", "aliases": ["liwan", "queue point"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Al Satwa", "aliases": ["al satwa", "satwa"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Arjan", "aliases": ["arjan"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Dubai Silicon Oasis", "aliases": ["dubai silicon oasis", "silicon oasis", "dso"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Dubai Sports City", "aliases": ["dubai sports city", "sports city"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "City Walk", "aliases": ["city walk"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "The Greens", "aliases": ["the greens", "greens"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Meydan", "aliases": ["meydan", "meydan city"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    {"name": "Palm Jebel Ali", "aliases": ["palm jebel ali"], "units": ["villa"]},
+    {"name": "Jebel Ali", "aliases": ["jebel ali", "jebel ali village"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    {"name": "Jumeirah Golf Estates", "aliases": ["jumeirah golf estates", "jge"], "units": ["villa", "townhouse"]},
+    {"name": "Dubai Marina", "aliases": ["dubai marina", "marina"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "Mohammed Bin Rashid City", "aliases": ["mohammed bin rashid city", "mbr city", "mbr"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    {"name": "Damac Hills", "aliases": ["damac hills", "damac hills 2", "akoya"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
+    {"name": "Downtown Dubai", "aliases": ["downtown dubai", "downtown"], "units": ["two_plus", "one_br", "studio"]},
+    {"name": "The Acres", "aliases": ["the acres", "acres"], "units": ["villa"]},
+    {"name": "Tilal Al Ghaf", "aliases": ["tilal al ghaf"], "units": ["villa", "townhouse"]},
+    {"name": "Mirdif", "aliases": ["mirdif", "mirdiff"], "units": ["villa", "townhouse", "two_plus", "one_br", "studio"]},
 )
 
 
@@ -193,3 +218,60 @@ def for_turn(*, stored: str = "", words=(), lead=None, listed=None) -> tuple[Pac
 
 def label(pack: Pack | None) -> str:
     return pack.name if pack is not None else ""
+
+
+# ---- the pack flow (round 17): what the turn reads for a home outside International City ------------------------------
+
+MEETING_LINE = "Every visit starts at our office (OFFICE in the context): our agent meets the customer there and takes them to the unit."
+NO_BAND_LINE = (
+    "No price band is listed for this community: quote only the units INVENTORY lists (their price, size and reference); "
+    "with none listed, say our agent will confirm the available options and prices, and invite them to our office."
+)
+BLOCK_HEAD = "COMMUNITY (this chat is about homes here, not International City; the system wrote these lines and they hold now):"
+
+
+def named_packs(listed=None, *, with_units: bool = True) -> tuple:
+    """The packs beside the default whose community has a live unit in the inventory (``with_units``), for tracks.decide
+    (names and aliases; nothing else is read there): a home there takes the pack's flow and quotes the unit; a community
+    with nothing listed stays another area, as before, until its units come (Matloob 2026-10-20: the pictures from
+    Property Finder, the customer referred to our office)."""
+    rows = [pack for pack in (listed or packs()) if not pack.default]
+    if not with_units:
+        return tuple(rows)
+    from ..models import LeadAiUnit
+
+    live = {str(name).casefold() for name in LeadAiUnit.objects.filter(active=True).exclude(community="").values_list("community", flat=True).distinct()}
+    return tuple(pack for pack in rows if pack.name.casefold() in live)
+
+
+def facts_block(pack: Pack, units=()) -> str:
+    """RES FACTS for a pack: the community, the meeting point, its bands when a person filled them, its facts lines, and
+    the rule that only INVENTORY's units carry a price."""
+    lines = [f"- Community: {pack.name}." + (f" Sub-areas: {', '.join(pack.sub_area_names())}." if pack.sub_areas else ""), f"- {MEETING_LINE}"]
+    bands = pack.bands if isinstance(pack.bands, dict) else {}
+    for deal in ("rent", "sale"):
+        table = bands.get(deal) if isinstance(bands.get(deal), dict) else {}
+        for unit, band in table.items():
+            if isinstance(band, dict) and band.get("from") and band.get("to"):
+                when = " a year" if deal == "rent" else ""
+                lines.append(f"- {UNIT_WORDS.get(unit, unit).capitalize()}s to {deal}: AED {int(band['from']):,}–{int(band['to']):,}{when} (a guide; the unit's own price is INVENTORY's).")
+    lines += [f"- {text.strip()}" for text in str(pack.facts_text or "").splitlines() if text.strip()]
+    lines.append(f"- {NO_BAND_LINE}" if not units else "- INVENTORY below lists the units we have in this community right now: quote those, and only those.")
+    return "\n".join(lines)
+
+
+def lines(pack: Pack) -> list[str]:
+    """The COMMUNITY block (data) for a pack chat's context."""
+    return [BLOCK_HEAD, f"- {pack.name}: the customer's community. Meeting point: our office." + (" The shops flow applies here too." if pack.shops else " No shops here.")]
+
+
+def known_amounts(pack: Pack) -> str:
+    """The pack's own figures (its bands), for the amount filter."""
+    parts = []
+    bands = pack.bands if isinstance(pack.bands, dict) else {}
+    for table in bands.values():
+        if isinstance(table, dict):
+            for band in table.values():
+                if isinstance(band, dict):
+                    parts += [f"{int(value):,}" for value in band.values() if isinstance(value, (int, float))]
+    return " ".join(parts)

@@ -36,6 +36,7 @@ CACHE_KEY = "leadai-v2"
 SHOPS_CACHE_KEY = "leadai-shops-v1"
 # ... and the residential one (batch 2e: a rent, sale or not-known chat of the International City campaign, prompt.RES_SYSTEM).
 RES_CACHE_KEY = "leadai-res-v1"
+PACK_CACHE_KEY = "leadai-pack-v1"  # the community packs' prompt (prompt.PACK_SYSTEM, round 17), cached apart
 # The most a model's answer may be (max_completion_tokens). RES_SCHEMA's answer is the longest: 25 facts and the need tag
 # before the reply and its English gloss, and the 2e real-model gate (round 1) had one cut off at 700 (OpenAI's "length":
 # too_long, a turn with no reply at all, shops-res-name-gate-new #2). What goes out stays code's to bound: RES_SYSTEM's

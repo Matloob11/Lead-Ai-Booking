@@ -749,6 +749,15 @@ RIGHT = {
     "shops-res-monthly-figure": answer("Studios here are around AED 29,000–33,000 a year, so roughly AED 2,500 a month.", segment="residential_tenant"),
     "shops-res-inventory-price": answer("The Spain Cluster studio is AED 31,000 a year. Would you like to see it?", segment="residential_tenant"),
     "shops-res-memory-asks-not-states": answer("Welcome back! Last time you looked at Spain Cluster — still that one, or another cluster?", segment="residential_tenant"),
+    "shops-pack-mudon-townhouse-rent-price": answer(
+        "We have a 3-bedroom townhouse in Mudon Al Ranim 6, 1,843 sq ft, at AED 180,000 a year (ref a7group-1633); our agent confirms it is still available. Would you like to visit our office to see it?",
+        segment="residential_tenant",
+    ),
+    "shops-pack-mudon-no-units": answer("Our agent will confirm the available villas and prices in Mudon for you. Would you like to visit our office?", segment="residential_tenant"),
+    "shops-pack-villanova-villa-sale-price": answer(
+        "The 4-bedroom villa in La Violeta, Villanova is AED 3,200,000 (ref a7group-1950); our agent confirms it is still available. Would you like to visit our office?",
+        segment="buyer",
+    ),
     "shops-res-commission-how-much-exactly": answer("It's usually 5% of the annual rent.", segment="residential_tenant"),
     "shops-sale-photos-call-booked": answer("Sure, here are the photos.", segment="buyer"),
     "shops-res-who-will-meet-me": answer(

@@ -2378,6 +2378,7 @@ def ask_model(
     residential: bool = False,
     places=calls.OFFICE_ONLY,
     call_taken=(),
+    pack: bool = False,
 ):
     """(answer, validated time, completions, rejection reason, still_invalid).
 
@@ -2419,7 +2420,7 @@ def ask_model(
     alternatives = alternatives if alternatives is not None else []
     answer_schema = schema.schema_for(shops_chat, residential)
     if residential:
-        cache_key = openai_client.RES_CACHE_KEY
+        cache_key = openai_client.PACK_CACHE_KEY if pack else openai_client.RES_CACHE_KEY  # the packs' prompt is its own (round 17)
     else:
         cache_key = openai_client.SHOPS_CACHE_KEY if shops_chat else openai_client.CACHE_KEY
     # RES_SCHEMA's answer is the longest (openai_client.RES_MAX_TOKENS); the other playbooks' requests stay as they were.
@@ -3315,7 +3316,7 @@ def residential_plain(
 
 def residential_rule(
     decision, facts, burst, said, heard, now, *, entered: bool, agreed: bool = False, appointment_open: bool = False,
-    handed_over: bool = False, ours: int = 0, closed_dates=(), taken=(), talked_shops: bool = False,
+    handed_over: bool = False, ours: int = 0, closed_dates=(), taken=(), talked_shops: bool = False, pack: bool = False,
 ) -> dict | None:
     """The rent flow's words before any model, else None (residential.pre_model_rule, with the burst read as the engine
     reads it): a voice note nobody could hear, an ID, IBAN or card number typed, the opener of a track just entered, the
@@ -3328,7 +3329,7 @@ def residential_rule(
     plain = residential_plain(joined, now, words=words, agreed=agreed, appointment_open=appointment_open, handed_over=handed_over)
     return residential.pre_model_rule(
         decision, facts, words=words, typed=typed, unheard=unheard and not handed_over, entered=entered, plain=plain, ours=ours,
-        slots=lambda: hours.offer_pair(now, closed_dates, taken), handed_over=handed_over, talked_shops=talked_shops,
+        slots=lambda: hours.offer_pair(now, closed_dates, taken), handed_over=handed_over, talked_shops=talked_shops, pack=pack,
     )
 
 
@@ -4330,6 +4331,9 @@ def _run_claimed(
         "lead": tracks.lazy(lambda: lead_context.for_turn(conversation, chat, state, now)), "clusters": tracks.cluster_names(settings_row),
         # Taps on our shop types list or a type's card: the shop track's own (spec §1.4.2), so a tap on another track moves it.
         "shop_tap": shops_chat and flow_taps([(_tap_label(item), _tap_id(item)) for item in (said or burst[-1:])]),
+        # The community packs (communities.py, round 17): a home in Mudon, Villanova, ... is that pack's rent or sale track.
+        "packs": communities.named_packs() if shops_chat else (),
+        "stored_community": state.community or "",
     }
     decision = tracks.decide(words=words_now, facts=facts, **track_inputs) if shops_chat else None
     # SALE (slice C, sales.py, calls.py): a buyer's turn may book a 5-minute call in the call pool (spec §3.3). The sale flow
@@ -4348,6 +4352,10 @@ def _run_claimed(
     # Batch 2e slice B, the rent flow (assistant/residential.py): a rent, sale or not-known chat takes the residential path,
     # with its own rules before the model (residential_rule), prompt, schema, context, guards, full-name gate and lines.
     res = shops_chat and decision is not None and residential.live_track(decision.track)
+    # The community packs' flow (communities.py, round 17): a residential chat about a community with a pack reads the
+    # pack's facts and INVENTORY in International City's place, with its own prompt (PACK_SYSTEM) and no opener of code's.
+    pack = communities.by_name(decision.community) if (decision is not None and decision.community) else None
+    pack_flow = bool(res and pack is not None and not pack.default)
     res_decision = decision  # the track the residential path was chosen for (the model's tag may move it: res_switch)
     res_spec = None  # the rent flow's words before any model (residential_rule)
     if res and not shops_rule_name and not licence_reply:
@@ -4358,6 +4366,7 @@ def _run_claimed(
             ours=ours_sent, closed_dates=settings_row.closed_dates, taken=taken,
             # We talked shops to them already (a shops template's chat with a reply of ours): the opener apologises.
             talked_shops=template_kind == ic_templates.SHOP and (state.track or "") in ("", tracks.SHOP) and ours_sent > 0,
+            pack=pack_flow,
         )
         if spec:
             shops_rule_name = f"{RES_RULE}:{spec['kind']}"
@@ -4415,15 +4424,17 @@ def _run_claimed(
             lead_now = track_inputs["lead"].get()
             # The chat's community (communities.py: what it stored, the lead context, their words, else International
             # City), stored on the state for the panel and the next turn; code's own, never the model's.
-            pack, pack_why = communities.for_turn(stored=state.community, words=words_now, lead=lead_now)
-            if pack.name != (state.community or ""):
-                LeadAiChatState.objects.filter(pk=state.pk).update(community=pack.name)
-                state.community = pack.name
-                logger.info("Lead AI chat %s is about %s (%s)", conversation.pk, pack.name, pack_why)
+            pack_now = pack if pack_flow else communities.default_pack()
+            if pack_now.name != (state.community or ""):
+                LeadAiChatState.objects.filter(pk=state.pk).update(community=pack_now.name)
+                state.community = pack_now.name
+                logger.info("Lead AI chat %s is about %s (%s)", conversation.pk, pack_now.name, decision.reason)
             # The real units the bot may quote (inventory.py): the chat's community, clusters, unit and deal; none, and
-            # the band answers as before.
+            # the band answers as before (a pack chat: the unit as named, two bedrooms or more being a villa or a townhouse too).
             if inventory.LIVE:
-                units = inventory.matches(pack.name, decision.clusters, decision.unit, inventory.deal_of(decision.track))
+                units = inventory.matches(
+                    pack_now.name, decision.clusters, inventory.pack_units(decision.unit) if pack_flow else decision.unit, inventory.deal_of(decision.track),
+                )
             # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
             sale_parts = sales.context_parts(
                 facts, decision.unit, decision.clusters,
@@ -4433,7 +4444,12 @@ def _run_claimed(
             res_context = residential.context(
                 settings_row, decision.track, decision.unit, decision.clusters, now, taken, lead=lead_now,
                 full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment, now),
-                inventory=inventory.lines(units), **sale_parts,
+                inventory=inventory.lines(units),
+                # A pack chat: the pack's facts in RES FACTS' place, its COMMUNITY lines, no International City charge lines.
+                facts_override=communities.facts_block(pack, units) if pack_flow else "",
+                community=communities.lines(pack) if pack_flow else (),
+                charges=not pack_flow,
+                **sale_parts,
             )
         context = prompt.context_message(
             now=now,
@@ -4459,7 +4475,7 @@ def _run_claimed(
             memory=memory.lines(memory.recall(conversation.contact.wa_id, exclude_conversation=conversation.pk)),
         )
         answer, when, completions, rejected, still_invalid = ask_model(
-            prompt.system_prompt(playbook, residential=res),
+            prompt.system_prompt(playbook, residential=res, pack=pack_flow),
             context,
             appointment,
             now,
@@ -4477,6 +4493,7 @@ def _run_claimed(
             name=greeted,
             need_segment=residential.segment_of(decision.track) if res else (needs.SEGMENTS[need_seen.kind] if need_seen is not None else ""),
             residential=res,
+            pack=pack_flow,
             # SALE (slice C): a buyer may book a call (calls.PLACES), checked against the call pool.
             places=calls.places_for(tracks.SALE if sale else ""),
             call_taken=call_taken,
@@ -4633,7 +4650,7 @@ def _run_claimed(
             unit=decision.unit, clusters=decision.clusters, facts=facts, residential_facts=settings_row.residential_facts,
             shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid, sending=photos_going,
             visit_open=appointment is not None, booked_at=appointment.starts_at if confirmed else None,
-            office_address=settings_row.office_address,
+            office_address=settings_row.office_address, pack=pack_flow, units=units,
         )
         # 2d's facts.need and facts.wanted stay set on the rent and sale tracks (followups.holds, the nudges, panel_note).
         residential.record_need(answer, facts, decision, words_now)
@@ -4937,6 +4954,8 @@ def _run_claimed(
     if res:
         # A residential reply may quote that track's and unit's figures only (spec §2.9.1), and the inventory's units'.
         rows_context = f"{rows_context} {residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters)} {inventory.known_amounts(units)}"
+        if pack_flow:
+            rows_context = f"{rows_context} {communities.known_amounts(pack)}"
     elif shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
@@ -5322,6 +5341,14 @@ def _run_claimed(
     if hold is not None:
         hold.close()  # the booking is stored: the next one may look at the slots
     done.update(plan)
+    if pack_flow and units and state.handed_over_at is None and residential._quotes_a_unit(text, units):
+        # The community packs' flow (round 17): the listed unit the reply quoted gets its Property Finder photos, once per
+        # unit per chat, from its own task after the commit (pack_photos.queue).
+        from .. import pack_photos
+
+        quoted = inventory.by_reference(units, text)
+        if quoted is not None and pack_photos.queue(conversation, state, quoted, turn.pk, language):
+            done["pack_photos"] = quoted.reference or str(quoted.pk)
     # The booking is stored: the turn row says so before the slower pin goes out.
     turn.reply_message_id = sent.pk
     LeadAiTurn.objects.filter(pk=turn.pk).update(reply_message=sent, actions={**(turn.actions or {}), **done})

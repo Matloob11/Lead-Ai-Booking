@@ -161,6 +161,15 @@ def _daily_digest() -> None:
         logger.info("Lead AI digest stored for %s", day)
 
 
+@shared_task(ignore_result=True, soft_time_limit=120, time_limit=150)
+def send_pack_photos(conversation_id: int, unit_id: int, turn_id=None, language: str = "en") -> None:
+    """A listed unit's Property Finder photos to a pack chat (pack_photos.send_photos; round 17)."""
+    from . import pack_photos
+
+    result = pack_photos.send_photos(conversation_id, unit_id, turn_id, language)
+    logger.info("Lead AI pack photos for conversation %s, unit %s: %s", conversation_id, unit_id, result)
+
+
 @shared_task(ignore_result=True, soft_time_limit=600, time_limit=660)
 def sync_inventory() -> None:
     """The units the bot may quote (assistant/inventory.py): Property Finder's live listings and the clean Availability

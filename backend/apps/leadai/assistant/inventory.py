@@ -415,7 +415,9 @@ def matches(community: str, sub_areas=(), unit: str = "", deal: str = "", *, bud
     if not community:
         return []
     rows = LeadAiUnit.objects.filter(active=True, community__iexact=community)
-    if unit:
+    if isinstance(unit, (tuple, list, set)):
+        rows = rows.filter(unit__in=[item for item in unit if item]) if any(unit) else rows
+    elif unit:
         rows = rows.filter(unit=unit)
     if deal in (LeadAiUnit.Deal.RENT, LeadAiUnit.Deal.SALE):
         rows = rows.filter(deal=deal)
@@ -462,3 +464,24 @@ def known_amounts(rows) -> str:
 
 def deal_of(track: str) -> str:
     return {tracks.RENT: LeadAiUnit.Deal.RENT, tracks.SALE: LeadAiUnit.Deal.SALE}.get(track, "")
+
+
+def pack_units(unit: str) -> tuple:
+    """The units a pack chat's wish matches (the community packs' flow): two bedrooms or more are an apartment, a townhouse
+    or a villa alike (a "3 bedroom in Mudon" is a townhouse there); a villa or a townhouse its own; a studio or a
+    one-bedroom its own; nothing named, every unit but a shop."""
+    if unit == tracks.TWO_PLUS:
+        return (tracks.TWO_PLUS, VILLA, TOWNHOUSE)
+    if unit in (VILLA, TOWNHOUSE, tracks.STUDIO, tracks.ONE_BR):
+        return (unit,)
+    return (tracks.STUDIO, tracks.ONE_BR, tracks.TWO_PLUS, VILLA, TOWNHOUSE)
+
+
+def by_reference(rows, text: str):
+    """The unit among ``rows`` whose reference the text names (a7group-1806), else the first row, else None."""
+    rows = list(rows or ())
+    low = str(text or "").lower()
+    for row in rows:
+        if row.reference and row.reference.lower() in low:
+            return row
+    return rows[0] if rows else None

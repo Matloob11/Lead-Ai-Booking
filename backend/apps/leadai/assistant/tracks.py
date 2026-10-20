@@ -51,6 +51,12 @@ TRACKS = (SHOP, RENT, SALE, OTHER)
 STUDIO = "studio"
 ONE_BR = "one_br"
 TWO_PLUS = "two_plus"
+# The community packs' units (assistant/communities.py, round 17): a villa or a townhouse in Mudon, Villanova, ...; never
+# International City's own flow, whose units stay the studio and the one-bedroom (UNITS).
+VILLA = "villa"
+TOWNHOUSE = "townhouse"
+PACK_UNITS = (STUDIO, ONE_BR, TWO_PLUS, VILLA, TOWNHOUSE)
+PACK = "pack"  # the reason: a home in a community with a pack
 # The units the rent and sale flows serve; any other home is OTHER.
 UNITS = (STUDIO, ONE_BR)
 # Slice C (T94) switches the sale flow on (sales.py, calls.py); with it off a buyer goes to OTHER (2d's invitation: nobody
@@ -86,13 +92,14 @@ class Decision:
     reason: str = ""  # the step that decided
     switched: bool = False  # the chat's known track changed
     sorry: bool = False  # we talked about the other thing, or they never asked about a shop: an opener apologises (slice B)
+    community: str = ""  # a community pack's name (communities.py) when the home is there, "" for International City
 
     def as_dict(self) -> dict:
         """For the turn's actions and the eval's report: the set values only."""
         out = {"track": self.track, "unit": self.unit, "reason": self.reason}
         if self.clusters:
             out["clusters"] = list(self.clusters)
-        for key in ("deal", "deal_from"):
+        for key in ("deal", "deal_from", "community"):
             if getattr(self, key):
                 out[key] = getattr(self, key)
         for key in ("switched", "sorry"):
@@ -648,6 +655,53 @@ def _facts_unit(facts: dict) -> str:
     return (_noun_unit(had.noun) if had is not None else "") or unit_of(facts.get("bedrooms")) or unit_of(facts.get("property_type"))
 
 
+_PACK_VILLA = re.compile(r"\bvillas?\b|فيلا|فلة|فلل|विला|ولا", re.IGNORECASE)
+_PACK_TOWNHOUSE = re.compile(r"\btown\s?houses?\b|\bth\b|تاون\s?هاوس|टाउनहाउस", re.IGNORECASE)
+
+
+def _pack_unit(need, texts, known: dict, fresh: dict) -> str:
+    """A pack's unit: a villa or a townhouse named in their words or in the facts' property type, else the bedrooms as
+    usual (two or more make two_plus; a studio or a one-bedroom stay what they are)."""
+    joined = " ".join(_flat(text) for text in texts or ())
+    typed = f"{joined} {known.get('property_type') or ''} {fresh.get('property_type') or ''}".lower()
+    if _PACK_TOWNHOUSE.search(typed):
+        return TOWNHOUSE
+    if _PACK_VILLA.search(typed):
+        return VILLA
+    if need is not None and need.noun:
+        return _noun_unit(need.noun)
+    return unit_of(fresh.get("bedrooms")) or unit_of(known.get("bedrooms")) or ""
+
+
+def pack_decision(decision, texts, known: dict, need, lead, *, packs=(), stored: str = "", stored_community: str = "", rent_said: bool = False):
+    """A home in a community with a pack: its rent or sale track and the pack's name, else None. The community is read
+    from their words (exactly one pack named, communities.named_in), the lead context's Community, or the chat's own
+    stored community; the home from the need (a villa, a townhouse, a flat, bedrooms) or the track already decided. A
+    shop stays a shop; a community nobody packs stays another area (OTHER), as before."""
+    if not packs:
+        return None
+    from . import communities
+
+    named = communities.named_in(texts, packs)
+    pack = named[0] if len(named) == 1 else None
+    if pack is None and isinstance(lead, _Lead):
+        pack = communities.by_name(str((lead.get() or {}).get("community") or ""), packs) if lead.loaded or decision.track in (RENT, SALE, OTHER) else None
+    if pack is None and stored_community:
+        pack = communities.by_name(stored_community, packs)
+    if pack is None or pack.default:
+        return None
+    is_home = decision.track in (RENT, SALE) or (decision.track == OTHER and (need is None or need.kind in (needs.HOME, needs.BUY, needs.NEVER_ASKED)))
+    if decision.track == SHOP or not is_home:
+        return None
+    if need is not None and need.kind == needs.SELL:
+        return None
+    deal = decision.deal or (SALE if (need is not None and need.kind == needs.BUY) or wants_buy(texts) else RENT)
+    if rent_said and deal == SALE and stored != SALE:
+        deal = RENT
+    track = deal if deal == RENT or SALE_LIVE else OTHER
+    return Decision(track, decision.unit, clusters=(), deal=deal, deal_from=decision.deal_from or WORDS, reason=PACK, sorry=decision.sorry, community=pack.name)
+
+
 def decide(
     *,
     words=(),
@@ -661,8 +715,14 @@ def decide(
     fresh=None,
     clusters=None,
     shop_tap: bool = False,
+    packs=(),
+    stored_community: str = "",
 ) -> Decision:
     """The chat's track and unit after this burst (the module note's five steps).
+
+    ``packs``: the community packs beside International City (communities.named_packs: name and aliases), and
+    ``stored_community`` the chat's own (state.community): a home in one of those communities is that pack's rent or sale
+    track with the unit as named (a villa, a townhouse, two bedrooms or more too), never OTHER (round 17, pack_decision).
 
     ``words``: their own words in the burst (engine.need_texts); ``facts``: what the chat knows (state.facts); ``fresh``:
     the facts the model recorded in this turn, if it answered; ``stored`` / ``stored_unit``: state.track and state.unit;
@@ -678,7 +738,7 @@ def decide(
     names = tuple(clusters or DEFAULT_CLUSTERS)
     lead = _Lead.of(lead)
     stored = stored if stored in TRACKS else UNKNOWN
-    stored_unit = stored_unit if stored_unit in (STUDIO, ONE_BR, TWO_PLUS) else ""
+    stored_unit = stored_unit if stored_unit in PACK_UNITS else ""
     # On a stored sale track only an explicit wish to rent switches it (batch 2e review: the sale flow's own question "Do
     # you prefer a rented unit or a vacant one?" is answered with rent words); elsewhere a rent word decides rent.
     rent_said = wants_rent(texts) if stored == SALE else said_rent(texts)
@@ -762,9 +822,15 @@ def decide(
     if decision.track in (RENT, SALE) or (decision.track == OTHER and decision.deal == SALE):
         if other_area(texts, known, names):
             decision = dataclasses.replace(decision, track=OTHER)
+    # ... unless it is a community with a pack (communities.py): that pack's own rent or sale track (round 17).
+    packed = pack_decision(decision, texts, known, need, lead, packs=packs, stored=stored, stored_community=stored_community, rent_said=rent_said)
+    if packed is not None:
+        decision = packed
 
     # The unit: their words, the model's facts of this turn, the stored one, the chat's facts, the lead context.
     unit = decision.unit
+    if not unit and decision.community:
+        unit = _pack_unit(need, texts, known, fresh) or (stored_unit if stored_community == decision.community else "")
     if not unit and (decision.track in (RENT, SALE) or decision.deal):
         unit = _facts_unit(fresh)
         if not unit and stored_unit and stored in (RENT, SALE, OTHER):
