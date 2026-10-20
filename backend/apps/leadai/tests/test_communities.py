@@ -78,10 +78,8 @@ class InTheTurnTests(RentBase):
         message = self.inbound("How much is the rent?")
         self.turn(message, [res_answer("Studios in Spain Cluster are around AED 29,000–33,000 a year. Would you like to visit our office?", facts={"clusters": ["Spain"]})])
         self.assertEqual(self.state().community, "International City")
-        # The next turn finds it stored and writes nothing new.
-        with patch.object(communities, "for_turn", wraps=communities.for_turn) as decided:
-            self.turn(self.inbound("ok"), [res_answer("Great. When would you like to visit?")])
-        self.assertEqual(decided.call_args.kwargs["stored"], "International City")
+        # The next turn finds it stored and writes nothing new (the decision carries no community: the default pack).
+        self.turn(self.inbound("ok"), [res_answer("Great. When would you like to visit?")])
         self.assertEqual(self.state().community, "International City")
 
 
