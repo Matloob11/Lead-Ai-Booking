@@ -746,3 +746,55 @@
   background: #fffaf0;
   border-color: #c8a34a;
 }
+
+/* Reply mode: which of our numbers sends, with New template and Sync from Meta (openTemplateComposer). */
+.tplc-from {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgb(127 127 127 / 8%);
+}
+
+.tplc-from__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.tplc-from__label {
+  color: var(--muted, #6b7280);
+}
+
+.tplc-from__number {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.tplc-from__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tplc-from__note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tplc-from__note[hidden] {
+  display: none !important;
+}
+
+.tplc-from__note--ok {
+  color: #1f7a3f;
+}
+
+.tplc-from__note--bad {
+  color: #b42318;
+}

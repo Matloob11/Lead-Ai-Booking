@@ -2431,3 +2431,137 @@ a.lai-media__name:hover {
   background: rgba(250, 204, 21, 0.18);
   color: #a16207;
 }
+
+/* ----------------------------------------------------- reports dialog (reports.js) */
+
+.lai-bar__reports {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  font-size: 12px;
+}
+
+.lai-rep {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 18px 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #eef3f9;
+}
+
+.lai-rep__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lai-rep__h {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+
+.lai-rep__note {
+  margin: 0;
+  color: #9fb0c4;
+}
+
+.lai-rep__note--err {
+  color: #fca5a5;
+}
+
+.lai-rep__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.lai-rep__tile {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 4%);
+}
+
+.lai-rep__tile--warn {
+  border-color: rgb(252 211 77 / 45%);
+}
+
+.lai-rep__tile-n {
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.lai-rep__tile-l {
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-rep__tile-sub {
+  font-size: 11px;
+  color: #8fa1b6;
+}
+
+.lai-rep__text p {
+  margin: 0 0 4px;
+}
+
+.lai-rep__text-head {
+  font-weight: 700;
+}
+
+.lai-rep__scroll {
+  overflow-x: auto;
+}
+
+.lai-rep__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lai-rep__table th,
+.lai-rep__table td {
+  padding: 5px 8px;
+  text-align: right;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.lai-rep__table th[scope="row"],
+.lai-rep__table thead th:first-child {
+  text-align: left;
+}
+
+.lai-rep__table thead th {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9fb0c4;
+}
+
+@media (max-width: 720px) {
+  .lai-bar__reports {
+    margin-left: auto;
+  }
+
+  .lai-bar__reports + .lai-bar__settings {
+    margin-left: 0;
+  }
+}
+
+/* Which of our numbers the chat is on: under the composer and in the window-closed bar (thread.js). */
+.lai-composer__from {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-locked__text .lai-composer__from {
+  color: #c9d6e6;
+}

@@ -79,6 +79,12 @@ export const leadAiApi = {
   draftUsed: (id, text) => apiFetch(`/api/leadai/chats/${id}/draft/used/`, { method: "POST", body: { text } }),
   draftDismiss: (id) => apiFetch(`/api/leadai/chats/${id}/draft/dismiss/`, { method: "POST", body: {} }),
 
+  /** Reports (assistant/digest.py): {today: {day, stats, text}, digests: [{day, stats, text, sent_to}], digest_hour}. */
+  digests: ({ days = 14 } = {}) => apiFetch(`/api/leadai/digests/?days=${Number(days) || 14}`),
+
+  /** The community packs (assistant/communities.py): {communities: [{name, aliases, sub_areas, units, units_live, ...}], can_edit}. */
+  communities: () => apiFetch("/api/leadai/communities/"),
+
   /** Cancels the chat's open meeting (409 when there is none). Returns the row. */
   cancelAppointment: (id) =>
     apiFetch(`/api/leadai/chats/${id}/appointment/cancel/`, { method: "POST", body: {} }),

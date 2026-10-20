@@ -65,6 +65,7 @@
 #   ops/wa.sh submit-leadbot-template       submit a7_lead_enquiry_confirm to agent 971 WABAs
 #   ops/wa.sh submit-leadai-reminder-template [--dry-run]  Lead AI meeting reminder to every active assigned WABA
 #   ops/wa.sh leadai-switch on|off|status   the Lead AI assistant's switch
+#   ops/wa.sh leadai-health                 Lead AI health: sweep, queue, last hour, who waits, inventory, keys
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
@@ -1036,6 +1037,15 @@ case "$cmd" in
     [[ -f "$script" ]] || die "missing ops/catalog/leadai-sync-inventory.py"
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  leadai-health)
+    # The Lead AI's health in one screen (apps/leadai/management/commands/leadai_health.py):
+    # the switch, the sweep's age (worker-leadai alive?), the leadai queue's depth, the last
+    # hour's turns, who waits for a person, the inventory's age, the keys, the last digest.
+    # Read only; exit 1 when something is red.
+    [[ $# -eq 0 ]] || die "leadai-health takes no arguments"
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_health"
     ;;
 
   set-pf-api-keys)
