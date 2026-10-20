@@ -15,6 +15,11 @@ The 2e design this extends: `2026-10-16-leadai-2e-one-bot-design.md`.
 | D5 | Quality first ("best"). |
 | D6 | A **memory system**: the AI learns from how questions are asked and answered (chats, agents' answers, approvals). |
 | D7 | The plan carries **Cursor's tasks** too. |
+| D8 (M1) | The PF key has **every permission** already (Matloob, 2026-10-20 12:45). |
+| D9 (M2) | The backend's **existing Bitrix CRM API key** is used for Owner Data too. |
+| D10 (M3) | Owner Data → Availability (SPA 1042, category 14) stages mean what their names say: **Rent Availability** (205), **Sale Availability** (283), **Sale/Rent availability** (74) are the units available for that deal; **New Availability** (4,756) is the new, unverified pool; *contacted\details shared* (100), *future availability* (28), *No answer* (281), *Name* (28) are not stock to quote. Cards carry Community, Unit Type, No. of Bedroom, Size (sqft), Purpose, Lease Price, owner numbers — and many hold the details only in the **title** ("Tun Tun Naing, 240k, mudon 6, unit 190 and 187, 4br, g+1"), so the inventory service parses titles (price "240k"/"3.5M", community, bedrooms "3br"/"4br", "g+1") beside the fields. |
+| D11 (M5) | The **meeting point is the office for every community**. |
+| D12 (M4, M6, M7) | "Do what is best": knowledge proposals are approved by Matloob, TLs may propose; the co-pilot draft goes out by itself after 15 minutes for ordinary questions, never for price negotiation, legal matters or complaints; gpt-4.1-mini for turns, gpt-4.1 for drafts and proposals. |
 
 ## 1. Where we stand (facts, 2026-10-20)
 
@@ -228,6 +233,23 @@ Three layers, all **data in the prompt**, never instructions:
 Every step: the real-model gate (≥95%, every strict scenario every run, the new scenario family included), Postgres
 tests on the image, `up app` with all four services, a probe, a TASKS entry with what was proven and what was not.
 Each feature ships behind its own switch in `LeadAiSettings`, so a bad day turns one thing off, not the bot.
+
+## 6a. What the data showed on day 1 (2026-10-20, read-only probes)
+- **Property Finder** (atlas.propertyfinder.com Enterprise API; the key has every scope: listings, leads, webhooks, users):
+  142 live listings — 48 townhouses, 34 shops, 33 villas, 24 apartments; **International City holds 5** (4 shops, one
+  townhouse in Warsan Village). The token lasts 30 minutes; listings page by 50 (`filter[state]=live`); a listing gives a
+  location id only, so the community and cluster are read from its title. 10,000 leads, and webhooks `lead.created` /
+  `lead.updated` already point at a youtupia.com endpoint (whoever built the PF → Bitrix lead feed).
+- **Bitrix Owner Data → Availability** (SPA 1042, category 14; user fields `UF_CRM_5_*`): the three "available" stages
+  hold 562 cards — of those, **145 carry no bedrooms, unit type or purpose at all**, most of the rest carry one or two,
+  and the price and the place sit in the title ("Maitha , 230k , unit 292 , mudon 6 , 3br , g+1") or nowhere. No Community
+  field exists on the card (the kanban's "Community" is another field's label). The enum lists are polluted with phone
+  numbers and prices typed as options.
+- **So:** the inventory v1 quotes only clean, matched units (`LeadAiUnit`, synced every half hour from both sources);
+  International City studios and one-bedrooms — the campaigns' own subject — fall back to the bands until the Availability
+  data is cleaned. **Cursor C55:** a validation on the Availability card (bedrooms, unit type, purpose, price, community
+  required before a card may enter Rent/Sale Availability) and a bulk title parser for the existing cards — without it the
+  live inventory stays thin for the units the campaigns sell.
 
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
