@@ -276,6 +276,26 @@ Each feature ships behind its own switch in `LeadAiSettings`, so a bad day turns
   balcony and move-in question: `residential.requirement_first`) and `shops-nine-questions-noted-95` (a numbered question
   of theirs lost: `crm_facts._numbered_questions`). Round 16 carries rounds 15 and 16 together.
 
+## 6c. Round 17 (2026-10-20, afternoon): the community packs' flow, v1
+Matloob's word on B2: for a home outside International City the bot quotes the Property Finder unit, sends its photos
+and refers the customer to our office ("pictures wagera PF se jayein aur office refer karein").
+- **Decision (code):** `tracks.pack_decision` — a home named with a community that has a pack *and live units*
+  (`communities.named_packs`) takes that pack's rent or sale track with the unit as named (villa, townhouse, two
+  bedrooms or more, studio, one-bedroom); the community travels on the `Decision` and is stored on the state. A
+  community with nothing listed stays another area (OTHER) exactly as before, so the gate's IC scenarios are untouched.
+- **Prompt:** `PACK_SYSTEM` — RES_SYSTEM's shared sections word for word; its own head, TRACK, HARD RULES (prices from
+  INVENTORY only, the system sends the photos, every visit starts at our office), STEPS and CHARGES. Cached apart.
+- **Context:** the pack's facts in RES FACTS' place (`communities.facts_block`), COMMUNITY lines, INVENTORY for that
+  community (two bedrooms or more match villas and townhouses too: `inventory.pack_units`), no IC charge lines.
+- **Guards:** no opener of code's; International City's steps off; "we have …" kept for listed units; the price asked
+  with no figure in the reply gets the listed unit's own line (`residential.pack_quote`); nothing listed → the honest
+  six-language line (`res_pack_no_units`); the amount filter still cuts any figure INVENTORY lacks.
+- **Photos:** `pack_photos.send_photos` — the quoted unit's first three Property Finder photos, kept as inbox
+  attachments, uploaded to the gateway for the chat's number and sent once per unit per chat, from their own task.
+- **Seed:** Cursor's C43 spellings became packs (migration 0015 adds the rows and the aliases).
+- **Not yet:** the sale flow's call-first for packs (Matloob chose the office visit for both), pack bands edited in the
+  panel (Django admin today), the desk showing the community, a scenario family per pack beyond the three scenarios.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
