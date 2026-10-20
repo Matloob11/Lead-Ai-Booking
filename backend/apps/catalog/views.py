@@ -25,11 +25,26 @@ def _require_admin(request):
 
 
 def _covered_waba_ids(user):
-    return set(
+    """The business accounts this user may write templates for: those of the numbers whose chats they may open
+    (visible_numbers: assigned numbers, or every active number for an admin), and, for an agent with Lead AI access,
+    those of the numbers that carry an active Lead AI chat — the desk opens every Lead AI chat on any number
+    (apps.leadai.lane.desk_q), and the Send-template dialog's New template writes for that chat's account
+    (Matloob 2026-10-20: "That WhatsApp Business account is not one of yours" on a Lead AI chat)."""
+    covered = set(
         user.visible_numbers.exclude(waba_business_id="").values_list(
             "waba_business_id", flat=True
         )
     )
+    from apps.leadai.lane import has_desk_access
+
+    if has_desk_access(user):
+        covered |= set(
+            Conversation.objects.filter(lead_ai_chat__active=True, number__is_active=True)
+            .exclude(number__waba_business_id="")
+            .values_list("number__waba_business_id", flat=True)
+            .distinct()
+        )
+    return covered
 
 
 def _meta_error_detail(exc):
