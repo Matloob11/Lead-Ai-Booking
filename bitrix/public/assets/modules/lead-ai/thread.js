@@ -704,6 +704,13 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
           : null,
         // The pill can say "AI on" while the assistant is held back (an OpenAI pause, the daily limit).
         note ? el("div.lai-thread__meta.lai-thread__meta--ai", {}, [icon("zap", { size: 12 }), `AI not answering: ${note}`]) : null,
+        // What the assistant remembers of this customer from chats on our other numbers (lead_ai_ai.memory, the detail).
+        Array.isArray(conversation.lead_ai_ai?.memory) && conversation.lead_ai_ai.memory.length
+          ? el("div.lai-thread__meta.lai-thread__meta--memory", { title: conversation.lead_ai_ai.memory.join("\n") }, [
+              icon("clock", { size: 12 }),
+              `Earlier chats: ${String(conversation.lead_ai_ai.memory[conversation.lead_ai_ai.memory.length - 1]).replace(/^- /, "")}`,
+            ])
+          : null,
       ]),
       el("div.lai-thread__tools", {}, [
         ...aiControls(conversation),
