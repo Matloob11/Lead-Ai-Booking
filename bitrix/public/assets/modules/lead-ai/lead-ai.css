@@ -2368,3 +2368,66 @@ a.lai-media__name:hover {
     margin-left: 0;
   }
 }
+
+/* ---- the co-pilot's draft reply (thread.js renderDraft; assistant/copilot.py) ---- */
+.lai-thread__draft {
+  padding: 0 14px 6px;
+}
+.lai-draft {
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  border-radius: 12px;
+  background: rgba(250, 204, 21, 0.08);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.lai-draft--person {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.07);
+}
+.lai-draft__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+.lai-draft__meta {
+  margin-left: auto;
+  font-weight: 400;
+  opacity: 0.65;
+}
+.lai-draft__question {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+.lai-draft__text {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.lai-draft__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lai-ask {
+  display: grid;
+  gap: 10px;
+  min-width: min(520px, 90vw);
+}
+.lai-ask__input {
+  width: 100%;
+  min-height: 72px;
+}
+.lai-desk-line__draft {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(250, 204, 21, 0.18);
+  color: #a16207;
+}
