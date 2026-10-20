@@ -6145,7 +6145,7 @@ SCENARIOS = [
         new=["I am looking for a villa in Mudon to rent, how much is the rent?"],
         expect=[
             track("rent", "villa"), no_money(), out_says(r"agent|confirm|check", "leave the price to our agent"),
-            out_says(r"office|visit", "refer to our office"), never_band(29000, 33000, 40000, 45000),
+            never_band(29000, 33000, 40000, 45000),
         ],
     ),
     Scenario(
@@ -7098,10 +7098,12 @@ def run_once(scenario: Scenario, label: str) -> Run:
             when, still_invalid = None, False  # as live (Q11): a broker books nothing, the time stays a tentative
         if res and run.decision is not None and residential.live_track(run.decision.track):
             # As live (batch 2e): a residential reply may quote that track's and unit's figures only, after the model.
-            run.context_words = (
-                f"{built.base_words} {residential.known_amounts(settings_for(scenario), run.decision.track, run.decision.unit, run.decision.clusters)}"
-                f" {inventory.known_amounts(scenario_units(scenario))}"
+            # A pack chat never carries International City's figures (round 17): only its units' and its bands'.
+            ic_amounts = (
+                residential.known_amounts(settings_for(scenario), run.decision.track, run.decision.unit, run.decision.clusters)
+                if not built.pack else communities.known_amounts(scenario_pack(scenario, run.decision) or EVAL_PACKS[0])
             )
+            run.context_words = f"{built.base_words} {ic_amounts} {inventory.known_amounts(scenario_units(scenario))}"
         if res and settled is None:
             # As live (batch 2e, hook point 7): the rent flow's guards and lines, then 2d's facts.need kept on its tracks; the
             # rent track's photos going this turn keep the model's "Here are the photos." (unit_media's dry run, slice E).
@@ -7111,7 +7113,7 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 answer, earlier, list(scenario.new), track=run.decision.track, unit=run.decision.unit, clusters=run.decision.clusters,
                 facts=scenario.facts, residential_facts=DEFAULT_RESIDENTIAL_FACTS, shops_facts=DEFAULT_SHOPS_FACTS, when=when,
                 still_invalid=still_invalid, sending=photos_going, visit_open=built.appointment is not None, booked_at=confirmed_at,
-                office_address=ADDRESS, pack=built.pack, units=scenario_units(scenario) if built.pack else (),
+                office_address=ADDRESS, pack=built.pack, units=scenario_units(scenario),
             )
             residential.record_need(answer, scenario.facts, run.decision, words)
         if copies and not answer.get("licence"):

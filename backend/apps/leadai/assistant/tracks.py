@@ -695,11 +695,16 @@ def pack_decision(decision, texts, known: dict, need, lead, *, packs=(), stored:
         return None
     if need is not None and need.kind == needs.SELL:
         return None
-    deal = decision.deal or (SALE if (need is not None and need.kind == needs.BUY) or wants_buy(texts) else RENT)
+    # The deal: a buy word or intent, else the stored track's own (a Villanova sale chat asking the villa's price stays a
+    # sale), else rent; a rent word on anything but a stored sale track says rent.
+    buying = (need is not None and need.kind == needs.BUY) or wants_buy(texts) or known.get("intent") == needs.BUY
+    deal = decision.deal or (SALE if buying else stored if stored in (RENT, SALE) else RENT)
     if rent_said and deal == SALE and stored != SALE:
         deal = RENT
     track = deal if deal == RENT or SALE_LIVE else OTHER
-    return Decision(track, decision.unit, clusters=(), deal=deal, deal_from=decision.deal_from or WORDS, reason=PACK, sorry=decision.sorry, community=pack.name)
+    # The unit: a villa or a townhouse named wins over the bedrooms' count ("3 bedroom townhouse" is a townhouse).
+    unit = _pack_unit(need, texts, known, {}) or decision.unit
+    return Decision(track, unit, clusters=(), deal=deal, deal_from=decision.deal_from or WORDS, reason=PACK, sorry=decision.sorry, community=pack.name)
 
 
 def decide(

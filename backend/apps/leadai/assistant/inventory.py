@@ -436,8 +436,18 @@ def line(row: LeadAiUnit) -> str:
     size = f", {row.size_sqft:,} sq ft" if row.size_sqft else ""
     furnished = f", {row.furnished}" if row.furnished else ""
     ref = row.reference or f"{row.get_source_display()} #{row.source_id}"
-    photos = f", {len(row.photos)} photos" if row.photos else ""
-    return f"- {ref}: {UNIT_WORDS.get(row.unit, row.unit)} for {row.deal} in {where}{size}{furnished}, {price}{photos}"
+    # No photo count: "1 photos" read as "1-bedroom" in the 2e gate's round 17; the system sends the photos itself.
+    return f"- {ref}: {unit_words(row)} for {row.deal} in {where}{size}{furnished}, {price}"
+
+
+def unit_words(row: LeadAiUnit) -> str:
+    """"3-bedroom townhouse", "studio", "one-bedroom apartment": the unit with its bedrooms when they say more than the
+    unit word does (a pack customer asks for "3 bedrooms": the line must say the unit has them)."""
+    noun = UNIT_WORDS.get(row.unit, row.unit)
+    beds = str(row.bedrooms or "").strip()
+    if beds.isdigit() and int(beds) >= 1 and row.unit in (tracks.TWO_PLUS, VILLA, TOWNHOUSE):
+        return f"{beds}-bedroom {noun}"
+    return noun
 
 
 def lines(rows) -> list[str]:

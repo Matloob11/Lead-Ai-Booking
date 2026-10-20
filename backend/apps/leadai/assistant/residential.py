@@ -2511,15 +2511,32 @@ def cluster_question(language: str, unit: str, earlier=(), facts=None, reply: st
 
 # The community packs' flow (round 17): a price asked, and the unit's own figures from INVENTORY in the reply.
 _PRICE_ASK = re.compile(
-    r"\b(?:price|prices|rent|rental|cost|costs|how\s+much|budget|rate|rates|kitn[ae]|kiraya|kiraaya|qeemat|keemat)\b"
-    r"|سعر|السعر|إيجار|ايجار|كم|قیمت|کرایہ|کتنا|कीमत|किराया|कितना",
+    r"\bhow\s+much\b|\bwhat(?:'s|\s+is|\s+are|\s+was)?\s+(?:the\s+|its\s+|your\s+)?(?:price|prices|rent|rental|cost|costs|rate|rates)\b"
+    r"|\b(?:price|prices|cost|costs|rate|rates|rental)\b|\b(?:the|its|your|yearly|annual|monthly)\s+rent\b|\brent\s*\?"
+    r"|\bkitn[ae]\b|\bkiraya\b|\bkiraaya\b|\bqeemat\b|\bkeemat\b|سعر|السعر|الإيجار|الايجار|بكم|كم\s+(?:سعر|إيجار|ايجار)|قیمت|کرایہ|کتنا|कीमत|किराया|कितना",
     re.IGNORECASE,
 )
 
 
 def asks_price(texts) -> bool:
-    """Their words ask the price or the rent (any language of ours)."""
+    """Their words ask the price or the rent ("how much is the rent?", "what's the price", "kitna kiraya"), in any
+    language of ours; "a studio to rent" asks nothing."""
     return any(_PRICE_ASK.search(str(text or "")) for text in texts or ())
+
+
+_PACK_CLAIM = re.compile(
+    r"\b(?:available|vacant|ready)\b|\bwe\s+(?:do\s+)?have\b[^.?!]{0,60}\b(?:villas?|townhouses?|apartments?|flats?|units?|homes?|houses?|options?)\b",
+    re.IGNORECASE,
+)
+
+
+def _pack_claims(sentence: str) -> bool:
+    """A pack chat's sentence says a home is available or that we have one, with nothing listed (the honest line and a
+    question stay: "our agent will confirm the available options" names no unit)."""
+    text = " ".join(str(sentence or "").split())
+    if re.search(r"\bagent\b[^.?!]{0,40}\b(?:confirm|check)", text, re.IGNORECASE) or rules.asks_question(text):
+        return False
+    return bool(_PACK_CLAIM.search(text))
 
 
 def _quotes_a_unit(reply: str, units) -> bool:
@@ -2545,8 +2562,9 @@ def pack_quote(units, reply: str = "") -> str:
     where = ", ".join(part for part in (row.sub_area, row.community) if part)
     size = f", {row.size_sqft:,} sq ft" if row.size_sqft else ""
     when = " a year" if row.deal == "rent" else ""
-    noun = inventory.UNIT_WORDS.get(row.unit, row.unit)
-    return f"We have a {noun} in {where}{size} at AED {row.price:,}{when} (ref {row.reference or row.source_id}); our agent confirms it is still available."
+    noun = inventory.unit_words(row)
+    article = "An" if noun[:1].lower() in "aeiou" else "A"
+    return f"{article} {noun} in {where}{size}, is listed at AED {row.price:,}{when} (ref {row.reference or row.source_id}); our agent confirms it is still available."
 
 
 def requirement_asked_last(earlier) -> bool:
@@ -2784,6 +2802,15 @@ def settle(
         # A person nobody asked for, over words code answers itself: code's line goes (the number, the photos, the money).
         noted.append("unasked_handover")
         answer["trimmed"] = [*(answer.get("trimmed") or []), *noted]
+    if pack and not units and asks_price(texts) and (answer.get("handover") or {}).get("needed") and answer["handover"].get("reason") in ("unclear", "price_or_details_insisted", "question_not_in_facts") and not people.asks_for_call(" ".join(texts)):
+        # A pack chat with nothing listed, the price asked: no person is needed for that — the honest line answers it
+        # (the 2e gate, round 17: shops-pack-mudon-no-units got "unclear" in one run of two).
+        answer["handover"] = {"needed": False, "reason": None}
+        kept = " ".join(sentence for sentence in _split(answer["reply"]) if not hands_over(sentence))
+        answer["reply"] = kept if re.search(r"\bagent\b|\bconfirm\w*\b|\bcheck\b", kept, re.IGNORECASE) else f"{kept} {line('res_pack_no_units', answer.get('language') or 'en')}".strip()
+        answer["send"] = True
+        noted.append("pack_no_units_handover")
+        answer["trimmed"] = [*(answer.get("trimmed") or []), "pack_no_units_handover"]
     handover = answer["handover"]
     team_track = SALE if track == SALE else RENT
     if wants_to_pay(texts):
@@ -2898,8 +2925,19 @@ def settle(
             reply, changed = drop_availability(reply, track, language)
             if changed:
                 cut.append("availability")
-        if pack and units and asks_price(texts) and not _quotes_a_unit(reply, units):
-            # The price asked in a pack chat: the matching unit's own figures go, from INVENTORY, never silence or a band.
+        if pack and not units:
+            # ... and a pack's own words for one ("a lovely villa available in Mudon", "we have townhouses there"), which
+            # International City's reading (claims_availability) does not know.
+            reply, changed = _drop(reply, _pack_claims)
+            if changed:
+                cut.append("pack_claim")
+        if units and asks_price(texts) and not _quotes_a_unit(reply, units):
+            # The price asked with a listed unit at hand (a pack chat, or International City's own inventory): the matching
+            # unit's own figures go, from INVENTORY, never silence or the band alone (the 2e gate, round 17:
+            # shops-res-inventory-price gave the band or no figure in both runs).
+            if not pack:
+                banned = rent_figures(unit, residential_facts) | sale_figures(unit, residential_facts)
+                reply, _changed = _drop(reply, lambda s: _cuts_unit(s, banned))
             reply = f"{reply} {pack_quote(units, reply)}".strip()
             cut.append("pack_quote")
         if not booked:

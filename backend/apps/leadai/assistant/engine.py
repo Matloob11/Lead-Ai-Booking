@@ -4953,9 +4953,9 @@ def _run_claimed(
     rows_context = _context_words(rows, campaign_msg, burst, heard, facts, campaign_templates)
     if res:
         # A residential reply may quote that track's and unit's figures only (spec §2.9.1), and the inventory's units'.
-        rows_context = f"{rows_context} {residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters)} {inventory.known_amounts(units)}"
-        if pack_flow:
-            rows_context = f"{rows_context} {communities.known_amounts(pack)}"
+        # A pack chat never carries International City's figures: the amount filter cuts them (the 2e gate, round 17).
+        ic_amounts = residential.known_amounts(settings_row, decision.track, decision.unit, decision.clusters) if not pack_flow else communities.known_amounts(pack)
+        rows_context = f"{rows_context} {ic_amounts} {inventory.known_amounts(units)}"
     elif shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"

@@ -161,7 +161,9 @@ class PackTurnTests(MixedBase):
         LeadAiUnit.objects.all().delete()
         message = self.inbound("I need a villa in Mudon to rent")
         outcome, calls, _, _ = self.turn(message, [])
-        self.assertEqual(self.state().track, "other")
+        self.assertEqual(outcome.status, "replied", outcome.reason)
+        self.assertEqual(calls, [])  # code's "options across Dubai" line, as before the packs
+        self.assertNotIn(self.state().track, ("rent", "sale"))
         self.assertNotEqual(self.state().community, "Mudon")
 
 
