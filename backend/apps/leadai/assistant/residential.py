@@ -2917,6 +2917,16 @@ def settle(
                 if kind:
                     contract_line = line(kind, language)
                     cut.append("contract")
+        if pack:
+            # A pack chat never carries International City's bands, even where the campaign message named them (the amount
+            # filter allows a figure the campaign said): the sentence goes (the 2e gate, round 17).
+            ic_figures = (
+                rent_figures(STUDIO, residential_facts) | rent_figures(ONE_BR, residential_facts)
+                | sale_figures(STUDIO, residential_facts) | sale_figures(ONE_BR, residential_facts)
+            )
+            reply, changed = _drop(reply, lambda s: _cuts_unit(s, ic_figures))
+            if changed:
+                cut.append("ic_figures")
         reply, changed = drop_shop_words(reply, track, office_address)
         if changed:
             cut.append("shop_words")
