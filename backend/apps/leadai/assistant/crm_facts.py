@@ -241,7 +241,35 @@ def their_questions(notes, texts) -> tuple[list[str], list[str]]:
             continue
         out.append(note)
         added.append(note)
+    # A numbered list of questions ("1. Can the landlord provide an NOC? 2. ... 5. Can preparation and hand-wash sinks be
+    # installed?"): each numbered clause that asks something is one of their questions whatever its topic, so one no note
+    # restates is noted in their words (the 2e real-model gate, round 15: chat 95's nine questions kept eight in one run).
+    for clause in _numbered_questions(_spoken(texts)):
+        note = schema.clean_note(clause)
+        if not note or note.casefold() in {have.casefold() for have in out}:
+            continue
+        if any(_restates(have, clause) for have in out):
+            continue
+        out.append(note)
+        added.append(note)
     return out, added
+
+
+_NUMBERED = re.compile(r"(?:^|\n)\s*\(?(\d{1,2})[.)]\s+([^\n]+)")
+
+
+def _numbered_questions(texts) -> list[str]:
+    """The clauses of a numbered list in their words that ask something (people._ASKS), in order; [] unless the list has
+    three or more numbered lines (a bare "1." in a sentence is no list)."""
+    from . import people
+
+    out: list[str] = []
+    for text in texts or ():
+        found = [(int(number), clause.strip()) for number, clause in _NUMBERED.findall(str(text or ""))]
+        if len(found) < 3:
+            continue
+        out += [clause for _number, clause in found if clause and people._ASKS.search(clause)]
+    return out
 
 
 def our_figures(shops_facts) -> set[int]:

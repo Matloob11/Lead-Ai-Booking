@@ -123,6 +123,7 @@ def send_due_reminders() -> None:
         _flag_unanswered,
         _escalate_handovers,
         _copilot_auto_send,
+        _daily_digest,
         _close_past_appointments,
         _agent_heads_up,
         _untaken_calls,
@@ -148,6 +149,16 @@ def _copilot_auto_send() -> None:
     sent = copilot.sweep()
     if sent:
         logger.info("Lead AI co-pilot sent %s draft(s) by itself", sent)
+
+
+def _daily_digest() -> None:
+    """Yesterday's digest (assistant/digest.py), stored and sent once from eight in the morning Dubai; a day the sweep
+    missed is stored quietly on a later sweep. One query a minute while nothing is due."""
+    from .assistant import digest
+
+    day = digest.sweep(timezone.now())
+    if day is not None:
+        logger.info("Lead AI digest stored for %s", day)
 
 
 @shared_task(ignore_result=True, soft_time_limit=600, time_limit=660)

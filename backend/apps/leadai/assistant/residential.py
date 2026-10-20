@@ -2513,6 +2513,31 @@ def invites(reply: str, answer: dict) -> bool:
     )
 
 
+def _requirement_asked_before(earlier) -> bool:
+    ours = [text for author, text in earlier or () if author in ("assistant", "agent")]
+    return any(asks_requirement(sentence) for text in ours for sentence in _split(text))
+
+
+def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=None, earlier=(), language: str = "en") -> tuple[str, bool]:
+    """Step 2's first half before its cluster question (brief Part 5): on the rent track, once step 1 is done (for_client
+    false, recorded this turn or known) and neither the balcony nor the move-in is known or was ever asked, a reply that
+    asks the cluster and nothing of step 2's first half gets code's balcony and move-in question in the cluster question's
+    place; the cluster comes next turn (cluster_first, requirement_asked_last). The 2e real-model gate, round 15:
+    shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?" in one run of two."""
+    if track != RENT or unit not in (STUDIO, ONE_BR):
+        return reply, False
+    known = {**(facts or {}), **{key: value for key, value in answer["facts"].items() if value is not None}}
+    if known.get("for_client") is not False or known.get("balcony") not in (None, "") or known.get("move_in") not in (None, ""):
+        return reply, False
+    if _requirement_asked_before(earlier):
+        return reply, False
+    sentences = _split(reply)
+    if any(asks_requirement(sentence) for sentence in sentences) or not any(asks_cluster(sentence) for sentence in sentences):
+        return reply, False
+    kept = [sentence for sentence in sentences if not asks_cluster(sentence) and not rules.asks_question(sentence)]
+    return " ".join([*kept, _BALCONY_MOVE[_lang(language)]]), True
+
+
 def cluster_first(
     reply: str, answer: dict, *, track: str, unit: str, clusters=(), facts=None, texts=(), earlier=(), language: str = "en",
     residential_facts=None, visit_open: bool = False, sending: bool = False,
@@ -2787,6 +2812,9 @@ def settle(
         reply, changed = _drop(reply, lambda s: names_colleague(s, staff))
         if changed:
             cut.append("colleague_named")
+        reply, changed = requirement_first(reply, answer, track=track, unit=unit, facts=facts, earlier=earlier, language=language)
+        if changed:
+            cut.append("requirement_first")
         reply, cluster_line, changed = cluster_first(
             reply, answer, track=track, unit=unit, clusters=clusters, facts=facts, texts=texts, earlier=earlier, language=language,
             residential_facts=residential_facts, visit_open=visit_open, sending=sending,

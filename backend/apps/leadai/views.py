@@ -231,6 +231,8 @@ def serialize_ai(conversation, settings_row=None, *, thinking=None, note=None) -
         "handed_over_at": _iso(state.handed_over_at) if state else None,
         "handover_reason": state.handover_reason if state else "",
         "handover_label": _handover_label(state),
+        # The community the chat is about (assistant/communities.py), "" until a turn decided it.
+        "community": (state.community or "") if state else "",
         # The co-pilot's draft reply for the agent (assistant/copilot.py), or null.
         "draft": (state.draft or None) if state else None,
         # The customer's earlier chats on our other numbers (assistant/memory.py), one line each, for the agent: the chat
@@ -918,3 +920,67 @@ def assistant_settings(request):
             row.consecutive_failures = 0
         row.save()
     return Response(serialize_settings(row, request.user))
+
+
+# Reports and communities ------------------------------------------------------------------------
+
+
+DIGEST_DAYS_MAX = 60
+
+
+def serialize_digest(row) -> dict:
+    return {"day": row.day.isoformat(), "stats": row.stats, "text": row.text, "sent_to": list(row.sent_to or []), "errors": list(row.errors or []), "created_at": _iso(row.created_at)}
+
+
+@api_view(["GET"])
+def digests(request):
+    """The Reports dialog (assistant/digest.py): the stored daily digests, newest first, and today's figures so far
+    (counts only, computed now). ``days``: how many stored days, 14 by default."""
+    from .assistant import digest
+    from .models import LeadAiDigest
+
+    try:
+        days = max(1, min(DIGEST_DAYS_MAX, int(request.GET.get("days", 14))))
+    except (TypeError, ValueError):
+        days = 14
+    now = timezone.now()
+    today = digest.compute(digest.today(now), now)
+    return Response({
+        "today": {"day": today["day"], "stats": today, "text": digest.text(today)},
+        "digests": [serialize_digest(row) for row in LeadAiDigest.objects.order_by("-day")[:days]],
+        "digest_hour": digest.DIGEST_HOUR,
+    })
+
+
+def serialize_community(pack) -> dict:
+    return {
+        "id": pack.pk,
+        "name": pack.name,
+        "aliases": list(pack.aliases or []),
+        "sub_areas": list(pack.sub_areas or []),
+        "units": list(pack.units or []),
+        "bands": dict(pack.bands or {}),
+        "facts_text": pack.facts_text,
+        "meeting": pack.meeting,
+        "meeting_address": pack.meeting_address,
+        "maps_url": pack.maps_url,
+        "shops": bool(pack.shops),
+        "call_first_sale": bool(pack.call_first_sale),
+        "languages": list(pack.languages or []),
+        "pf_location_ids": list(pack.pf_location_ids or []),
+        "active": bool(pack.active),
+        "units_live": pack.units_live if hasattr(pack, "units_live") else None,
+        "updated_at": _iso(pack.updated_at),
+    }
+
+
+@api_view(["GET"])
+def communities(request):
+    """The community packs (assistant/communities.py), every one, with how many inventory units each has live."""
+    from django.db.models import Count, OuterRef, Subquery
+
+    from .models import LeadAiCommunity, LeadAiUnit
+
+    live = LeadAiUnit.objects.filter(active=True, community__iexact=OuterRef("name")).order_by().values("community").annotate(n=Count("id")).values("n")
+    rows = LeadAiCommunity.objects.annotate(units_live=Subquery(live[:1])).order_by("name")
+    return Response({"communities": [serialize_community(row) for row in rows], "can_edit": _can_edit(request.user)})

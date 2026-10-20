@@ -43,7 +43,7 @@ class LeadAiChatStateAdmin(admin.ModelAdmin):
     list_display = (
         "conversation", "stopped_at", "stop_reason", "paused_at", "handed_over_at", "language",
         # The shops chats' automatic follow-ups (followups.py).
-        "followup_due_at", "template_b_sent_at", "nudges", "updated_at",
+        "followup_due_at", "template_b_sent_at", "nudges", "community", "updated_at",
     )
     raw_id_fields = ("conversation", "paused_by", "responsible_agent")
 
@@ -117,3 +117,25 @@ class LeadAiAlertAdmin(admin.ModelAdmin):
     list_display = ("kind", "priority", "conversation", "agent", "bitrix_user_id", "panel_sent_at", "bitrix_sent_at", "created_at")
     list_filter = ("kind", "priority")
     raw_id_fields = ("conversation", "appointment", "agent")
+
+
+from .models import LeadAiCommunity, LeadAiDigest  # noqa: E402 - the day-2 models (assistant/digest.py, assistant/communities.py)
+
+
+@admin.register(LeadAiDigest)
+class LeadAiDigestAdmin(admin.ModelAdmin):
+    list_display = ("day", "created_at", "sent_to", "errors")
+    readonly_fields = ("day", "stats", "text", "sent_to", "errors", "created_at")
+    ordering = ("-day",)
+
+
+@admin.register(LeadAiCommunity)
+class LeadAiCommunityAdmin(admin.ModelAdmin):
+    list_display = ("name", "active", "shops", "meeting", "updated_at")
+    list_filter = ("active", "shops", "meeting")
+    search_fields = ("name", "aliases")
+    fieldsets = (
+        (None, {"fields": ("name", "active", "aliases", "sub_areas", "units")}),
+        ("What the assistant may quote", {"fields": ("bands", "facts_text")}),
+        ("Meeting point and playbook", {"fields": ("meeting", "meeting_address", "maps_url", "shops", "call_first_sale", "languages", "pf_location_ids")}),
+    )

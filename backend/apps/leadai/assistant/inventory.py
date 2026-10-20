@@ -152,8 +152,50 @@ def place_of(title: str) -> tuple[str, str]:
     return community, sub
 
 
-def pf_row(item: dict) -> dict | None:
-    """A LeadAiUnit's fields from one Property Finder listing, or None when it carries no price."""
+# The location tree (GET /v1/locations?filter[id]=): a listing gives a location id only; the tree names the community
+# ("Villanova") and the sub-community ("La Violeta"). Read once per id per process, at most this many ids a sync.
+PF_LOCATIONS_AT_MOST = 300
+_LOCATIONS: dict = {}
+
+
+def pf_location(client: httpx.Client, token: str, location_id) -> dict | None:
+    """The location's {id, name, type, tree: [{id, name, type}]} from Property Finder, None when it gives none."""
+    try:
+        response = client.get(
+            f"{PF_BASE}/v1/locations",
+            params={"filter[id]": location_id},
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        body = response.json()
+    except Exception as exc:  # noqa: BLE001 - a nameless location is a unit without a community, never a lost sync
+        logger.info("Lead AI inventory: location %s not read (%s)", location_id, str(exc)[:80])
+        return None
+    data = body.get("data") if isinstance(body, dict) else None
+    first = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else None
+    return first if first is not None and str(first.get("id")) == str(location_id) else None
+
+
+def place_from_tree(location: dict | None) -> tuple[str, str]:
+    """(community, sub-area) from a location's tree: the COMMUNITY node, as the bot names it when it knows the name
+    (_COMMUNITY_WORDS: "International City Phase 2 (Al Warsan 4)" is International City), and the first SUBCOMMUNITY."""
+    if not isinstance(location, dict):
+        return "", ""
+    tree = [node for node in (location.get("tree") or []) if isinstance(node, dict)]
+    community = next((str(node.get("name") or "") for node in tree if node.get("type") == "COMMUNITY"), "")
+    low = community.lower()
+    for word, name in _COMMUNITY_WORDS:
+        if word in low:
+            community = name
+            break
+    subs = [str(node.get("name") or "") for node in tree if node.get("type") == "SUBCOMMUNITY"]
+    sub = subs[0] if subs else (str(location.get("name") or "") if location.get("type") == "SUBCOMMUNITY" else "")
+    return community[:80], sub[:80]
+
+
+def pf_row(item: dict, location: dict | None = None) -> dict | None:
+    """A LeadAiUnit's fields from one Property Finder listing, or None when it carries no price. ``location``: the
+    listing's location tree (pf_location), which names the community and the sub-area the title does not."""
     price = item.get("price") or {}
     amounts = price.get("amounts") or {}
     kind = str(price.get("type") or "")
@@ -170,6 +212,8 @@ def pf_row(item: dict) -> dict | None:
         return None
     title = str((item.get("title") or {}).get("en") or "")
     community, sub_area = place_of(title)
+    tree_community, tree_sub = place_from_tree(location)
+    community, sub_area = community or tree_community, sub_area or tree_sub
     images = ((item.get("media") or {}).get("images") or [])[:PHOTOS_KEPT]
     photos = [str((image.get("original") or {}).get("url") or "") for image in images if isinstance(image, dict)]
     updated = item.get("updatedAt")
@@ -206,7 +250,10 @@ def sync_pf() -> dict:
         token = pf_token(client)
         for item in pf_listings(client, token):
             source_id = str(item.get("id") or "")
-            row = pf_row(item) if source_id else None
+            location_id = (item.get("location") or {}).get("id") if isinstance(item.get("location"), dict) else None
+            if location_id and location_id not in _LOCATIONS and len(_LOCATIONS) < PF_LOCATIONS_AT_MOST:
+                _LOCATIONS[location_id] = pf_location(client, token, location_id)
+            row = pf_row(item, _LOCATIONS.get(location_id)) if source_id else None
             if row is None:
                 continue
             LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.PF, source_id=source_id, defaults={**row, "active": True})

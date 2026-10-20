@@ -19,6 +19,10 @@ urlpatterns = [
     path("chats/<int:pk>/appointment/take/", views.appointment_take, name="appointment-take"),
     path("desk/", views.desk_counts, name="desk-counts"),
     path("settings/", views.assistant_settings, name="settings"),
+    # The daily digests (assistant/digest.py) for the Reports dialog: the stored days and today so far.
+    path("digests/", views.digests, name="digests"),
+    # The community packs (assistant/communities.py): the list for the panel; edited in Django admin for now.
+    path("communities/", views.communities, name="communities"),
     # The shops playbook's media library (board T30).
     path("shop-media/", media_views.library, name="shop-media"),
     path("shop-media/reorder/", media_views.reorder, name="shop-media-reorder"),

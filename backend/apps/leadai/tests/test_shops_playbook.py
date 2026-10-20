@@ -53,7 +53,9 @@ WEDNESDAY_5PM = dt.datetime(2026, 10, 14, 17, 0, tzinfo=DUBAI)
 ADDRESS = DEFAULT_OFFICE_ADDRESS
 FIELDS_URL = "https://bitrix.test/bitrix/tools/a7_leadai_fields.php"
 # The general prompt, its correction and its schema as they were before this batch (git HEAD e184492).
-SYSTEM_SHA = "8fc2c8f68263f5babdf2f8219d718494486b201175c9af4e910f535c129d9466"
+# Round 15 (2026-10-20) added the PREVIOUS CHATS rule to the general prompt too (the customer memory, assistant/memory.py):
+# a deliberate change, so the hash moved from 8fc2c8f6… to this one.
+SYSTEM_SHA = "42f119e2d6a797a1ccc305f12f57a0bb0eeee4e347f12a49e2257e9e3e93a006"
 CORRECTION_SHA = "fade4cc01e55b5549099487bce35aadfc8ee4167c3c0e631ebd2fac342989137"
 SCHEMA_SHA = "c34ccbb4dc47ef61353480f478783b558dc2b6f79a52d40cb6e0298178569f36"
 # Code's two slots at NOW (14:00): an hour ahead at least, two hours apart (launch review issue 17: hours.OFFER_LEAD).

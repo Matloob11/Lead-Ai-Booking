@@ -240,6 +240,9 @@ class LeadAiChatState(models.Model):
     track = models.CharField(max_length=16, blank=True, default="", db_default="")
     unit = models.CharField(max_length=16, blank=True, default="", db_default="")
     track_changed_at = models.DateTimeField(null=True, blank=True)
+    # The community the chat is about (assistant/communities.py: its pack's name, "International City" for the campaigns
+    # of 2026; from the lead context, the customer's words or the default), stored by the turn that decided it.
+    community = models.CharField(max_length=80, blank=True, default="", db_default="")
     # The Bitrix lead's own words on what they asked about (assistant/lead_context.py; board T91): the portal, the
     # listing ref and link, the unit, the cluster, rent or sale, the budget, read once (``lead_context_at``) with
     # three tries (``lead_context_tries``), as data. None until read.
@@ -839,3 +842,59 @@ class LeadAiTranscript(models.Model):
     @property
     def heard(self) -> bool:
         return bool(self.text) and not self.error
+
+
+class LeadAiDigest(models.Model):
+    """One day of the Lead AI in numbers (assistant/digest.py; the advance plan's workstream A2): replies, late answers,
+    handovers and who took them, the co-pilot's drafts, bookings, opt-outs and the model's cost, for the Dubai calendar
+    day ``day``. Written by the sweep the next morning (and for the panel's Reports dialog), sent once as a Bitrix
+    notification to the admins and the alert list; ``sent_to`` keeps the Bitrix user ids it reached."""
+
+    day = models.DateField(unique=True)
+    stats = models.JSONField(default=dict, blank=True)
+    text = models.TextField(blank=True)
+    sent_to = models.JSONField(default=list, blank=True)
+    errors = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-day"]
+
+    def __str__(self):
+        return f"Lead AI digest for {self.day:%Y-%m-%d}"
+
+
+class LeadAiCommunity(models.Model):
+    """A community pack (assistant/communities.py; the advance plan's workstream B): what the assistant knows of one
+    community — the names customers write it by, its sub-areas (clusters, phases, districts), the unit types sold or
+    rented there, the price bands it may quote when the inventory has no match, free facts lines, the meeting point and
+    the playbook knobs. International City's pack carries the residential facts of the AI settings; the others start
+    empty (no band, no claim) until a person fills them. Edited in Django admin for now; the panel screen follows."""
+
+    class Meeting(models.TextChoices):
+        OFFICE = "office", "Our office"
+        ONSITE = "onsite", "On site"
+
+    name = models.CharField(max_length=80, unique=True)
+    aliases = models.JSONField(default=list, blank=True)  # ["ic", "international city", "انٹرنیشنل سٹی"]
+    sub_areas = models.JSONField(default=list, blank=True)  # [{"name": "Spain Cluster", "aliases": ["spain"]}]
+    units = models.JSONField(default=list, blank=True)  # ["studio", "one_br", "two_plus", "villa", "townhouse", "shop"]
+    bands = models.JSONField(default=dict, blank=True)  # {"rent": {"studio": {"from": 29000, "to": 33000}}, "sale": {...}}
+    facts_text = models.TextField(blank=True)  # free lines the model may quote (one per line)
+    meeting = models.CharField(max_length=8, choices=Meeting.choices, default=Meeting.OFFICE)
+    meeting_address = models.CharField(max_length=255, blank=True)  # blank: the AI settings' office address
+    maps_url = models.URLField(max_length=500, blank=True)
+    shops = models.BooleanField(default=False)  # the shops flow runs here (International City only in 2026)
+    call_first_sale = models.BooleanField(default=True)  # a buyer gets the sales call before a visit
+    languages = models.JSONField(default=list, blank=True)
+    pf_location_ids = models.JSONField(default=list, blank=True)  # Property Finder location ids of the community
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name_plural = "Lead AI communities"
+
+    def __str__(self):
+        return self.name

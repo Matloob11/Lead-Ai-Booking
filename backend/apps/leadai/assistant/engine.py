@@ -187,6 +187,7 @@ from . import (
     calls,
     caps,
     claims,
+    communities,
     copilot,
     crm,
     crm_facts,
@@ -4412,10 +4413,17 @@ def _run_claimed(
         if res:
             # The rent flow's block (spec §2.3): the lead context is read for it (once per chat, lead_context.for_turn).
             lead_now = track_inputs["lead"].get()
+            # The chat's community (communities.py: what it stored, the lead context, their words, else International
+            # City), stored on the state for the panel and the next turn; code's own, never the model's.
+            pack, pack_why = communities.for_turn(stored=state.community, words=words_now, lead=lead_now)
+            if pack.name != (state.community or ""):
+                LeadAiChatState.objects.filter(pk=state.pk).update(community=pack.name)
+                state.community = pack.name
+                logger.info("Lead AI chat %s is about %s (%s)", conversation.pk, pack.name, pack_why)
             # The real units the bot may quote (inventory.py): the chat's community, clusters, unit and deal; none, and
             # the band answers as before.
             if inventory.LIVE:
-                units = inventory.matches(inventory.DEFAULT_COMMUNITY, decision.clusters, decision.unit, inventory.deal_of(decision.track))
+                units = inventory.matches(pack.name, decision.clusters, decision.unit, inventory.deal_of(decision.track))
             # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
             sale_parts = sales.context_parts(
                 facts, decision.unit, decision.clusters,

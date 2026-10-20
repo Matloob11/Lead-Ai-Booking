@@ -177,3 +177,81 @@ class SyncTests(TestCase):
         self.assertEqual(result, {"upserted": 1, "skipped": 1, "gone": 0})
         self.assertEqual(LeadAiUnit.objects.get(source="bitrix", source_id="103048:sale").community, "Haven by Aldar")
         self.assertEqual(len(calls), 3)
+
+
+PF_TOWNHOUSE_NO_PLACE = {
+    "id": "03",
+    "reference": "a7group-2001",
+    "type": "townhouse",
+    "bedrooms": "3",
+    "size": 2100,
+    "price": {"amounts": {"sale": 3200000}, "type": "sale"},
+    "title": {"en": "Rented | 3BR Townhouse | Great Investment"},
+    "location": {"id": 12110},
+    "media": {"images": []},
+}
+LA_VIOLETA = {
+    "id": 12110, "name": "La Violeta 2", "type": "SUBCOMMUNITY",
+    "tree": [{"id": 1, "name": "Dubai", "type": "CITY"}, {"id": 8780, "name": "Villanova", "type": "COMMUNITY"}, {"id": 16041, "name": "La Violeta", "type": "SUBCOMMUNITY"}, {"id": 12110, "name": "La Violeta 2", "type": "SUBCOMMUNITY"}],
+}
+
+
+class LocationTreeTests(TestCase):
+    """The location tree names the community the title does not (round 16: 72 of 142 live listings had none)."""
+
+    def setUp(self):
+        inventory._LOCATIONS.clear()
+        self.addCleanup(inventory._LOCATIONS.clear)
+
+    def test_the_tree_names_the_community_and_the_sub_area(self):
+        self.assertEqual(inventory.place_from_tree(LA_VIOLETA), ("Villanova", "La Violeta"))
+        phase_2 = {"id": 16333, "name": "International City Phase 2 (Al Warsan 4)", "type": "COMMUNITY", "tree": [{"id": 16333, "name": "International City Phase 2 (Al Warsan 4)", "type": "COMMUNITY"}]}
+        self.assertEqual(inventory.place_from_tree(phase_2), ("International City", ""))
+        self.assertEqual(inventory.place_from_tree(None), ("", ""))
+        row = inventory.pf_row(PF_TOWNHOUSE_NO_PLACE, LA_VIOLETA)
+        self.assertEqual((row["community"], row["sub_area"], row["unit"], row["price"]), ("Villanova", "La Violeta", inventory.TOWNHOUSE, 3200000))
+        # The title's own place wins over the tree.
+        row = inventory.pf_row(PF_SHOP, LA_VIOLETA)
+        self.assertEqual((row["community"], row["sub_area"]), ("International City", "China Cluster"))
+
+    def test_the_sync_reads_each_location_once(self):
+        calls = []
+
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, **kwargs):
+                return FakeResponse({"accessToken": "t", "expiresIn": 1800})
+
+            def get(self, url, **kwargs):
+                calls.append(url)
+                if url.endswith("/locations"):
+                    wanted = kwargs["params"]["filter[id]"]
+                    return FakeResponse({"data": [LA_VIOLETA] if wanted == 12110 else []})
+                return FakeResponse({"results": [PF_TOWNHOUSE_NO_PLACE, {**PF_TOWNHOUSE_NO_PLACE, "id": "04", "reference": "a7group-2002"}, {**PF_SHOP, "location": {"id": 99}}], "pagination": {"nextPage": None}})
+
+        with self.settings(LEADAI_PF_API_KEY="k", LEADAI_PF_API_SECRET="s"), patch.object(inventory.httpx, "Client", FakeClient):
+            result = inventory.sync_pf()
+        self.assertEqual(result, {"upserted": 3, "gone": 0})
+        self.assertEqual(calls.count("https://atlas.propertyfinder.com/v1/locations"), 2)  # 12110 once for two listings, 99 once
+        self.assertEqual(LeadAiUnit.objects.get(source_id="03").community, "Villanova")
+        self.assertEqual(LeadAiUnit.objects.get(source_id="04").sub_area, "La Violeta")
+        self.assertEqual(LeadAiUnit.objects.get(source_id=PF_SHOP["id"]).community, "International City")
+        self.assertEqual(inventory._LOCATIONS, {12110: LA_VIOLETA, 99: None})
