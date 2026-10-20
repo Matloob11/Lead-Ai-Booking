@@ -231,6 +231,8 @@ def serialize_ai(conversation, settings_row=None, *, thinking=None, note=None) -
         "handed_over_at": _iso(state.handed_over_at) if state else None,
         "handover_reason": state.handover_reason if state else "",
         "handover_label": _handover_label(state),
+        # The co-pilot's draft reply for the agent (assistant/copilot.py), or null.
+        "draft": (state.draft or None) if state else None,
         "language": state.language if state else "",
         "facts": {k: v for k, v in ((state.facts if state else {}) or {}).items() if v not in (None, "")},
     }
@@ -427,6 +429,52 @@ def chat_pause_ai(request, pk):
 
 
 @api_view(["POST"])
+def chat_draft_ask(request, pk):
+    """Ask AI (the co-pilot): the agent's question about this chat, or "write me a reply", answered as a draft by a
+    task (copilot.ask); the screen hears ai.changed when it lands."""
+    from .assistant import copilot
+    from .tasks import copilot_ask
+
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    question = " ".join(str(request.data.get("question") or "").split())[: copilot.ASK_MAX]
+    if not question:
+        return Response({"detail": "Ask something first."}, status=status.HTTP_400_BAD_REQUEST)
+    transaction.on_commit(lambda pk=conversation.pk, q=question, who=request.user.pk: copilot_ask.delay(pk, q, who))
+    return Response({"ok": True})
+
+
+@api_view(["POST"])
+def chat_draft_used(request, pk):
+    """The agent sent the draft (as it was, or edited: ``text`` is what went out): its fate recorded, the draft cleared."""
+    from .assistant import copilot
+    from .models import LeadAiDraftOutcome
+
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    state = LeadAiChatState.for_conversation(conversation)
+    sent_text = " ".join(str(request.data.get("text") or "").split())
+    draft_text = " ".join(str((state.draft or {}).get("text") or "").split())
+    kind = LeadAiDraftOutcome.Kind.SENT if sent_text == draft_text else LeadAiDraftOutcome.Kind.EDITED
+    copilot.close(conversation, state, kind, agent=request.user, sent_text=sent_text)
+    _changed(conversation.pk)
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    return Response(serialize_lead_ai_conversation(conversation))
+
+
+@api_view(["POST"])
+def chat_draft_dismiss(request, pk):
+    """The agent dropped the draft: recorded (the knowledge base learns from a no too), cleared."""
+    from .assistant import copilot
+    from .models import LeadAiDraftOutcome
+
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    state = LeadAiChatState.for_conversation(conversation)
+    copilot.close(conversation, state, LeadAiDraftOutcome.Kind.DISMISSED, agent=request.user)
+    _changed(conversation.pk)
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    return Response(serialize_lead_ai_conversation(conversation))
+
+
+@api_view(["POST"])
 def chat_resume_ai(request, pk):
     """Let the assistant answer again: after a pause, an opt-out, an automatic-reply stop or a handover.
     A stop the assistant read as spam or a wrong number also takes the phone off the opt-out
@@ -445,6 +493,7 @@ def chat_resume_ai(request, pk):
         handed_over_at=None,
         handover_reason="",
         holding_line_at=None,
+        draft=None,  # the co-pilot's draft goes with the handover (assistant/copilot.py)
     )
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)

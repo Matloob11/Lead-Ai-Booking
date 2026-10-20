@@ -246,6 +246,10 @@ class LeadAiChatState(models.Model):
     lead_context = models.JSONField(null=True, blank=True)
     lead_context_at = models.DateTimeField(null=True, blank=True)
     lead_context_tries = models.PositiveSmallIntegerField(default=0, db_default=0)
+    # The co-pilot (assistant/copilot.py; Matloob 2026-10-20): while a person has the chat, what the assistant would
+    # have said, kept for the agent to send, edit or drop — {"text", "at", "reason", "kind", "language", "question",
+    # "by"}. None when there is none. Cleared when the handover clears, when it is used or dismissed.
+    draft = models.JSONField(null=True, blank=True)
     # The CRM record's responsible person, looked up once and cached.
     responsible_bitrix_user_id = models.CharField(max_length=16, blank=True)
     responsible_agent = models.ForeignKey(
@@ -306,6 +310,9 @@ class LeadAiSettings(models.Model):
     residential_facts = models.JSONField(default=default_residential_facts, blank=True)
     brand_name = models.CharField(max_length=80, default=DEFAULT_BRAND_NAME, db_default=DEFAULT_BRAND_NAME)
     viewing_agent_name = models.CharField(max_length=60, blank=True, default="", db_default="")
+    # The co-pilot (assistant/copilot.py): an ordinary draft nobody sent or dropped goes out by itself after this many
+    # minutes (Matloob 2026-10-20: 15; 0 turns it off). A draft for a person (a call, a complaint, legal) never does.
+    copilot_auto_send_minutes = models.PositiveSmallIntegerField(default=15, db_default=15)
     # Circuit breaker: after repeated OpenAI failures the assistant pauses itself.
     paused_until = models.DateTimeField(null=True, blank=True)
     consecutive_failures = models.PositiveSmallIntegerField(default=0)
@@ -346,6 +353,33 @@ class LeadAiSettings(models.Model):
             return True
         digits = "".join(ch for ch in str(wa_id or "") if ch.isdigit())
         return bool(digits) and digits in {"".join(c for c in str(n) if c.isdigit()) for n in (self.test_numbers or [])}
+
+
+class LeadAiDraftOutcome(models.Model):
+    """What became of a co-pilot draft (assistant/copilot.py): the raw material of the knowledge base (the advance plan,
+    workstream E). ``draft_text`` is what the assistant proposed, ``sent_text`` what went out (the agent's own words
+    when they edited it, the draft itself when sent as it was or by itself), ``kind`` how."""
+
+    class Kind(models.TextChoices):
+        SENT = "sent", "Sent as it was"
+        EDITED = "edited", "Edited and sent"
+        AUTO = "auto", "Sent by itself"
+        DISMISSED = "dismissed", "Dismissed"
+
+    conversation = models.ForeignKey("inbox.Conversation", on_delete=models.CASCADE, related_name="lead_ai_draft_outcomes")
+    agent = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    reason = models.CharField(max_length=40, blank=True)  # the handover reason the draft answered
+    question = models.CharField(max_length=500, blank=True)  # the agent's own question, for an Ask AI draft
+    draft_text = models.TextField()
+    sent_text = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["conversation", "created_at"])]
+
+    def __str__(self):
+        return f"Draft {self.kind} on conversation {self.conversation_id}"
 
 
 class LeadAiTurn(models.Model):

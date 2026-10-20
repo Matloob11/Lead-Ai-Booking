@@ -187,6 +187,7 @@ from . import (
     calls,
     caps,
     claims,
+    copilot,
     crm,
     crm_facts,
     crm_fields,
@@ -214,6 +215,7 @@ from . import (
     tracks,
     transcribe,
     transcript,
+    turn_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -3531,41 +3533,46 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "", re
             raise NotReady(AUDIO_WAITS[min(attempt, len(AUDIO_WAITS) - 1)], "voice note downloading")
         heard[item.pk] = text
 
-    turn = caps.reclaim(message, now) if requeued else _claim(message)
-    if turn is None:
-        return _skip("already handled")
+    # One turn at a time in a chat (turn_lock, issue I02): a second one waits and comes back to a chat that has the
+    # first reply in it already. Taken before the turn row exists, so a waiting turn claims nothing.
+    with turn_lock.leased(conversation.pk) as mine:
+        if mine is False:
+            raise NotReady(turn_lock.RETRY_IN, turn_lock.WAITING)
+        turn = caps.reclaim(message, now) if requeued else _claim(message)
+        if turn is None:
+            return _skip("already handled")
 
-    live.thinking(conversation, True)
-    # What a booking holds until it is stored (the office lock); let go however the turn ends.
-    hold = contextlib.ExitStack()
-    try:
-        outcome = _run_claimed(
-            turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline, playbook=playbook,
-            hold=hold,
-        )
-        if turn.calls:
-            _breaker_ok(settings_row)
-    except SoftTimeLimitExceeded:
-        outcome = Outcome(LeadAiTurn.Status.FAILED, "interrupted: time limit")
-        turn.error = "SoftTimeLimitExceeded"
-        _alert_interrupted(conversation, chat)
-    except openai_client.AssistantError as exc:
-        outcome = Outcome(LeadAiTurn.Status.FAILED, f"OpenAI: {exc.code}")
-        turn.error = str(exc)[:2000]
-        if _error_kind(exc) == "content":
-            # OpenAI answered, just not usefully: this chat's agent is told; no outage.
-            _alert_failure(conversation, chat, exc.code)
-        else:
-            _breaker_failed(settings_row, exc, conversation, chat)
-    except Exception as exc:  # noqa: BLE001 - recorded on the turn, told to the agent
-        logger.exception("Lead AI turn failed on message %s", message_id)
-        outcome = Outcome(LeadAiTurn.Status.FAILED, type(exc).__name__)
-        turn.error = str(exc)[:2000]
-        _alert_failure(conversation, chat, type(exc).__name__)
-    finally:
-        hold.close()
-        live.thinking(conversation, False)
-    return _finish(turn, outcome)
+        live.thinking(conversation, True)
+        # What a booking holds until it is stored (the office lock); let go however the turn ends.
+        hold = contextlib.ExitStack()
+        try:
+            outcome = _run_claimed(
+                turn, message, conversation, chat, state, settings_row, burst, heard, now, revoked, deadline, playbook=playbook,
+                hold=hold,
+            )
+            if turn.calls:
+                _breaker_ok(settings_row)
+        except SoftTimeLimitExceeded:
+            outcome = Outcome(LeadAiTurn.Status.FAILED, "interrupted: time limit")
+            turn.error = "SoftTimeLimitExceeded"
+            _alert_interrupted(conversation, chat)
+        except openai_client.AssistantError as exc:
+            outcome = Outcome(LeadAiTurn.Status.FAILED, f"OpenAI: {exc.code}")
+            turn.error = str(exc)[:2000]
+            if _error_kind(exc) == "content":
+                # OpenAI answered, just not usefully: this chat's agent is told; no outage.
+                _alert_failure(conversation, chat, exc.code)
+            else:
+                _breaker_failed(settings_row, exc, conversation, chat)
+        except Exception as exc:  # noqa: BLE001 - recorded on the turn, told to the agent
+            logger.exception("Lead AI turn failed on message %s", message_id)
+            outcome = Outcome(LeadAiTurn.Status.FAILED, type(exc).__name__)
+            turn.error = str(exc)[:2000]
+            _alert_failure(conversation, chat, type(exc).__name__)
+        finally:
+            hold.close()
+            live.thinking(conversation, False)
+        return _finish(turn, outcome)
 
 
 def _finish(turn, outcome: Outcome) -> Outcome:
@@ -4195,9 +4202,10 @@ def _run_claimed(
     if state.handed_over_at and (
         now - state.handed_over_at > HANDOVER_QUIET or human_after(message, campaign_templates, since=state.handed_over_at)
     ):
-        LeadAiChatState.objects.filter(pk=state.pk).update(handed_over_at=None, handover_reason="", holding_line_at=None)
+        LeadAiChatState.objects.filter(pk=state.pk).update(handed_over_at=None, handover_reason="", holding_line_at=None, draft=None)
         state.handed_over_at = None
         state.handover_reason = ""
+        state.draft = None  # the co-pilot's draft went with the handover (copilot.py)
 
     # The per-chat caps (caps.limits: a shops chat may send more); a shops chat's capped message is answered
     # once the cap frees (caps.to_answer), and its alert says so.
@@ -4455,6 +4463,9 @@ def _run_claimed(
             places=calls.places_for(tracks.SALE if sale else ""),
             call_taken=call_taken,
         )
+        # The co-pilot's draft (copilot.py): the model's own reply, before any guard rewrites or replaces it; _apply keeps
+        # it for the agent when a person has the chat.
+        answer["copilot_draft"] = answer["reply"]
         if (licence_media is not None or licence_page) and answer["handover"]["needed"] and answer["handover"]["reason"] == "media_received":
             answer["handover"] = {"needed": False, "reason": None}  # the photo is the licence we asked for
         if shops_chat:
@@ -4911,6 +4922,7 @@ def _run_claimed(
     elif shops_chat:
         # A shops reply may quote SHOP FACTS' own figures, and no other new one.
         rows_context = f"{rows_context} {shops.known_amounts(settings_row)}"
+    answer["copilot_context"] = rows_context  # the draft's amount filter reads the same words (copilot.draft_text)
     maps = settings_row.office_maps_url
     text = ""
     holding = False
@@ -5284,6 +5296,7 @@ def _run_claimed(
         # tap's answer later is not written in a script nobody wrote to them in (board review 2b).
         # A customer who types English letters reads them, whatever went out once: their lines stay so.
         answer.pop("line_language", None)
+    answer["copilot_sent"] = text  # what went out: the co-pilot keeps the model's words only when they differ (copilot.remember)
     done = _apply(
         conversation, chat, state, answer, action, when, appointment, now, sent=True, holding=holding, playbook=playbook,
         taken=taken, decision=decision,
@@ -5462,6 +5475,17 @@ def _apply(
             conversation.labels.add(broker_label())
             done["handover"] = BROKER
             done["broker"] = True
+        # The co-pilot (copilot.py): from the turn that hands the chat over, and on every turn while a person has it,
+        # the model's own words — the ones code did not send — wait for the agent as a draft.
+        if answer.get("copilot_draft") and (handover["needed"] or fresh.handed_over_at is not None or answer.get("broker")):
+            reason = fresh.handover_reason or str(handover.get("reason") or "") or (BROKER if answer.get("broker") else "unclear")
+            draft = copilot.remember(
+                answer, now, reason=reason, language=str(answer.get("line_language") or answer.get("language") or fresh.language or "")
+            )
+            if draft:
+                fresh.draft = draft
+                fields.append("draft")
+                done["draft"] = draft["kind"]
         if sent and action in ("confirm", "reschedule") and when is not None and fresh.not_interested_at is not None:
             fresh.not_interested_at = None  # they declined once, and have now booked
             fields.append("not_interested_at")

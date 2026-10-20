@@ -122,6 +122,7 @@ def send_due_reminders() -> None:
         _answer_capped,
         _flag_unanswered,
         _escalate_handovers,
+        _copilot_auto_send,
         _close_past_appointments,
         _agent_heads_up,
         _untaken_calls,
@@ -137,6 +138,28 @@ def send_due_reminders() -> None:
             raise
         except Exception:  # noqa: BLE001 - one job must not stop the others
             logger.exception("Lead AI sweep step %s failed", job.__name__)
+
+
+def _copilot_auto_send() -> None:
+    """The co-pilot's ordinary drafts nobody sent or dropped within the setting's minutes go out by themselves
+    (assistant/copilot.py; Matloob 2026-10-20: 15 minutes, never for a call, a complaint or legal)."""
+    from .assistant import copilot
+
+    sent = copilot.sweep()
+    if sent:
+        logger.info("Lead AI co-pilot sent %s draft(s) by itself", sent)
+
+
+@shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)
+def copilot_ask(conversation_id: int, question: str, agent_id: int | None = None) -> None:
+    """Ask AI (assistant/copilot.py): the agent's question answered as a draft on the chat."""
+    from apps.inbox.models import Conversation
+
+    from .assistant import copilot
+
+    conversation = Conversation.objects.filter(pk=conversation_id).select_related("contact").first()
+    if conversation is not None:
+        copilot.ask(conversation, question, agent_id)
 
 
 def _follow_ups() -> None:

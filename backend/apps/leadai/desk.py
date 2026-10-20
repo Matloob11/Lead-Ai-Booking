@@ -180,6 +180,7 @@ class NeedRow:
     since: dt.datetime | None
     reasons: tuple = ()  # why, in English for the agents ("Handed over: asked for a call", "Held 5:00 PM")
     kinds: tuple = ()  # HANDOVER, BROKER, HELD
+    draft: bool = False  # the co-pilot's draft reply waits for the agent (assistant/copilot.py)
 
     def as_dict(self) -> dict:
         return {
@@ -187,6 +188,7 @@ class NeedRow:
             "since": self.since.isoformat() if self.since else None,
             "reasons": list(self.reasons),
             "kinds": list(self.kinds),
+            "draft": self.draft,
         }
 
 
@@ -259,9 +261,12 @@ def needs_rows(queryset, now: dt.datetime | None = None) -> list[NeedRow]:
         .exclude(handover_reason=bitrix_status.HANDED_REASON)
         .annotate(person=_person_since("handed_over_at"), bitrix=_set_in_bitrix_since("handed_over_at"))
         .filter(person=False, bitrix=False)
-        .values_list("conversation_id", "handed_over_at", "handover_reason")
+        .values_list("conversation_id", "handed_over_at", "handover_reason", "draft")
     )
-    for conversation_id, since, reason in handed:
+    drafted: set[int] = set()
+    for conversation_id, since, reason, draft in handed:
+        if draft:
+            drafted.add(conversation_id)  # the co-pilot's draft waits for the agent (copilot.py)
         if reason == engine.BROKER:
             found.setdefault(conversation_id, []).append((BROKER, since, "Broker: waiting for a person"))
         else:
@@ -305,6 +310,7 @@ def needs_rows(queryset, now: dt.datetime | None = None) -> list[NeedRow]:
                 since=min(sinces) if sinces else None,
                 reasons=tuple(dict.fromkeys(text for _, _, text in items)),
                 kinds=tuple(dict.fromkeys(kind for kind, _, _ in items)),
+                draft=conversation_id in drafted,
             )
         )
     far = now + dt.timedelta(days=3650)

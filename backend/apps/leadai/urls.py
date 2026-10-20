@@ -10,6 +10,10 @@ urlpatterns = [
     path("chats/<int:pk>/move-to-inbox/", views.chat_move_to_inbox, name="chat-move-to-inbox"),
     path("chats/<int:pk>/pause-ai/", views.chat_pause_ai, name="chat-pause-ai"),
     path("chats/<int:pk>/resume-ai/", views.chat_resume_ai, name="chat-resume-ai"),
+    # The co-pilot (assistant/copilot.py): the agent's question as a draft, the draft used, the draft dropped.
+    path("chats/<int:pk>/draft/ask/", views.chat_draft_ask, name="chat-draft-ask"),
+    path("chats/<int:pk>/draft/used/", views.chat_draft_used, name="chat-draft-used"),
+    path("chats/<int:pk>/draft/dismiss/", views.chat_draft_dismiss, name="chat-draft-dismiss"),
     path("chats/<int:pk>/appointment/cancel/", views.appointment_cancel, name="appointment-cancel"),
     # The agent desk (batch 2e): I'll call, and the counts on Needs a person and Today.
     path("chats/<int:pk>/appointment/take/", views.appointment_take, name="appointment-take"),
