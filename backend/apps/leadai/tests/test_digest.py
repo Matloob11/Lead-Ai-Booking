@@ -40,8 +40,9 @@ class ComputeTests(DigestBase):
         )
         LeadAiDraftOutcome.objects.create(conversation=self.conversation, kind="auto", draft_text="x")
         LeadAiDraftOutcome.objects.create(conversation=self.conversation, kind="sent", draft_text="y", sent_text="y")
+        # One open appointment per chat (leadai_one_open_appointment): the call is a closed one of the same day.
         LeadAiAppointment.objects.create(conversation=self.conversation, status="confirmed", place="office", starts_at=NOW + dt.timedelta(days=1))
-        LeadAiAppointment.objects.create(conversation=self.conversation, status="tentative", place="call", starts_at=NOW + dt.timedelta(days=1))
+        LeadAiAppointment.objects.create(conversation=self.conversation, status="cancelled", place="call", starts_at=NOW + dt.timedelta(days=1))
         LeadAiOptOut.objects.create(phone="971509999999", source="leadai_stop", reason="stop", created_at=NOW - dt.timedelta(minutes=5))
         # Yesterday's turn is another day's.
         self.a_turn(minutes_ago=36 * 60)
@@ -55,7 +56,7 @@ class ComputeTests(DigestBase):
         self.assertEqual(stats["handovers"]["by"], {"Nabiha": 1})
         self.assertEqual(stats["handovers"]["reasons"], {"asked for a call": 1})
         self.assertEqual(stats["drafts"], {"sent": 1, "edited": 0, "auto": 1, "dismissed": 0})
-        self.assertEqual((stats["bookings"]["created"], stats["bookings"]["visits"], stats["bookings"]["calls"], stats["bookings"]["confirmed"]), (2, 1, 1, 1))
+        self.assertEqual((stats["bookings"]["created"], stats["bookings"]["visits"], stats["bookings"]["calls"], stats["bookings"]["confirmed"], stats["bookings"]["cancelled"]), (2, 1, 1, 1, 1))
         self.assertEqual(stats["opt_outs"], {"total": 1, "by_source": {"leadai_stop": 1}})
         # 5 turns of the day × (10,000 × $0.40 + 500 × $1.60) per million = $0.024.
         self.assertEqual(stats["cost"]["prompt_tokens"], 50_000)
@@ -66,7 +67,7 @@ class ComputeTests(DigestBase):
         self.assertIn("Replies: 3 in 1 chats (1 skipped, 1 failed); 1 late (over a minute); median 2.5 s.", text)
         self.assertIn("Handovers: 1 new; 1 taken by a person (median 14 min; Nabiha 1); 0 waiting now. Why: asked for a call 1.", text)
         self.assertIn("Drafts: 1 sent as written, 0 edited, 1 went out by themselves, 0 dismissed.", text)
-        self.assertIn("Bookings: 2 (1 office visits, 1 calls); 1 confirmed, 1 tentative, 0 cancelled.", text)
+        self.assertIn("Bookings: 2 (1 office visits, 1 calls); 1 confirmed, 0 tentative, 1 cancelled.", text)
         self.assertIn("Opt-outs: 1. Lead AI: asked us to stop 1.", text)
         self.assertNotIn("9999", text)  # never a customer's number
 

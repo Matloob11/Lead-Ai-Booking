@@ -37,12 +37,14 @@ class RequirementFirstTests(SimpleTestCase):
         reply, changed = residential.requirement_first(CLUSTER_ALONE, answer, track="rent", unit="studio", facts={"property_type": "studio"}, language="en")
         self.assertTrue(changed)
         self.assertEqual(reply, f"Perfect, you're looking for a studio in International City for yourself. {BALCONY_MOVE}")
-        # Step 2's first half asked already, or its answers known: the cluster question stands.
-        for facts in ({"for_client": False, "balcony": "yes"}, {"for_client": False, "move_in": "next month"}):
-            self.assertEqual(residential.requirement_first(CLUSTER_ALONE, {"facts": {}}, track="rent", unit="studio", facts=facts, language="en"), (CLUSTER_ALONE, False))
+        # Who it is for known before this turn (round 2's "Yes, book a viewing"): the model's own cluster question stands.
+        self.assertEqual(residential.requirement_first(CLUSTER_ALONE, answer, track="rent", unit="studio", facts={"for_client": False}, language="en"), (CLUSTER_ALONE, False))
+        # Step 2's first half answered in the same breath ("For myself, with a balcony"): the cluster question stands.
+        for fresh in ({"for_client": False, "balcony": "yes"}, {"for_client": False, "move_in": "next month"}):
+            self.assertEqual(residential.requirement_first(CLUSTER_ALONE, {"facts": fresh}, track="rent", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
         earlier = [("assistant", "Perfect. Do you prefer a balcony, and when are you planning to move?"), ("customer", "no balcony")]
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, answer, track="rent", unit="studio", facts={}, earlier=earlier, language="en"), (CLUSTER_ALONE, False))
-        # Step 1 not done, a one-bedroom on the sale track, or a reply that asks the balcony itself: untouched.
+        # Step 1 not answered, the sale track, or a reply that asks the balcony itself: untouched.
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, {"facts": {}}, track="rent", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, answer, track="sale", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
         asks_both = "Perfect. Do you prefer a balcony, and which cluster do you prefer?"
@@ -71,3 +73,4 @@ class NumberedQuestionsTests(SimpleTestCase):
         # Two numbered lines are no list; a line that asks nothing is no question.
         self.assertEqual(crm_facts._numbered_questions(["1. I am Madj.\n2. I sell desserts."]), [])
         self.assertEqual(crm_facts._numbered_questions(["1. I sell desserts.\n2. My shop is small.\n3. Is there a grease trap?"]), ["Is there a grease trap?"])
+        self.assertEqual(crm_facts._numbered_questions(["1) NOC possible\n2) Can the unit get Municipality approval\n3) grease trap?"]), ["Can the unit get Municipality approval", "grease trap?"])

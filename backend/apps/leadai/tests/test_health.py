@@ -30,15 +30,18 @@ class HealthTests(Base):
         self.assertIn("  leadai queue: 3 waiting", text)
         self.assertIn("  last hour: 1 replied, 0 skipped, 0 failed (0%); 0 late; p50 2.0 s, p95 2.0 s", text)
         self.assertIn("  inventory: 1 live (pf 1, bitrix 0), synced", text)
+        self.assertIn("  openai key: configured", text)
         self.assertIn("! digest: none yet", text)
         self.assertIn("today so far: Replies: 1 in 1 chats", text)
-        self.assertTrue(text.strip().endswith("HEALTH: WARN"), text)
+        self.assertTrue(text.strip().endswith("HEALTH: WARN"), text)  # the digest alone warns; the keys are the environment's
 
     def test_a_dead_sweep_and_a_missing_key_are_red(self):
         LeadAiSettings.objects.filter(pk=1).update(last_sweep_at=NOW - dt.timedelta(minutes=20))
         LeadAiChatState.objects.create(conversation=self.conversation, handed_over_at=NOW - dt.timedelta(hours=2), handover_reason="unclear")
         out = StringIO()
-        with patch("apps.leadai.management.commands.leadai_health.queue_depth", return_value=None), self.assertRaises(SystemExit):
+        with patch("apps.leadai.management.commands.leadai_health.queue_depth", return_value=None), patch(
+            "apps.leadai.assistant.openai_client.configured", return_value=False
+        ), self.assertRaises(SystemExit):
             call_command("leadai_health", stdout=out)
         text = out.getvalue()
         self.assertIn("X sweep (worker-leadai): 20 min ago", text)

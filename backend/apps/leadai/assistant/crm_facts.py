@@ -258,17 +258,29 @@ def their_questions(notes, texts) -> tuple[list[str], list[str]]:
 _NUMBERED = re.compile(r"(?:^|\n)\s*\(?(\d{1,2})[.)]\s+([^\n]+)")
 
 
-def _numbered_questions(texts) -> list[str]:
-    """The clauses of a numbered list in their words that ask something (people._ASKS), in order; [] unless the list has
-    three or more numbered lines (a bare "1." in a sentence is no list)."""
-    from . import people
+_QUESTION_OPENS = re.compile(
+    r"^(?:can|could|is|are|was|were|will|would|do|does|did|how|what|which|when|where|who|whom|whether|any|should|may|shall"
+    r"|kya|kia|kitna|kitni|kab|hal|هل|كم|متى|کیا|کتنا|کب|क्या|कितना|कब)\b",
+    re.IGNORECASE,
+)
 
+
+def _asks(clause: str) -> bool:
+    """A numbered line that asks: it ends with a question mark, or opens with a question word ("Can the landlord provide
+    an NOC"); "My shop is small" asks nothing, whatever people._ASKS reads into its "is"."""
+    text = " ".join(str(clause or "").split())
+    return text.endswith(("?", "؟")) or bool(_QUESTION_OPENS.match(text))
+
+
+def _numbered_questions(texts) -> list[str]:
+    """The clauses of a numbered list in their words that ask something (_asks), in order; [] unless the list has three
+    or more numbered lines (a bare "1." in a sentence is no list)."""
     out: list[str] = []
     for text in texts or ():
         found = [(int(number), clause.strip()) for number, clause in _NUMBERED.findall(str(text or ""))]
         if len(found) < 3:
             continue
-        out += [clause for _number, clause in found if clause and people._ASKS.search(clause)]
+        out += [clause for _number, clause in found if clause and _asks(clause)]
     return out
 
 

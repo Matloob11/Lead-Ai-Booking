@@ -2519,15 +2519,21 @@ def _requirement_asked_before(earlier) -> bool:
 
 
 def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=None, earlier=(), language: str = "en") -> tuple[str, bool]:
-    """Step 2's first half before its cluster question (brief Part 5): on the rent track, once step 1 is done (for_client
-    false, recorded this turn or known) and neither the balcony nor the move-in is known or was ever asked, a reply that
+    """Step 2's first half before its cluster question (brief Part 5): on the rent track, right after step 1 was answered
+    (for_client false recorded this turn, unknown before) while neither the balcony nor the move-in is known or was ever asked, a reply that
     asks the cluster and nothing of step 2's first half gets code's balcony and move-in question in the cluster question's
     place; the cluster comes next turn (cluster_first, requirement_asked_last). The 2e real-model gate, round 15:
     shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?" in one run of two."""
     if track != RENT or unit not in (STUDIO, ONE_BR):
         return reply, False
-    known = {**(facts or {}), **{key: value for key, value in answer["facts"].items() if value is not None}}
-    if known.get("for_client") is not False or known.get("balcony") not in (None, "") or known.get("move_in") not in (None, ""):
+    fresh = {key: value for key, value in answer["facts"].items() if value is not None}
+    known = {**(facts or {}), **fresh}
+    # Step 1 answered this very turn (the chat did not know who it is for; the model records an end user now): the next
+    # question is step 2's first half. Known before, the model's own cluster question stands (the 2e gate, round 2:
+    # shops-res-book-tap-template-b, "Yes, book a viewing" with for_client known got the cluster question, rightly).
+    if (facts or {}).get("for_client") is not None or fresh.get("for_client") is not False:
+        return reply, False
+    if known.get("balcony") not in (None, "") or known.get("move_in") not in (None, ""):
         return reply, False
     if _requirement_asked_before(earlier):
         return reply, False
