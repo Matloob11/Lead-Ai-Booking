@@ -128,6 +128,17 @@ function dayLabel(iso) {
   return DATE_FULL.format(date);
 }
 
+/** "+971501234567 · Coastline Properties": our number in full, then its name when the name is not the number itself. */
+export function ourNumberLabel(number) {
+  if (!number) return "—";
+  const phone = String(number.phone_number || "").replace(/\D/g, "");
+  const title = String(number.title || number.label || number.display_name || "").trim();
+  const titleIsPhone = Boolean(title && phone && title.replace(/\D/g, "") === phone);
+  if (phone && title && !titleIsPhone) return `+${phone} · ${title}`;
+  if (phone) return `+${phone}`;
+  return numberNameWithDial(number);
+}
+
 export function contactName(conversation) {
   const contact = conversation?.contact || {};
   const waId = String(contact.wa_id || "");
@@ -684,7 +695,8 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const note = aiNote(conversation.lead_ai_ai);
     const meta = [
       waId !== name ? waId : "",
-      conversation.number ? `on ${numberNameWithDial(conversation.number)}` : "",
+      // Our own number in full, with its name: the agent must see which of our lines this chat is on (Matloob 2026-10-20).
+      conversation.number ? `from ${ourNumberLabel(conversation.number)}` : "",
       conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
     ].filter(Boolean);
     // The shops assistant's "check back in a month" date, and a follow-up waiting for Meta, beside the chat's chips.
@@ -1143,6 +1155,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
         el("div.lai-locked", {}, [
           el("div.lai-locked__text", {}, [
             "The 24-hour window is closed. Only an approved template can go out until the customer writes back.",
+            el("div.lai-composer__from", {}, [`Messages to this customer go from our number ${ourNumberLabel(conversation.number)}.`]),
           ]),
           el("button.lai-btn.lai-btn--primary", { type: "button", onclick: openTemplates }, [
             icon("file", { size: 15 }),
@@ -1212,7 +1225,10 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       }
     }
 
-    clear(composer).append(el("div.lai-composer", {}, [attach, templates, input, send]));
+    clear(composer).append(
+      el("div.lai-composer", {}, [attach, templates, input, send]),
+      el("div.lai-composer__from", {}, [`Sending from our number ${ourNumberLabel(conversation.number)}.`]),
+    );
     state.submit = submit; // the co-pilot's "Send as me" sends through the same box (renderDraft)
     teardownFiles = bindFileSources({
       button: attach,
@@ -1247,6 +1263,9 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     openTemplateComposer({
       mode: "reply",
       conversation: state.conversation,
+      // New template and Sync from Meta inside the dialog, for this chat's business account (Matloob 2026-10-20).
+      canCreate: true,
+      isAdmin: Boolean(me?.is_wa_admin),
       templatesFor: async () => asList(await inbox.conversationTemplates(state.id), "templates"),
       // The composer outlives this chat when the agent opened another meanwhile.
       onSent: () => {

@@ -160,8 +160,14 @@ function mediaGlyph(format) {
  *   asked to type that same number back in would be the panel forgetting why
  *   it was opened.
  */
-export function openTemplateComposer({ mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting, to = "" }) {
+export function openTemplateComposer({
+  mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting, to = "", canCreate = false, isAdmin = false,
+}) {
   const isNew = mode === "new";
+  // Reply mode: the chat's own number, in full, and the two things an agent needs when the template they want is not in
+  // the list yet — write a new one for this number's business account, and refresh the list once Meta approved it
+  // (Matloob 2026-10-20: "which number did this go from, and how do I make a template for it from here?").
+  const ourNumber = !isNew && conversation && conversation.number ? conversation.number : null;
 
   const usable = numbers.find((n) => !n.send_blocked) || numbers[0];
   const state = {
@@ -678,6 +684,72 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
     checkExisting();
   });
 
+  const fromNotice = el("div.tplc-from__note", { hidden: true });
+
+  function sayFrom(text, kind = "ok") {
+    clear(fromNotice).append(text);
+    fromNotice.className = `tplc-from__note tplc-from__note--${kind}`;
+    fromNotice.hidden = !text;
+  }
+
+  const newTemplateBtn =
+    ourNumber && canCreate
+      ? el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Write a new template for this number's business account and submit it to Meta" }, [
+          icon("plus", { size: 14 }),
+          " New template",
+        ])
+      : null;
+  const syncFromMetaBtn = ourNumber
+    ? el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Refresh this list from Meta (a template approved just now)" }, [
+        icon("refresh", { size: 14 }),
+        " Sync from Meta",
+      ])
+    : null;
+
+  newTemplateBtn?.addEventListener("click", () => {
+    openCreateTemplateModal({
+      numbers: [ourNumber],
+      isAdmin,
+      wabaBusinessId: ourNumber.waba_business_id || "",
+      onCreated: (summary) => {
+        const where = summary && typeof summary.created === "number" ? ` on ${summary.created} business account${summary.created === 1 ? "" : "s"}` : "";
+        sayFrom(
+          `Submitted to Meta${where}. It is Pending until Meta approves it (usually a minute or two, sometimes longer); ` +
+            "it appears in this list once approved — press Sync from Meta to check.",
+          "ok"
+        );
+      },
+    });
+  });
+
+  syncFromMetaBtn?.addEventListener("click", async () => {
+    syncFromMetaBtn.disabled = true;
+    syncFromMetaBtn.replaceChildren(icon("refresh", { size: 14 }), " Syncing…");
+    try {
+      await catalog.syncTemplates(ourNumber.waba_business_id || "");
+      clearTemplateCaches();
+      await loadTemplates();
+      const approved = state.templates.length;
+      sayFrom(`Refreshed from Meta: ${approved} approved template${approved === 1 ? "" : "s"} for this number.`, "ok");
+    } catch (err) {
+      sayFrom(`Could not refresh from Meta: ${err.message}`, "bad");
+    } finally {
+      syncFromMetaBtn.disabled = false;
+      syncFromMetaBtn.replaceChildren(icon("refresh", { size: 14 }), " Sync from Meta");
+    }
+  });
+
+  const fromBar = ourNumber
+    ? el("div.tplc-from", {}, [
+        el("div.tplc-from__line", {}, [
+          el("span.tplc-from__label", {}, ["From our number"]),
+          el("strong.tplc-from__number", {}, [ourNumberText(ourNumber)]),
+        ]),
+        el("div.tplc-from__tools", {}, [newTemplateBtn, syncFromMetaBtn].filter(Boolean)),
+        fromNotice,
+      ])
+    : null;
+
   const left = el("div.tplc-left", {}, [
     isNew
       ? el("div.tplc-recipient", {}, [
@@ -687,6 +759,7 @@ export function openTemplateComposer({ mode, conversation, numbers = [], templat
           dupNotice,
         ])
       : null,
+    fromBar,
     search,
     list,
     form,
@@ -1220,7 +1293,17 @@ function formatWaNumber(number) {
   };
 }
 
-export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = false } = {}) {
+/** "+971501234567 · Coastline Properties": one of our numbers in full, then its name when that is not the number itself. */
+function ourNumberText(number) {
+  const phone = String(number?.phone_number || "").replace(/\D/g, "");
+  const title = String(number?.title || number?.label || number?.display_name || "").trim();
+  const titleIsPhone = Boolean(title && phone && title.replace(/\D/g, "") === phone);
+  if (phone && title && !titleIsPhone) return `+${phone} · ${title}`;
+  if (phone) return `+${phone}`;
+  return numberNameWithDial(number);
+}
+
+export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = false, wabaBusinessId = "" } = {}) {
   ensureTemplateCenterCss();
 
   // Which business account this is being written into. Meta reviews it under
@@ -1338,6 +1421,8 @@ export function openCreateTemplateModal({ onCreated, numbers = null, isAdmin = f
     if (!seen.size) {
       numberSelect.append(el("option", { value: "" }, ["No number available"]));
     }
+    // Opened from a chat: that chat's business account is the one meant, not the first in the list.
+    if (wabaBusinessId && seen.has(wabaBusinessId)) numberSelect.value = wabaBusinessId;
     paintWabaNote();
     if (isAdmin) paintDeployTargets();
   }

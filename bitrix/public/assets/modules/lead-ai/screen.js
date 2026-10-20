@@ -31,6 +31,7 @@ import { asList, inbox, leadAiApi } from "./api.js";
 import { deskEmptyText, deskLine, deskParams, deskRail, isDeskTab, trackFilters } from "./desk.js";
 import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
 import { closeUnitMediaDialog, unitMediaButton } from "./unit-media.js";
+import { reportsButton } from "./reports.js";
 import { shopsForm, shopsValues } from "./shops.js";
 import { residentialForm, residentialValues } from "./residential.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
@@ -152,6 +153,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
         onclick: () => openShopMediaDialog(),
       }, [icon("image", { size: 15 }), "Shop media"]),
       unitMediaButton(),
+      reportsButton(),
       el("button.lai-btn.lai-btn--ghost.lai-bar__settings", {
         type: "button",
         title: "The Lead AI assistant's status and settings",

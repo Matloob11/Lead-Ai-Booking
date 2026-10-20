@@ -251,6 +251,31 @@ Each feature ships behind its own switch in `LeadAiSettings`, so a bad day turns
   required before a card may enter Rent/Sale Availability) and a bulk title parser for the existing cards — without it the
   live inventory stays thin for the units the campaigns sell.
 
+## 6b. Day 2 of the fast track (2026-10-20): what shipped, what was cut
+- **A2 daily digest** — `assistant/digest.py`, `LeadAiDigest` (migration 0014): the Dubai day's replies, skipped and failed
+  turns, late answers (over a minute), handovers with who took them and how fast (from `LeadAiTurn.actions.handover` and
+  the first message of ours after it that is not the assistant's), the co-pilot's draft outcomes, bookings, opt-outs, the
+  stale alerts and the model's cost (tokens × list price by model name). The minute sweep stores yesterday's from 08:00
+  Dubai and sends it once to the panel admins and the Lead AI alert list; a day the sweep missed is stored on a later sweep
+  without a bell (up to seven back). Panel: Lead AI → **Reports** (today so far, the last digest, one row per day).
+- **A5 observability** — `ops/wa.sh leadai-health` (management command `leadai_health`): the switch, the sweep's age, the
+  leadai queue's depth, the last hour's turns and latency, stuck turns, chats waiting for a person, drafts waiting, stale
+  alerts, the inventory's age, the keys, the last digest, today so far; exit 1 when something is red.
+- **C, location names** — a Property Finder listing's location id is read once per id (`GET /v1/locations?filter[id]=`): the
+  tree names the community and the sub-community a title does not (72 of 142 live listings had no community on day 1).
+- **B, v1 = the data layer** — `LeadAiCommunity` (seeded: International City with its clusters and the 12 other communities
+  the agency lists, aliases only, no band), `assistant/communities.py` deciding the chat's pack by code (stored → lead
+  context → the customer's words → the default), stored on `LeadAiChatState.community`, shown to the panel
+  (`lead_ai_ai.community`), read by the inventory match. **Not yet (B2–B4):** the flow per community. A home outside
+  International City still goes to the OTHER track (`tracks.other_area`, the "many options across Dubai" line), villas and
+  townhouses too; a pack's bands, facts and meeting point reach the prompt only once that flow exists. Needs Matloob's word
+  on what the bot says for a Villanova townhouse or a Mudon villa (quote the Property Finder unit? call first?).
+- **A3 wallet guard — cut by Matloob (2026-10-20): "credits wala part skip kar do, main khud dekh loon ga."**
+- **Round 15's gate** (first run of the day) failed on one test and two strict scenarios: the general prompt's byte-for-byte
+  hash (round 15 changed the general prompt on purpose: recorded), `shops-res-for-myself` (the cluster question before the
+  balcony and move-in question: `residential.requirement_first`) and `shops-nine-questions-noted-95` (a numbered question
+  of theirs lost: `crm_facts._numbered_questions`). Round 16 carries rounds 15 and 16 together.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
