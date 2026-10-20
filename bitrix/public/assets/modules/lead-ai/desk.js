@@ -204,6 +204,8 @@ export function deskLine(row) {
       el("span.lai-desk-line__text", {}, [reasons[0] || "Needs a person"]),
       reasons.length > 1 ? el("span.lai-desk-line__more", {}, [`+${reasons.length - 1}`]) : null,
       wait ? el("span.lai-desk-line__wait", {}, [`waiting ${wait}`]) : null,
+      // The co-pilot wrote a draft reply for this chat (assistant/copilot.py): open it to send, edit or drop it.
+      part.draft ? el("span.lai-desk-line__draft", { title: "An AI draft reply is waiting in this chat" }, ["Draft ready"]) : null,
     ]);
   }
   if (part.view === "today") {

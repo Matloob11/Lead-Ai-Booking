@@ -419,7 +419,9 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     el("span.lai-thinking__text", {}, [THINKING_TEXT]),
   ]);
   const composer = el("div.lai-thread__composer");
-  const root = el("section.lai-thread", {}, [header, apptHost, list, thinking, composer]);
+  // The co-pilot's draft (lead_ai_ai.draft): what the AI would have said while a person has the chat.
+  const draftHost = el("div.lai-thread__draft", { hidden: true });
+  const root = el("section.lai-thread", {}, [header, apptHost, list, thinking, draftHost, composer]);
   clear(host).append(root);
   list.append(el("div.lai-thread__hint", {}, ["Loading…"]));
 
@@ -519,7 +521,123 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     // Rebuilt only when what may be sent changes, so a reply being typed and
     // the cursor in it survive every live update.
     if (state.composerOpen !== Boolean(state.conversation.is_session_open)) renderComposer();
+    renderDraft();
     onConversation?.(state.conversation);
+  }
+
+  /* ---------------------------------------------------------- co-pilot draft */
+
+  /** The AI's draft reply for the agent: send it as it is, edit it in the reply box, ask the AI something, or drop it. */
+  function renderDraft() {
+    const ai = state.conversation?.lead_ai_ai;
+    const draft = ai && ai.draft && typeof ai.draft === "object" ? ai.draft : null;
+    if (!draft || !String(draft.text || "").trim()) {
+      draftHost.hidden = true;
+      clear(draftHost);
+      return;
+    }
+    const text = String(draft.text);
+    const asked = String(draft.question || "").trim();
+    const kindTitle = draft.kind === "ordinary"
+      ? "An ordinary question: if nobody sends or drops this draft, the AI sends it by itself after the minutes set in AI settings."
+      : "A person's call: this draft never goes out by itself.";
+    const head = el("div.lai-draft__head", {}, [
+      icon("zap", { size: 13 }),
+      el("span.lai-draft__title", { title: kindTitle }, [asked ? "AI answer to your question" : "AI draft reply"]),
+      el("span.lai-draft__meta", {}, [since(draft.at).replace(/^ /, "") || "just now"]),
+    ]);
+    const body = el("div.lai-draft__body", {}, [
+      asked ? el("div.lai-draft__question", {}, [`You asked: ${asked}`]) : null,
+      el("div.lai-draft__text", {}, [text]),
+    ]);
+    const send = el("button.lai-btn.lai-btn--primary.lai-btn--sm", {
+      type: "button",
+      title: "Send these words to the customer from your name",
+      onclick: () => sendDraft(text, send),
+    }, [icon("send", { size: 13 }), "Send as me"]);
+    const edit = el("button.lai-btn.lai-btn--ghost.lai-btn--sm", {
+      type: "button",
+      title: "Put the draft in the reply box to change it",
+      onclick: () => editDraft(text),
+    }, [icon("edit", { size: 13 }) || "✎", "Edit"]);
+    const ask = el("button.lai-btn.lai-btn--ghost.lai-btn--sm", {
+      type: "button",
+      title: "Ask the AI a question about this chat, or for another reply",
+      onclick: askAi,
+    }, ["Ask AI"]);
+    const drop = el("button.lai-btn.lai-btn--ghost.lai-btn--sm", {
+      type: "button",
+      title: "Drop this draft",
+      onclick: () => dismissDraft(drop),
+    }, ["Dismiss"]);
+    clear(draftHost).append(el("div.lai-draft", { class: `lai-draft--${draft.kind === "ordinary" ? "ordinary" : "person"}` }, [
+      head,
+      body,
+      el("div.lai-draft__actions", {}, [send, edit, ask, drop]),
+    ]));
+    draftHost.hidden = false;
+  }
+
+  async function sendDraft(text, button) {
+    if (!state.input || !state.submit) {
+      toast("The reply box is closed (the 24-hour window): send a template instead.", "err");
+      return;
+    }
+    if (button) button.disabled = true;
+    try {
+      state.input.value = text;
+      await state.submit();
+      await leadAiApi.draftUsed(state.id, text);
+      await refreshDetail();
+    } catch (error) {
+      toast(`Could not send the draft: ${error.message}`, "err");
+      if (button) button.disabled = false;
+    }
+  }
+
+  function editDraft(text) {
+    if (!state.input) {
+      toast("The reply box is closed (the 24-hour window): send a template instead.", "err");
+      return;
+    }
+    state.input.value = text;
+    state.input.style.height = "auto";
+    state.input.style.height = `${Math.min(state.input.scrollHeight, 140)}px`;
+    state.input.focus();
+    state.draftEdited = text; // the composer's send then reports the edited words (draftUsed)
+  }
+
+  function askAi() {
+    const input = el("textarea.lai-input.lai-ask__input", { rows: 3, placeholder: "e.g. Is the deposit refundable? / Write a reply about parking" });
+    const go = el("button.lai-btn.lai-btn--primary", { type: "button" }, ["Ask"]);
+    const cancel = el("button.lai-btn.lai-btn--ghost", { type: "button", onclick: () => dialog.close() }, ["Cancel"]);
+    const dialog = chatModal("Ask AI about this chat", el("div.lai-ask", {}, [input, el("div.lai-confirm__actions", {}, [cancel, go])]));
+    go.onclick = async () => {
+      const question = input.value.trim();
+      if (!question) return;
+      go.disabled = true;
+      try {
+        await leadAiApi.draftAsk(state.id, question);
+        dialog.close();
+        toast("The AI is writing a draft; it appears above the reply box in a moment.");
+      } catch (error) {
+        go.disabled = false;
+        toast(`Could not ask: ${error.message}`, "err");
+      }
+    };
+    setTimeout(() => input.focus(), 0);
+  }
+
+  async function dismissDraft(button) {
+    if (button) button.disabled = true;
+    try {
+      const row = await leadAiApi.draftDismiss(state.id);
+      detailSeq += 1;
+      applyLeadAi(row);
+    } catch (error) {
+      toast(`Could not drop the draft: ${error.message}`, "err");
+      if (button) button.disabled = false;
+    }
   }
 
   /** Takes only the Lead AI part of a chat row (a re-read, Pause, Resume, Cancel). */
@@ -586,6 +704,13 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
           : null,
         // The pill can say "AI on" while the assistant is held back (an OpenAI pause, the daily limit).
         note ? el("div.lai-thread__meta.lai-thread__meta--ai", {}, [icon("zap", { size: 12 }), `AI not answering: ${note}`]) : null,
+        // What the assistant remembers of this customer from chats on our other numbers (lead_ai_ai.memory, the detail).
+        Array.isArray(conversation.lead_ai_ai?.memory) && conversation.lead_ai_ai.memory.length
+          ? el("div.lai-thread__meta.lai-thread__meta--memory", { title: conversation.lead_ai_ai.memory.join("\n") }, [
+              icon("clock", { size: 12 }),
+              `Earlier chats: ${String(conversation.lead_ai_ai.memory[conversation.lead_ai_ai.memory.length - 1]).replace(/^- /, "")}`,
+            ])
+          : null,
       ]),
       el("div.lai-thread__tools", {}, [
         ...aiControls(conversation),
@@ -1005,6 +1130,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     teardownFiles?.();
     teardownFiles = null;
     state.input = null;
+    state.submit = null;
     const conversation = state.conversation;
     if (!conversation) {
       clear(composer);
@@ -1071,6 +1197,11 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       try {
         const real = await inbox.send(state.id, { kind: "text", body });
         settleDraft(draft.id, real);
+        if (state.draftEdited !== undefined && state.conversation?.lead_ai_ai?.draft) {
+          // The co-pilot's draft went out in the agent's own words (or as it was): its fate is recorded.
+          state.draftEdited = undefined;
+          leadAiApi.draftUsed(state.id, body).then((row) => { detailSeq += 1; applyLeadAi(row); }).catch(() => {});
+        }
       } catch (error) {
         // A failed send may already have arrived live as its own failed row.
         settleDraft(draft.id, null, error.message);
@@ -1082,6 +1213,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     }
 
     clear(composer).append(el("div.lai-composer", {}, [attach, templates, input, send]));
+    state.submit = submit; // the co-pilot's "Send as me" sends through the same box (renderDraft)
     teardownFiles = bindFileSources({
       button: attach,
       dropZone: list,

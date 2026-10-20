@@ -1026,6 +1026,41 @@ case "$cmd" in
     ;;
 
 
+  leadai-sync-inventory)
+    # The Lead AI inventory refreshed now (apps/leadai/assistant/inventory.py: Property
+    # Finder's live listings and the clean Availability cards), with the counts and a few
+    # units printed (ops/catalog/leadai-sync-inventory.py). The beat job does the same every
+    # half hour; this proves it after a deploy.
+    [[ $# -eq 0 ]] || die "leadai-sync-inventory takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-sync-inventory.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-sync-inventory.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  set-pf-api-keys)
+    # Writes LEADAI_PF_API_KEY and LEADAI_PF_API_SECRET on the Official host (the Lead AI
+    # inventory, apps/leadai/assistant/inventory.py) from a local, gitignored env file that
+    # holds PF_API_KEY=... and PF_API_SECRET=... lines. They travel on stdin, never on a
+    # command line, never printed. No ``up`` here: the deploy that ships the code does it
+    # (env_file is read when a container is created).
+    keys_file="${1:-}"
+    [[ -f "$keys_file" ]] || die "set-pf-api-keys wants the local propertyfinder.env file"
+    pf_key="$(grep -E '^PF_API_KEY=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
+    pf_secret="$(grep -E '^PF_API_SECRET=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
+    [[ "$pf_key" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_KEY that looks like one"
+    [[ "$pf_secret" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_SECRET that looks like one"
+    printf '%s\n%s\n' "$pf_key" "$pf_secret" | remote 'set -eu
+      IFS= read -r k; IFS= read -r s
+      f=/opt/a7-wa/deploy/.env
+      [ -f "$f" ] || { echo "missing $f"; exit 1; }
+      { grep -v -e "^LEADAI_PF_API_KEY=" -e "^LEADAI_PF_API_SECRET=" "$f" || true; } > "$f.tmp"
+      printf "LEADAI_PF_API_KEY=%s\nLEADAI_PF_API_SECRET=%s\n" "$k" "$s" >> "$f.tmp"
+      chmod --reference="$f" "$f.tmp" 2>/dev/null || true
+      mv "$f.tmp" "$f"
+      echo pf-keys=written'
+    ;;
+
   ensure-crm-lead-secret)
     # Writes one env key on the Official host if it is missing. Hex-only so
     # this cannot become an arbitrary .env edit. The same value must be put

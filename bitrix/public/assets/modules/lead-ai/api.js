@@ -74,6 +74,11 @@ export const leadAiApi = {
   /** Clears a pause, a stop or a handover. Returns the row. */
   resumeAi: (id) => apiFetch(`/api/leadai/chats/${id}/resume-ai/`, { method: "POST", body: {} }),
 
+  /** The co-pilot (assistant/copilot.py): ask for a draft, say the draft was sent (as it was or edited), drop it. */
+  draftAsk: (id, question) => apiFetch(`/api/leadai/chats/${id}/draft/ask/`, { method: "POST", body: { question } }),
+  draftUsed: (id, text) => apiFetch(`/api/leadai/chats/${id}/draft/used/`, { method: "POST", body: { text } }),
+  draftDismiss: (id) => apiFetch(`/api/leadai/chats/${id}/draft/dismiss/`, { method: "POST", body: {} }),
+
   /** Cancels the chat's open meeting (409 when there is none). Returns the row. */
   cancelAppointment: (id) =>
     apiFetch(`/api/leadai/chats/${id}/appointment/cancel/`, { method: "POST", body: {} }),
