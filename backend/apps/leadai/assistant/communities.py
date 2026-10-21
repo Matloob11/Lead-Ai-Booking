@@ -259,8 +259,9 @@ def _text_list(value, limit: int, each: int, label: str, errors: dict) -> list:
     return out
 
 
-def _sub_areas(value, errors: dict) -> list:
-    """[{name, aliases}] from a list of dicts, or one "Name | alias, alias" per line."""
+def _sub_areas_of(value, errors: dict) -> list:
+    """[{name, aliases}] from a list of dicts, or one "Name | alias, alias" per line (the editor's input; _sub_areas above
+    reads a stored row)."""
     if value is None:
         return []
     rows = []
@@ -345,7 +346,7 @@ def validate(raw, *, creating: bool = False) -> tuple[dict, dict]:
     if "aliases" in raw:
         fields["aliases"] = [alias.casefold() for alias in _text_list(raw.get("aliases"), ALIASES_MAX, ALIAS_MAX, "aliases", errors)]
     if "sub_areas" in raw:
-        fields["sub_areas"] = _sub_areas(raw.get("sub_areas"), errors)
+        fields["sub_areas"] = _sub_areas_of(raw.get("sub_areas"), errors)
     if "units" in raw:
         units = _text_list(raw.get("units"), 10, 16, "units", errors)
         stray = [unit for unit in units if unit not in UNIT_WORDS]
