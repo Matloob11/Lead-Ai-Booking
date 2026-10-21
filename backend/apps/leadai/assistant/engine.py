@@ -2646,7 +2646,9 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
     } - {start}
     if any(slot.date() != day for slot in others):
         return None
-    if theirs.minute and claims.says_hourly(answer["reply"] or ""):
+    # The reason may sit in the English gloss alone (the 2e gate, round 18: "Our office slots start on the hour or half
+    # hour" in reply_en, the reply itself offering 4:00 PM or 6:00 PM): read both.
+    if theirs.minute and (claims.says_hourly(answer["reply"] or "") or claims.says_hourly(answer.get("reply_en") or "")):
         return theirs
     if not others:
         return None
@@ -4333,7 +4335,8 @@ def _run_claimed(
         "shop_tap": shops_chat and flow_taps([(_tap_label(item), _tap_id(item)) for item in (said or burst[-1:])]),
         # The community packs (communities.py, round 17): a home in Mudon, Villanova, ... is that pack's rent or sale track.
         "packs": communities.named_packs() if shops_chat else (),
-        "stored_community": state.community or "",
+        # The chat's own community, else the one its campaign sells (LeadAiCampaign.community, Cursor's C44).
+        "stored_community": state.community or communities.campaign_community(chat),
     }
     decision = tracks.decide(words=words_now, facts=facts, **track_inputs) if shops_chat else None
     # SALE (slice C, sales.py, calls.py): a buyer's turn may book a 5-minute call in the call pool (spec §3.3). The sale flow

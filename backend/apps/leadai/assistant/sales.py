@@ -627,10 +627,26 @@ def asks_media(said: str) -> bool:
     return shop_flow.asks_media(shop_flow.typed_words(said))
 
 
-def abroad(handover: dict, answer: dict) -> bool:
-    """The model read a buyer abroad who cannot visit (its abroad_cannot_visit, kept or taken off by 2d's untag_need):
-    they get the call (spec §3.1), never that handover."""
-    return "abroad_cannot_visit" in ((handover or {}).get("reason"), answer.get("need_dropped"))
+def abroad(handover: dict, answer: dict, said: str = "") -> bool:
+    """The model read a buyer abroad who cannot visit (its abroad_cannot_visit, kept or taken off by 2d's untag_need), or
+    their own words say so (abroad_words: the 2e gate, round 18, shops-sale-abroad: "I am in London now, I can't come to
+    the office" got the model's own call offer with no handover, and the abroad line never went): they get the call (spec
+    §3.1), never that handover."""
+    return "abroad_cannot_visit" in ((handover or {}).get("reason"), answer.get("need_dropped")) or abroad_words(said)
+
+
+_ABROAD = re.compile(
+    r"\b(?:abroad|overseas|outside\s+(?:the\s+)?(?:uae|emirates|country)|out\s+of\s+(?:the\s+)?(?:country|uae)|not\s+in\s+(?:dubai|the\s+uae|uae|the\s+emirates)"
+    r"|(?:i\s+am|i'm|im|we\s+are|we're|currently)\s+in\s+(?:london|the\s+uk|uk|england|india|pakistan|the\s+usa|usa|america|canada|australia|germany|france|turkey|egypt|"
+    r"saudi(?:\s+arabia)?|riyadh|jeddah|qatar|doha|oman|muscat|bahrain|kuwait|jordan|lebanon|russia|china|nigeria|kenya|south\s+africa|europe|asia|africa)\b"
+    r"|خارج\s+(?:الإمارات|الامارات|البلد|الدولة)|لست\s+في\s+دبي|مش\s+في\s+دبي|باہر\s+(?:ملک|یو\s*اے\s*ای)|دبئی\s+میں\s+نہیں|दुबई\s+में\s+नहीं|देश\s+से\s+बाहर)",
+    re.IGNORECASE,
+)
+
+
+def abroad_words(said: str) -> bool:
+    """Their own words say they are abroad or outside the UAE."""
+    return bool(_ABROAD.search(" ".join(str(said or "").split())))
 
 
 # The lines --------------------------------------------------------------------------------------------------------
@@ -1135,7 +1151,7 @@ def call_step(
     asked = asks_call(said, answer, appointment)
     if handover["needed"] and handover["reason"] in ("call_requested", "abroad_cannot_visit"):
         answer["handover"] = {"needed": False, "reason": None}
-    if abroad(handover, answer):
+    if abroad(handover, answer, said):
         answer["abroad_call"] = True  # settle's ABROAD line: the call and two free call slots
     proposal = answer["appointment"]
     if when is not None:

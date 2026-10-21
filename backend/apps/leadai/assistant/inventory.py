@@ -39,6 +39,7 @@ LIVE = True
 DEFAULT_COMMUNITY = "International City"
 PF_BASE = "https://atlas.propertyfinder.com"
 PF_PAGE = 50
+PF_PAGES_AT_MOST = 40  # 2,000 listings: a nextPage that never ends cannot hold the half-hourly task past its limit
 PF_TIMEOUT = 30.0
 PHOTOS_KEPT = 5
 SHOWN = 3
@@ -66,9 +67,30 @@ _CLUSTER = re.compile(
 _COMMUNITY_WORDS = (
     ("international city", "International City"), ("warsan", "International City"), ("mudon", "Mudon"), ("damac lagoons", "Damac Lagoons"),
     ("lagoons", "Damac Lagoons"), ("villanova", "Villanova"), ("dubai south", "Dubai South"), ("arabian ranches", "Arabian Ranches"),
-    ("town square", "Town Square"), ("jvc", "JVC"), ("jumeirah village circle", "JVC"), ("dubailand", "Dubailand"), ("al furjan", "Al Furjan"),
+    ("town square", "Town Square"), ("jvc", "JVC"), ("jumeirah village circle", "JVC"), ("dubai land residence complex", "Dubai Land Residence Complex"),
+    ("dubailand", "Dubailand"), ("dubai land", "Dubailand"), ("al furjan", "Al Furjan"),
     ("the valley", "The Valley"), ("haven", "Haven by Aldar"), ("yas", "Yas Island"),
 )
+# A Property Finder reference as the agency writes it (a7group-1633): the one key a Bitrix card and a listing share.
+_PF_REF = re.compile(r"a7group-\d{1,8}", re.IGNORECASE)
+
+
+def community_name(name: str) -> str:
+    """The bot's spelling of a community name as Bitrix or Property Finder wrote it (_COMMUNITY_WORDS: "Dubai Land" and
+    "Dubailand" are Dubailand, "Jumeirah Village Circle" is JVC, "Al Warsan" is International City), else the name as
+    given, title-cased when it came all in lower case ("palm jebel ali")."""
+    text = " ".join(str(name or "").split())
+    low = text.lower()
+    for word, canonical in _COMMUNITY_WORDS:
+        if word in low:
+            return canonical
+    return text.title() if text and text == low else text
+
+
+def pf_reference(value) -> str:
+    """"a7group-1633" from a card's Property Finder ref field (C62), lower case; '' for anything else."""
+    match = _PF_REF.search(str(value or ""))
+    return match.group(0).lower() if match else ""
 
 
 # ---- the sources ---------------------------------------------------------------------------------------------------
@@ -94,6 +116,7 @@ def pf_token(client: httpx.Client) -> str:
 def pf_listings(client: httpx.Client, token: str):
     """Every live listing, page by page (a generator of the API's own dicts)."""
     page = 1
+    pages = 0
     while True:
         response = client.get(
             f"{PF_BASE}/v1/listings",
@@ -106,7 +129,8 @@ def pf_listings(client: httpx.Client, token: str):
             yield item
         pagination = body.get("pagination") or {}
         page = pagination.get("nextPage")
-        if not page:
+        pages += 1
+        if not page or pages >= PF_PAGES_AT_MOST:
             return
 
 
@@ -245,11 +269,14 @@ def sync_pf() -> dict:
     if not pf_configured():
         return {"skipped": "no Property Finder key"}
     seen: set[str] = set()
-    upserted = 0
+    upserted = repeated = 0
     with httpx.Client(timeout=PF_TIMEOUT) as client:
         token = pf_token(client)
         for item in pf_listings(client, token):
             source_id = str(item.get("id") or "")
+            if source_id in seen:
+                repeated += 1  # the API's pages overlap (2026-10-20: 394 rows for 144 listings): each listing once
+                continue
             location_id = (item.get("location") or {}).get("id") if isinstance(item.get("location"), dict) else None
             if location_id and location_id not in _LOCATIONS and len(_LOCATIONS) < PF_LOCATIONS_AT_MOST:
                 _LOCATIONS[location_id] = pf_location(client, token, location_id)
@@ -260,8 +287,11 @@ def sync_pf() -> dict:
             seen.add(source_id)
             upserted += 1
     gone = LeadAiUnit.objects.filter(source=LeadAiUnit.Source.PF, active=True).exclude(source_id__in=seen).update(active=False)
-    logger.info("Lead AI inventory: Property Finder %s live listings, %s gone", upserted, gone)
-    return {"upserted": upserted, "gone": gone}
+    logger.info("Lead AI inventory: Property Finder %s live listings, %s gone, %s repeated across pages", upserted, gone, repeated)
+    out = {"upserted": upserted, "gone": gone}
+    if repeated:
+        out["repeated"] = repeated
+    return out
 
 
 # Bitrix Owner Data → Availability (SPA 1042, category 14; the Owner Data user fields are UF_CRM_5_*).
@@ -281,7 +311,40 @@ BITRIX_FIELDS = {
     "furnished": "ufCrm5_1734261990377",
     "area": "ufCrm5_1768487008300",
     "loc_name": "ufCrm5_1777563155595",
+    # Cursor's C59 (2026-10-20): the card's own Community name (UF_CRM_A7_AVAIL_COMMUNITY, 2691; its enum ids below), filled
+    # on 316 of 557 cards; and C62: the Property Finder ref (UF 2698; Bitrix refused a named field for a string on CRM_5).
+    "community": "ufCrmA7AvailCommunity",
+    "pf_ref": "ufCrm5_1792564962558",
 }
+# The Community name enum (ops/bitrix-aws/a7_c59_enum_ids.md), id → the name as Bitrix lists it; community_name gives
+# the bot's spelling. The six International City clusters name the community and the cluster.
+BITRIX_COMMUNITY = {
+    2526: "International City", 2527: "Dubai Land", 2528: "Mudon", 2529: "Arabian Ranches 3", 2530: "Serena", 2531: "Damac Lagoons",
+    2532: "Al Warsan", 2533: "Dubai Hills Estate", 2534: "Villanova", 2535: "Nad Al Sheba", 2536: "Al Jaddaf",
+    2537: "Dubai Land Residence Complex", 2538: "Business Bay", 2539: "Dubai Creek Harbour", 2540: "Liwan", 2541: "Al Satwa",
+    2542: "Arjan", 2543: "The Valley", 2544: "Dubailand", 2545: "Dubai Silicon Oasis", 2546: "Dubai Sports City", 2547: "City Walk",
+    2548: "Greens", 2549: "Meydan", 2550: "palm jebel ali", 2551: "Jumeirah Golf Estates", 2552: "Dubai Marina",
+    2553: "Mohammed Bin Rashid City", 2554: "Damac Hills 2", 2555: "Downtown Dubai", 2556: "Jebel Ali", 2557: "The Greens",
+    2558: "Arabian Ranches 2", 2559: "Jumeirah Village Triangle", 2560: "Town Square", 2561: "Dubai Science Park",
+    2562: "Tilal Al Ghaf", 2563: "DAMAC Hills", 2564: "Jumeirah", 2565: "Jumeirah Village Circle", 2566: "Mirdif",
+    2567: "Sobha Hartland", 2568: "The Hills", 2569: "Meydan City", 2570: "Rukan", 2571: "Dubai South (Dubai World Central)",
+    2572: "France Cluster", 2573: "Dubai Harbour", 2574: "England Cluster", 2575: "Greece Cluster", 2576: "Morocco Cluster",
+    2577: "Persia Cluster", 2578: "Spain Cluster", 2579: "Zabeel",
+}
+IC_CLUSTERS = frozenset({"France Cluster", "England Cluster", "Greece Cluster", "Morocco Cluster", "Persia Cluster", "Spain Cluster"})
+
+
+def bitrix_place(named: str, text: str) -> tuple[str, str]:
+    """(community, sub-area) of an Availability card: its Community name field first (C59; an International City cluster
+    there names the community and the cluster; another name takes the bot's spelling, with the cluster from the area and
+    title only when it is International City), else the area and title read as before (place_of)."""
+    community, sub = place_of(text)
+    if named in IC_CLUSTERS:
+        return "International City", named
+    if named:
+        community = community_name(named)
+        return community, (sub if community == "International City" else "")
+    return community, sub
 BITRIX_BEDROOMS = {430: "studio", 1575: "studio", 1636: "studio", 431: "1", 1573: "1", 1634: "1", 432: "2", 1570: "2", 1635: "2", 433: "3", 1565: "3", 2084: "3", 434: "4", 1564: "4", 435: "5", 1683: "5", 436: "6", 437: "7+", 1566: "7", 1567: "7+"}
 BITRIX_TYPES = {438: "apartment", 439: "villa", 440: "building", 441: "plot", 442: "penthouse", 1674: "townhouse", 1563: "townhouse"}
 BITRIX_PURPOSE = {445: "sale", 446: "rent", 447: "both", 1688: "sale", 1691: "rent"}
@@ -304,9 +367,10 @@ def bitrix_rows(item: dict, stage: str) -> list[dict]:
         return []
     title = str(item.get("title") or "")
     area = str(item.get(BITRIX_FIELDS["area"]) or item.get(BITRIX_FIELDS["loc_name"]) or "")
-    community, sub_area = place_of(f"{area} {title}")
+    community, sub_area = bitrix_place(enum("community", BITRIX_COMMUNITY) or "", f"{area} {title}")
     if not community:
         return []
+    reference = pf_reference(item.get(BITRIX_FIELDS["pf_ref"]))
     size = item.get(BITRIX_FIELDS["size"])
     try:
         size_sqft = int(float(size)) if size not in (None, "", 0) and float(size) > 0 else None
@@ -327,7 +391,7 @@ def bitrix_rows(item: dict, stage: str) -> list[dict]:
             value *= 1_000_000  # "3.2" typed for 3.2 million
         price = int(round(value))
         rows.append({
-            "reference": "",
+            "reference": reference,
             "community": community[:80],
             "sub_area": sub_area[:80],
             "unit": unit_of(kind, bedrooms),
@@ -395,6 +459,42 @@ def sync_bitrix() -> dict:
     return {"upserted": upserted, "skipped": skipped, "gone": gone}
 
 
+def refresh_bitrix(card_id: int) -> dict:
+    """One Availability card read again (crm.item.get) after Bitrix's own webhook said it changed (Cursor's C46,
+    bitrix_views.inventory_event): its clean rows upserted and active, any other row it had retired; a card that is gone,
+    dirty, in another category or off the available stages retires every row it had. The half-hourly sync still reads
+    them all. Counts; raises BitrixTransient for the task to try again."""
+    from apps.crmlink import client as bitrix
+
+    if not bitrix.configured():
+        return {"skipped": "no Bitrix webhook"}
+    card_id = int(card_id)
+    try:
+        with bitrix.background():
+            result = bitrix.call("crm.item.get", {"entityTypeId": BITRIX_ENTITY_TYPE, "id": card_id})
+    except bitrix.BitrixTransient:
+        raise
+    except bitrix.BitrixError as exc:
+        logger.info("Lead AI inventory: Availability card %s not read (%s): its units retire", card_id, str(exc)[:80])
+        result = None
+    item = (result.get("item") if isinstance(result, dict) else None) or {}
+    stage = str(item.get("stageId") or "")
+    category = item.get("categoryId")
+    in_category = category in (None, "", BITRIX_CATEGORY, str(BITRIX_CATEGORY))
+    rows = bitrix_rows(item, stage) if item and stage in BITRIX_STAGES and in_category else []
+    seen: set[str] = set()
+    for row in rows:
+        source_id = f"{card_id}:{row['deal']}"
+        LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.BITRIX, source_id=source_id, defaults={**row, "active": True})
+        seen.add(source_id)
+    gone = (
+        LeadAiUnit.objects.filter(source=LeadAiUnit.Source.BITRIX, active=True, source_id__startswith=f"{card_id}:")
+        .exclude(source_id__in=seen)
+        .update(active=False)
+    )
+    return {"card": card_id, "stage": stage, "upserted": len(rows), "gone": gone}
+
+
 def sync() -> dict:
     out = {}
     for name, job in (("pf", sync_pf), ("bitrix", sync_bitrix)):
@@ -425,6 +525,10 @@ def matches(community: str, sub_areas=(), unit: str = "", deal: str = "", *, bud
         rows = rows.filter(price__lte=int(budget * 1.15))
     wanted = {str(area or "").lower().replace(" cluster", "") for area in sub_areas or () if area}
     rows = list(rows.order_by("price", "pk")[: limit * 4])
+    # A card published on Property Finder (C62: the same a7group reference) is one unit: the listing, with its photos
+    # and link, stands for both.
+    published = {row.reference for row in rows if row.reference and row.source == LeadAiUnit.Source.PF}
+    rows = [row for row in rows if not (row.source == LeadAiUnit.Source.BITRIX and row.reference in published)]
     if wanted:
         rows.sort(key=lambda row: (0 if row.sub_area.lower().replace(" cluster", "") in wanted else 1, row.price or 0))
     return rows[:limit]

@@ -77,6 +77,34 @@ class ReadingTests(SimpleTestCase):
         millions = inventory.bitrix_rows({**BITRIX_VILLA, "ufCrm5_1734247021855": 3.2}, "DT1042_14:PREPARATION")
         self.assertEqual(millions[0]["price"], 3200000)
 
+    def test_the_cards_own_community_name_and_property_finder_ref(self):  # Cursor's C59 and C62 (round 20)
+        card = {**BITRIX_VILLA, "ufCrmA7AvailCommunity": 2534, "ufCrm5_1792564962558": " A7GROUP-1633 "}
+        rows = inventory.bitrix_rows(card, "DT1042_14:PREPARATION")
+        self.assertEqual((rows[0]["community"], rows[0]["sub_area"], rows[0]["reference"]), ("Villanova", "", "a7group-1633"))
+        # The field wins over the title; an International City cluster names the community and the cluster; the bot's
+        # spellings hold (JVC, Dubailand, International City for Al Warsan); a name all in lower case is title-cased.
+        places = {
+            2578: ("International City", "Spain Cluster"), 2565: ("JVC", ""), 2527: ("Dubailand", ""), 2544: ("Dubailand", ""),
+            2537: ("Dubai Land Residence Complex", ""), 2550: ("Palm Jebel Ali", ""), 2532: ("International City", ""),
+            2563: ("DAMAC Hills", ""), 2571: ("Dubai South", ""),
+        }
+        for enum_id, place in places.items():
+            with self.subTest(enum_id=enum_id):
+                rows = inventory.bitrix_rows({**BITRIX_VILLA, "ufCrmA7AvailCommunity": enum_id}, "DT1042_14:PREPARATION")
+                self.assertEqual((rows[0]["community"], rows[0]["sub_area"]), place)
+        # International City named in the field, the cluster in the area: both read. Another community keeps no cluster.
+        rows = inventory.bitrix_rows({**BITRIX_VILLA, "ufCrmA7AvailCommunity": 2526, "ufCrm5_1768487008300": "France cluster"}, "DT1042_14:PREPARATION")
+        self.assertEqual((rows[0]["community"], rows[0]["sub_area"]), ("International City", "France Cluster"))
+        rows = inventory.bitrix_rows({**BITRIX_VILLA, "ufCrmA7AvailCommunity": 2528, "ufCrm5_1768487008300": "France cluster"}, "DT1042_14:PREPARATION")
+        self.assertEqual((rows[0]["community"], rows[0]["sub_area"]), ("Mudon", ""))
+        # No field, or an id the table lacks: the area and the title as before. A ref that is none stays ''.
+        for extra in ({}, {"ufCrmA7AvailCommunity": 9999}, {"ufCrmA7AvailCommunity": "0"}):
+            rows = inventory.bitrix_rows({**BITRIX_VILLA, **extra, "ufCrm5_1792564962558": "see PF"}, "DT1042_14:PREPARATION")
+            self.assertEqual((rows[0]["community"], rows[0]["reference"]), ("Haven by Aldar", ""))
+        # The sync asks Bitrix for the two fields.
+        self.assertIn("ufCrmA7AvailCommunity", inventory.BITRIX_FIELDS.values())
+        self.assertIn("ufCrm5_1792564962558", inventory.BITRIX_FIELDS.values())
+
 
 class MatchTests(TestCase):
     def setUp(self):
@@ -103,6 +131,59 @@ class MatchTests(TestCase):
         self.assertIn("31,000", inventory.known_amounts(rows))
         self.assertIn("390", inventory.known_amounts(rows))
         self.assertEqual(inventory.lines([]), [])
+
+    def test_a_card_published_on_property_finder_is_one_unit(self):  # C62
+        LeadAiUnit.objects.create(source="pf", source_id="p1", reference="a7group-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=180000, photos=["x"])
+        LeadAiUnit.objects.create(source="bitrix", source_id="9:rent", reference="a7group-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=175000)
+        LeadAiUnit.objects.create(source="bitrix", source_id="10:rent", reference="", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=190000)
+        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent")
+        self.assertEqual([(row.source, row.source_id) for row in rows], [("pf", "p1"), ("bitrix", "10:rent")])
+        # The card alone (the listing gone): the card answers.
+        LeadAiUnit.objects.filter(source_id="p1").update(active=False)
+        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent")
+        self.assertEqual([row.source_id for row in rows], ["9:rent", "10:rent"])
+
+
+class RefreshTests(TestCase):
+    """One card read again after Bitrix's webhook (inventory.refresh_bitrix; Cursor's C46, round 20)."""
+
+    def test_the_card_is_read_again_and_its_rows_follow_it(self):
+        from apps.crmlink import client as bitrix
+
+        answers = []
+
+        def fake_call(method, payload=None):
+            self.assertEqual((method, payload), ("crm.item.get", {"entityTypeId": 1042, "id": 103048}))
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with patch.object(bitrix, "configured", return_value=True), patch.object(bitrix, "call", side_effect=fake_call):
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:PREPARATION", "categoryId": 14}})
+            self.assertEqual(inventory.refresh_bitrix(103048), {"card": 103048, "stage": "DT1042_14:PREPARATION", "upserted": 1, "gone": 0})
+            self.assertTrue(LeadAiUnit.objects.get(source="bitrix", source_id="103048:sale").active)
+            # Moved off the available stages: its row retires.
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:CLIENT", "categoryId": 14}})
+            self.assertEqual(inventory.refresh_bitrix(103048)["gone"], 1)
+            self.assertFalse(LeadAiUnit.objects.get(source="bitrix", source_id="103048:sale").active)
+            # Back, offered for both: two rows, active.
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:UC_G0PCBL", "categoryId": 14, "ufCrm5_1734247157896": 447, "ufCrm5_1734247036310": 180000}})
+            self.assertEqual(inventory.refresh_bitrix(103048)["upserted"], 2)
+            self.assertEqual(LeadAiUnit.objects.filter(source="bitrix", source_id__startswith="103048:", active=True).count(), 2)
+            # Another category, a dirty card, a card Bitrix no longer has: every row retires. Bitrix busy: the task's retry.
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:UC_G0PCBL", "categoryId": 3}})
+            self.assertEqual(inventory.refresh_bitrix(103048)["gone"], 2)
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:PREPARATION", "categoryId": 14}})
+            self.assertEqual(inventory.refresh_bitrix(103048)["upserted"], 1)
+            answers.append(bitrix.BitrixError("crm.item.get: Not found"))
+            self.assertEqual(inventory.refresh_bitrix(103048)["gone"], 1)
+            answers.append(bitrix.BitrixTransient("crm.item.get: timed out"))
+            with self.assertRaises(bitrix.BitrixTransient):
+                inventory.refresh_bitrix(103048)
+            self.assertEqual(LeadAiUnit.objects.filter(source="bitrix", active=True).count(), 0)
+        # No webhook configured: nothing read, nothing changed.
+        self.assertEqual(inventory.refresh_bitrix(103048), {"skipped": "no Bitrix webhook"})
 
 
 class InTheTurnTests(SimpleTestCase):
@@ -255,3 +336,86 @@ class LocationTreeTests(TestCase):
         self.assertEqual(LeadAiUnit.objects.get(source_id="04").sub_area, "La Violeta")
         self.assertEqual(LeadAiUnit.objects.get(source_id=PF_SHOP["id"]).community, "International City")
         self.assertEqual(inventory._LOCATIONS, {12110: LA_VIOLETA, 99: None})
+
+
+class PagingTests(TestCase):
+    """Property Finder's pages overlap (2026-10-20: 394 rows for 144 live listings): each listing is upserted once, the
+    repeats counted; a nextPage that never ends stops at PF_PAGES_AT_MOST."""
+
+    def setUp(self):
+        inventory._LOCATIONS.clear()
+        self.addCleanup(inventory._LOCATIONS.clear)
+
+    def test_a_listing_repeated_across_pages_counts_once(self):
+        pages = {
+            1: {"results": [PF_SHOP, PF_STUDIO_SALE], "pagination": {"nextPage": 2}},
+            2: {"results": [PF_STUDIO_SALE, {**PF_SHOP, "id": "05", "reference": "a7group-1814"}], "pagination": {"nextPage": None}},
+        }
+        asked = []
+
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, **kwargs):
+                return FakeResponse({"accessToken": "t", "expiresIn": 1800})
+
+            def get(self, url, **kwargs):
+                if url.endswith("/locations"):
+                    return FakeResponse({"data": []})
+                page = int(kwargs["params"]["page[number]"])
+                asked.append(page)
+                return FakeResponse(pages[page])
+
+        with self.settings(LEADAI_PF_API_KEY="k", LEADAI_PF_API_SECRET="s"), patch.object(inventory.httpx, "Client", FakeClient):
+            result = inventory.sync_pf()
+        self.assertEqual(result, {"upserted": 3, "gone": 0, "repeated": 1})
+        self.assertEqual(asked, [1, 2])
+        self.assertEqual(LeadAiUnit.objects.filter(source="pf", active=True).count(), 3)
+
+    def test_an_endless_next_page_stops(self):
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, **kwargs):
+                return FakeResponse({"accessToken": "t", "expiresIn": 1800})
+
+            def get(self, url, **kwargs):
+                return FakeResponse({"results": [PF_SHOP], "pagination": {"nextPage": 99}})
+
+        with self.settings(LEADAI_PF_API_KEY="k", LEADAI_PF_API_SECRET="s"), patch.object(inventory.httpx, "Client", FakeClient), patch.object(inventory, "PF_PAGES_AT_MOST", 3):
+            result = inventory.sync_pf()
+        self.assertEqual(result, {"upserted": 1, "gone": 0, "repeated": 2})

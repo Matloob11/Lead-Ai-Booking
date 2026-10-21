@@ -42,6 +42,8 @@ TEST_SETTINGS = {
     "BITRIX_WEBHOOK_URL": "",
     "CRM_LEAD_WA_SECRET": "test-crm-secret",
     "LEADAI_BITRIX_NOTIFY_URL": "https://bitrix.test/bitrix/tools/a7_leadai_notify.php",
+    # Off: a test of the escalation map (test_escalation.py) names the endpoint and fakes the answer itself.
+    "LEADAI_BITRIX_ESCALATION_URL": "",
 }
 
 

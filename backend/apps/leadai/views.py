@@ -984,3 +984,57 @@ def communities(request):
     live = LeadAiUnit.objects.filter(active=True, community__iexact=OuterRef("name")).order_by().values("community").annotate(n=Count("id")).values("n")
     rows = LeadAiCommunity.objects.annotate(units_live=Subquery(live[:1])).order_by("name")
     return Response({"communities": [serialize_community(row) for row in rows], "can_edit": _can_edit(request.user)})
+
+
+COMMUNITY_HISTORY_MAX = 50
+
+
+@api_view(["POST"])
+def community_create(request):
+    """A new community pack (panel admins): the name and any of the pack's fields (communities.validate)."""
+    from .assistant import communities
+    from .models import LeadAiCommunity
+
+    if not _can_edit(request.user):
+        return Response({"detail": "Only a panel admin can add a community."}, status=status.HTTP_403_FORBIDDEN)
+    data = request.data if isinstance(request.data, dict) else {}
+    fields, errors = communities.validate(data, creating=True)
+    if "name" in fields and LeadAiCommunity.objects.filter(name__iexact=fields["name"]).exists():
+        errors["name"] = "A community of that name exists already."
+    if errors:
+        return Response({"detail": "Some values are not valid.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+    row = LeadAiCommunity.objects.create(**fields)
+    row.units_live = 0
+    return Response(serialize_community(row), status=status.HTTP_201_CREATED)
+
+
+@api_view(["PUT"])
+def community_detail(request, pk):
+    """Change a community pack (panel admins): only the keys sent, each checked (communities.validate); the chats of that
+    community read the pack on their next turn."""
+    from django.db.models import Count
+
+    from .assistant import communities
+    from .models import LeadAiCommunity, LeadAiUnit
+
+    if not _can_edit(request.user):
+        return Response({"detail": "Only a panel admin can change a community."}, status=status.HTTP_403_FORBIDDEN)
+    row = get_object_or_404(LeadAiCommunity, pk=pk)
+    data = request.data if isinstance(request.data, dict) else {}
+    fields, errors = communities.validate(data)
+    if "name" in fields and fields["name"] != row.name:
+        if row.name == communities.DEFAULT:
+            errors["name"] = "International City keeps its name: the assistant's own flow is built on it."
+        elif LeadAiCommunity.objects.filter(name__iexact=fields["name"]).exclude(pk=row.pk).exists():
+            errors["name"] = "A community of that name exists already."
+    if "active" in fields and not fields["active"] and row.name == communities.DEFAULT:
+        errors["active"] = "International City cannot be switched off."
+    if errors:
+        return Response({"detail": "Some values are not valid.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+    changed = [key for key, value in fields.items() if getattr(row, key) != value]
+    for key in changed:
+        setattr(row, key, fields[key])
+    if changed:
+        row.save(update_fields=[*changed, "updated_at"])
+    row.units_live = LeadAiUnit.objects.filter(active=True, community__iexact=row.name).aggregate(n=Count("id"))["n"] or 0
+    return Response(serialize_community(row))

@@ -944,7 +944,7 @@ def _escalate(conversation, state, now, settings_row, *, since, handover: bool) 
 
     from .. import optout
     from ..models import LeadAiAlert, LeadAiChat
-    from . import alerts, engine, transcript
+    from . import alerts, engine, escalation, transcript
 
     if conversation.linked_conversation_id or state.stopped_at is not None or state.not_interested_at is not None:
         return False
@@ -984,6 +984,14 @@ def _escalate(conversation, state, now, settings_row, *, since, handover: bool) 
             "time). The assistant told them our agent would answer them there."
         )
     lines = [head, words_line(words), *where_lines(conversation, chat), "Please reply to them in the chat now, or ask a colleague to."]
+    # A handover nobody answered reaches the responsible's team lead and department head too (escalation.above, Cursor's
+    # C49 map; the advance plan's D): the lead's responsible, else the chat's owner.
+    above = []
+    if handover:
+        owner = conversation.assigned_agent
+        above = escalation.above((state.responsible_bitrix_user_id or "").strip() or getattr(owner, "bitrix_user_id", ""))
+        if above:
+            lines.append("The responsible's team lead and department head have this alert too.")
     return bool(
         alerts.raise_alert(
             kind=WAITING,
@@ -993,5 +1001,6 @@ def _escalate(conversation, state, now, settings_row, *, since, handover: bool) 
             text="\n".join(item for item in lines if item),
             dedupe_key=base,
             crm_url=engine._crm_url(chat),
+            also=above,
         )
     )

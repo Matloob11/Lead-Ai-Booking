@@ -353,6 +353,14 @@ LEADAI_BITRIX_FIELDS_URL = env(
     "LEADAI_BITRIX_FIELDS_URL",
     "https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_fields.php",
 )
+# The Bitrix-side map of who stands above a user (team lead, department head;
+# Cursor's C49), read when a handover nobody answered is escalated
+# (apps/leadai/assistant/escalation.py). Signed with CRM_LEAD_WA_SECRET. Empty
+# turns it off: the escalation reaches the chat's people only.
+LEADAI_BITRIX_ESCALATION_URL = env(
+    "LEADAI_BITRIX_ESCALATION_URL",
+    "https://crm.a7grouprealestatedxb.com/bitrix/tools/a7_leadai_escalation.php",
+)
 # Official Conversation Health — same default as OpenWA linked-device monitor.
 CONVERSATION_HEALTH_OVERRIDE_PASSWORD = env("CONVERSATION_HEALTH_OVERRIDE_PASSWORD", "222007")
 

@@ -104,3 +104,65 @@ def bot_status(request):
     chats = bitrix_status.apply(lead_id, bot_status=bot, wa_opt_out=opt, changed_by=changed_by, at=(at or "")[:40])
     logger.info("Lead AI: Bitrix set Bot Status %s / opt-out %s on lead %s (%s chats)", bot, opt, lead_id, chats)
     return JsonResponse({"ok": True, "chats": chats})
+
+
+# POST /api/leadai/inventory/bitrix/: Bitrix says an Availability card was added or changed (Cursor's C46 handler,
+# a7_inventory_webhook.php, on SPA 1042 in category 14 or an available stage). Header X-A7-Signature = hex HMAC-SHA256 of
+# "leadai-inventory." + ts + "." + body with CRM_LEAD_WA_SECRET; ts (unix seconds) in X-A7-Ts and in the body; body
+# {"event": "update", "id": 103048, "stageId": "DT1042_14:PREPARATION", "ts": 1760000000}.
+INVENTORY_PREFIX = b"leadai-inventory."
+
+
+def inventory_sign(raw: bytes, ts: str, secret: str) -> str:
+    return hmac.new(secret.encode(), INVENTORY_PREFIX + ts.encode() + b"." + raw, hashlib.sha256).hexdigest()
+
+
+@csrf_exempt
+def inventory_event(request):
+    """Checked like bot_status: 405 for any method but POST, 401 for a missing, wrong or old signature, 400 for a body
+    off the contract; else 200 {"ok": true, "queued": true, "id": N} and the card is read again in a task
+    (tasks.refresh_bitrix_unit → inventory.refresh_bitrix): its clean rows upserted, the rest retired."""
+    if request.method != "POST":
+        return _refuse(405, "POST only.")
+    try:
+        length = int(request.META.get("CONTENT_LENGTH") or 0)
+    except ValueError:
+        length = 0
+    if length > MAX_BODY:
+        return _refuse(400, "Body too large.")
+    raw = request.body
+    if not raw or len(raw) > MAX_BODY:
+        return _refuse(400, "Bad body.")
+    secret = (getattr(settings, "CRM_LEAD_WA_SECRET", "") or "").strip()
+    ts = str(request.headers.get("X-A7-Ts") or "").strip()
+    given = str(request.headers.get("X-A7-Signature") or "").strip().lower()
+    if not ts:
+        # The handler's stamp travels in the body too: a proxy that drops the header still signs.
+        try:
+            stamped = json.loads(raw.decode("utf-8"))
+            ts = str(int(stamped.get("ts"))) if isinstance(stamped, dict) and isinstance(stamped.get("ts"), int) else ""
+        except (UnicodeDecodeError, ValueError):
+            ts = ""
+    if not secret or not _TS.fullmatch(ts) or not _SIGN.fullmatch(given) or abs(time.time() - int(ts)) > MAX_SKEW:
+        return _refuse(401, "Unauthorized.")
+    if not hmac.compare_digest(inventory_sign(raw, ts, secret).encode("ascii"), given.encode("ascii")):
+        return _refuse(401, "Unauthorized.")
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return _refuse(400, "Body is not JSON.")
+    if not isinstance(body, dict):
+        return _refuse(400, "Body is not an object.")
+    try:
+        card_id = _int_or_none(body.get("id"))
+    except ValueError:
+        return _refuse(400, "Bad field.")
+    if not card_id:
+        return _refuse(400, "No card.")
+    from .tasks import refresh_bitrix_unit
+
+    refresh_bitrix_unit.delay(card_id)
+    logger.info(
+        "Lead AI inventory: Bitrix says Availability card %s %s (%s)", card_id, str(body.get("event") or "update")[:20], str(body.get("stageId") or "")[:60]
+    )
+    return JsonResponse({"ok": True, "queued": True, "id": card_id})

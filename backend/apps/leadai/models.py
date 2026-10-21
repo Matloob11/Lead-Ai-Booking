@@ -115,6 +115,9 @@ class LeadAiCampaign(models.Model):
     playbook = models.CharField(
         max_length=24, choices=Playbook.choices, default=Playbook.GENERAL, db_default=Playbook.GENERAL
     )
+    # The community the campaign sells (a pack's name, assistant/communities.py; Cursor's C44 popup passes it): a chat's
+    # community until its own words or lead context say otherwise. "" is International City, as before.
+    community = models.CharField(max_length=80, blank=True, default="", db_default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

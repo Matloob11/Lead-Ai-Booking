@@ -23,6 +23,8 @@ urlpatterns = [
     path("digests/", views.digests, name="digests"),
     # The community packs (assistant/communities.py): the list for the panel; edited in Django admin for now.
     path("communities/", views.communities, name="communities"),
+    path("communities/new/", views.community_create, name="community-create"),
+    path("communities/<int:pk>/", views.community_detail, name="community-detail"),
     # The shops playbook's media library (board T30).
     path("shop-media/", media_views.library, name="shop-media"),
     path("shop-media/reorder/", media_views.reorder, name="shop-media-reorder"),
@@ -34,4 +36,6 @@ urlpatterns = [
     path("unit-media/<int:pk>/file/", media_views.unit_file, name="unit-media-file"),
     # A person's Bot Status in Bitrix (board T52, C12): signed, no session.
     path("bitrix/bot-status/", bitrix_views.bot_status, name="bitrix-bot-status"),
+    # An Availability card added or changed in Bitrix (Cursor's C46 webhook): signed, no session; the card is read again.
+    path("inventory/bitrix/", bitrix_views.inventory_event, name="inventory-bitrix"),
 ]

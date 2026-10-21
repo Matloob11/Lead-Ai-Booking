@@ -180,6 +180,21 @@ def sync_inventory() -> None:
     logger.info("Lead AI inventory sync: %s", result)
 
 
+@shared_task(bind=True, ignore_result=True, soft_time_limit=60, time_limit=90, max_retries=5)
+def refresh_bitrix_unit(self, card_id: int) -> None:
+    """One Availability card read again after Bitrix's webhook said it changed (bitrix_views.inventory_event, Cursor's
+    C46; inventory.refresh_bitrix). Bitrix busy or down: again in a minute, five times; the half-hourly sync has it after."""
+    from apps.crmlink import client as bitrix
+
+    from .assistant import inventory
+
+    try:
+        result = inventory.refresh_bitrix(card_id)
+    except bitrix.BitrixTransient as exc:
+        raise self.retry(exc=exc, countdown=60)
+    logger.info("Lead AI inventory: Availability card %s refreshed: %s", card_id, result)
+
+
 @shared_task(ignore_result=True, soft_time_limit=60, time_limit=90)
 def copilot_ask(conversation_id: int, question: str, agent_id: int | None = None) -> None:
     """Ask AI (assistant/copilot.py): the agent's question answered as a draft on the chat."""
