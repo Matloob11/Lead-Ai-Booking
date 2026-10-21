@@ -2171,8 +2171,9 @@ def settle(
         cut = claims.settle(answer, new_texts, known=known, office=office_address, options=wants_other)
         if cut:
             trimmed.append(claims.COMMISSION if cut == [claims.COMMISSION] else claims.CUT)
-        if claims.HOURLY in cut and hourly_slots(answer, new_texts, earlier, now, closed_dates, taken, booked=booked):
-            # Its only words said our slots start on the hour, and went: code's two free slots from their hour instead.
+        if (claims.HOURLY in cut or claims.CLOSEST in cut) and hourly_slots(answer, new_texts, earlier, now, closed_dates, taken, booked=booked):
+            # Its only words said our slots start on the hour (or called other times the closest available), and went:
+            # code's two free slots from their hour instead.
             trimmed.append(HOURLY_SLOTS)
     if agreed or reoffer:
         # They said yes to coming, or turned down nothing of the times we just
@@ -2683,6 +2684,10 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
     # The reason may sit in the English gloss alone (the 2e gate, round 18: "Our office slots start on the hour or half
     # hour" in reply_en, the reply itself offering 4:00 PM or 6:00 PM): read both.
     if theirs.minute and (claims.says_hourly(answer["reply"] or "") or claims.says_hourly(answer.get("reply_en") or "")):
+        return theirs
+    # "The closest available slot is at 4:00 PM or 6:00 PM" (the 2e gate, round 22: shops-gate-half-hour #2): their half
+    # hour passed over with the claim that nearer slots are not there; never true of our 30-minute slots.
+    if theirs.minute and (claims.says_closest(answer["reply"] or "") or claims.says_closest(answer.get("reply_en") or "")):
         return theirs
     if not others:
         return None

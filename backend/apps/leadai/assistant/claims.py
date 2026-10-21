@@ -268,6 +268,29 @@ def says_hourly(text: str) -> bool:
     """The text says our slots start only on the hour (_HOURLY): never true of them (hours.SLOT, every 30 minutes). Read by
     engine.passed_over_hour on the reply before settle cuts the sentence: it says why their half hour was passed over."""
     return bool(_HOURLY.search(" ".join(str(text or "").replace("’", "'").split())))
+
+
+# "The closest available slot is at 4:00 PM or 6:00 PM" to "Can I come today at 4:30?": their half hour passed over with the
+# claim that nearer slots are not there (the 2e gate, round 22: shops-gate-half-hour #2). Our slots are every 30 minutes.
+CLOSEST = "closest"
+_CLOSEST = re.compile(
+    r"\b(?:closest|nearest|next|earliest|first)\s+(?:available\s+|free\s+|open\s+)?(?:slots?|times?|openings?|appointments?|viewings?|visits?)\b"
+    r"|\b(?:closest|nearest)\s+(?:we\s+have|available|free)\b|\bno\s+(?:slot|time)s?\s+at\s+\d{1,2}[:.]\d{2}\b",
+    re.IGNORECASE,
+)
+
+
+def says_closest(text: str) -> bool:
+    """The text calls other times the closest or next available (_CLOSEST): when they asked a half hour, it says why it was
+    passed over, and it is never true of our 30-minute slots. Read by engine.passed_over_hour; settle cuts the sentence."""
+    return bool(_CLOSEST.search(" ".join(str(text or "").replace("’", "'").split())))
+
+
+def half_hour_asked(texts) -> bool:
+    """Their words name a time off the hour ("4:30", "half past five")."""
+    from . import hours
+
+    return any(moment.minute for text in texts or () for moment in hours.spoken_times(str(text or "")))
 # What they asked about, read in their own words (the topic of a claim).
 _ASKED = {
     "location": re.compile(
@@ -401,6 +424,10 @@ def settle(answer: dict, texts, *, known: str = "", office: str = "", options: b
     asked_commission = asked_about(COMMISSION, texts)
     sentences = filters.split_sentences(reply)
     topics = [topic_of(sentence, known, office) for sentence in sentences]
+    if half_hour_asked(texts):
+        # Their half hour called unavailable by "the closest available slot is …": a claim about our slots that is never
+        # true (every 30 minutes); the sentence goes, and engine.passed_over_hour books their own hour when it is free.
+        topics = [topic or (CLOSEST if says_closest(sentence) else "") for sentence, topic in zip(sentences, topics)]
     kept: list[str] = []
     cut: list[str] = []
     # The reply leaves a question to our agent already (its own words or the build pack's line): no second deferral.
@@ -432,7 +459,7 @@ def settle(answer: dict, texts, *, known: str = "", office: str = "", options: b
         return []
     said = [str(text or "") for text in texts or () if str(text or "").strip()]
     answer["reply"] = " ".join(kept).strip()
-    if not answer["reply"] and not all(rules.is_acknowledgement(text) for text in said) and any(topic != HOURLY for topic in cut):
+    if not answer["reply"] and not all(rules.is_acknowledgement(text) for text in said) and any(topic not in (HOURLY, CLOSEST) for topic in cut):
         # (Our slots said to be hourly answer no question of theirs: nothing is left to defer.)
         answer["reply"] = unknown_line(language)
     answer["send"] = bool(answer["reply"])
