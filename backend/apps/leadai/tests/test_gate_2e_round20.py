@@ -26,6 +26,40 @@ CLUSTER_AND_MOVE = "Perfect, you're looking for a studio in International City. 
 BALCONY_MOVE = residential._BALCONY_MOVE["en"]
 CONTRACT_ASKED = "No problem. Will it be a contract in your name?"
 OCCUPANCY_ASKED = "Perfect, the Spain Cluster studio. Will it be for yourself, your family, or company staff?"
+# The third gate's one strict failure (shops-res-cluster-unknown #2): the requirement asked again in more detail, no cluster.
+MOVE_AGAIN = (
+    "Great, a studio with a balcony for next month. Most standard layouts in International City are very similar, so seeing one gives "
+    "you a good idea. The exact apartment can differ in condition, floor, view, balcony and finishing — our agent will show you the "
+    "exact unit at the viewing. Are you planning to move in early or later next month?"
+)
+
+
+class RequirementAskedAgainTests(SimpleTestCase):
+    def test_their_answer_counts_as_the_requirement_answered(self):
+        self.assertTrue(residential.requirement_answered({}, {}, ["Balcony would be nice, next month"]))
+        self.assertTrue(residential.requirement_answered({"balcony": "yes"}, {"move_in": "January"}, ["ok"]))
+        self.assertTrue(residential.requirement_answered({}, {}, ["No balcony, immediately"]))
+        self.assertTrue(residential.requirement_answered({}, {"balcony": "no"}, ["in 2 weeks"]))
+        self.assertFalse(residential.requirement_answered({}, {}, ["Balcony would be nice"]))  # the move-in not yet
+        self.assertFalse(residential.requirement_answered({"move_in": "next month"}, {}, ["ok"]))  # the balcony not yet
+        self.assertFalse(residential.requirement_answered({}, {}, ["next month"]))
+
+    def test_the_round_20_run_asks_the_cluster_now(self):
+        for facts in ({"balcony": "yes", "move_in": "next month"}, {"balcony": "yes"}):
+            with self.subTest(facts=facts):
+                run = run_eval("shops-res-cluster-unknown", res_answer(MOVE_AGAIN, facts=facts))
+                self.assertEqual(run.failures, [], run.out)
+                self.assertIn("Any cluster you prefer", run.out)
+                self.assertNotIn("early or later", run.out)
+        with patch.object(residential, "requirement_answered", return_value=False):
+            self.assertIn("does not ask the cluster", run_eval("shops-res-cluster-unknown", res_answer(MOVE_AGAIN, facts={"balcony": "yes", "move_in": "next month"})).failures)
+        # Half answered ("Balcony would be nice" alone): the model's own move-in question stands and the cluster waits.
+        reply = "Great. When are you planning to move?"
+        out = residential.cluster_first(
+            reply, {"facts": {"balcony": "yes"}}, track="rent", unit="studio", facts={"for_client": False}, texts=["Balcony would be nice"],
+            earlier=[("assistant", BALCONY_MOVE)], language="en",
+        )
+        self.assertEqual(out, (reply, "", False))
 
 
 class AloneInvitationTests(SimpleTestCase):

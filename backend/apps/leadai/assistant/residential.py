@@ -2491,6 +2491,27 @@ _WITH_OTHERS = re.compile(
 )
 
 
+# Their answer to our balcony and move-in question carries the move-in ("next month", "in 2 weeks", "immediately", "January",
+# "agle mahine", "الشهر القادم"): step 2's first half is answered, whatever the model recorded of it.
+_MOVE_SAID = re.compile(
+    r"\b(?:next|this|coming)\s+(?:month|week|year)\b|\bend\s+of\s+(?:the\s+)?(?:month|year|\w+)\b|\b(?:immediately|asap|right\s+away|urgently?)\b|\bwithin\s+(?:a|\d+)\s+(?:days?|weeks?|months?)\b"
+    r"|\bin\s+(?:a|\d+)\s+(?:days?|weeks?|months?)\b|\bafter\s+\d+\s+(?:days?|weeks?|months?)\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b"
+    r"|\b(?:jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b\.?|\b(?:agle|is|iss)\s+(?:mahine|hafte|mahiney|haftey)\b|\bjald\b|\bfauran\b|\babhi\b"
+    r"|الشهر\s+القادم|الأسبوع\s+القادم|فورا|فوراً|حالا|اگلے\s+(?:مہینے|ہفتے)|فوری|اबھی|अगले\s+(?:महीने|हफ़्ते|हफ्ते)|जल्दी|तुरंत",
+    re.IGNORECASE,
+)
+
+
+def requirement_answered(facts: dict | None, fresh: dict | None, texts=()) -> bool:
+    """Step 2's first half is answered: the balcony (the chat's or this answer's fact, or their words) and the move-in
+    (a fact, or a time in their words)."""
+    known = {**(facts or {}), **{key: value for key, value in (fresh or {}).items() if value not in (None, "", [])}}
+    words = " ".join(str(text or "") for text in texts or ())
+    balcony = known.get("balcony") not in (None, "") or bool(_BALCONY_YES.search(words) or _BALCONY_NO.search(words) or _BALCONY_ASK.search(words))
+    move_in = known.get("move_in") not in (None, "") or bool(_MOVE_SAID.search(words))
+    return balcony and move_in
+
+
 def alone_said(texts) -> bool:
     """Their words now answer step 3 with themselves alone, and name nobody beside them."""
     words = " ".join(str(text or "") for text in texts or ()).replace("’", "'")
@@ -2677,6 +2698,11 @@ def cluster_first(
     if track != RENT or unit not in (STUDIO, ONE_BR) or cluster_known(clusters, facts, answer["facts"], texts) or asked_cluster_before(earlier):
         return reply, "", False
     reply, cut = _drop(reply, asks_occupancy)
+    if requirement_asked_last(earlier) and requirement_answered(facts, answer["facts"], texts):
+        # Our balcony and move-in question answered, and the reply asks it again in more detail ("Are you planning to move
+        # in early or later next month?"): the cluster is next (the 2e gate, round 20: shops-res-cluster-unknown #2).
+        reply, again = _drop(reply, asks_requirement)
+        cut = cut or again
     sentences = _split(reply)
     if any(asks_cluster(sentence) for sentence in sentences):
         return reply, "", cut
