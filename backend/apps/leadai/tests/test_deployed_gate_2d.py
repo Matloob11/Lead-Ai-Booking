@@ -152,7 +152,8 @@ class HalfHourTurnTests(ShopsBase):
         self.assertTrue(self.actions(message)["upgraded"])
 
     def test_without_the_fix_the_model_offered_4_or_5(self):
-        with no_passed_over_hour():
+        # Round 22 cuts the "closest available" sentence as well (claims.CLOSEST): off here too, the deployed reply goes whole.
+        with no_passed_over_hour(), patch("apps.leadai.assistant.claims.half_hour_asked", return_value=False):
             _, outcome = self.asked(CLOSEST_TWO)
         self.assertTrue(self.body(outcome).startswith(CLOSEST_TWO), self.body(outcome))
         self.assertFalse(LeadAiAppointment.objects.filter(status=LeadAiAppointment.Status.CONFIRMED).exists())
