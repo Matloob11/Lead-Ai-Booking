@@ -37,6 +37,8 @@ _SOON = re.compile(
     r"|within\s+(?:a|1|2|one|two)\s+months?|in\s+(?:a|\d+|two|three|four)\s+(?:days?|weeks?)|(?:1|2|one|two)\s+months?|\d{1,2}\s+days)\b",
     re.IGNORECASE,
 )
+# "not now", "after 2 months", "later this year": a time named as not yet is known, not soon.
+_NOT_SOON = re.compile(r"\b(?:not|no|never|later|after|maybe)\b|بعد|لاحقا|بعد\s+میں|बाद", re.IGNORECASE)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,7 +108,8 @@ def compute(
         add(5, "area known")
     when = str(facts.get("move_in") or facts.get("buy_timeline") or "").strip()
     if when:
-        add(10 if _SOON.search(when) else 3, "moving soon" if _SOON.search(when) else "move-in known")
+        soon = bool(_SOON.search(when)) and not _NOT_SOON.search(when)
+        add(10 if soon else 3, "moving soon" if soon else "move-in known")
     if str(facts.get("full_name") or "").strip():
         add(5, "full name given")
     if appointment is not None:
@@ -227,8 +230,10 @@ def rescore_quiet(now) -> int:
     from . import crm_fields
 
     moved = 0
+    # The customer's own last message (Conversation.last_inbound_at, stamped on an inbound alone): our follow-ups, nudges
+    # and reminders stamp last_message_at and must not keep a silent chat warm (the round-21 review).
     rows = (
-        LeadAiChatState.objects.filter(score__gt=0, conversation__last_message_at__lt=now - QUIET_AFTER)
+        LeadAiChatState.objects.filter(score__gt=0, conversation__last_inbound_at__lt=now - QUIET_AFTER)
         .exclude(scored_at__gte=now - dt.timedelta(hours=20))
         .select_related("conversation")
         .order_by("scored_at", "pk")[:RESCORE_AT_MOST]

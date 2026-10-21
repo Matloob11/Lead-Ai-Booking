@@ -3902,7 +3902,17 @@ def record_opt_out(
             # follow-ups read it (needs.wants_no_shop: facts.need, or intent buy or sell, or a home as property_type):
             # review 2d found a buyer whose want only the model recorded (intent buy) written Lost.
             writes = []
-        crm_fields.queue(conversation, chat, writes)
+        # The score (assistant/score.py): a no or a stop is 0 now, on the chat and on the lead, not three days on at
+        # the daily rescore (the round-21 review). Only a chat scored above 0 before: the stale figure is what misleads.
+        score_writes = []
+        if state.score:
+            from . import score as lead_score
+
+            state.refresh_from_db(fields=["stopped_at", "not_interested_at"])  # the queryset update above bypassed it
+            scored, moved = lead_score.update(conversation, state, now=now)
+            if moved:
+                score_writes = lead_score.writes(scored)
+        crm_fields.queue(conversation, chat, writes + score_writes)
         lost_written = kind == rules.NOT_INTERESTED and bool(writes)
     if quiet:
         return True
@@ -5827,13 +5837,14 @@ def _apply(
             writes += crm_fields.residential_writes(
                 facts, fresh.track, fresh.unit, words=str(answer.get("their_words") or ""), besides=writes
             )
-            # The lead score (assistant/score.py, F1): stored on the chat every turn, written to the lead when it moved.
+            # The lead score (assistant/score.py, F1): stored on the chat every turn; its two fields go with the batch and
+            # queue() keeps only what is news for the chat's current lead (residential_writes' rule: a lead reached by a
+            # later campaign, or a write skipped while the chat had no lead, catches up at the next turn).
             from . import score as lead_score
 
-            scored, moved = lead_score.update(conversation, fresh, now=now, hot=bool(done.get("hot_lead")))
+            scored, _ = lead_score.update(conversation, fresh, now=now, hot=bool(done.get("hot_lead")))
             done["score"] = scored.value
-            if moved:
-                writes += lead_score.writes(scored)
+            writes += lead_score.writes(scored)
             if crm_fields.queue(conversation, chat, writes):
                 done["crm_fields"] = [field for field, _, _ in writes]
     # The customer memory (memory.py): this chat's facts and bookings kept by the phone, for the chats on other numbers.

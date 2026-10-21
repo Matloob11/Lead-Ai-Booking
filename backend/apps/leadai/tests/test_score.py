@@ -48,6 +48,13 @@ class ComputeTests(SimpleTestCase):
         buyer = score.compute(facts={"buy_timeline": "within 3 months", "budget": "half a million", "cluster_flexible": True}, track="sale", unit="one_br", now=NOW)
         self.assertEqual(buyer.reasons, ("unit known", "to buy", "budget known", "area known", "move-in known"))
         self.assertEqual(buyer.value, 38)
+        # A time named as not yet is known, not soon.
+        for when in ("not now", "after 2 months", "maybe next month", "later this year"):
+            with self.subTest(when=when):
+                self.assertEqual(score.compute(facts={"move_in": when}, now=NOW).reasons, ("move-in known",))
+        for when in ("next month", "immediately", "within 2 weeks", "in 30 days"):
+            with self.subTest(when=when):
+                self.assertEqual(score.compute(facts={"move_in": when}, now=NOW).reasons, ("moving soon",))
 
     def test_how_fast_they_answer_and_the_models_word(self):
         fast = score.compute(facts={}, now=NOW, reply_minutes=[5, 20, 40])
@@ -104,6 +111,25 @@ class TurnTests(RentBase):
         self.assertEqual((scored.value, moved), (state.score, False))
         self.assertEqual(len(self.scores()), 1)
 
+    def test_a_no_after_a_booking_is_zero_now(self):
+        self.rent(clusters=["Spain"], full_name="Ahmed Khan", move_in="next month")
+        self.turn(self.inbound("Tomorrow at 5 pm"), [res_answer("Perfect, see you tomorrow at 5 PM.", action="confirm", place="office", date="2026-10-13", time="17:00")])
+        self.assertGreaterEqual(self.state().score, 60)
+        self.turn(self.inbound("Not interested anymore, thanks"), [res_answer("Understood.", opt_out="not_interested")])
+        state = self.state()
+        self.assertIsNotNone(state.not_interested_at)
+        self.assertEqual((state.score, state.score_reasons), (0, "Cold 0: not interested"))
+        self.assertEqual(self.scores()[-1], "0")
+
+    def test_the_reasons_reach_the_lead_when_the_value_stands(self):
+        crm_fields.queue(self.conversation, self.chat, score.writes(score.Score(25, ("they wrote", "unit known"))))
+        crm_fields.queue(self.conversation, self.chat, score.writes(score.Score(25, ("they wrote", "unit known", "visit cancelled"))))
+        rows = LeadAiCrmField.objects.filter(conversation=self.conversation).order_by("pk").values_list("field", "value")
+        self.assertEqual(list(rows), [
+            (crm_fields.FIELD_AI_SCORE, "25"), (crm_fields.FIELD_AI_SCORE_WHY, "Cold 25: they wrote; unit known"),
+            (crm_fields.FIELD_AI_SCORE_WHY, "Cold 25: they wrote; unit known; visit cancelled"),
+        ])
+
     def test_a_booking_makes_it_hot_and_the_lead_hears_it(self):
         self.rent(clusters=["Spain"], full_name="Ahmed Khan", move_in="next month")
         before = self.state().score
@@ -145,7 +171,8 @@ class RescoreTests(Base):
             track="rent", unit="studio", facts=KNOWN, score=60, score_reasons="Warm 60: x", scored_at=NOW - dt.timedelta(days=2)
         )
         self.inbound("Balcony would be nice, next month", seconds_ago=5 * 24 * 3600)
-        Conversation.objects.filter(pk=self.conversation.pk).update(last_message_at=NOW - dt.timedelta(days=5))
+        # Their last message five days ago; ours (a follow-up) yesterday stamps last_message_at and must not keep it warm.
+        Conversation.objects.filter(pk=self.conversation.pk).update(last_inbound_at=NOW - dt.timedelta(days=5), last_message_at=NOW - dt.timedelta(days=1))
         self.assertEqual(score.rescore_quiet(NOW), 1)
         state.refresh_from_db()
         self.assertEqual((state.score, state.scored_at), (50, NOW))
