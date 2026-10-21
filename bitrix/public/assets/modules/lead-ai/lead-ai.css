@@ -2571,3 +2571,186 @@ a.lai-media__name:hover {
   --lai-chip: #38bdf8;
   color: #bae6fd;
 }
+
+/* ----------------------------------------------------- communities dialog (communities.js) */
+
+.lai-bar__communities {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  font-size: 12px;
+}
+
+.lai-com {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  padding: 14px 18px 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #eef3f9;
+}
+
+.lai-com__side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lai-com__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lai-com__h {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.lai-com__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.lai-com__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 3%);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lai-com__item--on {
+  border-color: rgb(196 181 253 / 60%);
+  background: rgb(196 181 253 / 10%);
+}
+
+.lai-com__item--off .lai-com__item-name {
+  color: #8fa1b6;
+  text-decoration: line-through;
+}
+
+.lai-com__item-name {
+  font-weight: 700;
+}
+
+.lai-com__item-sub {
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-com__main {
+  min-width: 0;
+}
+
+.lai-com__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lai-com__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.lai-com__sub {
+  font-size: 11.5px;
+  color: #9fb0c4;
+}
+
+.lai-com__note {
+  margin: 0;
+  font-size: 12px;
+  color: #9fb0c4;
+}
+
+.lai-com__note:empty {
+  display: none;
+}
+
+.lai-com__note--err {
+  color: #fca5a5;
+}
+
+.lai-com__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.lai-com__check {
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lai-com__bands {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lai-com__band-row {
+  display: grid;
+  grid-template-columns: 110px repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
+  align-items: end;
+}
+
+.lai-com__band-deal {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #c4b5fd;
+  padding-bottom: 6px;
+}
+
+.lai-com__band-l {
+  display: block;
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-com__band-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lai-com__band {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.lai-com__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .lai-com {
+    grid-template-columns: 1fr;
+  }
+
+  .lai-bar__communities {
+    margin-left: auto;
+  }
+
+  .lai-bar__communities + .lai-bar__reports {
+    margin-left: 0;
+  }
+}

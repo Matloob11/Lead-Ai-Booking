@@ -85,6 +85,10 @@ export const leadAiApi = {
   /** The community packs (assistant/communities.py): {communities: [{name, aliases, sub_areas, units, units_live, ...}], can_edit}. */
   communities: () => apiFetch("/api/leadai/communities/"),
 
+  /** A panel admin changes one pack (only the keys sent; 400 {detail, errors: {field: message}}) or adds one. */
+  updateCommunity: (id, changes) => apiFetch(`/api/leadai/communities/${Number(id) || 0}/`, { method: "PUT", body: changes }),
+  createCommunity: (data) => apiFetch("/api/leadai/communities/new/", { method: "POST", body: data }),
+
   /** Cancels the chat's open meeting (409 when there is none). Returns the row. */
   cancelAppointment: (id) =>
     apiFetch(`/api/leadai/chats/${id}/appointment/cancel/`, { method: "POST", body: {} }),
