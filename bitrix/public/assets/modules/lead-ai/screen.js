@@ -289,6 +289,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     rail.active(tab);
     search.hidden = !isListTab(tab);
     filters.hidden = !isListTab(tab);
+    hotButton.hidden = isDeskTab(tab); // Needs a person and Today keep their own order
     // Another view's rows must not stand in for this one's while it loads.
     if (isListTab(tab)) loadChats({ keep: !switched });
     else loadSara();
