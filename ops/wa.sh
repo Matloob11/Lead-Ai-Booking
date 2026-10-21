@@ -75,6 +75,7 @@
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
 #   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
 #   ops/wa.sh load                        host load, RAM, disk, top containers
+#   ops/wa.sh leadai-greet-settings on|off [number] [bitrix id] [template] [hours]  the new-lead greet's settings
 #   ops/wa.sh leadai-health                 Lead AI health: sweep, queue, last hour, who waits, inventory, keys
 
 set -euo pipefail
@@ -1303,6 +1304,26 @@ case "$cmd" in
     ;;
 
   ""|-h|--help|help) usage ;;
+  leadai-greet-settings)
+    # The new-lead greet's settings (apps/leadai/assistant/newlead.py, round 22), set as the
+    # Django admin form would and checked as the greet checks them (ops/catalog/leadai-greet-settings.py):
+    #   ops/wa.sh leadai-greet-settings off
+    #   ops/wa.sh leadai-greet-settings on <number digits> <bitrix user id> <template name> [hours]
+    mode="${1:-}"
+    [[ "$mode" == "on" || "$mode" == "off" ]] || die "leadai-greet-settings takes on or off first"
+    number="${2:-}"; agent="${3:-}"; template="${4:-}"; hours="${5:-48}"
+    if [[ "$mode" == "on" ]]; then
+      [[ "$number" =~ ^[0-9]{9,15}$ ]] || die "the number is its digits: '$number'"
+      [[ "$agent" =~ ^[0-9]{1,8}$ ]] || die "a Bitrix user id is a number: '$agent'"
+      [[ "$template" =~ ^[a-z0-9_]{1,80}$ ]] || die "a template name is lower-case letters, digits and underscores: '$template'"
+      [[ "$hours" =~ ^[0-9]{1,3}$ ]] || die "hours is a number: '$hours'"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-greet-settings.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-greet-settings.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T       -e GREET_ON=$mode -e GREET_NUMBER=$number -e GREET_AGENT=$agent -e GREET_TEMPLATE=$template -e GREET_HOURS=$hours       web python manage.py shell"
+    ;;
+
   leadai-grant-access)
     # Give Lead AI access (Agent.can_lead_ai) to agents by Bitrix id, as "Agents & access"
     # would (ops/catalog/leadai-grant-access.py). Ids only; the script skips an agent
