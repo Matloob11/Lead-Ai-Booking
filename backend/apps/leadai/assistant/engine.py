@@ -2646,7 +2646,9 @@ def passed_over_hour(answer: dict, said: str, day: dt.date, model_at: dt.time | 
     } - {start}
     if any(slot.date() != day for slot in others):
         return None
-    if theirs.minute and claims.says_hourly(answer["reply"] or ""):
+    # The reason may sit in the English gloss alone (the 2e gate, round 18: "Our office slots start on the hour or half
+    # hour" in reply_en, the reply itself offering 4:00 PM or 6:00 PM): read both.
+    if theirs.minute and (claims.says_hourly(answer["reply"] or "") or claims.says_hourly(answer.get("reply_en") or "")):
         return theirs
     if not others:
         return None
