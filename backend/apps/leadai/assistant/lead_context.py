@@ -121,6 +121,15 @@ def _ref_in(text) -> str:
     return match.group(0).lower() if match else ""
 
 
+def _url_in(text) -> str:
+    """The first portal link anywhere in a comment (a Bayut lead's "Link: https://www.bayut.com/…"); '' for none."""
+    for match in _URL.finditer(str(text or "")):
+        found = _url(match.group(0).rstrip(".,;)"))
+        if found:
+            return found
+    return ""
+
+
 def _listing_id(text) -> str:
     """The portal's listing id in the comment ("Listing ID: FYS8JPQCB4FA92YB0GWQV5H39G"), upper case; '' for none."""
     match = _LISTING_ID.search(str(text or ""))
@@ -166,7 +175,7 @@ def parse(row) -> dict:
     context = {
         "source": SOURCES.get(str(row.get("SOURCE_ID") or "").strip().upper(), ""),
         "listing_ref": _ref(row.get(FIELD_REF)) or _ref_in(comments),
-        "listing_url": _url(row.get(FIELD_URL)) or _url(comments),
+        "listing_url": _url(row.get(FIELD_URL)) or _url_in(comments),
         "listing_id": _listing_id(comments),
         "unit": unit,
         "property": prop,
