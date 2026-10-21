@@ -44,11 +44,14 @@ class RequirementFirstTests(SimpleTestCase):
             self.assertEqual(residential.requirement_first(CLUSTER_ALONE, {"facts": fresh}, track="rent", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
         earlier = [("assistant", "Perfect. Do you prefer a balcony, and when are you planning to move?"), ("customer", "no balcony")]
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, answer, track="rent", unit="studio", facts={}, earlier=earlier, language="en"), (CLUSTER_ALONE, False))
-        # Step 1 not answered, the sale track, or a reply that asks the balcony itself: untouched.
+        # Step 1 not answered, the sale track, or a reply that asks both halves itself: untouched.
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, {"facts": {}}, track="rent", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
         self.assertEqual(residential.requirement_first(CLUSTER_ALONE, answer, track="sale", unit="studio", facts={}, language="en"), (CLUSTER_ALONE, False))
-        asks_both = "Perfect. Do you prefer a balcony, and which cluster do you prefer?"
+        asks_both = "Perfect. Do you prefer a balcony, and when would you like to move in?"
         self.assertEqual(residential.requirement_first(asks_both, answer, track="rent", unit="studio", facts={}, language="en"), (asks_both, False))
+        # The balcony beside the cluster, the move-in never asked (round 20's rule): code's question for both.
+        half = "Perfect. Do you prefer a balcony, and which cluster do you prefer?"
+        self.assertEqual(residential.requirement_first(half, answer, track="rent", unit="studio", facts={}, language="en"), (f"Perfect. {BALCONY_MOVE}", True))
         # In their language.
         reply, changed = residential.requirement_first(CLUSTER_ALONE, answer, track="rent", unit="studio", facts={}, language="ur_latin")
         self.assertTrue(reply.endswith(residential._BALCONY_MOVE["ur_latin"]))

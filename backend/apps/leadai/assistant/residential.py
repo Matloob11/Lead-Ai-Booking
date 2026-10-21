@@ -2477,18 +2477,30 @@ def asks_occupancy(sentence: str) -> bool:
 
 
 # Step 2's first half (brief Part 5: "Do you prefer a balcony, and when are you planning to move?"): the cluster comes after it.
-_REQUIREMENT_ASK = re.compile(
-    r"\bbalcon\w*|\bmov(?:e|ing)\s*-?\s*in\b|\b(?:plan(?:ning)?|want|wanting|like|need|going)\s+to\s+(?:move|shift)\b"
+_BALCONY_ASK = re.compile(r"\bbalcon\w*|شرفة|بلكونة|بالکونی|बालकनी", re.IGNORECASE)
+_MOVE_ASK = re.compile(
+    r"\bmov(?:e|ing)\s*-?\s*in\b|\b(?:plan(?:ning)?|want|wanting|like|need|going)\s+to\s+(?:move|shift)\b"
     r"|\bwhen\b[^.?!]{0,40}\b(?:move|moving|shift|shifting)\b|\bshift\s+kab\b|\bkab\s+shift\b"
-    r"|شرفة|بلكونة|الانتقال|بالکونی|کب\s+شفٹ|बालकनी|कब\s+शिफ्ट",
+    r"|الانتقال|کب\s+شفٹ|कब\s+शिफ्ट",
     re.IGNORECASE,
 )
+_REQUIREMENT_ASK = re.compile(f"{_BALCONY_ASK.pattern}|{_MOVE_ASK.pattern}", re.IGNORECASE)
 
 
 def asks_requirement(sentence: str) -> bool:
     """The sentence asks step 2's first half: a balcony, or when they move (brief Part 5)."""
     text = " ".join(str(sentence or "").split())
     return rules.asks_question(text) and bool(_REQUIREMENT_ASK.search(text))
+
+
+def asks_balcony(sentence: str) -> bool:
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_BALCONY_ASK.search(text))
+
+
+def asks_move_in(sentence: str) -> bool:
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_MOVE_ASK.search(text))
 
 
 def asks_cluster(sentence: str) -> bool:
@@ -2590,10 +2602,11 @@ def _requirement_asked_before(earlier) -> bool:
 
 def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=None, earlier=(), language: str = "en") -> tuple[str, bool]:
     """Step 2's first half before its cluster question (brief Part 5): on the rent track, right after step 1 was answered
-    (for_client false recorded this turn, unknown before) while neither the balcony nor the move-in is known or was ever asked, a reply that
-    asks the cluster and nothing of step 2's first half gets code's balcony and move-in question in the cluster question's
-    place; the cluster comes next turn (cluster_first, requirement_asked_last). The 2e real-model gate, round 15:
-    shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?" in one run of two."""
+    (for_client false recorded this turn, unknown before) while neither the balcony nor the move-in is known or was ever
+    asked, a reply that asks the cluster, or only one of the two (the move-in but not the balcony), gets code's balcony
+    and move-in question in its questions' place; the cluster comes next turn (cluster_first, requirement_asked_last). The
+    2e real-model gate, round 15: shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?"
+    in one run of two; round 20: the cluster question and "do you have a preferred move-in date?", no balcony."""
     if track != RENT or unit not in (STUDIO, ONE_BR):
         return reply, False
     fresh = {key: value for key, value in answer["facts"].items() if value is not None}
@@ -2608,8 +2621,12 @@ def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=
     if _requirement_asked_before(earlier):
         return reply, False
     sentences = _split(reply)
-    if any(asks_requirement(sentence) for sentence in sentences) or not any(asks_cluster(sentence) for sentence in sentences):
-        return reply, False
+    balcony = any(asks_balcony(sentence) for sentence in sentences)
+    move_in = any(asks_move_in(sentence) for sentence in sentences)
+    if balcony and move_in:
+        return reply, False  # the model's own, both halves
+    if not any(asks_cluster(sentence) for sentence in sentences) and not (balcony or move_in):
+        return reply, False  # nothing of step 2 asked: the model's answer stands (another guard may have its say)
     kept = [sentence for sentence in sentences if not asks_cluster(sentence) and not rules.asks_question(sentence)]
     return " ".join([*kept, _BALCONY_MOVE[_lang(language)]]), True
 
