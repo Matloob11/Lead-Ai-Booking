@@ -174,6 +174,28 @@ def admin_recipients() -> list:
     return [(agent, _bitrix_target(agent.bitrix_user_id)) for agent in agents]
 
 
+def extra_recipients(bitrix_ids, targets) -> list:
+    """[(agent or None, bitrix_user_id)] for Bitrix users named besides the chat's people (``targets``): a hold user
+    is nobody, one already among the targets (by Bitrix id or by their agent row) is not repeated."""
+    from django.contrib.auth import get_user_model
+
+    out = []
+    known_ids = {bitrix_id for _, bitrix_id in targets if bitrix_id}
+    known_agents = {agent.pk for agent, _ in targets if agent is not None}
+    for value in bitrix_ids or ():
+        target = _bitrix_target(value)
+        if not target or target in known_ids:
+            continue
+        agent = get_user_model().objects.filter(is_active=True, bitrix_user_id=target).order_by("pk").first()
+        if agent is not None and agent.pk in known_agents:
+            continue
+        out.append((agent, target))
+        known_ids.add(target)
+        if agent is not None:
+            known_agents.add(agent.pk)
+    return out
+
+
 def raise_alert(
     *,
     kind: str,
@@ -186,17 +208,22 @@ def raise_alert(
     crm_url: str = "",
     admins: bool = False,
     listed: bool | None = None,
+    also=(),
 ) -> list:
     """Record one alert per recipient and deliver each after the commit.
 
     Returns the new rows; a recipient already alerted for this event is skipped.
     ``listed``: whether the Lead AI alert list hears it too; None reads the kind (LISTED_KINDS), True or False
     decides for this one (a shops chat's reply cap and opt-out reach the list: caps.alert, engine.record_opt_out).
+    ``also``: Bitrix user ids that hear it besides (people.escalate_waiting: the responsible's team lead and department
+    head, escalation.above), each once, by their own agent row when they have one.
     """
     from ..tasks import deliver_alert
 
     base = (dedupe_key or f"{kind}:{conversation.pk}:{timezone.now():%Y%m%d%H%M%S%f}")[:180]
     targets = admin_recipients() if admins else recipients(conversation, listed=kind in LISTED_KINDS if listed is None else listed)
+    if also and not admins:
+        targets += extra_recipients(also, targets)
     if not admins and targets and not TRACK_TITLE.match(title):
         title = track_prefix(conversation) + title
     created = []

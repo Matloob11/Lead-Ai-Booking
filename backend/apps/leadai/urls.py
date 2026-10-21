@@ -36,4 +36,6 @@ urlpatterns = [
     path("unit-media/<int:pk>/file/", media_views.unit_file, name="unit-media-file"),
     # A person's Bot Status in Bitrix (board T52, C12): signed, no session.
     path("bitrix/bot-status/", bitrix_views.bot_status, name="bitrix-bot-status"),
+    # An Availability card added or changed in Bitrix (Cursor's C46 webhook): signed, no session; the card is read again.
+    path("inventory/bitrix/", bitrix_views.inventory_event, name="inventory-bitrix"),
 ]
