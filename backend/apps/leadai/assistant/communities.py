@@ -220,6 +220,174 @@ def label(pack: Pack | None) -> str:
     return pack.name if pack is not None else ""
 
 
+def campaign_community(chat) -> str:
+    """The community the chat's campaign sells (LeadAiCampaign.community, Cursor's C44), "" when none: the chat's community
+    before its own words or lead context say otherwise."""
+    campaign = getattr(chat, "campaign", None) if chat is not None else None
+    row = getattr(campaign, "lead_ai", None) if campaign is not None else None
+    return str(getattr(row, "community", "") or "")
+
+
+# ---- the panel's editor (views.community_detail) ---------------------------------------------------------------------
+
+NAME_MAX, ALIASES_MAX, SUB_AREAS_MAX, FACTS_MAX, ADDRESS_MAX, URL_MAX = 80, 40, 60, 2000, 255, 500
+MEETINGS = ("office", "onsite")
+BAND_MAX = 100_000_000
+
+
+def _text_list(value, limit: int, each: int, label: str, errors: dict) -> list:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [part for part in re.split(r"[\n,;]+", value)]
+    if not isinstance(value, list):
+        errors[label] = "Send a list, or one entry per line."
+        return []
+    out = []
+    for item in value:
+        text = " ".join(str(item or "").split())
+        if not text:
+            continue
+        if len(text) > each:
+            errors[label] = f"'{text[:30]}…' is longer than {each} characters."
+            return []
+        if text not in out:
+            out.append(text)
+    if len(out) > limit:
+        errors[label] = f"At most {limit} entries."
+        return out[:limit]
+    return out
+
+
+def _sub_areas(value, errors: dict) -> list:
+    """[{name, aliases}] from a list of dicts, or one "Name | alias, alias" per line."""
+    if value is None:
+        return []
+    rows = []
+    items = [line for line in str(value).splitlines()] if isinstance(value, str) else value
+    if not isinstance(items, list):
+        errors["sub_areas"] = "Send a list, or one 'Name | alias, alias' per line."
+        return []
+    for item in items:
+        if isinstance(item, dict):
+            name = " ".join(str(item.get("name") or "").split())
+            aliases = _text_list(item.get("aliases"), 20, ALIAS_MAX, "sub_areas", errors)
+        else:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            name, _, rest = text.partition("|")
+            name = " ".join(name.split())
+            aliases = _text_list(rest, 20, ALIAS_MAX, "sub_areas", errors)
+        if not name:
+            continue
+        if len(name) > NAME_MAX:
+            errors["sub_areas"] = f"'{name[:30]}…' is longer than {NAME_MAX} characters."
+            return []
+        rows.append({"name": name, "aliases": [alias.casefold() for alias in aliases]})
+    if len(rows) > SUB_AREAS_MAX:
+        errors["sub_areas"] = f"At most {SUB_AREAS_MAX} sub-areas."
+        return rows[:SUB_AREAS_MAX]
+    return rows
+
+
+def _bands(value, errors: dict) -> dict:
+    """{"rent": {unit: {from, to}}, "sale": {...}}: whole AED amounts, from at most to; an empty band is left out."""
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        errors["bands"] = "Send the bands as an object."
+        return {}
+    out: dict = {}
+    for deal in ("rent", "sale"):
+        table = value.get(deal)
+        if table in (None, ""):
+            continue
+        if not isinstance(table, dict):
+            errors["bands"] = f"Send the {deal} bands as an object."
+            return {}
+        for unit, band in table.items():
+            if unit not in UNIT_WORDS or band in (None, "", {}):
+                continue
+            if not isinstance(band, dict):
+                errors[f"bands.{deal}.{unit}"] = "Send from and to."
+                continue
+            low, high = band.get("from"), band.get("to")
+            if low in (None, "") and high in (None, ""):
+                continue
+            try:
+                low, high = int(str(low).replace(",", "")), int(str(high).replace(",", ""))
+            except (TypeError, ValueError):
+                errors[f"bands.{deal}.{unit}"] = "From and to must be whole AED amounts."
+                continue
+            if not (0 < low <= high <= BAND_MAX):
+                errors[f"bands.{deal}.{unit}"] = "From must be at most to, both above zero."
+                continue
+            out.setdefault(deal, {})[unit] = {"from": low, "to": high}
+    return out
+
+
+def validate(raw, *, creating: bool = False) -> tuple[dict, dict]:
+    """(fields, errors) for a pack an admin sent (views.community_detail / communities POST): only the keys given, cleaned;
+    each wrong one named."""
+    if not isinstance(raw, dict):
+        return {}, {"detail": "Send the pack as an object."}
+    errors: dict = {}
+    fields: dict = {}
+    if "name" in raw or creating:
+        name = " ".join(str(raw.get("name") or "").split())
+        if not name:
+            errors["name"] = "Give the community a name."
+        elif len(name) > NAME_MAX or not re.fullmatch(r"[\w][\w '().&/-]*", name, re.UNICODE):
+            errors["name"] = "Letters, digits, spaces and ' ( ) . & / - only, up to 80 characters."
+        else:
+            fields["name"] = name
+    if "aliases" in raw:
+        fields["aliases"] = [alias.casefold() for alias in _text_list(raw.get("aliases"), ALIASES_MAX, ALIAS_MAX, "aliases", errors)]
+    if "sub_areas" in raw:
+        fields["sub_areas"] = _sub_areas(raw.get("sub_areas"), errors)
+    if "units" in raw:
+        units = _text_list(raw.get("units"), 10, 16, "units", errors)
+        stray = [unit for unit in units if unit not in UNIT_WORDS]
+        if stray:
+            errors["units"] = f"'{stray[0]}' is not a unit ({', '.join(UNIT_WORDS)})."
+        else:
+            fields["units"] = units
+    if "bands" in raw:
+        fields["bands"] = _bands(raw.get("bands"), errors)
+    if "facts_text" in raw:
+        text = "\n".join(" ".join(line.split()) for line in str(raw.get("facts_text") or "").splitlines() if line.strip())
+        if len(text) > FACTS_MAX:
+            errors["facts_text"] = f"At most {FACTS_MAX} characters."
+        else:
+            fields["facts_text"] = text
+    if "meeting" in raw:
+        meeting = str(raw.get("meeting") or "office").strip().lower()
+        if meeting not in MEETINGS:
+            errors["meeting"] = "office or onsite."
+        else:
+            fields["meeting"] = meeting
+    if "meeting_address" in raw:
+        address = " ".join(str(raw.get("meeting_address") or "").split())
+        if len(address) > ADDRESS_MAX:
+            errors["meeting_address"] = f"At most {ADDRESS_MAX} characters."
+        else:
+            fields["meeting_address"] = address
+    if "maps_url" in raw:
+        url = str(raw.get("maps_url") or "").strip()
+        if url and (len(url) > URL_MAX or not re.match(r"^https?://[^\s]+$", url)):
+            errors["maps_url"] = "A full http(s) link, or nothing."
+        else:
+            fields["maps_url"] = url
+    for key in ("shops", "call_first_sale", "active"):
+        if key in raw:
+            value = raw.get(key)
+            fields[key] = value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on")
+    if "languages" in raw:
+        fields["languages"] = [lang.casefold() for lang in _text_list(raw.get("languages"), 10, 16, "languages", errors)]
+    return fields, errors
+
+
 # ---- the pack flow (round 17): what the turn reads for a home outside International City ------------------------------
 
 MEETING_LINE = "Every visit starts at our office (OFFICE in the context): our agent meets the customer there and takes them to the unit."

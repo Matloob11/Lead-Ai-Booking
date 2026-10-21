@@ -100,3 +100,77 @@ class EndpointTests(Base):
         self.assertFalse(data["can_edit"])
         self.client.force_login(self.admin)
         self.assertTrue(self.client.get("/api/leadai/communities/").json()["can_edit"])
+
+
+class EditorTests(Base):
+    """The panel's editor (views.community_detail / community_create) and communities.validate."""
+
+    def test_validate_cleans_and_names_what_is_wrong(self):
+        fields, errors = communities.validate({
+            "aliases": "Mudon, مدن\n mudon ", "sub_areas": "Mudon Al Ranim 6 | ranim 6, al ranim\nArabella", "units": ["villa", "townhouse"],
+            "bands": {"rent": {"villa": {"from": "150,000", "to": "220000"}, "townhouse": {"from": "", "to": ""}}, "sale": {}},
+            "facts_text": " Gated community.  \n\nChiller is separate. ", "meeting": "office", "maps_url": "", "shops": "false", "active": True,
+        })
+        self.assertEqual(errors, {})
+        self.assertEqual(fields["aliases"], ["mudon", "مدن"])
+        self.assertEqual(fields["sub_areas"], [{"name": "Mudon Al Ranim 6", "aliases": ["ranim 6", "al ranim"]}, {"name": "Arabella", "aliases": []}])
+        self.assertEqual(fields["bands"], {"rent": {"villa": {"from": 150000, "to": 220000}}})
+        self.assertEqual(fields["facts_text"], "Gated community.\nChiller is separate.")
+        self.assertEqual((fields["shops"], fields["active"]), (False, True))
+        _, errors = communities.validate({"units": ["castle"], "bands": {"rent": {"villa": {"from": 5, "to": 2}}}, "maps_url": "maps.app.goo.gl/x", "meeting": "beach"})
+        self.assertEqual(set(errors), {"units", "bands.rent.villa", "maps_url", "meeting"})
+        _, errors = communities.validate({}, creating=True)
+        self.assertIn("name", errors)
+
+    def test_an_admin_edits_a_pack_and_an_agent_may_not(self):
+        row = LeadAiCommunity.objects.get(name="Mudon")
+        self.client.force_login(self.agent)
+        self.assertEqual(self.client.put(f"/api/leadai/communities/{row.pk}/", {"facts_text": "x"}, content_type="application/json").status_code, 403)
+        self.client.force_login(self.admin)
+        response = self.client.put(
+            f"/api/leadai/communities/{row.pk}/",
+            {"bands": {"rent": {"villa": {"from": 150000, "to": 220000}}}, "facts_text": "Gated community.", "aliases": "mudon, مدن, mudon community"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        row.refresh_from_db()
+        self.assertEqual(row.bands, {"rent": {"villa": {"from": 150000, "to": 220000}}})
+        self.assertEqual(row.aliases, ["mudon", "مدن", "mudon community"])
+        # The pack the turn reads carries the band now.
+        pack = communities.by_name("Mudon")
+        self.assertIn("Villas to rent: AED 150,000–220,000 a year", communities.facts_block(pack, []))
+        self.assertIn("150,000", communities.known_amounts(pack))
+        # Wrong values are named; International City keeps its name and stays on.
+        response = self.client.put(f"/api/leadai/communities/{row.pk}/", {"units": ["castle"]}, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("units", response.json()["errors"])
+        ic = LeadAiCommunity.objects.get(name="International City")
+        response = self.client.put(f"/api/leadai/communities/{ic.pk}/", {"name": "IC", "active": False}, content_type="application/json")
+        self.assertEqual(set(response.json()["errors"]), {"name", "active"})
+
+    def test_an_admin_adds_a_pack(self):
+        self.client.force_login(self.admin)
+        response = self.client.post("/api/leadai/communities/new/", {"name": "Emaar South", "aliases": "emaar south", "units": ["villa"]}, content_type="application/json")
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["name"], "Emaar South")
+        self.assertTrue(LeadAiCommunity.objects.filter(name="Emaar South", active=True).exists())
+        response = self.client.post("/api/leadai/communities/new/", {"name": "emaar south"}, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+
+
+class CampaignCommunityTests(Base):
+    def test_the_campaigns_community_is_the_chats_until_its_own_words_say_otherwise(self):
+        from apps.campaigns.models import Campaign
+        from apps.leadai import lane
+
+        campaign = Campaign.objects.get(name="CRM Leads · Lead AI · ic_shops")
+        row = lane.mark_campaign(campaign, playbook="ic_shops", community="mudon")
+        self.assertEqual(row.community, "Mudon")
+        self.assertEqual(communities.campaign_community(self.chat), "")  # the chat has no campaign yet
+        self.chat.campaign = campaign
+        self.chat.save(update_fields=["campaign"])
+        self.chat.refresh_from_db()
+        self.assertEqual(communities.campaign_community(self.chat), "Mudon")
+        # A name no pack knows is left out; International City is "".
+        self.assertEqual(lane.mark_campaign(campaign, community="Atlantis").community, "")
+        self.assertEqual(lane.mark_campaign(campaign, community="International City").community, "")

@@ -23,6 +23,8 @@ urlpatterns = [
     path("digests/", views.digests, name="digests"),
     # The community packs (assistant/communities.py): the list for the panel; edited in Django admin for now.
     path("communities/", views.communities, name="communities"),
+    path("communities/new/", views.community_create, name="community-create"),
+    path("communities/<int:pk>/", views.community_detail, name="community-detail"),
     # The shops playbook's media library (board T30).
     path("shop-media/", media_views.library, name="shop-media"),
     path("shop-media/reorder/", media_views.reorder, name="shop-media-reorder"),

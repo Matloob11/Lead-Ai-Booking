@@ -176,17 +176,29 @@ def playbook_value(value) -> str:
     return value if value in LeadAiCampaign.Playbook.values else GENERAL
 
 
-def mark_campaign(campaign, playbook: str | None = None) -> LeadAiCampaign:
+def mark_campaign(campaign, playbook: str | None = None, community: str | None = None) -> LeadAiCampaign:
     """Make a campaign a Lead AI campaign whose chats follow ``playbook``.
 
     Not given, it is general (as is an unknown value). A campaign marked
-    already keeps its playbook unless one is passed.
+    already keeps its playbook unless one is passed. ``community``: the pack the
+    campaign sells (assistant/communities.py; Cursor's C44 popup passes it), kept
+    as the pack's own name; a name no pack knows is left out.
     """
+    from .assistant import communities
+
     chosen = playbook_value(playbook)
-    row, created = LeadAiCampaign.objects.get_or_create(campaign=campaign, defaults={"playbook": chosen})
+    pack = communities.by_name(community) if community else None
+    wanted = pack.name if pack is not None and not pack.default else ""
+    row, created = LeadAiCampaign.objects.get_or_create(campaign=campaign, defaults={"playbook": chosen, "community": wanted})
+    fields = []
     if not created and playbook is not None and row.playbook != chosen:
         row.playbook = chosen
-        row.save(update_fields=["playbook"])
+        fields.append("playbook")
+    if not created and community is not None and row.community != wanted:
+        row.community = wanted
+        fields.append("community")
+    if fields:
+        row.save(update_fields=fields)
     return row
 
 
