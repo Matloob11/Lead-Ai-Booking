@@ -4434,7 +4434,7 @@ def _run_claimed(
     )
     units = []  # the inventory's units the model path reads (inventory.matches); none on code's own paths
     enquired = None  # a portal lead's own listing among them (inventory.enquired; round 22)
-    live = []  # the active ones, for code's guards and the photos
+    live_units = []  # the active ones, for code's guards and the photos
     if shops_rule_name.startswith(f"{RES_RULE}:"):
         # The rent flow's own words before any model (residential_rule): an opener, a document or voice-note line, the
         # neutral invitation; shaped like the model's answer, so the same path sends and stores it.
@@ -4495,7 +4495,7 @@ def _run_claimed(
                     units = [enquired, *[row for row in units if row.pk != enquired.pk]]
                 # What code's guards and the photos may treat as a home we have: the active rows alone (a retired
                 # listing is in the block for the model to say it went, never quoted as available, never sent).
-                live = [row for row in units if row.active]
+                live_units = [row for row in units if row.active]
             # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
             sale_parts = sales.context_parts(
                 facts, decision.unit, decision.clusters,
@@ -4507,7 +4507,7 @@ def _run_claimed(
                 full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment, now),
                 inventory=inventory.lines(units, enquired=enquired),
                 # A pack chat: the pack's facts in RES FACTS' place, its COMMUNITY lines, no International City charge lines.
-                facts_override=communities.facts_block(pack, live) if pack_flow else "",
+                facts_override=communities.facts_block(pack, live_units) if pack_flow else "",
                 community=communities.lines(pack) if pack_flow else (),
                 charges=not pack_flow,
                 **sale_parts,
@@ -4711,7 +4711,7 @@ def _run_claimed(
             unit=decision.unit, clusters=decision.clusters, facts=facts, residential_facts=settings_row.residential_facts,
             shops_facts=settings_row.shops_facts, when=when, still_invalid=still_invalid, sending=photos_going,
             visit_open=appointment is not None, booked_at=appointment.starts_at if confirmed else None,
-            office_address=settings_row.office_address, pack=pack_flow, units=live,
+            office_address=settings_row.office_address, pack=pack_flow, units=live_units,
         )
         # 2d's facts.need and facts.wanted stay set on the rent and sale tracks (followups.holds, the nudges, panel_note).
         residential.record_need(answer, facts, decision, words_now)
@@ -5402,12 +5402,12 @@ def _run_claimed(
     if hold is not None:
         hold.close()  # the booking is stored: the next one may look at the slots
     done.update(plan)
-    if pack_flow and live and state.handed_over_at is None and residential._quotes_a_unit(text, live):
+    if pack_flow and live_units and state.handed_over_at is None and residential._quotes_a_unit(text, live_units):
         # The community packs' flow (round 17): the listed unit the reply quoted gets its Property Finder photos, once per
         # unit per chat, from its own task after the commit (pack_photos.queue).
         from .. import pack_photos
 
-        quoted = inventory.by_reference(live, text)
+        quoted = inventory.by_reference(live_units, text)
         if quoted is not None and pack_photos.queue(conversation, state, quoted, turn.pk, language):
             done["pack_photos"] = quoted.reference or str(quoted.pk)
     # The booking is stored: the turn row says so before the slower pin goes out.
