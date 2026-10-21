@@ -255,3 +255,86 @@ class LocationTreeTests(TestCase):
         self.assertEqual(LeadAiUnit.objects.get(source_id="04").sub_area, "La Violeta")
         self.assertEqual(LeadAiUnit.objects.get(source_id=PF_SHOP["id"]).community, "International City")
         self.assertEqual(inventory._LOCATIONS, {12110: LA_VIOLETA, 99: None})
+
+
+class PagingTests(TestCase):
+    """Property Finder's pages overlap (2026-10-20: 394 rows for 144 live listings): each listing is upserted once, the
+    repeats counted; a nextPage that never ends stops at PF_PAGES_AT_MOST."""
+
+    def setUp(self):
+        inventory._LOCATIONS.clear()
+        self.addCleanup(inventory._LOCATIONS.clear)
+
+    def test_a_listing_repeated_across_pages_counts_once(self):
+        pages = {
+            1: {"results": [PF_SHOP, PF_STUDIO_SALE], "pagination": {"nextPage": 2}},
+            2: {"results": [PF_STUDIO_SALE, {**PF_SHOP, "id": "05", "reference": "a7group-1814"}], "pagination": {"nextPage": None}},
+        }
+        asked = []
+
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, **kwargs):
+                return FakeResponse({"accessToken": "t", "expiresIn": 1800})
+
+            def get(self, url, **kwargs):
+                if url.endswith("/locations"):
+                    return FakeResponse({"data": []})
+                page = int(kwargs["params"]["page[number]"])
+                asked.append(page)
+                return FakeResponse(pages[page])
+
+        with self.settings(LEADAI_PF_API_KEY="k", LEADAI_PF_API_SECRET="s"), patch.object(inventory.httpx, "Client", FakeClient):
+            result = inventory.sync_pf()
+        self.assertEqual(result, {"upserted": 3, "gone": 0, "repeated": 1})
+        self.assertEqual(asked, [1, 2])
+        self.assertEqual(LeadAiUnit.objects.filter(source="pf", active=True).count(), 3)
+
+    def test_an_endless_next_page_stops(self):
+        class FakeResponse:
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, **kwargs):
+                return FakeResponse({"accessToken": "t", "expiresIn": 1800})
+
+            def get(self, url, **kwargs):
+                return FakeResponse({"results": [PF_SHOP], "pagination": {"nextPage": 99}})
+
+        with self.settings(LEADAI_PF_API_KEY="k", LEADAI_PF_API_SECRET="s"), patch.object(inventory.httpx, "Client", FakeClient), patch.object(inventory, "PF_PAGES_AT_MOST", 3):
+            result = inventory.sync_pf()
+        self.assertEqual(result, {"upserted": 1, "gone": 0, "repeated": 2})

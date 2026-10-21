@@ -39,6 +39,7 @@ LIVE = True
 DEFAULT_COMMUNITY = "International City"
 PF_BASE = "https://atlas.propertyfinder.com"
 PF_PAGE = 50
+PF_PAGES_AT_MOST = 40  # 2,000 listings: a nextPage that never ends cannot hold the half-hourly task past its limit
 PF_TIMEOUT = 30.0
 PHOTOS_KEPT = 5
 SHOWN = 3
@@ -94,6 +95,7 @@ def pf_token(client: httpx.Client) -> str:
 def pf_listings(client: httpx.Client, token: str):
     """Every live listing, page by page (a generator of the API's own dicts)."""
     page = 1
+    pages = 0
     while True:
         response = client.get(
             f"{PF_BASE}/v1/listings",
@@ -106,7 +108,8 @@ def pf_listings(client: httpx.Client, token: str):
             yield item
         pagination = body.get("pagination") or {}
         page = pagination.get("nextPage")
-        if not page:
+        pages += 1
+        if not page or pages >= PF_PAGES_AT_MOST:
             return
 
 
@@ -245,11 +248,14 @@ def sync_pf() -> dict:
     if not pf_configured():
         return {"skipped": "no Property Finder key"}
     seen: set[str] = set()
-    upserted = 0
+    upserted = repeated = 0
     with httpx.Client(timeout=PF_TIMEOUT) as client:
         token = pf_token(client)
         for item in pf_listings(client, token):
             source_id = str(item.get("id") or "")
+            if source_id in seen:
+                repeated += 1  # the API's pages overlap (2026-10-20: 394 rows for 144 listings): each listing once
+                continue
             location_id = (item.get("location") or {}).get("id") if isinstance(item.get("location"), dict) else None
             if location_id and location_id not in _LOCATIONS and len(_LOCATIONS) < PF_LOCATIONS_AT_MOST:
                 _LOCATIONS[location_id] = pf_location(client, token, location_id)
@@ -260,8 +266,11 @@ def sync_pf() -> dict:
             seen.add(source_id)
             upserted += 1
     gone = LeadAiUnit.objects.filter(source=LeadAiUnit.Source.PF, active=True).exclude(source_id__in=seen).update(active=False)
-    logger.info("Lead AI inventory: Property Finder %s live listings, %s gone", upserted, gone)
-    return {"upserted": upserted, "gone": gone}
+    logger.info("Lead AI inventory: Property Finder %s live listings, %s gone, %s repeated across pages", upserted, gone, repeated)
+    out = {"upserted": upserted, "gone": gone}
+    if repeated:
+        out["repeated"] = repeated
+    return out
 
 
 # Bitrix Owner Data → Availability (SPA 1042, category 14; the Owner Data user fields are UF_CRM_5_*).

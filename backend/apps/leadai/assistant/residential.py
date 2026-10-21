@@ -3118,8 +3118,11 @@ def max_questions(track: str) -> int:
 
 def segment_of(track: str) -> str:
     """The segment a residential answer is forced into (spec §1.4.4), so _shape never turns a booking into a holding
-    handover: residential_tenant on the rent track, buyer on the sale track, '' (the model's) while not known."""
-    return {RENT: "residential_tenant", SALE: "buyer"}.get(track, "")
+    handover: residential_tenant on the rent track, buyer on the sale track, and residential_tenant while the track is
+    not known too (the prompt's own OUTPUT rule; the 2e gate, rounds 15–17: shops-mixed-not-known-booking's "can I come
+    today 5 pm and discuss?" came back segment "other", which kept code from booking their own time — a job applicant
+    still carries the model's handover, which keeps code from booking for them)."""
+    return {RENT: "residential_tenant", SALE: "buyer", UNKNOWN: "residential_tenant"}.get(track, "")
 
 
 def opener_spec(decision, facts: dict | None, *, sorry: bool = False, monthly: bool = False) -> dict:
