@@ -41,11 +41,11 @@ class AloneInvitationTests(SimpleTestCase):
         self.assertFalse(residential.asks_contract("The contract will be in your name."))
         self.assertFalse(residential.asks_contract("Which cluster do you prefer?"))
 
-    def settle(self, reply, said="Just me", earlier=None, slots=None, **kwargs):
+    def settle(self, reply, said="Just me", earlier=None, slots=None, track="rent", **kwargs):
         answer = normal(res_answer(reply))
         earlier = [("assistant", OCCUPANCY_ASKED)] if earlier is None else earlier
         engine.settle(
-            answer, earlier, [said], 0, playbook="ic_shops", now=NOW, residential=True, track="rent",
+            answer, earlier, [said], 0, playbook="ic_shops", now=NOW, residential=True, track=track,
             slots=hours.offer_pair(NOW) if slots is None else slots, **kwargs,
         )
         return answer
