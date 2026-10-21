@@ -1217,7 +1217,10 @@ class FieldsQueueTests(ShopsBase):
         self.assertFalse(hasattr(crm, "update_lead"))  # no REST lead update is left anywhere (board T55)
         self.assertEqual(post.call_args.args[0], FIELDS_URL)
         body = json.loads(post.call_args.kwargs["content"])
-        self.assertEqual(body["fields"], {crm_fields.FIELD_BOT_STATUS: 2476, crm_fields.FIELD_SHOP_TYPE: 2472, crm_fields.FIELD_LICENCE: 2457})
+        # The score's two fields ride the same batch (test_score): the turn's own three are these.
+        own = {code: value for code, value in body["fields"].items() if code not in (crm_fields.FIELD_AI_SCORE, crm_fields.FIELD_AI_SCORE_WHY)}
+        self.assertEqual(own, {crm_fields.FIELD_BOT_STATUS: 2476, crm_fields.FIELD_SHOP_TYPE: 2472, crm_fields.FIELD_LICENCE: 2457})
+        self.assertEqual(body["fields"][crm_fields.FIELD_AI_SCORE], 10)  # they wrote
         self.assertNotIn("STATUS_ID", body["fields"])
 
 
