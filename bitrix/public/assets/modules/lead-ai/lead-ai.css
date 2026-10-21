@@ -472,6 +472,22 @@
   color: #fde68a;
 }
 
+/* The lead score (lead_ai_ai.score): hot, warm or cold with the figure; the reasons in the title. */
+.lai-chip--score-hot {
+  --lai-chip: #ef4444;
+  color: #fecaca;
+}
+
+.lai-chip--score-warm {
+  --lai-chip: #f59e0b;
+  color: #fde68a;
+}
+
+.lai-chip--score-cold {
+  --lai-chip: #64748b;
+  color: #cbd5e1;
+}
+
 /* Read by screen readers, not drawn. */
 .lai-sr {
   position: absolute;

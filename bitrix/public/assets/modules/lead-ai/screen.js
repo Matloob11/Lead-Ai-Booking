@@ -92,6 +92,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     q: "",
     brokers: false, // only the chats labelled Broker
     track: "", // the desk's track filter: "shop", "rent", "sale", "other" or none
+    hotFirst: false, // the hottest leads first (?sort=score; lead_ai_ai.score)
     activeId: conversationId ? Number(conversationId) : null,
     pendingHighlight: highlightMessageId || null,
     thread: null,
@@ -131,6 +132,18 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   }, ["Brokers"]);
+  // The lead score's sort (?sort=score): the hottest leads first, the unscored last; pressed again, back to the newest.
+  const hotButton = el("button.lai-filter.lai-filter--hot", {
+    type: "button",
+    "aria-pressed": "false",
+    title: "The hottest leads first (the AI's lead score: hot, warm, cold), instead of the newest message first",
+    onclick: () => {
+      state.hotFirst = !state.hotFirst;
+      hotButton.setAttribute("aria-pressed", String(state.hotFirst));
+      hotButton.classList.toggle("is-on", state.hotFirst);
+      loadChats();
+    },
+  }, ["Hot first"]);
   // The desk's track filters (?track=), one at a time.
   const tracks = trackFilters({
     onChange: (track) => {
@@ -138,7 +151,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   });
-  const filters = el("div.lai-filters", {}, [brokersButton, ...tracks.buttons]);
+  const filters = el("div.lai-filters", {}, [brokersButton, hotButton, ...tracks.buttons]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -300,6 +313,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
         q: state.q,
         label: state.brokers ? BROKER_LABEL : "",
         ...deskParams(tab, state.track),
+        sort: state.hotFirst && tab === "chats" ? "score" : "",
         limit: PAGE,
         offset,
       });
@@ -328,9 +342,16 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     return [...byId.values()];
   }
 
+  function scoreOf(row) {
+    const value = row?.lead_ai_ai?.score?.value;
+    return typeof value === "number" ? value : -1;
+  }
+
   function sortRows() {
     state.rows.sort((a, b) => {
       if (Boolean(b.is_pinned) !== Boolean(a.is_pinned)) return b.is_pinned ? 1 : -1;
+      // Hot first: the server's order (lead_ai_ai.score, the unscored last) kept across pages and live updates.
+      if (state.hotFirst && scoreOf(b) !== scoreOf(a)) return scoreOf(b) - scoreOf(a);
       return (Date.parse(b.last_message_at || "") || 0) - (Date.parse(a.last_message_at || "") || 0);
     });
   }

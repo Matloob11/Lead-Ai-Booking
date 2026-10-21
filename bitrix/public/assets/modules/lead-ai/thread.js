@@ -163,6 +163,8 @@ export function isBrokerChat(conversation) {
  */
 export function chatChips(conversation) {
   const chips = [];
+  const score = scoreChip(conversation);
+  if (score) chips.push(score);
   const track = trackChip(conversation);
   // The community the chat is about (lead_ai_ai.community, the packs' flow): shown when it is not International City.
   const community = String(conversation?.lead_ai_ai?.community || "").trim();
@@ -191,6 +193,18 @@ export function chatChips(conversation) {
     chips.push(el("span.lai-chip.lai-chip--more", { title: `Labels: ${rest.join(", ")}` }, [`+${rest.length}`]));
   }
   return chips;
+}
+
+/** The lead score (lead_ai_ai.score: value 0–100, label hot/warm/cold, reasons): "Hot 82", with the reasons as the title. */
+function scoreChip(conversation) {
+  const score = conversation?.lead_ai_ai?.score;
+  if (!score || typeof score.value !== "number") return null;
+  const label = ["hot", "warm", "cold"].includes(score.label) ? score.label : "cold";
+  const word = label.charAt(0).toUpperCase() + label.slice(1);
+  const reasons = String(score.reasons || "").trim();
+  return el(`span.lai-chip.lai-chip--score.lai-chip--score-${label}`, { title: reasons || `Lead score ${score.value}` }, [
+    `${word} ${score.value}`,
+  ]);
 }
 
 /** Why the chat was handed over: the server's label (handover_label), else this screen's own map. */
