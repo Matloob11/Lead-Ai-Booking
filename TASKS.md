@@ -1,3 +1,11 @@
+## 2026-10-21 — Lead AI new-lead greet switched on (Claude Code)
+
+14:40 UTC, through the new `ops/wa.sh leadai-greet-settings` verb (`ops/catalog/leadai-greet-settings.py`: the settings set as the Django admin form would and checked as the greet checks them — the number the agent may send from, the template approved on that WABA, media-free, two variables at most). Number 971581058723, template `portal_enquiry_reply` (UTILITY, en; Cursor's C68, approved on all 8 WABAs at ~13:33 UTC), sender bitrix_2311, leads up to 48 hours old. Cursor's C67 handler is asked to go on now; the first real greet is the proof still owed.
+
+**Shared:** `TASKS.md`, `SHOPS-BOT-BOARD.md`, `ops/wa.sh` (my verb alone; Cursor's uncommitted verb left to them).
+
+---
+
 ## 2026-10-21 — Lead AI round 22 is live: the new-lead greet — a brand-new Bitrix lead gets the Lead AI's first message within minutes, and the assistant talks about the listing they enquired on (Claude Code)
 
 Branch `leadai-2e` `9a41407` → main. Live **14:15 UTC** (`build app` + `migrate-new-image` leadai 0018 + `up app`, all four services up together; `django-check` No changes). The gate: eval **579 of 584 (99.1%)**, the model's own words **309 of 314 (98.4%)**, every code, money and policy scenario every run; leadai 2052 tests, crmlink 118, inbox 15, all OK. Reviewed before the gate by three adversarial readers with a refuter per finding: four findings confirmed (the source gate, the retired listing in the guards, the settings a send would refuse, the villa named an apartment), all absorbed. Matloob's ask (2026-10-21): "new leads ko bhi AI baat karaye — jis property se aaya hai uski details de, kuch aur chahe to uske hisab se, booking slots, viewing".
