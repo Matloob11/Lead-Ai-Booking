@@ -40,8 +40,32 @@ def settings_ready(settings_row) -> str:
         return "no greet agent"
     if settings_row.greet_number is None or not settings_row.greet_number.is_active:
         return "no greet number"
+    if not agent.visible_numbers.filter(pk=settings_row.greet_number_id).exists():
+        return "greet number not the greet agent's"
     if not (settings_row.greet_template or "").strip():
         return "no greet template"
+    return ""
+
+
+def greet_template(settings_row):
+    """The approved template of the settings' name on the greet number's WABA (English first), or None."""
+    from apps.catalog.models import WaTemplate
+
+    rows = list(
+        WaTemplate.objects.filter(
+            name=(settings_row.greet_template or "").strip(), waba_business_id=settings_row.greet_number.waba_business_id,
+            status=WaTemplate.Status.APPROVED,
+        ).order_by("-pk")
+    )
+    return next((row for row in rows if str(row.language or "").lower().startswith("en")), rows[0] if rows else None)
+
+
+def template_ready(template) -> str:
+    """'' when the greet may use this template, else why not: the greet carries no media and fills {{1}} and {{2}} only."""
+    if getattr(template, "requires_header_media", False):
+        return "greet template has a media header"
+    if int(getattr(template, "variable_count", 0) or 0) > 2:
+        return "greet template needs more than {{1}} and {{2}}"
     return ""
 
 
@@ -50,6 +74,28 @@ def greeted_already(lead_id: int) -> bool:
     from apps.campaigns.models import CampaignRecipient
 
     return CampaignRecipient.objects.filter(crm_lead_id=lead_id, campaign__lead_ai__isnull=False).exists()
+
+
+PHONE_WITHIN = dt.timedelta(hours=24)
+
+
+def phone_greeted_lately(phone_digits: str, now) -> bool:
+    """A Lead AI campaign was made for this phone within PHONE_WITHIN, sent or still pending (a customer who enquired on
+    two listings in a row makes two leads a minute apart: one greet)."""
+    from apps.campaigns.models import CampaignRecipient
+
+    return CampaignRecipient.objects.filter(
+        phone=phone_digits, campaign__lead_ai__isnull=False, campaign__created_at__gte=now - PHONE_WITHIN
+    ).exists()
+
+
+def talking_already(phone_digits: str) -> bool:
+    """The customer wrote to one of our numbers before (a conversation with an inbound message): a lead made for a chat
+    in progress (the inbox's "Create lead", a hand-made lead) is no portal enquiry to greet, and the greet must never
+    take an agent's chat onto the Lead AI screen."""
+    from apps.inbox.models import Conversation
+
+    return Conversation.objects.filter(contact__wa_id=phone_digits, last_inbound_at__isnull=False).exists()
 
 
 def listing_words(context: dict, unit=None) -> str:
@@ -61,9 +107,9 @@ def listing_words(context: dict, unit=None) -> str:
         noun = inventory.unit_words(unit)
         place = unit.community or str(context.get("community") or "")
         return f"the {noun} in {place}" if place else f"the {noun}"
-    noun = UNIT_WORDS.get(str(context.get("unit") or ""), "")
-    if not noun and context.get("property") in ("villa", "townhouse", "shop"):
-        noun = UNIT_WORDS[context["property"]]
+    # A villa, a townhouse or a shop names the home whatever the bedrooms field says (tracks._pack_unit's rule).
+    prop = str(context.get("property") or "")
+    noun = UNIT_WORDS[prop] if prop in ("villa", "townhouse", "shop") else UNIT_WORDS.get(str(context.get("unit") or ""), "")
     place = str(context.get("community") or context.get("cluster") or "").strip()
     if noun and place:
         return f"{noun} in {place}"
@@ -103,7 +149,6 @@ def greet(lead_id: int, *, now=None) -> dict:
     """The greet for one lead: {"sent": True, "campaign_id": N, ...} or {"skipped": why}. Raises BitrixTransient for
     the task to try again; any other Bitrix refusal is a skip."""
     from apps.campaigns import crm_leads
-    from apps.catalog.models import WaTemplate
     from apps.crmlink import client as bitrix
 
     from .. import lane
@@ -129,6 +174,11 @@ def greet(lead_id: int, *, now=None) -> dict:
         return {"skipped": "lead not read"}
     if str(row.get("STATUS_ID") or "").upper() != NEW_STATUS:
         return {"skipped": f"not a new lead ({str(row.get('STATUS_ID') or '')[:24]})"}
+    # A portal's lead only (lead_context.SOURCES: Property Finder, Bayut, Dubizzle): a lead the inbox's "Create lead"
+    # made for a chat in progress, a hand-made lead, an agent's own test lead is nobody's enquiry to greet.
+    context = lead_context.parse(row)
+    if not context.get("source"):
+        return {"skipped": f"not a portal lead ({str(row.get('SOURCE_ID') or '')[:24]})"}
     created = _created_at(row)
     if created is not None and now - created > dt.timedelta(hours=int(settings_row.greet_within_hours or 0)):
         return {"skipped": "too old"}
@@ -139,15 +189,18 @@ def greet(lead_id: int, *, now=None) -> dict:
     why = crm_leads.opt_out_reason(row_for_popup) or crm_leads.lead_ai_skip_reason(row_for_popup)
     if why:
         return {"skipped": why.rstrip(".").lower()}
+    digits = crm_leads._digits(phones[0])
+    if talking_already(digits):
+        return {"skipped": "talking to us already"}
+    if phone_greeted_lately(digits, now):
+        return {"skipped": "greeted this phone today"}
     number = settings_row.greet_number
-    template = (
-        WaTemplate.objects.filter(name=settings_row.greet_template.strip(), waba_business_id=number.waba_business_id, status=WaTemplate.Status.APPROVED)
-        .order_by("-pk")
-        .first()
-    )
+    template = greet_template(settings_row)
     if template is None:
         return {"skipped": "no approved template on the greet number"}
-    context = lead_context.parse(row)
+    why = template_ready(template)
+    if why:
+        return {"skipped": why}
     from . import inventory
 
     words = listing_words(context, inventory.enquired(context))
@@ -166,7 +219,7 @@ def greet(lead_id: int, *, now=None) -> dict:
             field_map=field_map,
         )
     except (crm_leads.CrmLeadSendError, crm_leads.CampaignError) as exc:
-        logger.info("Lead AI greet: lead %s not sent (%s)", lead_id, str(exc)[:120])
+        logger.warning("Lead AI greet: lead %s not sent (%s): a setting is off", lead_id, str(exc)[:120])
         return {"skipped": str(exc)[:120]}
     if result.get("skipped"):
         reason = "; ".join(str(item.get("reason") or "") for item in result["skipped"])

@@ -60,6 +60,9 @@ class ContextTests(SimpleTestCase):
         self.assertEqual(newlead.listing_words({"unit": "studio", "cluster": "Spain Cluster"}), "the studio in Spain Cluster")
         self.assertEqual(newlead.listing_words({"property": "villa"}), "the villa")
         self.assertEqual(newlead.listing_words({"community": "Mudon"}), "the home in Mudon")
+        # A villa or a townhouse names the home whatever the bedrooms field says.
+        self.assertEqual(newlead.listing_words({"unit": "two_plus", "property": "townhouse", "community": "Mudon"}), "the townhouse in Mudon")
+        self.assertEqual(newlead.listing_words({"unit": "two_plus", "property": "villa", "community": "Serena"}), "the villa in Serena")
         self.assertEqual(newlead.listing_words({}), "your enquiry")
         unit = LeadAiUnit(unit="townhouse", bedrooms="3", community="Mudon")
         self.assertEqual(newlead.listing_words({}, unit), "the 3-bedroom townhouse in Mudon")
@@ -138,6 +141,7 @@ class GreetTests(Base):
         LeadAiSettings.objects.filter(pk=1).update(greet_template="ic_shops")
         for extra, why in (
             ({"STATUS_ID": "IN_PROCESS"}, "not a new lead (IN_PROCESS)"),
+            ({"SOURCE_ID": "OTHER"}, "not a portal lead (OTHER)"),  # the inbox's "Create lead", a hand-made or a test lead
             ({"DATE_CREATE": (NOW - dt.timedelta(days=3)).isoformat()}, "too old"),
             ({"PHONE": []}, "no phone"),
             ({"UF_CRM_A7_BOT_STATUS": 2479}, "broker"),
@@ -150,8 +154,54 @@ class GreetTests(Base):
         self.assertEqual(newlead.greet(901, now=NOW), {"skipped": "lead not read"})
         LeadAiSettings.objects.filter(pk=1).update(greet_template="no_such_template")
         self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "no approved template on the greet number"})
+        # The agent must be able to send from the greet number; the template carries no media and two variables at most.
+        LeadAiSettings.objects.filter(pk=1).update(greet_template="ic_shops", greet_agent=self.agent)
+        self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "greet number not the greet agent's"})
+        LeadAiSettings.objects.filter(pk=1).update(greet_agent=self.admin)
+        WaTemplate.objects.create(
+            waba_business_id="waba1", name="with_image", language="en", category="MARKETING", status=WaTemplate.Status.APPROVED,
+            components=[{"type": "HEADER", "format": "IMAGE"}, {"type": "BODY", "text": "Hi {{1}}"}],
+        )
+        LeadAiSettings.objects.filter(pk=1).update(greet_template="with_image")
+        self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "greet template has a media header"})
+        WaTemplate.objects.create(
+            waba_business_id="waba1", name="three_vars", language="en", category="MARKETING", status=WaTemplate.Status.APPROVED,
+            components=[{"type": "BODY", "text": "Hi {{1}}, {{2}} and {{3}}"}],
+        )
+        LeadAiSettings.objects.filter(pk=1).update(greet_template="three_vars")
+        self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "greet template needs more than {{1}} and {{2}}"})
         self.assertEqual(Campaign.objects.count(), 1)
         self.run.assert_not_called()
+
+    @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
+    def test_a_customer_talking_to_us_or_greeted_today_is_left_alone(self):
+        from apps.inbox.models import Contact, Conversation
+
+        contact = Contact.objects.create(wa_id="971509998888", display_name="Ahmed")
+        chat = Conversation.objects.create(number=self.number, contact=contact, assigned_agent=self.agent, session_expires_at=NOW + dt.timedelta(hours=20))
+        Conversation.objects.filter(pk=chat.pk).update(last_inbound_at=NOW - dt.timedelta(hours=1))
+        self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "talking to us already"})
+        chat.delete()
+        contact.delete()
+        self.assertTrue(newlead.greet(900, now=NOW).get("sent"))
+        # A second enquiry from the same phone a minute later makes a second lead: one greet.
+        self.rows[902] = lead_row(ID="902", COMMENTS="Listing ID: ABCDEFGHIJKLMNOPQRST12")
+        self.assertEqual(newlead.greet(902, now=NOW + dt.timedelta(minutes=1)), {"skipped": "greeted this phone today"})
+        self.assertEqual(Campaign.objects.count(), 2)
+
+    @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
+    def test_the_english_template_is_preferred(self):
+        WaTemplate.objects.create(
+            waba_business_id="waba1", name="portal_enquiry_reply", language="en", category="UTILITY", status=WaTemplate.Status.APPROVED,
+            components=[{"type": "BODY", "text": "Hi {{1}}, about {{2}}."}],
+        )
+        WaTemplate.objects.create(
+            waba_business_id="waba1", name="portal_enquiry_reply", language="ar", category="UTILITY", status=WaTemplate.Status.APPROVED,
+            components=[{"type": "BODY", "text": "مرحبا {{1}}، بخصوص {{2}}."}],
+        )
+        LeadAiSettings.objects.filter(pk=1).update(greet_template="portal_enquiry_reply")
+        result = newlead.greet(900, now=NOW)
+        self.assertEqual(Campaign.objects.get(pk=result["campaign_id"]).template.language, "en")
 
 
 @override_settings(**TEST_SETTINGS)
@@ -197,3 +247,16 @@ class FirstTurnTests(RentBase):
         self.assertIn("a7group-1789", context)
         self.assertIn("(the listing they enquired about; no longer listed, offer the others)", context)
         self.assertLess(context.index("a7group-1789"), context.index("a7group-1800"))
+        # The gone listing is never quoted as available by code's own line, nor its photos sent.
+        body = self.outbound()[-1].body
+        self.assertNotIn("(ref a7group-1789)", body)
+        self.assertNotIn("still available", body.split("a7group-1800")[0] if "a7group-1800" in body else body)
+
+    def test_a_price_question_on_a_gone_listing_quotes_a_live_one_or_nothing(self):
+        LeadAiUnit.objects.create(source="pf", source_id=LISTING_ID, reference="a7group-1789", community="International City", sub_area="Spain Cluster", unit="studio", bedrooms="studio", deal="rent", price=31000, active=False)
+        self.rent(clusters=["Spain"])
+        self.set_state(lead_context={"source": "Property Finder", "listing_id": LISTING_ID, "unit": "studio", "deal": "rent"}, lead_context_at=NOW)
+        self.turn(self.inbound("How much is it?"), [res_answer("That studio is no longer listed. Would you like similar studios in Spain Cluster?")])
+        body = self.outbound()[-1].body
+        self.assertNotIn("a7group-1789", body)
+        self.assertNotIn("still available", body)

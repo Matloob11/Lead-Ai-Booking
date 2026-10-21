@@ -653,8 +653,9 @@ def pack_units(unit: str) -> tuple:
 
 
 def by_reference(rows, text: str):
-    """The unit among ``rows`` whose reference the text names (a7group-1806), else the first row, else None."""
-    rows = list(rows or ())
+    """The active unit among ``rows`` whose reference the text names (a7group-1806), else the first active row, else
+    None. A retired listing (a lead's enquired unit, round 22) is never quoted as available nor sent as photos."""
+    rows = [row for row in rows or () if getattr(row, "active", True)]
     low = str(text or "").lower()
     for row in rows:
         if row.reference and row.reference.lower() in low:
