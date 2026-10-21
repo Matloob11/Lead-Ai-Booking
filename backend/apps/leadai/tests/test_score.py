@@ -11,6 +11,7 @@ from apps.inbox.models import Conversation
 from apps.leadai.assistant import crm_fields, score
 from apps.leadai.models import LeadAiAppointment, LeadAiChatState, LeadAiCrmField
 from apps.leadai.tests.test_assistant import NOW, Base
+from apps.leadai.tests.test_desk import DeskBase
 from apps.leadai.tests.test_residential_turns import RentBase, res_answer
 
 KNOWN = {"budget_aed": 32000.0, "budget_basis": "per_year", "clusters": ["Spain"], "move_in": "next month", "full_name": "Ahmed Khan"}
@@ -113,6 +114,28 @@ class TurnTests(RentBase):
         self.assertGreaterEqual(state.score, 60)
         self.assertIn("visit booked", state.score_reasons)
         self.assertEqual(self.scores(), [str(state.score)])
+
+
+class DeskTests(DeskBase):
+    def test_the_rows_carry_the_score_and_sort_hot_first_when_asked(self):
+        hot = self.chat(name="Hot", score=82, score_reasons="Hot 82: visit booked; unit known", scored_at=NOW)
+        cold = self.chat(name="Cold", score=12, score_reasons="Cold 12: they wrote", scored_at=NOW)
+        unscored = self.chat(name="New")
+        Conversation.objects.filter(pk=hot.pk).update(last_message_at=NOW - dt.timedelta(hours=3))
+        Conversation.objects.filter(pk=cold.pk).update(last_message_at=NOW - dt.timedelta(hours=2))
+        Conversation.objects.filter(pk=unscored.pk).update(last_message_at=NOW - dt.timedelta(hours=1))
+        newest_first = [row["id"] for row in self.rows(self.desker)["results"]]
+        self.assertEqual(newest_first, [unscored.pk, cold.pk, hot.pk])
+        payload = self.rows(self.desker, "?sort=score")
+        self.assertEqual([row["id"] for row in payload["results"]], [hot.pk, cold.pk, unscored.pk])
+        by_id = {row["id"]: row["lead_ai_ai"]["score"] for row in payload["results"]}
+        self.assertEqual(by_id[hot.pk], {"value": 82, "label": "hot", "reasons": "Hot 82: visit booked; unit known"})
+        self.assertEqual(by_id[cold.pk]["label"], "cold")
+        self.assertIsNone(by_id[unscored.pk])
+        self.client.force_login(self.desker)
+        self.assertEqual(self.client.get("/api/leadai/chats/?sort=x").status_code, 400)
+        # The desk's own views keep their order.
+        self.assertEqual(self.client.get("/api/leadai/chats/?needs=1&sort=score").status_code, 200)
 
 
 class RescoreTests(Base):
