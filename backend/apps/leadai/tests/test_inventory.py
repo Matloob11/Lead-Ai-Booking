@@ -133,15 +133,27 @@ class MatchTests(TestCase):
         self.assertEqual(inventory.lines([]), [])
 
     def test_a_card_published_on_property_finder_is_one_unit(self):  # C62
-        LeadAiUnit.objects.create(source="pf", source_id="p1", reference="a7group-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=180000, photos=["x"])
+        # The listing's reference as Property Finder writes it, the card's lower-cased: the same unit.
+        LeadAiUnit.objects.create(source="pf", source_id="p1", reference="A7GROUP-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=180000, photos=["x"])
         LeadAiUnit.objects.create(source="bitrix", source_id="9:rent", reference="a7group-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=175000)
         LeadAiUnit.objects.create(source="bitrix", source_id="10:rent", reference="", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=190000)
         rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent")
         self.assertEqual([(row.source, row.source_id) for row in rows], [("pf", "p1"), ("bitrix", "10:rent")])
+        # A card offered for rent and sale keeps the deal the listing is not for: with no deal asked, the card's sale
+        # row stands beside the rent listing.
+        LeadAiUnit.objects.create(source="bitrix", source_id="9:sale", reference="a7group-1633", community="Mudon", unit=inventory.TOWNHOUSE, deal="sale", price=3200000)
+        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "")
+        self.assertEqual([(row.source, row.source_id) for row in rows], [("pf", "p1"), ("bitrix", "10:rent"), ("bitrix", "9:sale")])
+        # The twin is dropped whatever its price, even past the cut: a dozen cheaper cards between them.
+        for index in range(12):
+            LeadAiUnit.objects.create(source="bitrix", source_id=f"{20 + index}:rent", community="Mudon", unit=inventory.TOWNHOUSE, deal="rent", price=176000 + index)
+        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent", limit=20)
+        self.assertNotIn("9:rent", [row.source_id for row in rows])
+        self.assertIn("p1", [row.source_id for row in rows])
         # The card alone (the listing gone): the card answers.
         LeadAiUnit.objects.filter(source_id="p1").update(active=False)
-        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent")
-        self.assertEqual([row.source_id for row in rows], ["9:rent", "10:rent"])
+        rows = inventory.matches("Mudon", [], inventory.TOWNHOUSE, "rent", limit=2)
+        self.assertEqual([row.source_id for row in rows], ["9:rent", "20:rent"])
 
 
 class RefreshTests(TestCase):
@@ -176,12 +188,20 @@ class RefreshTests(TestCase):
             self.assertEqual(inventory.refresh_bitrix(103048)["gone"], 2)
             answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:PREPARATION", "categoryId": 14}})
             self.assertEqual(inventory.refresh_bitrix(103048)["upserted"], 1)
+            # A refusal that says nothing of the card (a token without the scope) leaves its rows for the sync.
+            answers.append(bitrix.BitrixError("crm.item.get: Invalid request credentials"))
+            self.assertEqual(inventory.refresh_bitrix(103048), {"card": 103048, "error": "crm.item.get: Invalid request credentials"})
+            self.assertEqual(LeadAiUnit.objects.filter(source="bitrix", source_id__startswith="103048:", active=True).count(), 1)
             answers.append(bitrix.BitrixError("crm.item.get: Not found"))
             self.assertEqual(inventory.refresh_bitrix(103048)["gone"], 1)
             answers.append(bitrix.BitrixTransient("crm.item.get: timed out"))
             with self.assertRaises(bitrix.BitrixTransient):
                 inventory.refresh_bitrix(103048)
             self.assertEqual(LeadAiUnit.objects.filter(source="bitrix", active=True).count(), 0)
+            # A card whose Community name the packs know by an alias is stored under the pack's name.
+            answers.append({"item": {**BITRIX_VILLA, "stageId": "DT1042_14:PREPARATION", "categoryId": 14, "ufCrmA7AvailCommunity": 2554}})
+            inventory.refresh_bitrix(103048)
+            self.assertEqual(LeadAiUnit.objects.get(source="bitrix", source_id="103048:sale").community, "Damac Hills")
         # No webhook configured: nothing read, nothing changed.
         self.assertEqual(inventory.refresh_bitrix(103048), {"skipped": "no Bitrix webhook"})
 
@@ -258,6 +278,47 @@ class SyncTests(TestCase):
         self.assertEqual(result, {"upserted": 1, "skipped": 1, "gone": 0})
         self.assertEqual(LeadAiUnit.objects.get(source="bitrix", source_id="103048:sale").community, "Haven by Aldar")
         self.assertEqual(len(calls), 3)
+
+    def test_a_community_the_packs_know_by_an_alias_is_stored_under_the_packs_name(self):  # the round-20 review
+        from apps.crmlink import client as bitrix
+
+        def fake_call(method, payload=None):
+            if payload["filter"]["stageId"] == "DT1042_14:PREPARATION":
+                return {"items": [
+                    {**BITRIX_VILLA, "ufCrmA7AvailCommunity": 2554},  # Damac Hills 2
+                    {**BITRIX_VILLA, "id": 2, "ufCrmA7AvailCommunity": 2570},  # Rukan
+                    {**BITRIX_VILLA, "id": 3, "ufCrmA7AvailCommunity": 2548},  # Greens
+                    {**BITRIX_VILLA, "id": 4, "ufCrmA7AvailCommunity": 2569},  # Meydan City
+                ]}
+            return {"items": []}
+
+        with patch.object(bitrix, "configured", return_value=True), patch.object(bitrix, "call", side_effect=fake_call):
+            inventory.sync_bitrix()
+        stored = {row.source_id: row.community for row in LeadAiUnit.objects.filter(source="bitrix")}
+        self.assertEqual(stored, {"103048:sale": "Damac Hills", "2:sale": "Dubailand", "3:sale": "The Greens", "4:sale": "Meydan"})
+        # So the pack counts them as its own and the chat's match finds them.
+        from apps.leadai.assistant import communities
+
+        self.assertIn("Damac Hills", [pack.name for pack in communities.named_packs()])
+        self.assertEqual([row.source_id for row in inventory.matches("Damac Hills", [], inventory.TOWNHOUSE, "sale")], ["103048:sale"])
+        # A listing whose location tree names the community by an alias too.
+        self.assertEqual(inventory.pack_names([{"community": "DAMAC Hills 2"}, {"community": "Atlantis"}]), [{"community": "Damac Hills"}, {"community": "Atlantis"}])
+
+    def test_the_syncs_retire_spares_a_row_the_webhook_refreshed_meanwhile(self):  # the round-20 review
+        import datetime as dt
+
+        from django.utils import timezone
+
+        from apps.crmlink import client as bitrix
+
+        stale = LeadAiUnit.objects.create(source="bitrix", source_id="7:rent", community="Mudon", unit=inventory.VILLA, deal="rent", price=100000)
+        fresh = LeadAiUnit.objects.create(source="bitrix", source_id="8:rent", community="Mudon", unit=inventory.VILLA, deal="rent", price=100000)
+        LeadAiUnit.objects.filter(pk=stale.pk).update(synced_at=timezone.now() - dt.timedelta(minutes=5))
+        LeadAiUnit.objects.filter(pk=fresh.pk).update(synced_at=timezone.now() + dt.timedelta(seconds=30))  # refreshed after the sync began
+        with patch.object(bitrix, "configured", return_value=True), patch.object(bitrix, "call", return_value={"items": []}):
+            self.assertEqual(inventory.sync_bitrix()["gone"], 1)
+        self.assertFalse(LeadAiUnit.objects.get(pk=stale.pk).active)
+        self.assertTrue(LeadAiUnit.objects.get(pk=fresh.pk).active)
 
 
 PF_TOWNHOUSE_NO_PLACE = {

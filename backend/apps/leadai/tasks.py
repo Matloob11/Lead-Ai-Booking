@@ -121,7 +121,6 @@ def send_due_reminders() -> None:
         _queue_missed_turns,
         _answer_capped,
         _flag_unanswered,
-        _escalate_handovers,
         _copilot_auto_send,
         _daily_digest,
         _close_past_appointments,
@@ -130,8 +129,10 @@ def send_due_reminders() -> None:
         _retry_crm_syncs,
         _retry_crm_fields,
         _reminders,
-        # Last: it only queues one task per due chat, and must never delay a reminder.
+        # Last: they only queue one task per due chat, or read the Bitrix escalation map (round 20: one call on a cold
+        # cache), and must never delay a reminder. A sweep cut off here resumes them next minute.
         _follow_ups,
+        _escalate_handovers,
     ):
         try:
             job()

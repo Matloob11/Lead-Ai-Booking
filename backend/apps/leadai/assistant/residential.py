@@ -2476,19 +2476,79 @@ def asks_occupancy(sentence: str) -> bool:
     return bool(_OCCUPANCY_ASK.search(text)) or (bool(_ALONE_ASK.search(text)) and not _A_CLIENT.search(text))
 
 
-# Step 2's first half (brief Part 5: "Do you prefer a balcony, and when are you planning to move?"): the cluster comes after it.
-_REQUIREMENT_ASK = re.compile(
-    r"\bbalcon\w*|\bmov(?:e|ing)\s*-?\s*in\b|\b(?:plan(?:ning)?|want|wanting|like|need|going)\s+to\s+(?:move|shift)\b"
-    r"|\bwhen\b[^.?!]{0,40}\b(?:move|moving|shift|shifting)\b|\bshift\s+kab\b|\bkab\s+shift\b"
-    r"|شرفة|بلكونة|الانتقال|بالکونی|کب\s+شفٹ|बालकनी|कब\s+शिफ्ट",
+# Their answer to step 3 says they stay alone ("Just me", "only myself", "alone", "sirf main", "akela", "لوحدي"): step 4,
+# the invitation, follows; never with anyone else named beside them ("just me and my wife", "me and a friend").
+_ALONE_SAID = re.compile(
+    r"\b(?:just|only)\s+(?:me|myself|for\s+me|for\s+myself)\b|\bby\s+myself\b|\bmyself\s+only\b|\b(?:i\s+am|i'm|i\s+will\s+be|i'll\s+be)\s+(?:staying\s+|living\s+)?alone\b"
+    r"|\balone\b|\bsingle\s+(?:person|occupant|man|woman|guy)\b|\bbachelor\b|\bsirf\s+(?:main|mai|mein)\b|\b(?:main|mai|mein)\s+akel[ai]\b|\bakel[ai]\b"
+    r"|لوحدي|وحدي|أنا\s+فقط|بس\s+أنا|صرف\s+میں|میں\s+اکیل[اے]|اکیل[اے]|सिर्फ़?\s+मैं|मैं\s+अकेल[ाे]|अकेल[ाे]",
     re.IGNORECASE,
 )
+_WITH_OTHERS = re.compile(
+    r"\b(?:and|with|plus|&)\s+(?:my\s+|a\s+|two\s+|three\s+|\d+\s+)?(?:wife|husband|family|kids?|children|son|daughter|parents?|mother|father|brother|sister|friends?|colleagues?|partner|roommates?|people|persons?|others?)\b"
+    r"|\bfamily\b|\bwe\s+are\s+\d+\b|\b\d+\s+(?:people|persons|of\s+us)\b|عائلتي|زوجتي|أصدقائي|فیملی|بیوی|دوست|परिवार|पत्नी|दोस्त",
+    re.IGNORECASE,
+)
+
+
+# Their answer to our balcony and move-in question carries the move-in ("next month", "in 2 weeks", "immediately", "January",
+# "agle mahine", "الشهر القادم"): step 2's first half is answered, whatever the model recorded of it.
+_MOVE_SAID = re.compile(
+    r"\b(?:next|this|coming)\s+(?:month|week|year)\b|\bend\s+of\s+(?:the\s+)?(?:month|year|\w+)\b|\b(?:immediately|asap|right\s+away|urgently?)\b|\bwithin\s+(?:a|\d+)\s+(?:days?|weeks?|months?)\b"
+    r"|\bin\s+(?:a|\d+)\s+(?:days?|weeks?|months?)\b|\bafter\s+\d+\s+(?:days?|weeks?|months?)\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b"
+    r"|\b(?:jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b\.?|\b(?:agle|is|iss)\s+(?:mahine|hafte|mahiney|haftey)\b|\bjald\b|\bfauran\b|\babhi\b"
+    r"|الشهر\s+القادم|الأسبوع\s+القادم|فورا|فوراً|حالا|اگلے\s+(?:مہینے|ہفتے)|فوری|اबھی|अगले\s+(?:महीने|हफ़्ते|हफ्ते)|जल्दी|तुरंत",
+    re.IGNORECASE,
+)
+
+
+def requirement_answered(facts: dict | None, fresh: dict | None, texts=()) -> bool:
+    """Step 2's first half is answered: the balcony (the chat's or this answer's fact, or their words) and the move-in
+    (a fact, or a time in their words)."""
+    known = {**(facts or {}), **{key: value for key, value in (fresh or {}).items() if value not in (None, "", [])}}
+    words = " ".join(str(text or "") for text in texts or ())
+    balcony = known.get("balcony") not in (None, "") or bool(_BALCONY_YES.search(words) or _BALCONY_NO.search(words) or _BALCONY_ASK.search(words))
+    move_in = known.get("move_in") not in (None, "") or bool(_MOVE_SAID.search(words))
+    return balcony and move_in
+
+
+def alone_said(texts) -> bool:
+    """Their words now answer step 3 with themselves alone, and name nobody beside them."""
+    words = " ".join(str(text or "") for text in texts or ()).replace("’", "'")
+    return bool(_ALONE_SAID.search(words)) and not _WITH_OTHERS.search(words) and not _STAFF_WORDS.search(words) and not _SHARING_WORDS.search(words)
+
+
+def asks_contract(sentence: str) -> bool:
+    """The sentence asks whose name the contract is in (step 3's second half, for a shared or company stay)."""
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_CONTRACT_WORD.search(text))
+
+
+# Step 2's first half (brief Part 5: "Do you prefer a balcony, and when are you planning to move?"): the cluster comes after it.
+_BALCONY_ASK = re.compile(r"\bbalcon\w*|شرفة|بلكونة|بالکونی|बालकनी", re.IGNORECASE)
+_MOVE_ASK = re.compile(
+    r"\bmov(?:e|ing)\s*-?\s*in\b|\b(?:plan(?:ning)?|want|wanting|like|need|going)\s+to\s+(?:move|shift)\b"
+    r"|\bwhen\b[^.?!]{0,40}\b(?:move|moving|shift|shifting)\b|\bshift\s+kab\b|\bkab\s+shift\b"
+    r"|الانتقال|کب\s+شفٹ|कब\s+शिफ्ट",
+    re.IGNORECASE,
+)
+_REQUIREMENT_ASK = re.compile(f"{_BALCONY_ASK.pattern}|{_MOVE_ASK.pattern}", re.IGNORECASE)
 
 
 def asks_requirement(sentence: str) -> bool:
     """The sentence asks step 2's first half: a balcony, or when they move (brief Part 5)."""
     text = " ".join(str(sentence or "").split())
     return rules.asks_question(text) and bool(_REQUIREMENT_ASK.search(text))
+
+
+def asks_balcony(sentence: str) -> bool:
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_BALCONY_ASK.search(text))
+
+
+def asks_move_in(sentence: str) -> bool:
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_MOVE_ASK.search(text))
 
 
 def asks_cluster(sentence: str) -> bool:
@@ -2590,10 +2650,11 @@ def _requirement_asked_before(earlier) -> bool:
 
 def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=None, earlier=(), language: str = "en") -> tuple[str, bool]:
     """Step 2's first half before its cluster question (brief Part 5): on the rent track, right after step 1 was answered
-    (for_client false recorded this turn, unknown before) while neither the balcony nor the move-in is known or was ever asked, a reply that
-    asks the cluster and nothing of step 2's first half gets code's balcony and move-in question in the cluster question's
-    place; the cluster comes next turn (cluster_first, requirement_asked_last). The 2e real-model gate, round 15:
-    shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?" in one run of two."""
+    (for_client false recorded this turn, unknown before) while neither the balcony nor the move-in is known or was ever
+    asked, a reply that asks the cluster, or only one of the two (the move-in but not the balcony), gets code's balcony
+    and move-in question in its questions' place; the cluster comes next turn (cluster_first, requirement_asked_last). The
+    2e real-model gate, round 15: shops-res-for-myself, "For myself", got "Any cluster you prefer, or are you flexible?"
+    in one run of two; round 20: the cluster question and "do you have a preferred move-in date?", no balcony."""
     if track != RENT or unit not in (STUDIO, ONE_BR):
         return reply, False
     fresh = {key: value for key, value in answer["facts"].items() if value is not None}
@@ -2608,8 +2669,12 @@ def requirement_first(reply: str, answer: dict, *, track: str, unit: str, facts=
     if _requirement_asked_before(earlier):
         return reply, False
     sentences = _split(reply)
-    if any(asks_requirement(sentence) for sentence in sentences) or not any(asks_cluster(sentence) for sentence in sentences):
-        return reply, False
+    balcony = any(asks_balcony(sentence) for sentence in sentences)
+    move_in = any(asks_move_in(sentence) for sentence in sentences)
+    if balcony and move_in:
+        return reply, False  # the model's own, both halves
+    if not any(asks_cluster(sentence) for sentence in sentences) and not (balcony or move_in):
+        return reply, False  # nothing of step 2 asked: the model's answer stands (another guard may have its say)
     kept = [sentence for sentence in sentences if not asks_cluster(sentence) and not rules.asks_question(sentence)]
     return " ".join([*kept, _BALCONY_MOVE[_lang(language)]]), True
 
@@ -2633,6 +2698,11 @@ def cluster_first(
     if track != RENT or unit not in (STUDIO, ONE_BR) or cluster_known(clusters, facts, answer["facts"], texts) or asked_cluster_before(earlier):
         return reply, "", False
     reply, cut = _drop(reply, asks_occupancy)
+    if requirement_asked_last(earlier) and requirement_answered(facts, answer["facts"], texts):
+        # Our balcony and move-in question answered, and the reply asks it again in more detail ("Are you planning to move
+        # in early or later next month?"): the cluster is next (the 2e gate, round 20: shops-res-cluster-unknown #2).
+        reply, again = _drop(reply, asks_requirement)
+        cut = cut or again
     sentences = _split(reply)
     if any(asks_cluster(sentence) for sentence in sentences):
         return reply, "", cut

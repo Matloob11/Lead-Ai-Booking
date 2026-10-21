@@ -85,7 +85,7 @@ def bot_status(request):
         return _refuse(401, "Unauthorized.")
     try:
         body = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return _refuse(400, "Body is not JSON.")
     if not isinstance(body, dict):
         return _refuse(400, "Body is not an object.")
@@ -111,6 +111,9 @@ def bot_status(request):
 # "leadai-inventory." + ts + "." + body with CRM_LEAD_WA_SECRET; ts (unix seconds) in X-A7-Ts and in the body; body
 # {"event": "update", "id": 103048, "stageId": "DT1042_14:PREPARATION", "ts": 1760000000}.
 INVENTORY_PREFIX = b"leadai-inventory."
+# "ts":1760000000 in the raw body (the handler's json_encode puts no space after the colon; one is allowed).
+_BODY_TS = re.compile(rb'"ts"\s*:\s*([0-9]{1,12})\b')
+REFRESH_EVERY = 30
 
 
 def inventory_sign(raw: bytes, ts: str, secret: str) -> str:
@@ -137,19 +140,17 @@ def inventory_event(request):
     ts = str(request.headers.get("X-A7-Ts") or "").strip()
     given = str(request.headers.get("X-A7-Signature") or "").strip().lower()
     if not ts:
-        # The handler's stamp travels in the body too: a proxy that drops the header still signs.
-        try:
-            stamped = json.loads(raw.decode("utf-8"))
-            ts = str(int(stamped.get("ts"))) if isinstance(stamped, dict) and isinstance(stamped.get("ts"), int) else ""
-        except (UnicodeDecodeError, ValueError):
-            ts = ""
+        # The handler's stamp travels in the body too: a proxy that drops the header still signs. Read with a bounded
+        # pattern, not a parse: nothing unsigned is parsed (a nested document would raise past json's ValueError).
+        match = _BODY_TS.search(raw)
+        ts = match.group(1).decode("ascii") if match else ""
     if not secret or not _TS.fullmatch(ts) or not _SIGN.fullmatch(given) or abs(time.time() - int(ts)) > MAX_SKEW:
         return _refuse(401, "Unauthorized.")
     if not hmac.compare_digest(inventory_sign(raw, ts, secret).encode("ascii"), given.encode("ascii")):
         return _refuse(401, "Unauthorized.")
     try:
         body = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return _refuse(400, "Body is not JSON.")
     if not isinstance(body, dict):
         return _refuse(400, "Body is not an object.")
@@ -159,10 +160,17 @@ def inventory_event(request):
         return _refuse(400, "Bad field.")
     if not card_id:
         return _refuse(400, "No card.")
+    from django.core.cache import cache
+
     from .tasks import refresh_bitrix_unit
 
-    refresh_bitrix_unit.delay(card_id)
+    # One read per card per half minute: Bitrix fires on every save, and a captured request could be replayed for
+    # MAX_SKEW; the sync has the rest.
+    queued = bool(cache.add(f"leadai:inventory:refresh:{card_id}", 1, REFRESH_EVERY))
+    if queued:
+        refresh_bitrix_unit.delay(card_id)
     logger.info(
-        "Lead AI inventory: Bitrix says Availability card %s %s (%s)", card_id, str(body.get("event") or "update")[:20], str(body.get("stageId") or "")[:60]
+        "Lead AI inventory: Bitrix says Availability card %s %s (%s)%s",
+        card_id, str(body.get("event") or "update")[:20], str(body.get("stageId") or "")[:60], "" if queued else ": read already",
     )
-    return JsonResponse({"ok": True, "queued": True, "id": card_id})
+    return JsonResponse({"ok": True, "queued": queued, "id": card_id})
