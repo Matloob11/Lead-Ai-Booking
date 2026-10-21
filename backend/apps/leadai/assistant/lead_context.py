@@ -115,6 +115,12 @@ def _ref(value) -> str:
 _LISTING_ID = re.compile(r"\bListing\s*ID\s*[:\-]?\s*([A-Z0-9]{12,40})\b", re.IGNORECASE)
 
 
+def _ref_in(text) -> str:
+    """A7's reference anywhere in a comment ("Listing reference: a7group-1789"), lower case; '' for none."""
+    match = _REF.search(str(text or ""))
+    return match.group(0).lower() if match else ""
+
+
 def _listing_id(text) -> str:
     """The portal's listing id in the comment ("Listing ID: FYS8JPQCB4FA92YB0GWQV5H39G"), upper case; '' for none."""
     match = _LISTING_ID.search(str(text or ""))
@@ -159,7 +165,7 @@ def parse(row) -> dict:
     comments = str(row.get("COMMENTS") or "")
     context = {
         "source": SOURCES.get(str(row.get("SOURCE_ID") or "").strip().upper(), ""),
-        "listing_ref": _ref(row.get(FIELD_REF)) or _ref(comments),
+        "listing_ref": _ref(row.get(FIELD_REF)) or _ref_in(comments),
         "listing_url": _url(row.get(FIELD_URL)) or _url(comments),
         "listing_id": _listing_id(comments),
         "unit": unit,
