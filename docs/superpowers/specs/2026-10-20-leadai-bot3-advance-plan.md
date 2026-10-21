@@ -327,8 +327,18 @@ and refers the customer to our office ("pictures wagera PF se jayein aur office 
   invitation with two free slots (`engine.alone_invitation`). The third gate failed one run of shops-res-cluster-unknown
   (the move-in asked again in more detail, no cluster): our balcony and move-in question answered (a fact or their words,
   `residential.requirement_answered`) now drops a repeat of it and code's cluster question goes.
-- **Waits:** F1's score write needs `UF_CRM_A7_AI_SCORE` (number) and `_WHY` (text) on `a7_leadai_fields.php`'s
-  allow-list (asked of Cursor); the 10-minute first escalation step of D stays at 30 minutes for every recipient.
+- **Waits:** the 10-minute first escalation step of D stays at 30 minutes for every recipient.
+
+## 6e. Round 21 (2026-10-21): the lead score, F1
+- **The score (`assistant/score.py`):** 0–100 from the chat's facts and events — they wrote, the unit, the deal, the
+  budget, the area, the move-in, a full name, a visit or call booked / done / held / cancelled, how fast they answer,
+  the model's "wants to move fast", abroad, and the quiet (3 days −10, 7 days −20); a STOP or a no is 0, a broker 5.
+  Hot from 70, warm from 40; the reasons in English ("Hot 85: they wrote; unit known; …").
+- **Where:** `LeadAiChatState.score / score_reasons / scored_at` (migration 0017), set at the end of every shops turn
+  and once a day for quiet chats (`rescore_quiet` after the digest); the lead's `UF_CRM_A7_AI_SCORE` and `_WHY`
+  written through the fields tool when the value moved (Cursor's C50, allowed since C65).
+- **The desk:** the chip on every row and thread, a Hot first sort (`?sort=score`, the unscored last).
+- **Not yet:** the digest's time-to-first-human by score band; a backfill of the chats that never speak again.
 
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone

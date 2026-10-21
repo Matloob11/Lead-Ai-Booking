@@ -48,13 +48,15 @@ export const leadAiApi = {
    * `needs` lists the chats that need a person, `today` the visits and calls of
    * today, each row with lead_ai_desk. The first page carries desk_counts.
    */
-  chats({ q = "", label = "", track = "", needs = false, today = false, limit = 40, offset = 0 } = {}) {
+  chats({ q = "", label = "", track = "", needs = false, today = false, sort = "", limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit, offset });
     if (q) query.set("q", q);
     if (label) query.set("label", label);
     if (track) query.set("track", track);
     if (needs) query.set("needs", "1");
     else if (today) query.set("today", "1");
+    // The hottest leads first (lead_ai_ai.score; the server sorts, the unscored last).
+    if (sort === "score" && !needs && !today) query.set("sort", "score");
     return apiFetch(`/api/leadai/chats/?${query}`);
   },
 

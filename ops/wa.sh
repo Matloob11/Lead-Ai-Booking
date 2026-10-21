@@ -58,6 +58,7 @@
 #   ops/wa.sh set-meta-graph-token FILE    write META_GRAPH_ACCESS_TOKEN; up -d all app services; then probe-media-template-path
 #   ops/wa.sh set-alots-ui-cookie FILE     store alots Cookie; up -d all app services; then probe-media-template-path
 #   ops/wa.sh credit-status               read-only gateway credit poll + panel flags (never the balance)
+#   ops/wa.sh submit-aldardso-missing     submit aldardso to the eight 971 numbers that lack it
 #   ops/wa.sh credit-release              reclaim parked credit rows and start their campaigns (writer)
 #   ops/wa.sh probe-backend-md5           md5 of every source file in the running web image
 #   ops/wa.sh raise-upload-limit            Official nginx body size → 1024m
@@ -65,7 +66,6 @@
 #   ops/wa.sh submit-leadbot-template       submit a7_lead_enquiry_confirm to agent 971 WABAs
 #   ops/wa.sh submit-leadai-reminder-template [--dry-run]  Lead AI meeting reminder to every active assigned WABA
 #   ops/wa.sh leadai-switch on|off|status   the Lead AI assistant's switch
-#   ops/wa.sh leadai-health                 Lead AI health: sweep, queue, last hour, who waits, inventory, keys
 #   ops/wa.sh leadai-test-numbers [digits…] numbers the assistant answers while it is off
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
@@ -75,6 +75,7 @@
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
 #   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
 #   ops/wa.sh load                        host load, RAM, disk, top containers
+#   ops/wa.sh leadai-health                 Lead AI health: sweep, queue, last hour, who waits, inventory, keys
 
 set -euo pipefail
 
@@ -397,6 +398,26 @@ case "$cmd" in
     add_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/add-dubai10wbx-numbers.py"
     [[ -f "$add_script" ]] || die "missing ops/catalog/add-dubai10wbx-numbers.py"
     encoded=$(base64 -w0 < "$add_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  add-dubai01-05-numbers)
+    # The 38 sheet numbers Dubai01WBX–Dubai05WBX were missing from the panel.
+    [[ $# -eq 0 ]] || die "add-dubai01-05-numbers takes no arguments"
+    add_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/add-dubai01-05-numbers.py"
+    [[ -f "$add_script" ]] || die "missing ops/catalog/add-dubai01-05-numbers.py"
+    encoded=$(base64 -w0 < "$add_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  set-number-quality)
+    # Sheet All Active Accounts: High -> HIGH, Low -> YELLOW.
+    [[ $# -eq 0 ]] || die "set-number-quality takes no arguments"
+    quality_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-number-quality.py"
+    [[ -f "$quality_script" ]] || die "missing ops/catalog/set-number-quality.py"
+    encoded=$(base64 -w0 < "$quality_script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
@@ -786,23 +807,6 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
-  leadai-grant-access)
-    # Give Lead AI access (Agent.can_lead_ai) to agents by Bitrix id, as "Agents & access"
-    # would (ops/catalog/leadai-grant-access.py). Ids only; the script skips an agent
-    # without Official API access and says so.
-    [[ $# -ge 1 ]] || die "leadai-grant-access takes one or more Bitrix ids"
-    ids=""
-    for id in "$@"; do
-      [[ "$id" =~ ^[0-9]{1,8}$ ]] || die "a Bitrix id is a number: '$id'"
-      ids="${ids:+$ids,}$id"
-    done
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-grant-access.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/leadai-grant-access.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && \
-      base64 -d | docker compose exec -T -e GRANT_IDS=$ids web python manage.py shell"
-    ;;
-
   leadai-answer-late)
     # One-off (2026-10-19): answer the replies to campaigns 549-553 that the Lead AI
     # dropped as too old in the reply burst after the send, through the normal engine
@@ -844,6 +848,27 @@ case "$cmd" in
     [[ $# -eq 0 ]] || die "credit-status takes no arguments"
     script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/credit-status.py"
     [[ -f "$script" ]] || die "missing ops/catalog/credit-status.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  submit-aldardso-missing)
+    # Submit the existing aldardso template to 971581058719–726 only.
+    # A WABA that already has the name is left as it is. No campaign is sent.
+    [[ $# -eq 0 ]] || die "submit-aldardso-missing takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/submit-aldardso-missing.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/submit-aldardso-missing.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  check-aldardso-eight)
+    # Read Meta's status for aldardso on 971581058719–726. No send.
+    [[ $# -eq 0 ]] || die "check-aldardso-eight takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/check-aldardso-eight.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/check-aldardso-eight.py"
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
@@ -1026,50 +1051,6 @@ case "$cmd" in
       cd /opt/a7-wa/deploy && docker compose up -d 2>&1 | tail -5'
     ;;
 
-
-  leadai-sync-inventory)
-    # The Lead AI inventory refreshed now (apps/leadai/assistant/inventory.py: Property
-    # Finder's live listings and the clean Availability cards), with the counts and a few
-    # units printed (ops/catalog/leadai-sync-inventory.py). The beat job does the same every
-    # half hour; this proves it after a deploy.
-    [[ $# -eq 0 ]] || die "leadai-sync-inventory takes no arguments"
-    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-sync-inventory.py"
-    [[ -f "$script" ]] || die "missing ops/catalog/leadai-sync-inventory.py"
-    encoded=$(base64 -w0 < "$script")
-    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T web python manage.py shell"
-    ;;
-
-  leadai-health)
-    # The Lead AI's health in one screen (apps/leadai/management/commands/leadai_health.py):
-    # the switch, the sweep's age (worker-leadai alive?), the leadai queue's depth, the last
-    # hour's turns, who waits for a person, the inventory's age, the keys, the last digest.
-    # Read only; exit 1 when something is red.
-    [[ $# -eq 0 ]] || die "leadai-health takes no arguments"
-    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_health"
-    ;;
-
-  set-pf-api-keys)
-    # Writes LEADAI_PF_API_KEY and LEADAI_PF_API_SECRET on the Official host (the Lead AI
-    # inventory, apps/leadai/assistant/inventory.py) from a local, gitignored env file that
-    # holds PF_API_KEY=... and PF_API_SECRET=... lines. They travel on stdin, never on a
-    # command line, never printed. No ``up`` here: the deploy that ships the code does it
-    # (env_file is read when a container is created).
-    keys_file="${1:-}"
-    [[ -f "$keys_file" ]] || die "set-pf-api-keys wants the local propertyfinder.env file"
-    pf_key="$(grep -E '^PF_API_KEY=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
-    pf_secret="$(grep -E '^PF_API_SECRET=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
-    [[ "$pf_key" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_KEY that looks like one"
-    [[ "$pf_secret" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_SECRET that looks like one"
-    printf '%s\n%s\n' "$pf_key" "$pf_secret" | remote 'set -eu
-      IFS= read -r k; IFS= read -r s
-      f=/opt/a7-wa/deploy/.env
-      [ -f "$f" ] || { echo "missing $f"; exit 1; }
-      { grep -v -e "^LEADAI_PF_API_KEY=" -e "^LEADAI_PF_API_SECRET=" "$f" || true; } > "$f.tmp"
-      printf "LEADAI_PF_API_KEY=%s\nLEADAI_PF_API_SECRET=%s\n" "$k" "$s" >> "$f.tmp"
-      chmod --reference="$f" "$f.tmp" 2>/dev/null || true
-      mv "$f.tmp" "$f"
-      echo pf-keys=written'
-    ;;
 
   ensure-crm-lead-secret)
     # Writes one env key on the Official host if it is missing. Hex-only so
@@ -1293,6 +1274,95 @@ case "$cmd" in
     remote "cd $APP_DIR && docker compose exec -T web python manage.py crmlink_backfill_mirrors ${args[*]}"
     ;;
 
+  hooks-worker)
+    # A second container that only applies webhook rows (replies, delivered, read).
+    # Does not recreate the campaign worker.
+    [[ $# -eq 0 ]] || die "hooks-worker takes no arguments"
+    remote "set -eu
+      cd $APP_DIR
+      test -f $APP_DIR/a7_drain_hooks.py
+      if docker ps -a --format '{{.Names}}' | grep -qx 'a7wa-worker-hooks'; then
+        echo 'a7wa-worker-hooks already exists'
+        docker ps -a --filter name=a7wa-worker-hooks --format '{{.Names}} {{.Status}}'
+        exit 0
+      fi
+      docker compose run -d -T --name a7wa-worker-hooks --no-deps \
+        -v $APP_DIR/a7_drain_hooks.py:/tmp/a7_drain_hooks.py:ro \
+        worker python /tmp/a7_drain_hooks.py
+      docker ps --filter name=a7wa-worker-hooks --format '{{.Names}} {{.Status}}'
+    "
+    ;;
+
+  worker-pool-grow)
+    # Add 1 or 2 processes to the running inbox worker. Does not restart it,
+    # so a campaign already sending keeps its place. The next container start
+    # goes back to the compose concurrency.
+    n="${1:-}"
+    [[ $# -eq 1 && "$n" =~ ^[12]$ ]] || die "worker-pool-grow takes 1 or 2"
+    remote "cd $APP_DIR && docker compose exec -T worker celery -A a7wa control pool_grow $n"
+    ;;
+
   ""|-h|--help|help) usage ;;
+  leadai-grant-access)
+    # Give Lead AI access (Agent.can_lead_ai) to agents by Bitrix id, as "Agents & access"
+    # would (ops/catalog/leadai-grant-access.py). Ids only; the script skips an agent
+    # without Official API access and says so.
+    [[ $# -ge 1 ]] || die "leadai-grant-access takes one or more Bitrix ids"
+    ids=""
+    for id in "$@"; do
+      [[ "$id" =~ ^[0-9]{1,8}$ ]] || die "a Bitrix id is a number: '$id'"
+      ids="${ids:+$ids,}$id"
+    done
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-grant-access.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-grant-access.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e GRANT_IDS=$ids web python manage.py shell"
+    ;;
+
+  leadai-health)
+    # The Lead AI's health in one screen (apps/leadai/management/commands/leadai_health.py):
+    # the switch, the sweep's age (worker-leadai alive?), the leadai queue's depth, the last
+    # hour's turns, who waits for a person, the inventory's age, the keys, the last digest.
+    # Read only; exit 1 when something is red.
+    [[ $# -eq 0 ]] || die "leadai-health takes no arguments"
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_health"
+    ;;
+
+  leadai-sync-inventory)
+    # The Lead AI inventory refreshed now (apps/leadai/assistant/inventory.py: Property
+    # Finder's live listings and the clean Availability cards), with the counts and a few
+    # units printed (ops/catalog/leadai-sync-inventory.py). The beat job does the same every
+    # half hour; this proves it after a deploy.
+    [[ $# -eq 0 ]] || die "leadai-sync-inventory takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-sync-inventory.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-sync-inventory.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  set-pf-api-keys)
+    # Writes LEADAI_PF_API_KEY and LEADAI_PF_API_SECRET on the Official host (the Lead AI
+    # inventory, apps/leadai/assistant/inventory.py) from a local, gitignored env file that
+    # holds PF_API_KEY=... and PF_API_SECRET=... lines. They travel on stdin, never on a
+    # command line, never printed. No ``up`` here: the deploy that ships the code does it
+    # (env_file is read when a container is created).
+    keys_file="${1:-}"
+    [[ -f "$keys_file" ]] || die "set-pf-api-keys wants the local propertyfinder.env file"
+    pf_key="$(grep -E '^PF_API_KEY=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
+    pf_secret="$(grep -E '^PF_API_SECRET=' "$keys_file" | head -n1 | cut -d= -f2- | tr -d '\r\n[:space:]')"
+    [[ "$pf_key" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_KEY that looks like one"
+    [[ "$pf_secret" =~ ^[A-Za-z0-9_.-]{20,200}$ ]] || die "that file has no PF_API_SECRET that looks like one"
+    printf '%s\n%s\n' "$pf_key" "$pf_secret" | remote 'set -eu
+      IFS= read -r k; IFS= read -r s
+      f=/opt/a7-wa/deploy/.env
+      [ -f "$f" ] || { echo "missing $f"; exit 1; }
+      { grep -v -e "^LEADAI_PF_API_KEY=" -e "^LEADAI_PF_API_SECRET=" "$f" || true; } > "$f.tmp"
+      printf "LEADAI_PF_API_KEY=%s\nLEADAI_PF_API_SECRET=%s\n" "$k" "$s" >> "$f.tmp"
+      chmod --reference="$f" "$f.tmp" 2>/dev/null || true
+      mv "$f.tmp" "$f"
+      echo pf-keys=written'
+    ;;
+
   *) die "unknown command '$cmd' — try: ops/wa.sh help" ;;
 esac
