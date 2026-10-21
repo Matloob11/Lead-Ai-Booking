@@ -183,6 +183,21 @@ def sync_inventory() -> None:
     logger.info("Lead AI inventory sync: %s", result)
 
 
+@shared_task(bind=True, ignore_result=True, soft_time_limit=90, time_limit=120, max_retries=5)
+def greet_new_lead(self, lead_id: int) -> None:
+    """A lead created in Bitrix gets the Lead AI's first message (assistant/newlead.greet; bitrix_views.new_lead,
+    Cursor's C67; round 22). Bitrix busy or down: again in a minute, five times."""
+    from apps.crmlink import client as bitrix
+
+    from .assistant import newlead
+
+    try:
+        result = newlead.greet(lead_id)
+    except bitrix.BitrixTransient as exc:
+        raise self.retry(exc=exc, countdown=60)
+    logger.info("Lead AI greet for lead %s: %s", lead_id, result)
+
+
 @shared_task(bind=True, ignore_result=True, soft_time_limit=60, time_limit=90, max_retries=5)
 def refresh_bitrix_unit(self, card_id: int) -> None:
     """One Availability card read again after Bitrix's webhook said it changed (bitrix_views.inventory_event, Cursor's

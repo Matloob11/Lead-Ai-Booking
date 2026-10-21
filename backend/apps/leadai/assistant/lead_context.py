@@ -112,6 +112,30 @@ def _ref(value) -> str:
     return text.lower() if _REF.fullmatch(text) else ""
 
 
+_LISTING_ID = re.compile(r"\bListing\s*ID\s*[:\-]?\s*([A-Z0-9]{12,40})\b", re.IGNORECASE)
+
+
+def _ref_in(text) -> str:
+    """A7's reference anywhere in a comment ("Listing reference: a7group-1789"), lower case; '' for none."""
+    match = _REF.search(str(text or ""))
+    return match.group(0).lower() if match else ""
+
+
+def _url_in(text) -> str:
+    """The first portal link anywhere in a comment (a Bayut lead's "Link: https://www.bayut.com/…"); '' for none."""
+    for match in _URL.finditer(str(text or "")):
+        found = _url(match.group(0).rstrip(".,;)"))
+        if found:
+            return found
+    return ""
+
+
+def _listing_id(text) -> str:
+    """The portal's listing id in the comment ("Listing ID: FYS8JPQCB4FA92YB0GWQV5H39G"), upper case; '' for none."""
+    match = _LISTING_ID.search(str(text or ""))
+    return match.group(1).upper() if match else ""
+
+
 def _url(value) -> str:
     text = str(next(iter(_values(value)), "") or "").strip()
     match = _URL.fullmatch(text)
@@ -144,10 +168,15 @@ def parse(row) -> dict:
     prop = _first(PROPERTIES, row.get(FIELD_PROPERTY), PROPERTY_TYPE_ID)
     if prop == "shop":
         unit = ""  # a shop has no bedrooms, whatever the field says
+    # The portal's own words in the lead's comment (the kanban's "Listing ID: FYS8…", "Listing reference: a7group-1789",
+    # a Bayut link): the ref and the link when the fields are empty, and the portal's listing id (Property Finder's,
+    # the inventory's source_id) as data for inventory.enquired.
+    comments = str(row.get("COMMENTS") or "")
     context = {
         "source": SOURCES.get(str(row.get("SOURCE_ID") or "").strip().upper(), ""),
-        "listing_ref": _ref(row.get(FIELD_REF)),
-        "listing_url": _url(row.get(FIELD_URL)),
+        "listing_ref": _ref(row.get(FIELD_REF)) or _ref_in(comments),
+        "listing_url": _url(row.get(FIELD_URL)) or _url_in(comments),
+        "listing_id": _listing_id(comments),
         "unit": unit,
         "property": prop,
         "cluster": _first(CLUSTERS, row.get(FIELD_CLUSTER), SUB_COMMUNITY_TYPE_ID),
