@@ -29,10 +29,12 @@ class HourlyGlossTests(SimpleTestCase):
         run = run_eval("shops-gate-half-hour", live)
         self.assertEqual((run.failures, run.when), ([], at(12, 16, 30)))
         self.assertNotIn("on the hour", run.out)
-        # The reply's own words alone (no gloss) keep round 1's rule: the two offered slots stand.
+        # The reply's own words alone (no gloss, no reason) keep round 1's rule: the two offered slots stand, nothing is
+        # booked for them (test_gate_2e_round11: FOUR_OR_SIX upgrades nothing).
         plain = tentative(FOUR_OR_SIX, reply_en="", words=CAN_I_COME, share_location=True, maker=eval_answer)
         run = run_eval("shops-gate-half-hour", plain)
-        self.assertIn("4:30", run.out)  # offered their 4:30 PM, or booked: the scenario's either
+        self.assertIn("4:00 PM or 6:00 PM", run.out)
+        self.assertNotEqual(run.when, at(12, 16, 30))
 
 
 class AbroadWordsTests(SimpleTestCase):

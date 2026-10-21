@@ -344,7 +344,7 @@ def validate(raw, *, creating: bool = False) -> tuple[dict, dict]:
         else:
             fields["name"] = name
     if "aliases" in raw:
-        fields["aliases"] = [alias.casefold() for alias in _text_list(raw.get("aliases"), ALIASES_MAX, ALIAS_MAX, "aliases", errors)]
+        fields["aliases"] = list(dict.fromkeys(alias.casefold() for alias in _text_list(raw.get("aliases"), ALIASES_MAX, ALIAS_MAX, "aliases", errors)))
     if "sub_areas" in raw:
         fields["sub_areas"] = _sub_areas_of(raw.get("sub_areas"), errors)
     if "units" in raw:
@@ -385,7 +385,7 @@ def validate(raw, *, creating: bool = False) -> tuple[dict, dict]:
             value = raw.get(key)
             fields[key] = value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on")
     if "languages" in raw:
-        fields["languages"] = [lang.casefold() for lang in _text_list(raw.get("languages"), 10, 16, "languages", errors)]
+        fields["languages"] = list(dict.fromkeys(lang.casefold() for lang in _text_list(raw.get("languages"), 10, 16, "languages", errors)))
     return fields, errors
 
 
