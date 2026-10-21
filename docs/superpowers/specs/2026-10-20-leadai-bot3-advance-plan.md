@@ -340,6 +340,24 @@ and refers the customer to our office ("pictures wagera PF se jayein aur office 
 - **The desk:** the chip on every row and thread, a Hot first sort (`?sort=score`, the unscored last).
 - **Not yet:** the digest's time-to-first-human by score band; a backfill of the chats that never speak again.
 
+## 6f. Round 22 (2026-10-21): the new-lead greet (Bot 1's first half)
+Matloob's ask: new leads get the AI too — the listing they came from, its details, anything else they want, the slots,
+the viewing. Campaign-first, so the 24-hour window never blocks the first message.
+- **Trigger:** Cursor's C67 handler on lead creation → `POST /api/leadai/bitrix/new-lead/` (signed like C46) → a
+  minute later `tasks.greet_new_lead` → `newlead.greet`.
+- **Greet:** the lead read; skipped unless New, fresh (48 h), with a phone, not opted out / broker / Lost, not in a
+  Lead AI chat, never reached by a Lead AI campaign; then the greet template through the popup's own path
+  (`send_from_leads`: a one-recipient Lead AI campaign, ic_shops, the community from the lead); `{{2}}` the listing
+  in words. Settings in Django admin (`greet_*`, migration 0018).
+- **The listing:** the comment's Listing ID / a7group ref / Bayut link into the lead context; `inventory.enquired`
+  puts that unit first in the first turn's INVENTORY block, marked, "no longer listed" when it went.
+- **The review before the gate (22b):** a portal's lead only (the inbox's "Create lead" for a chat in progress would
+  have pulled the agent's chat onto the Lead AI screen), a customer talking to us already or greeted within 24 hours
+  left alone, the settings a send would refuse named as skips, a villa named a villa, a retired enquired listing kept
+  from code's guards and the photos.
+- **Not yet:** the client-first half (the customer writes first to the ad's number: T80/T81), a "closer" prompt (T82),
+  the enquired unit's photos on the first turn outside the pack flow, an eval family for portal leads.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
