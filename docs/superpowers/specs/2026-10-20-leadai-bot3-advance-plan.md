@@ -296,6 +296,26 @@ and refers the customer to our office ("pictures wagera PF se jayein aur office 
 - **Not yet:** the sale flow's call-first for packs (Matloob chose the office visit for both), pack bands edited in the
   panel (Django admin today), the desk showing the community, a scenario family per pack beyond the three scenarios.
 
+## 6d. Rounds 18–20 (2026-10-21): the packs edited in the panel, the campaign's community, Cursor's ids consumed
+- **Round 18:** `residential.segment_of` gives the model's unknown segment a residential track (the customer's own time
+  gets booked; shops-mixed-not-known-booking had failed 1/2 for three rounds); the Property Finder sync counts a
+  listing repeated across overlapping pages once and stops an endless nextPage (40 pages); `probe-leadai-turn` books a
+  free hour instead of a fixed 5 pm; the thread shows the community chip. 18b: the hourly reason read from the English
+  gloss too (`passed_over_hour`), a buyer abroad read from their own words (`sales.abroad_words`).
+- **Round 19 (B2's editor):** the Communities dialog on the Lead AI screen — aliases, sub-areas, units, bands, facts,
+  meeting point, maps link, shops, on/off — read by everyone, saved by a panel admin (`PUT /api/leadai/communities/<id>/`,
+  `POST …/new/`, `communities.validate`). `LeadAiCampaign.community` (migration 0016): `lane.mark_campaign(community=)`
+  for Cursor's C44b; a chat reads its campaign's community until its own words name another.
+- **Round 20 (C's Bitrix half, D's escalation):** the Availability card's own Community name (C59, enum 2526–2579 →
+  the bot's spellings; an International City cluster names the cluster) and Property Finder ref (C62) read into the
+  inventory; a card published on Property Finder counts once (the listing, with its photos, stands for both).
+  `POST /api/leadai/inventory/bitrix/` (C46, signed "leadai-inventory.") reads the one card again in a task
+  (`inventory.refresh_bitrix`); Cursor enables the handler after "round 20 is live". A handover nobody answered in 30
+  minutes reaches the responsible's team lead and department head too (`escalation.above`, C49's map, cached six
+  hours; `LEADAI_BITRIX_ESCALATION_URL`, empty = off).
+- **Waits:** F1's score write needs `UF_CRM_A7_AI_SCORE` (number) and `_WHY` (text) on `a7_leadai_fields.php`'s
+  allow-list (asked of Cursor); the 10-minute first escalation step of D stays at 30 minutes for every recipient.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
