@@ -5827,6 +5827,13 @@ def _apply(
             writes += crm_fields.residential_writes(
                 facts, fresh.track, fresh.unit, words=str(answer.get("their_words") or ""), besides=writes
             )
+            # The lead score (assistant/score.py, F1): stored on the chat every turn, written to the lead when it moved.
+            from . import score as lead_score
+
+            scored, moved = lead_score.update(conversation, fresh, now=now, hot=bool(done.get("hot_lead")))
+            done["score"] = scored.value
+            if moved:
+                writes += lead_score.writes(scored)
             if crm_fields.queue(conversation, chat, writes):
                 done["crm_fields"] = [field for field, _, _ in writes]
     # The customer memory (memory.py): this chat's facts and bookings kept by the phone, for the chats on other numbers.

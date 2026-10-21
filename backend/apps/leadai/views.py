@@ -34,7 +34,7 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
 from django.db import transaction
-from django.db.models import Prefetch, Q, Sum
+from django.db.models import F, Prefetch, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -47,7 +47,7 @@ from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
 from . import desk, ic_templates
-from .assistant import hours, memory, openai_client, residential, shops
+from .assistant import hours, memory, openai_client, residential, score, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 
@@ -289,6 +289,11 @@ def serialize_lead_ai_conversation(
             conversation, _state(conversation), followups.approved_wabas() if approved is None else approved
         )
     row["lead_ai_ai"]["followup_note"] = followup_note
+    # The lead score (assistant/score.py, F1): the figure, hot/warm/cold and the reasons, for the chip and the sort.
+    row["lead_ai_ai"]["score"] = (
+        {"value": state.score, "label": score.label_of(state.score), "reasons": state.score_reasons}
+        if state is not None and state.score is not None else None
+    )
     row["lead_ai_appointment"] = serialize_appointment(_open_appointment(conversation))
     return row
 
@@ -348,8 +353,15 @@ def chat_list(request):
     today = request.GET.get("today") == "1"
     if needs and today:
         return Response({"detail": "Ask for needs or today, not both."}, status=status.HTTP_400_BAD_REQUEST)
+    # ?sort=score: the hottest leads first (assistant/score.py, F1), the unscored last; the desk's own views keep theirs.
+    sort = request.GET.get("sort", "").strip().lower()
+    if sort not in ("", "score"):
+        return Response({"detail": "sort is score or nothing."}, status=status.HTTP_400_BAD_REQUEST)
 
-    queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
+    if sort == "score":
+        queryset = queryset.order_by("-is_pinned", F("lead_ai_state__score").desc(nulls_last=True), "-last_message_at", "-created_at")
+    else:
+        queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
     try:
         limit = min(max(int(request.GET.get("limit", 50)), 1), 200)
         offset = max(int(request.GET.get("offset", 0)), 0)

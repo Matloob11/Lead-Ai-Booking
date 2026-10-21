@@ -246,6 +246,11 @@ class LeadAiChatState(models.Model):
     # The community the chat is about (assistant/communities.py: its pack's name, "International City" for the campaigns
     # of 2026; from the lead context, the customer's words or the default), stored by the turn that decided it.
     community = models.CharField(max_length=80, blank=True, default="", db_default="")
+    # The lead score (assistant/score.py, F1): 0–100 with its reasons ("Hot 82: visit booked; unit known"), computed by
+    # code at each turn and once a day for a quiet chat; None until a turn scored it.
+    score = models.PositiveSmallIntegerField(null=True, blank=True)
+    score_reasons = models.CharField(max_length=255, blank=True, default="", db_default="")
+    scored_at = models.DateTimeField(null=True, blank=True)
     # The Bitrix lead's own words on what they asked about (assistant/lead_context.py; board T91): the portal, the
     # listing ref and link, the unit, the cluster, rent or sale, the budget, read once (``lead_context_at``) with
     # three tries (``lead_context_tries``), as data. None until read.

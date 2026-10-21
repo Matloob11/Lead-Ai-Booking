@@ -82,6 +82,9 @@ function a7_leadai_fields_allow(): array
         'UF_CRM_A7_SHOP_TYPE' => [2471 => true, 2472 => true, 2473 => true, 2474 => true],
         'UF_CRM_A7_BOT_STATUS' => [2475 => true, 2476 => true, 2477 => true, 2478 => true, 2479 => true, 2480 => true, 2481 => true],
         'UF_CRM_A7_WA_OPT_OUT' => [2482 => true, 2483 => true],
+        // C65 / C50: AI score (UF 2696) and why (UF 2697) for Claude F1.
+        'UF_CRM_A7_AI_SCORE' => 'number',
+        'UF_CRM_A7_AI_SCORE_WHY' => 'text',
     ];
 }
 

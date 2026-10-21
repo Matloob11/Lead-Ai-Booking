@@ -137,6 +137,9 @@ FIELD_BALCONY = "UF_CRM_A7_BALCONY"  # C39, enum
 FIELD_VACANT_RENTED = "UF_CRM_A7_VACANT_RENTED"  # C39, enum
 FIELD_PAYMENT = "UF_CRM_A7_PAYMENT"  # C39, enum
 FIELD_OCCUPANCY = "UF_CRM_A7_OCCUPANCY"  # C39, enum
+# The lead score (assistant/score.py, F1; Cursor's C50 fields 2696 and 2697, on the tool's allow-list since C65).
+FIELD_AI_SCORE = "UF_CRM_A7_AI_SCORE"  # number, 0–100
+FIELD_AI_SCORE_WHY = "UF_CRM_A7_AI_SCORE_WHY"  # text: "Hot 82: visit booked; unit known"
 # Not a field: the lead's EMAIL, a key of the tool's body of its own, added only while the lead has none (C39).
 EMAIL = "email"
 
@@ -152,7 +155,7 @@ PAYMENT_IDS = {"cash": 2507, "mortgage": 2508, "finance": 2508}  # "cheques" is 
 # Never "bachelor": brief rule 7 (no screening); RES_SCHEMA has no such value, 2d's shops schema had.
 OCCUPANCY_IDS = {"myself": 2509, "family": 2510, "company_staff": 2511, "company": 2511, "sharing": 2512}
 # Text, whatever its characters: the tool refuses a number in a text field, and with it the whole batch.
-TEXT_FIELDS = frozenset({FIELD_ACTIVITY, FIELD_CLUSTERS, FIELD_TIMELINE, FIELD_FULL_NAME})
+TEXT_FIELDS = frozenset({FIELD_ACTIVITY, FIELD_CLUSTERS, FIELD_TIMELINE, FIELD_FULL_NAME, FIELD_AI_SCORE_WHY})
 FULL_NAME_MAX = 80
 TIMELINE_MAX = 200
 # A budget the lead may keep (lead_context's own bounds); a yearly rent below this is a monthly figure said with no basis.
@@ -229,6 +232,8 @@ ALLOWED = {
     FIELD_SHOP_TYPE: frozenset(SHOP_TYPE_IDS.values()),
     FIELD_BOT_STATUS: STATUSES,
     FIELD_OPT_OUT: frozenset({OPT_OUT_YES, 2483}),
+    FIELD_AI_SCORE: NUMBER,  # C65
+    FIELD_AI_SCORE_WHY: TEXT,
 }
 
 

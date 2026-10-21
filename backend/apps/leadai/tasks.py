@@ -155,11 +155,13 @@ def _copilot_auto_send() -> None:
 def _daily_digest() -> None:
     """Yesterday's digest (assistant/digest.py), stored and sent once from eight in the morning Dubai; a day the sweep
     missed is stored quietly on a later sweep. One query a minute while nothing is due."""
-    from .assistant import digest
+    from .assistant import digest, score
 
     day = digest.sweep(timezone.now())
     if day is not None:
         logger.info("Lead AI digest stored for %s", day)
+        # The same once-a-day moment: the quiet chats' scores cool down (assistant/score.py, F1).
+        score.rescore_quiet(timezone.now())
 
 
 @shared_task(ignore_result=True, soft_time_limit=120, time_limit=150)
