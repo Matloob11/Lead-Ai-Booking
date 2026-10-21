@@ -122,7 +122,12 @@ class ShopsBase(FirstChatBase):
         return self.inbound(label, kind=Message.Kind.BUTTON, payload={"button": {"text": label}}, seconds_ago=seconds_ago)
 
     def fields(self):
-        return [(row.field, row.value) for row in LeadAiCrmField.objects.filter(conversation=self.conversation).order_by("pk")]
+        """The turn's lead writes, the score's own two left out (every shops turn scores the chat: test_score has them)."""
+        return [
+            (row.field, row.value)
+            for row in LeadAiCrmField.objects.filter(conversation=self.conversation).order_by("pk")
+            if row.field not in (crm_fields.FIELD_AI_SCORE, crm_fields.FIELD_AI_SCORE_WHY)
+        ]
 
     def later(self, minutes):
         self.clock.return_value = NOW + dt.timedelta(minutes=minutes)

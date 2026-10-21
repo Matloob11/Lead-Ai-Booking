@@ -30,10 +30,11 @@ SLOW_MINUTES = 24 * 60
 RECENT_EXCHANGES = 6
 RESCORE_AT_MOST = 500
 UNITS_KNOWN = frozenset({"studio", "one_br", "two_plus", "villa", "townhouse", "shop"})
-# A move-in or buying timeline near enough to count ("next month", "immediately", "within 2 weeks", "in 30 days").
+# A move-in or buying timeline near enough to count ("next month", "immediately", "within 2 weeks", "in 30 days"): two
+# months at most; "within 3 months" or "next year" is known, not soon.
 _SOON = re.compile(
-    r"\b(?:immediately|asap|urgent(?:ly)?|now|this\s+(?:week|month)|next\s+(?:week|month)|within\s+(?:a|\d+)\s+(?:days?|weeks?|months?)"
-    r"|in\s+(?:a|\d+|two|three|four)\s+(?:days?|weeks?)|(?:1|2|one|two)\s+months?|\d{1,2}\s+days)\b",
+    r"\b(?:immediately|asap|urgent(?:ly)?|now|this\s+(?:week|month)|next\s+(?:week|month)|within\s+(?:a|\d+)\s+(?:days?|weeks?)"
+    r"|within\s+(?:a|1|2|one|two)\s+months?|in\s+(?:a|\d+|two|three|four)\s+(?:days?|weeks?)|(?:1|2|one|two)\s+months?|\d{1,2}\s+days)\b",
     re.IGNORECASE,
 )
 
@@ -158,7 +159,7 @@ def reply_minutes_for(conversation, limit: int = RECENT_EXCHANGES) -> list[int]:
     rows = list(
         Message.objects.filter(conversation=conversation)
         .exclude(kind__in=("reaction", "system"))
-        .order_by("-pk")
+        .order_by("-created_at", "-pk")
         .values_list("direction", "created_at")[: limit * 8]
     )
     rows.reverse()
@@ -179,7 +180,7 @@ def last_inbound_at(conversation):
     return (
         Message.objects.filter(conversation=conversation, direction=Message.Direction.INBOUND)
         .exclude(kind__in=("reaction", "system"))
-        .order_by("-pk")
+        .order_by("-created_at", "-pk")
         .values_list("created_at", flat=True)
         .first()
     )

@@ -157,10 +157,13 @@ class RescoreTests(Base):
         self.assertEqual(score.rescore_quiet(NOW), 0)
 
     def test_their_reply_times_are_read_from_the_chat(self):
-        # Our message two hours ago (the campaign), theirs now: 120 minutes.
-        self.inbound("Yes")
+        # Our message two hours ago (the campaign), theirs now: 120 minutes. Read in time order, not by row.
+        self.inbound("Yes", seconds_ago=0)
         self.assertEqual(score.reply_minutes_for(self.conversation), [120])
-        self.assertEqual(score.last_inbound_at(self.conversation), NOW - dt.timedelta(seconds=30))
+        self.assertEqual(score.last_inbound_at(self.conversation), NOW)
+        self.inbound("Earlier", seconds_ago=3 * 24 * 3600)  # a row stored later for an older message: still before ours
+        self.assertEqual(score.reply_minutes_for(self.conversation), [120])
+        self.assertEqual(score.last_inbound_at(self.conversation), NOW)
         LeadAiAppointment.objects.create(conversation=self.conversation, status="confirmed", place="office", starts_at=NOW + dt.timedelta(hours=2))
         scored, moved = score.update(self.conversation, LeadAiChatState.for_conversation(self.conversation), now=NOW)
         self.assertTrue(moved)

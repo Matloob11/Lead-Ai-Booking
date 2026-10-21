@@ -287,7 +287,7 @@ class BodyTests(SimpleTestCase):
         body = F.body_for(rows)
         self.assertEqual(body["fields"], {F.FIELD_TIMELINE: "2027", F.FIELD_ACTIVITY: "24", F.FIELD_BUDGET: 340000, F.FIELD_RENT_SALE: 2444})
         self.assertEqual(F.refusal(body), "")
-        self.assertEqual(F.TEXT_FIELDS, {F.FIELD_ACTIVITY, F.FIELD_CLUSTERS, F.FIELD_TIMELINE, F.FIELD_FULL_NAME})
+        self.assertEqual(F.TEXT_FIELDS, {F.FIELD_ACTIVITY, F.FIELD_CLUSTERS, F.FIELD_TIMELINE, F.FIELD_FULL_NAME, F.FIELD_AI_SCORE_WHY})
 
     def test_the_email_is_a_key_of_its_own(self):
         body = F.body_for(rows_for([(F.EMAIL, "ahmed.khan@gmail.com", {})]))
