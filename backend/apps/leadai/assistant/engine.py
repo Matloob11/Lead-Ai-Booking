@@ -1919,6 +1919,35 @@ def plans_or_elsewhere(said: str, now) -> bool:
     )
 
 
+def alone_invitation(
+    answer: dict, new_texts: list, earlier: list, slots, now, *, agreed: bool = False, reoffer: bool = False, office_address: str = "",
+) -> bool:
+    """The rent track's step 4 right after step 3 (brief Part 5): our side asked who will stay, their words now say just
+    them (residential.alone_said), and the model's reply neither invites nor offers a time — code's invitation with the two
+    free ``slots`` (residential.invite_text) goes in the reply's step-3 questions' place (a contract question is for a
+    shared or company stay, never for one person); the model's answers stay. The 2e real-model gate, round 20:
+    shops-res-invitation-two-slots #1, "Just me", got "No problem. Will it be a contract in your name?" and no invitation
+    (the model's own in every other run of rounds 11–19). Not after a yes (``agreed``), for a booking, an opt-out, a
+    handover or a fixed line; nothing when the chat may not be invited (no ``slots``). Live and in the eval, from settle.
+    True when the reply changed."""
+    from . import residential as res
+
+    if agreed or not slots or not answer["reply"] or not answer["send"] or answer.get("converted"):
+        return False
+    if answer["opt_out"] != "none" or answer["handover"]["needed"] or answer["appointment"]["action"] not in ("none", "tentative"):
+        return False
+    ours = [text for author, text in earlier or () if author in ("assistant", "agent")]
+    if not ours or not any(res.asks_occupancy(sentence) for sentence in filters.split_sentences(ours[-1])):
+        return False
+    if not res.alone_said(new_texts) or res.invites(answer["reply"], answer):
+        return False
+    kept = [s for s in filters.split_sentences(answer["reply"]) if not res.asks_occupancy(s) and not res.asks_contract(s)]
+    answer["reply"] = " ".join([*kept, res.invite_text(answer["language"], slots, now, office_address)]).strip()
+    if not reoffer:
+        answer["invited_to_meeting"] = True
+    return True
+
+
 def location_invitation(
     answer: dict, known: dict, new_texts: list, slots, now, *, agreed: bool = False, reoffer: bool = False, office_address: str = "",
     before: str = "",
@@ -2238,6 +2267,11 @@ def settle(
         # Where we are, asked by a known end user, answered with no invitation: code's two slots close it (the launch gate's
         # eval shops-location-counted-81).
         trimmed.append("location_invitation")
+    if shops_chat and residential and track == tracks.RENT and slots and alone_invitation(
+        answer, new_texts, earlier, slots, now, agreed=agreed, reoffer=reoffer, office_address=office_address
+    ):
+        # Step 3 answered "just me" to our question, and no invitation in the reply: code's invitation and two slots.
+        trimmed.append("alone_invitation")
     # Batch 2e: the rent track's invitation is the model's words with code's slots (spec §2.1 step 4, §2.5), as a shops
     # chat's: its own times checked and an offer of two counted as the invitation it is (the 2e real-model gate, round 1:
     # shops-res-invitation-two-slots offered "today at 3:00 PM or 4:00 PM" with invited_to_meeting false, both runs). The

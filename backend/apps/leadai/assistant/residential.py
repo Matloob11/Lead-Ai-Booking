@@ -2476,6 +2476,33 @@ def asks_occupancy(sentence: str) -> bool:
     return bool(_OCCUPANCY_ASK.search(text)) or (bool(_ALONE_ASK.search(text)) and not _A_CLIENT.search(text))
 
 
+# Their answer to step 3 says they stay alone ("Just me", "only myself", "alone", "sirf main", "akela", "لوحدي"): step 4,
+# the invitation, follows; never with anyone else named beside them ("just me and my wife", "me and a friend").
+_ALONE_SAID = re.compile(
+    r"\b(?:just|only)\s+(?:me|myself|for\s+me|for\s+myself)\b|\bby\s+myself\b|\bmyself\s+only\b|\b(?:i\s+am|i'm|i\s+will\s+be|i'll\s+be)\s+(?:staying\s+|living\s+)?alone\b"
+    r"|\balone\b|\bsingle\s+(?:person|occupant|man|woman|guy)\b|\bbachelor\b|\bsirf\s+(?:main|mai|mein)\b|\b(?:main|mai|mein)\s+akel[ai]\b|\bakel[ai]\b"
+    r"|لوحدي|وحدي|أنا\s+فقط|بس\s+أنا|صرف\s+میں|میں\s+اکیل[اے]|اکیل[اے]|सिर्फ़?\s+मैं|मैं\s+अकेल[ाे]|अकेल[ाे]",
+    re.IGNORECASE,
+)
+_WITH_OTHERS = re.compile(
+    r"\b(?:and|with|plus|&)\s+(?:my\s+|a\s+|two\s+|three\s+|\d+\s+)?(?:wife|husband|family|kids?|children|son|daughter|parents?|mother|father|brother|sister|friends?|colleagues?|partner|roommates?|people|persons?|others?)\b"
+    r"|\bfamily\b|\bwe\s+are\s+\d+\b|\b\d+\s+(?:people|persons|of\s+us)\b|عائلتي|زوجتي|أصدقائي|فیملی|بیوی|دوست|परिवार|पत्नी|दोस्त",
+    re.IGNORECASE,
+)
+
+
+def alone_said(texts) -> bool:
+    """Their words now answer step 3 with themselves alone, and name nobody beside them."""
+    words = " ".join(str(text or "") for text in texts or ()).replace("’", "'")
+    return bool(_ALONE_SAID.search(words)) and not _WITH_OTHERS.search(words) and not _STAFF_WORDS.search(words) and not _SHARING_WORDS.search(words)
+
+
+def asks_contract(sentence: str) -> bool:
+    """The sentence asks whose name the contract is in (step 3's second half, for a shared or company stay)."""
+    text = " ".join(str(sentence or "").split())
+    return rules.asks_question(text) and bool(_CONTRACT_WORD.search(text))
+
+
 # Step 2's first half (brief Part 5: "Do you prefer a balcony, and when are you planning to move?"): the cluster comes after it.
 _BALCONY_ASK = re.compile(r"\bbalcon\w*|شرفة|بلكونة|بالکونی|बालकनी", re.IGNORECASE)
 _MOVE_ASK = re.compile(
