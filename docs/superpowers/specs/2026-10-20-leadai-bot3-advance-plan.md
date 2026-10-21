@@ -313,6 +313,20 @@ and refers the customer to our office ("pictures wagera PF se jayein aur office 
   (`inventory.refresh_bitrix`); Cursor enables the handler after "round 20 is live". A handover nobody answered in 30
   minutes reaches the responsible's team lead and department head too (`escalation.above`, C49's map, cached six
   hours; `LEADAI_BITRIX_ESCALATION_URL`, empty = off).
+- **Round 20b (the review before the gate):** three adversarial readers over the round's diff (correctness, contract,
+  integration) and a refuter per finding confirmed seven defects, all absorbed in code: alias-only community names
+  stored under the pack's name (`inventory.pack_names`), the sync's retire sparing a webhook-refreshed row, a refusal
+  that is not "not found" leaving a card's units, the Property Finder twin dropped per (reference, deal) before any
+  cut, a hold-user responsible asking for the owner's people, a nested body 400 not 500 with nothing unsigned parsed,
+  one card read per half minute, the whole escalation map in one call and the sweep running escalation last.
+- **Round 20c (the gate's own failure):** shops-res-for-myself failed one run — the cluster question plus "a preferred
+  move-in date?", no balcony — and `residential.requirement_first` now stands aside only when both halves of step 2's
+  first half are asked; the cluster, or one half alone, gets code's balcony and move-in question. The second gate failed
+  one run of shops-res-invitation-two-slots ("Just me" answered with a contract question, no invitation): on the rent
+  track, our who-will-stay question answered with themselves alone and no invitation in the reply now gets code's
+  invitation with two free slots (`engine.alone_invitation`). The third gate failed one run of shops-res-cluster-unknown
+  (the move-in asked again in more detail, no cluster): our balcony and move-in question answered (a fact or their words,
+  `residential.requirement_answered`) now drops a repeat of it and code's cluster question goes.
 - **Waits:** F1's score write needs `UF_CRM_A7_AI_SCORE` (number) and `_WHY` (text) on `a7_leadai_fields.php`'s
   allow-list (asked of Cursor); the 10-minute first escalation step of D stays at 30 minutes for every recipient.
 
