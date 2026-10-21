@@ -3,10 +3,12 @@
 reaches them too (people.escalate_waiting; the advance plan's D: "an escalation IM to the lead's responsible and their
 TL").
 
-The call: POST {"user_id": 2311}, signed like the notify tool but with its own prefix ("leadai-escalation." + ts + "."
-+ body, X-Leadai-Ts / X-Leadai-Sign, CRM_LEAD_WA_SECRET); the answer {"ok": true, "map": {"2311": {"lead": 2560, "head":
-60}}}, 0 for unknown. One answer is kept for CACHE_SECONDS per user (the structure changes rarely); a miss or a failure
-for a tenth of that. Any trouble is nobody: the alert goes to the chat's people as before, never late.
+The call: POST {} (the whole map, one CUser::GetList there: 66 users on 2026-10-20), signed like the notify tool but
+with its own prefix ("leadai-escalation." + ts + "." + body, X-Leadai-Ts / X-Leadai-Sign, CRM_LEAD_WA_SECRET); the answer
+{"ok": true, "map": {"2311": {"lead": 2560, "head": 60}, ...}}, 0 for unknown. The map is kept for CACHE_SECONDS (the
+structure changes rarely), a miss or a failure for a tenth of that, so a cold cache costs one call, not one per user.
+Any trouble is nobody: the alert goes to the chat's people as before, never late (the lookup never raises, and the sweep
+runs it last).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 SIGN_PREFIX = b"leadai-escalation."
+CACHE_KEY = "leadai:escalation:map"
 CACHE_SECONDS = 6 * 3600
 TIMEOUT = httpx.Timeout(10, connect=5)
 # Bitrix users 0 and 1 hold unassigned leads: nobody's work (alerts.HOLD_USERS).
@@ -44,11 +47,7 @@ def above(bitrix_user_id) -> list[str]:
     uid = str(bitrix_user_id or "").strip()
     if not uid.isdigit() or uid in NOBODY:
         return []
-    key = f"leadai:escalation:{uid}"
-    found = cache.get(key)
-    if found is None:
-        found = _fetch(int(uid))
-        cache.set(key, found, CACHE_SECONDS if found else CACHE_SECONDS // 10)
+    found = the_map().get(uid) or {}
     out: list[str] = []
     for role in ("lead", "head"):
         who = str(found.get(role) or "").strip()
@@ -57,13 +56,22 @@ def above(bitrix_user_id) -> list[str]:
     return out
 
 
-def _fetch(user_id: int) -> dict:
-    """{"lead": id, "head": id} for one user from the map endpoint, {} when it is off, unreachable or says nothing."""
+def the_map() -> dict:
+    """{user id: {"lead": id, "head": id}} for every user the endpoint maps, from the cache or one call."""
+    found = cache.get(CACHE_KEY)
+    if found is None:
+        found = _fetch()
+        cache.set(CACHE_KEY, found, CACHE_SECONDS if found else CACHE_SECONDS // 10)
+    return found if isinstance(found, dict) else {}
+
+
+def _fetch() -> dict:
+    """The whole map from the endpoint, {} when it is off, unreachable or says nothing. Never raises."""
     url = endpoint()
     secret = (getattr(settings, "CRM_LEAD_WA_SECRET", "") or "").strip()
     if not url or not secret:
         return {}
-    raw = json.dumps({"user_id": int(user_id)}, separators=(",", ":")).encode("utf-8")
+    raw = b"{}"
     ts = str(int(time.time()))
     try:
         response = httpx.post(
@@ -73,21 +81,25 @@ def _fetch(user_id: int) -> dict:
             timeout=TIMEOUT,
         )
         body = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.info("Lead AI escalation map not read for user %s (%s)", user_id, type(exc).__name__)
+    except Exception as exc:  # noqa: BLE001 - the map is a convenience: a lookup that fails is nobody, never a failed sweep
+        logger.info("Lead AI escalation map not read (%s)", type(exc).__name__)
         return {}
-    if not isinstance(body, dict) or not body.get("ok"):
-        logger.info("Lead AI escalation map refused for user %s (%s)", user_id, str((body or {}).get("error") if isinstance(body, dict) else response.status_code)[:80])
+    if not isinstance(body, dict) or not body.get("ok") or not isinstance(body.get("map"), dict):
+        logger.info("Lead AI escalation map refused (%s)", str(body.get("error") if isinstance(body, dict) else response.status_code)[:80])
         return {}
-    entry = (body.get("map") or {}).get(str(int(user_id))) if isinstance(body.get("map"), dict) else None
-    if not isinstance(entry, dict):
-        return {}
-    out = {}
-    for role in ("lead", "head"):
-        try:
-            value = int(entry.get(role) or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value > 0:
-            out[role] = value
+    out: dict = {}
+    for key, entry in body["map"].items():
+        uid = str(key).strip()
+        if not uid.isdigit() or not isinstance(entry, dict):
+            continue
+        roles = {}
+        for role in ("lead", "head"):
+            try:
+                value = int(entry.get(role) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                roles[role] = value
+        if roles:
+            out[uid] = roles
     return out

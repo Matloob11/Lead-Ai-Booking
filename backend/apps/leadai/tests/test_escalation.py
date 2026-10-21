@@ -16,6 +16,7 @@ from apps.leadai.tests.test_assistant import NOW
 from apps.leadai.tests.test_review_2d import ReviewBase
 
 MAP_URL = "https://bitrix.test/bitrix/tools/a7_leadai_escalation.php"
+MAP = {"ok": True, "map": {"2311": {"lead": 2560, "head": 60}, "5": {"lead": 1, "head": 9}, "6": {"lead": 9, "head": 9}, "7": {"lead": 0, "head": 7}}, "count": 4}
 
 
 class FakeResponse:
@@ -39,19 +40,23 @@ class MapTests(SimpleTestCase):
         cache.clear()
         self.addCleanup(cache.clear)
 
-    def test_the_map_is_asked_once_per_user_and_signed(self):
+    def test_the_whole_map_is_asked_once_and_signed(self):
         posts = []
 
         def fake_post(url, *, content, headers, timeout):
             posts.append((url, content, headers))
-            return FakeResponse({"ok": True, "map": {"2311": {"lead": 2560, "head": 60}}, "count": 1})
+            return FakeResponse(MAP)
 
         with patch.object(escalation.httpx, "post", side_effect=fake_post):
             self.assertEqual(escalation.above("2311"), ["2560", "60"])
-            self.assertEqual(escalation.above(2311), ["2560", "60"])  # kept: asked once
-        self.assertEqual(len(posts), 1)
+            self.assertEqual(escalation.above(2311), ["2560", "60"])
+            self.assertEqual(escalation.above("5"), ["9"])  # user 1 holds unassigned leads: nobody's work
+            self.assertEqual(escalation.above("6"), ["9"])  # the same person once
+            self.assertEqual(escalation.above("7"), [])  # 0 is unknown; themselves is nobody
+            self.assertEqual(escalation.above("8"), [])  # not in the map
+        self.assertEqual(len(posts), 1)  # one call for everyone, kept
         url, raw, headers = posts[0]
-        self.assertEqual((url, json.loads(raw)), (MAP_URL, {"user_id": 2311}))
+        self.assertEqual((url, json.loads(raw)), (MAP_URL, {}))
         self.assertEqual(headers["X-Leadai-Sign"], escalation.sign(raw, headers["X-Leadai-Ts"], "test-crm-secret"))
         self.assertNotEqual(headers["X-Leadai-Sign"], alerts.sign(raw, headers["X-Leadai-Ts"], "test-crm-secret"))  # its own prefix
 
@@ -59,38 +64,37 @@ class MapTests(SimpleTestCase):
         with patch.object(escalation.httpx, "post", side_effect=httpx.ConnectError("x")):
             self.assertEqual(escalation.above("2311"), [])
         cache.clear()
-        with answers({"ok": True, "map": {"2311": {"lead": 0, "head": 2311}}}):
-            self.assertEqual(escalation.above("2311"), [])  # 0 is unknown; themselves is nobody
-        cache.clear()
-        with answers({"ok": True, "map": {"5": {"lead": 1, "head": 9}}}):
-            self.assertEqual(escalation.above("5"), ["9"])  # user 1 holds unassigned leads: nobody's work
-        cache.clear()
-        with answers({"ok": True, "map": {"5": {"lead": 9, "head": 9}}}):
-            self.assertEqual(escalation.above("5"), ["9"])  # the same person once
+        with patch.object(escalation.httpx, "post", side_effect=RuntimeError("a bad URL, a surprise")):
+            self.assertEqual(escalation.above("2311"), [])  # never raises: the alert must still go
         cache.clear()
         with answers({"ok": False, "error": "Unauthorized."}):
-            self.assertEqual(escalation.above("5"), [])
+            self.assertEqual(escalation.above("2311"), [])
         cache.clear()
         with answers(ValueError("not JSON")):
-            self.assertEqual(escalation.above("5"), [])
+            self.assertEqual(escalation.above("2311"), [])
         cache.clear()
-        with answers({"ok": True, "map": {"6": {"lead": 9}}}):
-            self.assertEqual(escalation.above("5"), [])  # not in the map
+        with answers({"ok": True, "map": "x"}):
+            self.assertEqual(escalation.above("2311"), [])
+        cache.clear()
+        with answers({"ok": True, "map": {"2311": {"lead": "abc", "head": None}, "x": {"lead": 1}}}):
+            self.assertEqual(escalation.above("2311"), [])
         for who in ("", "0", "1", "abc", None):
             with self.subTest(who=who):
                 self.assertEqual(escalation.above(who), [])
         cache.clear()
         with override_settings(LEADAI_BITRIX_ESCALATION_URL=""), patch.object(escalation.httpx, "post", side_effect=AssertionError("asked")):
             self.assertEqual(escalation.above("2311"), [])
-        # A failure is asked again sooner than an answer is: the miss is kept a tenth of the time.
-        with patch.object(escalation, "cache") as fake, answers({"ok": True, "map": {"7": {"lead": 8}}}):
+
+    def test_a_failure_is_asked_again_sooner_than_an_answer(self):
+        with patch.object(escalation, "cache") as fake:
             fake.get.return_value = None
-            self.assertEqual(escalation.above("7"), ["8"])
-            fake.set.assert_called_once_with("leadai:escalation:7", {"lead": 8}, escalation.CACHE_SECONDS)
+            with answers(MAP):
+                self.assertEqual(escalation.above("2311"), ["2560", "60"])
+            fake.set.assert_called_once_with(escalation.CACHE_KEY, {"2311": {"lead": 2560, "head": 60}, "5": {"lead": 1, "head": 9}, "6": {"lead": 9, "head": 9}, "7": {"head": 7}}, escalation.CACHE_SECONDS)
             fake.set.reset_mock()
             with patch.object(escalation.httpx, "post", side_effect=httpx.ReadTimeout("slow")):
-                self.assertEqual(escalation.above("7"), [])
-            fake.set.assert_called_once_with("leadai:escalation:7", {}, escalation.CACHE_SECONDS // 10)
+                self.assertEqual(escalation.above("2311"), [])
+            fake.set.assert_called_once_with(escalation.CACHE_KEY, {}, escalation.CACHE_SECONDS // 10)
 
 
 class EscalationReachesAboveTests(ReviewBase):
@@ -113,7 +117,7 @@ class EscalationReachesAboveTests(ReviewBase):
         self.assertEqual(ids.count("2311"), 1)  # Matloob is listed already: not twice, though the map named them too
         self.assertEqual(ids.count("88"), 1)
         for row in rows:
-            self.assertIn("The responsible's team lead and department head have this alert too.", row.text)
+            self.assertIn("The responsible's team lead and department head were sent this alert too.", row.text)
         lead_row = next(row for row in rows if row.bitrix_user_id == "2560")
         self.assertIsNone(lead_row.agent)
         self.assertEqual(lead_row.dedupe_key.rsplit(":", 1)[1], "b2560")
@@ -122,7 +126,7 @@ class EscalationReachesAboveTests(ReviewBase):
             self.assertEqual(people.escalate_waiting(NOW), 0)
         self.assertEqual(len(self.waiting()), len(rows))
 
-    def test_no_responsible_asks_for_the_owner_and_nobody_above_changes_nothing(self):
+    def test_no_responsible_or_a_hold_user_asks_for_the_owner(self):
         self.handed()
         with patch.object(escalation, "above", return_value=[]) as above:
             self.assertEqual(people.escalate_waiting(NOW), 1)
@@ -131,6 +135,13 @@ class EscalationReachesAboveTests(ReviewBase):
         self.assertTrue(rows)
         for row in rows:
             self.assertNotIn("team lead", row.text)
+        # A lead held by Bitrix user 1 (unassigned) is nobody's: the owner's people again (alerts.recipients reads it so).
+        LeadAiAlert.objects.all().delete()
+        self.set_state(responsible_bitrix_user_id="1")
+        with patch.object(escalation, "above", return_value=["2560"]) as above:
+            self.assertEqual(people.escalate_waiting(NOW), 1)
+        above.assert_called_once_with("77")
+        self.assertIn("2560", [row.bitrix_user_id for row in self.waiting()])
 
     def test_a_lead_with_an_agent_row_gets_their_own_row_once(self):
         from apps.accounts.models import Agent

@@ -1,7 +1,8 @@
 """POST /api/leadai/inventory/bitrix/ (bitrix_views.inventory_event; round 20): Bitrix's Availability webhook (Cursor's
 C46 handler, a7_inventory_webhook.php) says a card was added or changed. Signed "leadai-inventory." + ts + "." + body
 with CRM_LEAD_WA_SECRET in X-A7-Signature, the stamp in X-A7-Ts and in the body: 405 for any other method, 401 for a
-missing, wrong or old signature, 400 for a body off the contract, else 200 and the card is read again in a task."""
+missing, wrong or old signature, 400 for a body off the contract, else 200 and the card is read again in a task, once
+per half minute per card."""
 
 import hashlib
 import hmac
@@ -9,6 +10,7 @@ import json
 import time
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 
 from apps.leadai.tests.test_assistant import TEST_SETTINGS
@@ -30,6 +32,8 @@ def signed(body, *, secret=SECRET, ts=None, prefix=b"leadai-inventory.", header_
 @override_settings(**TEST_SETTINGS)
 class InventoryWebhookTests(TestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.http = Client(enforce_csrf_checks=True)  # no session, no CSRF token: the signature is the key
         patcher = patch("apps.leadai.tasks.refresh_bitrix_unit.delay")
         self.delay = patcher.start()
@@ -59,14 +63,14 @@ class InventoryWebhookTests(TestCase):
         self.assertEqual((response.status_code, response.json()), (200, {"ok": True, "queued": True, "id": 103048}))
         self.delay.assert_called_once_with(103048)
         # The same hex in any case; a body changed after signing is refused.
-        raw, headers = signed(self.body())
+        raw, headers = signed(self.body(card=103050))
         headers["HTTP_X_A7_SIGNATURE"] = headers["HTTP_X_A7_SIGNATURE"].upper()
         self.assertEqual(self.http.post(URL, data=raw, content_type="application/json", **headers).status_code, 200)
         self.assertEqual(self.http.post(URL, data=raw + b" ", content_type="application/json", **headers).status_code, 401)
         # The stamp in the body alone (no X-A7-Ts header) still signs; an old one in the body alone is old.
         ts = int(time.time())
-        self.assertEqual(self.post(self.body(ts=ts), ts=ts, header_ts=False).status_code, 200)
-        self.assertEqual(self.post(self.body(ts=ts - 400), ts=ts - 400, header_ts=False).status_code, 401)
+        self.assertEqual(self.post(self.body(card=103051, ts=ts), ts=ts, header_ts=False).status_code, 200)
+        self.assertEqual(self.post(self.body(card=103052, ts=ts - 400), ts=ts - 400, header_ts=False).status_code, 401)
         self.assertEqual(self.delay.call_count, 3)
 
     def test_a_body_off_the_contract_is_400(self):
@@ -78,6 +82,24 @@ class InventoryWebhookTests(TestCase):
         # A card id as digits is a card.
         self.assertEqual(self.post({"event": "add", "id": "103049", "stageId": "", "ts": int(time.time())}).status_code, 200)
         self.delay.assert_called_once_with(103049)
+
+    def test_a_nested_body_is_refused_not_a_500(self):
+        # Unsigned and with no stamp header, a deeply nested document is never parsed: 401. Signed, it is 400.
+        deep = b"[" * 16000
+        self.assertEqual(self.http.post(URL, data=deep, content_type="application/json").status_code, 401)
+        self.assertEqual(self.post(deep).status_code, 400)
+        ts = int(time.time())
+        stamped = b'{"ts":' + str(ts).encode() + b',"id":[' + b"[" * 15000
+        self.assertEqual(self.post(stamped, ts=ts, header_ts=False).status_code, 400)
+        self.delay.assert_not_called()
+
+    def test_one_read_per_card_per_half_minute(self):
+        self.assertEqual(self.post(self.body()).json(), {"ok": True, "queued": True, "id": 103048})
+        self.assertEqual(self.post(self.body()).json(), {"ok": True, "queued": False, "id": 103048})
+        self.assertEqual(self.post(self.body(card=103049)).json(), {"ok": True, "queued": True, "id": 103049})
+        self.assertEqual(self.delay.call_count, 2)
+        cache.clear()
+        self.assertEqual(self.post(self.body()).json()["queued"], True)
 
     def test_no_secret_configured_is_401(self):
         with override_settings(CRM_LEAD_WA_SECRET=""):

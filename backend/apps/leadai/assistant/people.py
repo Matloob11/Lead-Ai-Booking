@@ -985,13 +985,14 @@ def _escalate(conversation, state, now, settings_row, *, since, handover: bool) 
         )
     lines = [head, words_line(words), *where_lines(conversation, chat), "Please reply to them in the chat now, or ask a colleague to."]
     # A handover nobody answered reaches the responsible's team lead and department head too (escalation.above, Cursor's
-    # C49 map; the advance plan's D): the lead's responsible, else the chat's owner.
+    # C49 map; the advance plan's D): the lead's responsible, else the chat's owner (a lead held by Bitrix user 0 or 1 is
+    # nobody's: the owner's people are asked, as alerts.recipients reads it).
     above = []
     if handover:
         owner = conversation.assigned_agent
-        above = escalation.above((state.responsible_bitrix_user_id or "").strip() or getattr(owner, "bitrix_user_id", ""))
+        above = escalation.above(alerts._bitrix_target(state.responsible_bitrix_user_id) or getattr(owner, "bitrix_user_id", ""))
         if above:
-            lines.append("The responsible's team lead and department head have this alert too.")
+            lines.append("The responsible's team lead and department head were sent this alert too.")
     return bool(
         alerts.raise_alert(
             kind=WAITING,

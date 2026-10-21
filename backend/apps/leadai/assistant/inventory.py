@@ -93,6 +93,21 @@ def pf_reference(value) -> str:
     return match.group(0).lower() if match else ""
 
 
+def pack_names(rows, listed=None) -> list:
+    """The rows' community as the packs name it (communities.by_name: a card's "Damac Hills 2" is the Damac Hills pack's,
+    a listing's "DAMAC Hills 2" too, "Greens" is The Greens', "Rukan" is Dubailand's), so the unit counts as the pack's
+    (communities.named_packs, matches, both by the pack's name); a name no pack knows stays as it is. ``listed``: the
+    packs, read once per sync (the round-20 review: four of the C59 names were stored under a name no pack uses)."""
+    from . import communities
+
+    packs = communities.packs() if listed is None else listed
+    for row in rows:
+        pack = communities.by_name(row.get("community") or "", packs)
+        if pack is not None:
+            row["community"] = pack.name[:80]
+    return rows
+
+
 # ---- the sources ---------------------------------------------------------------------------------------------------
 
 
@@ -268,8 +283,11 @@ def sync_pf() -> dict:
     """The live Property Finder listings into LeadAiUnit (upserted; the rest of the source made inactive). Counts."""
     if not pf_configured():
         return {"skipped": "no Property Finder key"}
+    from . import communities
+
     seen: set[str] = set()
     upserted = repeated = 0
+    listed = communities.packs()
     with httpx.Client(timeout=PF_TIMEOUT) as client:
         token = pf_token(client)
         for item in pf_listings(client, token):
@@ -283,7 +301,8 @@ def sync_pf() -> dict:
             row = pf_row(item, _LOCATIONS.get(location_id)) if source_id else None
             if row is None:
                 continue
-            LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.PF, source_id=source_id, defaults={**row, "active": True})
+            pack_names([row], listed)
+            LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.PF, source_id=source_id, defaults={**row, "active": True, "synced_at": timezone.now()})
             seen.add(source_id)
             upserted += 1
     gone = LeadAiUnit.objects.filter(source=LeadAiUnit.Source.PF, active=True).exclude(source_id__in=seen).update(active=False)
@@ -415,6 +434,10 @@ def sync_bitrix() -> dict:
 
     if not bitrix.configured():
         return {"skipped": "no Bitrix webhook"}
+    from . import communities
+
+    started = timezone.now()
+    listed = communities.packs()
     seen: set[str] = set()
     upserted = skipped = 0
     for stage in BITRIX_STAGES:
@@ -442,29 +465,38 @@ def sync_bitrix() -> dict:
                     time.sleep(BITRIX_WAIT)
             items = (result or {}).get("items") or [] if isinstance(result, dict) else []
             for item in items:
-                rows = bitrix_rows(item, stage)
+                rows = pack_names(bitrix_rows(item, stage), listed)
                 if not rows:
                     skipped += 1
                     continue
                 for row in rows:
                     source_id = f"{item.get('id')}:{row['deal']}"
-                    LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.BITRIX, source_id=source_id, defaults={**row, "active": True})
+                    LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.BITRIX, source_id=source_id, defaults={**row, "active": True, "synced_at": timezone.now()})
                     seen.add(source_id)
                     upserted += 1
             if len(items) < BITRIX_PAGE:
                 break
             start += BITRIX_PAGE
-    gone = LeadAiUnit.objects.filter(source=LeadAiUnit.Source.BITRIX, active=True).exclude(source_id__in=seen).update(active=False)
+    # Only rows nothing touched since the sync began retire: a card the webhook refreshed meanwhile (refresh_bitrix, after
+    # its stage was paged) keeps its rows (the round-20 review).
+    gone = (
+        LeadAiUnit.objects.filter(source=LeadAiUnit.Source.BITRIX, active=True, synced_at__lt=started)
+        .exclude(source_id__in=seen)
+        .update(active=False)
+    )
     logger.info("Lead AI inventory: Bitrix Availability %s clean units, %s skipped (no bedrooms, type, purpose, place or price), %s gone", upserted, skipped, gone)
     return {"upserted": upserted, "skipped": skipped, "gone": gone}
 
 
 def refresh_bitrix(card_id: int) -> dict:
     """One Availability card read again (crm.item.get) after Bitrix's own webhook said it changed (Cursor's C46,
-    bitrix_views.inventory_event): its clean rows upserted and active, any other row it had retired; a card that is gone,
-    dirty, in another category or off the available stages retires every row it had. The half-hourly sync still reads
-    them all. Counts; raises BitrixTransient for the task to try again."""
+    bitrix_views.inventory_event): its clean rows upserted and active, any other row it had retired; a card that is gone
+    (Bitrix: not found), dirty, in another category or off the available stages retires every row it had. Any other
+    refusal (a token without the scope, a card we may not read) leaves its rows for the half-hourly sync, which still
+    reads them all. Counts; raises BitrixTransient for the task to try again."""
     from apps.crmlink import client as bitrix
+
+    from . import communities
 
     if not bitrix.configured():
         return {"skipped": "no Bitrix webhook"}
@@ -475,17 +507,20 @@ def refresh_bitrix(card_id: int) -> dict:
     except bitrix.BitrixTransient:
         raise
     except bitrix.BitrixError as exc:
-        logger.info("Lead AI inventory: Availability card %s not read (%s): its units retire", card_id, str(exc)[:80])
+        if "not found" not in str(exc).lower():
+            logger.warning("Lead AI inventory: Availability card %s not read (%s): its units stay for the sync", card_id, str(exc)[:80])
+            return {"card": card_id, "error": str(exc)[:120]}
+        logger.info("Lead AI inventory: Availability card %s is gone (%s): its units retire", card_id, str(exc)[:80])
         result = None
     item = (result.get("item") if isinstance(result, dict) else None) or {}
     stage = str(item.get("stageId") or "")
     category = item.get("categoryId")
     in_category = category in (None, "", BITRIX_CATEGORY, str(BITRIX_CATEGORY))
-    rows = bitrix_rows(item, stage) if item and stage in BITRIX_STAGES and in_category else []
+    rows = pack_names(bitrix_rows(item, stage), communities.packs()) if item and stage in BITRIX_STAGES and in_category else []
     seen: set[str] = set()
     for row in rows:
         source_id = f"{card_id}:{row['deal']}"
-        LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.BITRIX, source_id=source_id, defaults={**row, "active": True})
+        LeadAiUnit.objects.update_or_create(source=LeadAiUnit.Source.BITRIX, source_id=source_id, defaults={**row, "active": True, "synced_at": timezone.now()})
         seen.add(source_id)
     gone = (
         LeadAiUnit.objects.filter(source=LeadAiUnit.Source.BITRIX, active=True, source_id__startswith=f"{card_id}:")
@@ -524,11 +559,12 @@ def matches(community: str, sub_areas=(), unit: str = "", deal: str = "", *, bud
     if budget:
         rows = rows.filter(price__lte=int(budget * 1.15))
     wanted = {str(area or "").lower().replace(" cluster", "") for area in sub_areas or () if area}
-    rows = list(rows.order_by("price", "pk")[: limit * 4])
-    # A card published on Property Finder (C62: the same a7group reference) is one unit: the listing, with its photos
-    # and link, stands for both.
-    published = {row.reference for row in rows if row.reference and row.source == LeadAiUnit.Source.PF}
-    rows = [row for row in rows if not (row.source == LeadAiUnit.Source.BITRIX and row.reference in published)]
+    rows = list(rows.order_by("price", "pk"))
+    # A card published on Property Finder (C62: the same a7group reference, for the same deal) is one unit: the listing,
+    # with its photos and link, stands for both. Before any cut, so the twin is dropped whatever its price; a card offered
+    # for rent and sale keeps the deal the listing is not for (the round-20 review).
+    published = {(row.reference.casefold(), row.deal) for row in rows if row.reference and row.source == LeadAiUnit.Source.PF}
+    rows = [row for row in rows if not (row.source == LeadAiUnit.Source.BITRIX and ((row.reference or "").casefold(), row.deal) in published)]
     if wanted:
         rows.sort(key=lambda row: (0 if row.sub_area.lower().replace(" cluster", "") in wanted else 1, row.price or 0))
     return rows[:limit]
