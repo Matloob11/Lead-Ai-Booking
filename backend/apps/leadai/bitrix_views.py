@@ -120,22 +120,25 @@ def inventory_sign(raw: bytes, ts: str, secret: str) -> str:
     return hmac.new(secret.encode(), INVENTORY_PREFIX + ts.encode() + b"." + raw, hashlib.sha256).hexdigest()
 
 
-@csrf_exempt
-def inventory_event(request):
-    """Checked like bot_status: 405 for any method but POST, 401 for a missing, wrong or old signature, 400 for a body
-    off the contract; else 200 {"ok": true, "queued": true, "id": N} and the card is read again in a task
-    (tasks.refresh_bitrix_unit → inventory.refresh_bitrix): its clean rows upserted, the rest retired."""
+def a7_sign(raw: bytes, ts: str, secret: str, prefix: bytes) -> str:
+    return hmac.new(secret.encode(), prefix + ts.encode() + b"." + raw, hashlib.sha256).hexdigest()
+
+
+def _a7_event(request, prefix: bytes):
+    """A box handler's signed event (X-A7-Signature over ``prefix`` + ts + "." + body, the stamp in X-A7-Ts or the
+    body): (the body's object, None), or (None, the refusal) — 405, 401 for a missing, wrong or old signature, 400 for
+    a body off the contract. Nothing unsigned is parsed."""
     if request.method != "POST":
-        return _refuse(405, "POST only.")
+        return None, _refuse(405, "POST only.")
     try:
         length = int(request.META.get("CONTENT_LENGTH") or 0)
     except ValueError:
         length = 0
     if length > MAX_BODY:
-        return _refuse(400, "Body too large.")
+        return None, _refuse(400, "Body too large.")
     raw = request.body
     if not raw or len(raw) > MAX_BODY:
-        return _refuse(400, "Bad body.")
+        return None, _refuse(400, "Bad body.")
     secret = (getattr(settings, "CRM_LEAD_WA_SECRET", "") or "").strip()
     ts = str(request.headers.get("X-A7-Ts") or "").strip()
     given = str(request.headers.get("X-A7-Signature") or "").strip().lower()
@@ -145,15 +148,26 @@ def inventory_event(request):
         match = _BODY_TS.search(raw)
         ts = match.group(1).decode("ascii") if match else ""
     if not secret or not _TS.fullmatch(ts) or not _SIGN.fullmatch(given) or abs(time.time() - int(ts)) > MAX_SKEW:
-        return _refuse(401, "Unauthorized.")
-    if not hmac.compare_digest(inventory_sign(raw, ts, secret).encode("ascii"), given.encode("ascii")):
-        return _refuse(401, "Unauthorized.")
+        return None, _refuse(401, "Unauthorized.")
+    if not hmac.compare_digest(a7_sign(raw, ts, secret, prefix).encode("ascii"), given.encode("ascii")):
+        return None, _refuse(401, "Unauthorized.")
     try:
         body = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
-        return _refuse(400, "Body is not JSON.")
+        return None, _refuse(400, "Body is not JSON.")
     if not isinstance(body, dict):
-        return _refuse(400, "Body is not an object.")
+        return None, _refuse(400, "Body is not an object.")
+    return body, None
+
+
+@csrf_exempt
+def inventory_event(request):
+    """Checked like bot_status: 405 for any method but POST, 401 for a missing, wrong or old signature, 400 for a body
+    off the contract; else 200 {"ok": true, "queued": true, "id": N} and the card is read again in a task
+    (tasks.refresh_bitrix_unit → inventory.refresh_bitrix): its clean rows upserted, the rest retired."""
+    body, refused = _a7_event(request, INVENTORY_PREFIX)
+    if refused is not None:
+        return refused
     try:
         card_id = _int_or_none(body.get("id"))
     except ValueError:
@@ -174,3 +188,33 @@ def inventory_event(request):
         card_id, str(body.get("event") or "update")[:20], str(body.get("stageId") or "")[:60], "" if queued else ": read already",
     )
     return JsonResponse({"ok": True, "queued": queued, "id": card_id})
+
+
+# POST /api/leadai/bitrix/new-lead/: Bitrix says a lead was created (Cursor's C67 handler, the C46 way): the same
+# signature with its own prefix; body {"event": "add", "id": 80123, "ts": 1760000000}. The greet runs a minute later
+# (tasks.greet_new_lead → assistant/newlead.greet), once per lead per GREET_EVERY whatever the handler repeats.
+NEW_LEAD_PREFIX = b"leadai-newlead."
+GREET_DELAY = 60
+GREET_EVERY = 600
+
+
+@csrf_exempt
+def new_lead(request):
+    body, refused = _a7_event(request, NEW_LEAD_PREFIX)
+    if refused is not None:
+        return refused
+    try:
+        lead_id = _int_or_none(body.get("id"))
+    except ValueError:
+        return _refuse(400, "Bad field.")
+    if not lead_id:
+        return _refuse(400, "No lead.")
+    from django.core.cache import cache
+
+    from .tasks import greet_new_lead
+
+    queued = bool(cache.add(f"leadai:newlead:{lead_id}", 1, GREET_EVERY))
+    if queued:
+        greet_new_lead.apply_async(args=[lead_id], countdown=GREET_DELAY)
+    logger.info("Lead AI: Bitrix says lead %s was created%s", lead_id, "" if queued else " (queued already)")
+    return JsonResponse({"ok": True, "queued": queued, "id": lead_id})

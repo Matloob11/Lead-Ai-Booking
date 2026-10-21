@@ -324,6 +324,16 @@ class LeadAiSettings(models.Model):
     # The co-pilot (assistant/copilot.py): an ordinary draft nobody sent or dropped goes out by itself after this many
     # minutes (Matloob 2026-10-20: 15; 0 turns it off). A draft for a person (a call, a complaint, legal) never does.
     copilot_auto_send_minutes = models.PositiveSmallIntegerField(default=15, db_default=15)
+    # The new-lead greet (assistant/newlead.py, round 22): a brand-new Bitrix lead with a phone gets this approved
+    # template from this number, sent as this agent, through the campaign popup's own path with the Lead AI on; a lead
+    # created more than greet_within_hours ago is left alone. Off until an admin sets the four.
+    greet_enabled = models.BooleanField(default=False, db_default=False)
+    greet_agent = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    greet_number = models.ForeignKey("catalog.WabaNumber", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    greet_template = models.CharField(max_length=255, blank=True, default="", db_default="")
+    greet_within_hours = models.PositiveSmallIntegerField(default=48, db_default=48)
     # Circuit breaker: after repeated OpenAI failures the assistant pauses itself.
     paused_until = models.DateTimeField(null=True, blank=True)
     consecutive_failures = models.PositiveSmallIntegerField(default=0)

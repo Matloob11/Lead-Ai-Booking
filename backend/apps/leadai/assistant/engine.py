@@ -4433,6 +4433,7 @@ def _run_claimed(
         quiet=state.handed_over_at is not None or state.not_interested_at is not None or segment == "other",
     )
     units = []  # the inventory's units the model path reads (inventory.matches); none on code's own paths
+    enquired = None  # a portal lead's own listing among them (inventory.enquired; round 22)
     if shops_rule_name.startswith(f"{RES_RULE}:"):
         # The rent flow's own words before any model (residential_rule): an opener, a document or voice-note line, the
         # neutral invitation; shaped like the model's answer, so the same path sends and stores it.
@@ -4486,6 +4487,11 @@ def _run_claimed(
                 units = inventory.matches(
                     pack_now.name, decision.clusters, inventory.pack_units(decision.unit) if pack_flow else decision.unit, inventory.deal_of(decision.track),
                 )
+                # A portal lead's own listing (lead_context's ref or listing id; round 22): first, active or not, so the
+                # bot answers about the home they asked for, or says it went and offers the others.
+                enquired = inventory.enquired(lead_now)
+                if enquired is not None:
+                    units = [enquired, *[row for row in units if row.pk != enquired.pk]]
             # SALE (slice C): the buyer's next questions (SALE STEP) and the call pool's free slots (CALL SLOTS).
             sale_parts = sales.context_parts(
                 facts, decision.unit, decision.clusters,
@@ -4495,7 +4501,7 @@ def _run_claimed(
             res_context = residential.context(
                 settings_row, decision.track, decision.unit, decision.clusters, now, taken, lead=lead_now,
                 full_name=residential.full_name_known(facts, lead_now), history=history, held=residential.held_start(appointment, now),
-                inventory=inventory.lines(units),
+                inventory=inventory.lines(units, enquired=enquired),
                 # A pack chat: the pack's facts in RES FACTS' place, its COMMUNITY lines, no International City charge lines.
                 facts_override=communities.facts_block(pack, units) if pack_flow else "",
                 community=communities.lines(pack) if pack_flow else (),

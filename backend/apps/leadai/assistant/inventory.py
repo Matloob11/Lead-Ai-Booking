@@ -590,12 +590,34 @@ def unit_words(row: LeadAiUnit) -> str:
     return noun
 
 
-def lines(rows) -> list[str]:
-    """The INVENTORY block's lines (data), or none."""
+def lines(rows, enquired=None) -> list[str]:
+    """The INVENTORY block's lines (data), or none. ``enquired``: the listing the lead enquired about (a portal lead's
+    comment, lead_context; round 22), marked as such — and as no longer listed when it is not active."""
     rows = list(rows or ())
     if not rows:
         return []
-    return [BLOCK_HEAD, *(line(row) for row in rows)]
+    out = [BLOCK_HEAD]
+    for row in rows:
+        text = line(row)
+        if enquired is not None and row.pk == enquired.pk:
+            text += " (the listing they enquired about" + ("" if row.active else "; no longer listed, offer the others") + ")"
+        out.append(text)
+    return out
+
+
+def enquired(context: dict | None):
+    """The unit a portal lead enquired about (lead_context: A7's reference, or Property Finder's listing id), active or
+    not, else None. Round 22: a new lead's first turn quotes the listing they asked about."""
+    context = context or {}
+    ref = str(context.get("listing_ref") or "").strip().lower()
+    listing_id = str(context.get("listing_id") or "").strip()
+    if ref:
+        row = LeadAiUnit.objects.filter(reference__iexact=ref).order_by("-active", "-pk").first()
+        if row is not None:
+            return row
+    if listing_id:
+        return LeadAiUnit.objects.filter(source=LeadAiUnit.Source.PF, source_id__iexact=listing_id).order_by("-active", "-pk").first()
+    return None
 
 
 def known_amounts(rows) -> str:

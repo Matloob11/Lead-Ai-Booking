@@ -38,4 +38,6 @@ urlpatterns = [
     path("bitrix/bot-status/", bitrix_views.bot_status, name="bitrix-bot-status"),
     # An Availability card added or changed in Bitrix (Cursor's C46 webhook): signed, no session; the card is read again.
     path("inventory/bitrix/", bitrix_views.inventory_event, name="inventory-bitrix"),
+    # A lead created in Bitrix (Cursor's C67 webhook, round 22): signed, no session; the new-lead greet follows.
+    path("bitrix/new-lead/", bitrix_views.new_lead, name="bitrix-new-lead"),
 ]
