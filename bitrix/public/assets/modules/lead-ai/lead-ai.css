@@ -2565,3 +2565,9 @@ a.lai-media__name:hover {
 .lai-locked__text .lai-composer__from {
   color: #c9d6e6;
 }
+
+/* The chat's community when it is not International City (the community packs' flow, thread.js chatChips). */
+.lai-chip--community {
+  --lai-chip: #38bdf8;
+  color: #bae6fd;
+}

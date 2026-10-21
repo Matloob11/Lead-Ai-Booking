@@ -166,7 +166,19 @@ try:
 
             # 1. An exact day and time: booked, confirmation written by code.
             day = next_open_day(now, settings_row.closed_dates or [])
-            asked = f"Hi, I need a shop around 400 sq ft for a cafe, my trade licence is ready. Can I come on {hours.day_label(dt.datetime.combine(day, dt.time(12), tzinfo=hours.DUBAI))} at 5 pm?"
+            # Two free hours on that day (a real client's visit at 17:00 failed this probe on 2026-10-20): the first for the
+            # exact-time booking, the later one for the reschedule.
+            day_start = dt.datetime.combine(day, dt.time(0), tzinfo=hours.DUBAI)
+            busy = {
+                start.astimezone(hours.DUBAI).replace(second=0, microsecond=0)
+                for start in LeadAiAppointment.objects.filter(
+                    status__in=LeadAiAppointment.OPEN, starts_at__gte=day_start, starts_at__lt=day_start + dt.timedelta(days=1)
+                ).values_list("starts_at", flat=True)
+            }
+            free_hours = [hour for hour in (17, 16, 15, 18, 19) if dt.datetime.combine(day, dt.time(hour), tzinfo=hours.DUBAI) not in busy]
+            hour1 = free_hours[0] if free_hours else 17
+            hour2 = next((hour for hour in free_hours if hour > hour1), hour1 + 1)
+            asked = f"Hi, I need a shop around 400 sq ft for a cafe, my trade licence is ready. Can I come on {hours.day_label(dt.datetime.combine(day, dt.time(12), tzinfo=hours.DUBAI))} at {hour1 - 12} pm?"
             outcome = turn(say(conversation, asked))
             reply = Message.objects.filter(pk=outcome.reply_message_id).first()
             print("turn 1:", outcome.status, outcome.reason, "|", (reply.body if reply else "").replace("\n", " / "))
@@ -177,7 +189,7 @@ try:
             check("turn 1 replied", outcome.status == "replied", (outcome.status, outcome.reason))
             check("turn 1 reply tagged as the assistant, no sender", reply is not None and reply.payload.get("source") == "leadai_ai" and reply.sent_by_id is None)
             appointment = LeadAiAppointment.objects.filter(conversation=conversation).first()
-            expected = dt.datetime.combine(day, dt.time(17), tzinfo=hours.DUBAI)
+            expected = dt.datetime.combine(day, dt.time(hour1), tzinfo=hours.DUBAI)
             check(
                 "turn 1 booked the exact time",
                 appointment is not None and appointment.status == "confirmed" and appointment.starts_at == expected,
@@ -193,13 +205,13 @@ try:
             check("turn 1 facts kept", (state.facts or {}).get("size_sqft") in (400, 400.0), state.facts)
 
             # 2. A new time: the same appointment moves.
-            outcome = turn(say(conversation, "Sorry, can we make it 6 pm instead on the same day?"))
+            outcome = turn(say(conversation, f"Sorry, can we make it {hour2 - 12} pm instead on the same day?"))
             reply = Message.objects.filter(pk=outcome.reply_message_id).first()
             print("turn 2:", outcome.status, outcome.reason, "|", (reply.body if reply else "").replace("\n", " / "))
             appointment = LeadAiAppointment.objects.filter(conversation=conversation, status__in=LeadAiAppointment.OPEN).first()
             check(
-                "turn 2 rescheduled to 6 pm",
-                appointment is not None and appointment.starts_at == expected.replace(hour=18),
+                f"turn 2 rescheduled to {hour2 - 12} pm",
+                appointment is not None and appointment.starts_at == expected.replace(hour=hour2),
                 appointment and appointment.starts_at,
             )
             check("still one appointment", LeadAiAppointment.objects.filter(conversation=conversation).count() == 1)

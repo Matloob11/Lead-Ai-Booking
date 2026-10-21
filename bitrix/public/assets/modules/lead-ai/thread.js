@@ -164,6 +164,11 @@ export function isBrokerChat(conversation) {
 export function chatChips(conversation) {
   const chips = [];
   const track = trackChip(conversation);
+  // The community the chat is about (lead_ai_ai.community, the packs' flow): shown when it is not International City.
+  const community = String(conversation?.lead_ai_ai?.community || "").trim();
+  if (community && community !== "International City") {
+    chips.push(el("span.lai-chip.lai-chip--community", { title: `The chat is about homes in ${community}` }, [community]));
+  }
   if (track) {
     chips.push(track);
   } else if (conversation?.lead_ai_info?.playbook === "ic_shops") {
