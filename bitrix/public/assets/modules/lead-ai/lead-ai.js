@@ -66,13 +66,13 @@ function setDeskBadge() {
 }
 
 /**
- * An agent with no number has no inbox layout, so the inbox opens no live socket for them. One is opened here for the
- * page's life (core/realtime.js re-broadcasts its frames as "wa:event"), so the handover alerts, the chime, the
- * desk's count and the handovers screen all hear the server while the screen is closed too.
+ * An agent with no number has no inbox layout, so the inbox opens no live socket for them (scoped to the desk, or with
+ * Lead AI access alike). One is opened here for the page's life (core/realtime.js re-broadcasts its frames as
+ * "wa:event"), so the alerts, the chime, the desk's count, the Lead AI screen and the handovers screen all hear the
+ * server, while those screens are closed too.
  */
 function openOwnSocket() {
-  if (ownSocket || document.querySelector(".sidebar__menu-btn") || window.a7wa?.liveSocket) return;
-  if (!me || !scopedAgent()) return;
+  if (ownSocket || !me || document.querySelector(".sidebar__menu-btn") || window.a7wa?.liveSocket) return;
   ownSocket = new InboxSocket({ onEvent: () => {}, onStatus: () => {} });
   window.a7wa.liveSocket = ownSocket;
   ownSocket.connect();
