@@ -2770,3 +2770,23 @@ a.lai-media__name:hover {
     margin-left: 0;
   }
 }
+
+/* The handover desk ("My handovers", handovers.js; apps/leadai/handover_desk.py, 2026-10-22): the Lead AI screen's
+   shell with one list and one thread, the row's reason line and its meeting line, the thread's Done button. */
+.lai-screen--handovers .lai-side {
+  padding-top: 12px;
+}
+.lai-hd-row__line {
+  color: var(--lai-muted, #8aa0b8);
+  font-size: 12px;
+}
+.lai-hd-row__meeting {
+  color: var(--lai-accent, #7c9cff);
+  font-size: 12px;
+}
+.lai-done {
+  white-space: nowrap;
+}
+.access__handovers {
+  margin-bottom: 14px;
+}

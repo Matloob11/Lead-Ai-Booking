@@ -405,9 +405,11 @@ function crmLine(appointment) {
 /**
  * @param {HTMLElement} host  where the thread is drawn
  * @param {number} conversationId
- * @param {{ me?: object, onConversation?: Function, onMoved?: Function, highlightMessageId?: number }} hooks
+ * @param {{ me?: object, onConversation?: Function, onMoved?: Function, onDone?: Function, highlightMessageId?: number, scoped?: boolean }} hooks
+ *   ``scoped``: the handover desk's view (handovers.js): the chat and the customer only — no line on our number's name,
+ *   the owner, the campaign or the CRM record, no AI controls, no Move to inbox; a Done button instead (``onDone``).
  */
-export function mountThread(host, conversationId, { me, onConversation, onMoved, highlightMessageId } = {}) {
+export function mountThread(host, conversationId, { me, onConversation, onMoved, onDone, highlightMessageId, scoped = false } = {}) {
   const state = {
     id: conversationId,
     conversation: null,
@@ -711,23 +713,47 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const waId = conversation.contact?.wa_id ? `+${conversation.contact.wa_id}` : "";
     const lead = conversation.lead_ai_info || {};
     const crm = lead.crm_entity && lead.crm_id ? `${crmWord(lead.crm_entity)} #${lead.crm_id}` : "";
-    const note = aiNote(conversation.lead_ai_ai);
-    const meta = [
-      waId !== name ? waId : "",
-      // Our own number in full, with its name: the agent must see which of our lines this chat is on (Matloob 2026-10-20).
-      conversation.number ? `from ${ourNumberLabel(conversation.number)}` : "",
-      conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
-    ].filter(Boolean);
+    const note = scoped ? "" : aiNote(conversation.lead_ai_ai);
+    // The handover desk (scoped): the chat and the customer only; no line on our number's name, the owner or the team.
+    const meta = scoped
+      ? [waId !== name ? waId : ""].filter(Boolean)
+      : [
+          waId !== name ? waId : "",
+          // Our own number in full, with its name: the agent must see which of our lines this chat is on (Matloob 2026-10-20).
+          conversation.number ? `from ${ourNumberLabel(conversation.number)}` : "",
+          conversation.assigned_agent?.display_name ? `agent ${conversation.assigned_agent.display_name}` : "",
+        ].filter(Boolean);
     // The shops assistant's "check back in a month" date, and a follow-up waiting for Meta, beside the chat's chips.
-    const chips = [...chatChips(conversation), followUpChip(conversation), followUpNote(conversation)].filter(Boolean);
+    const chips = [...(scoped ? [] : chatChips(conversation)), followUpChip(conversation), followUpNote(conversation)].filter(Boolean);
+    const windowPill = el("span.lai-window", { class: conversation.is_session_open ? "is-open" : "is-closed" }, [
+      conversation.is_session_open ? "24h window open" : "Window closed",
+    ]);
+    const tools = scoped
+      ? [
+          windowPill,
+          el("button.lai-btn.lai-btn--primary.lai-btn--sm.lai-done", {
+            type: "button",
+            title: "Done with this chat: it leaves your list and the AI carries on alone",
+            onclick: confirmDone,
+          }, [icon("check", { size: 14 }), "Done"]),
+        ]
+      : [
+          ...aiControls(conversation),
+          windowPill,
+          el("button.lai-btn.lai-btn--ghost.lai-move", {
+            type: "button",
+            title: "Put this chat back in the main inbox",
+            onclick: confirmMove,
+          }, [icon("reply", { size: 15 }), "Move to inbox"]),
+        ];
 
     clear(header).append(
       el("div.lai-avatar", {}, [initials(name)]),
       el("div.lai-thread__who", {}, [
         el("div.lai-thread__name", {}, [name]),
-        el("div.lai-thread__meta", {}, [meta.join(" · ")]),
+        meta.length ? el("div.lai-thread__meta", {}, [meta.join(" · ")]) : null,
         chips.length ? el("div.lai-thread__chips", {}, chips) : null,
-        lead.campaign_name || crm
+        !scoped && (lead.campaign_name || crm)
           ? el("div.lai-thread__meta.lai-thread__meta--source", {}, [
               icon("send", { size: 12 }),
               [lead.campaign_name, crm].filter(Boolean).join(" · "),
@@ -736,25 +762,43 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
         // The pill can say "AI on" while the assistant is held back (an OpenAI pause, the daily limit).
         note ? el("div.lai-thread__meta.lai-thread__meta--ai", {}, [icon("zap", { size: 12 }), `AI not answering: ${note}`]) : null,
         // What the assistant remembers of this customer from chats on our other numbers (lead_ai_ai.memory, the detail).
-        Array.isArray(conversation.lead_ai_ai?.memory) && conversation.lead_ai_ai.memory.length
+        !scoped && Array.isArray(conversation.lead_ai_ai?.memory) && conversation.lead_ai_ai.memory.length
           ? el("div.lai-thread__meta.lai-thread__meta--memory", { title: conversation.lead_ai_ai.memory.join("\n") }, [
               icon("clock", { size: 12 }),
               `Earlier chats: ${String(conversation.lead_ai_ai.memory[conversation.lead_ai_ai.memory.length - 1]).replace(/^- /, "")}`,
             ])
           : null,
       ]),
-      el("div.lai-thread__tools", {}, [
-        ...aiControls(conversation),
-        el("span.lai-window", { class: conversation.is_session_open ? "is-open" : "is-closed" }, [
-          conversation.is_session_open ? "24h window open" : "Window closed",
-        ]),
-        el("button.lai-btn.lai-btn--ghost.lai-move", {
-          type: "button",
-          title: "Put this chat back in the main inbox",
-          onclick: confirmMove,
-        }, [icon("reply", { size: 15 }), "Move to inbox"]),
-      ])
+      el("div.lai-thread__tools", {}, tools)
     );
+  }
+
+  /** The handover desk's Done (scoped): the chat leaves the agent's list; the assistant carries on alone. */
+  function confirmDone() {
+    const stay = el("button.lai-btn.lai-btn--ghost", { type: "button", onclick: () => dialog.close() }, ["Cancel"]);
+    const actions = el("div.lai-confirm__actions", {}, [
+      stay,
+      el("button.lai-btn.lai-btn--primary", {
+        type: "button",
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          try {
+            await leadAiApi.deskDone(state.id);
+            dialog.close();
+            toast("Done. The chat left your list; the AI carries on.");
+            onDone?.(state.id);
+          } catch (error) {
+            button.disabled = false;
+            toast(`Could not finish the chat: ${error.message}`, "err");
+          }
+        },
+      }, ["Done"]),
+    ]);
+    const dialog = chatModal("Done with this chat?", el("div.lai-confirm", {}, [
+      el("p", {}, ["It leaves your list. The AI answers the customer on its own from here; a new handover brings the chat back to you."]),
+      actions,
+    ]));
   }
 
   /** The assistant's pill, and Pause / Resume where they apply. */
@@ -1282,8 +1326,9 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     openTemplateComposer({
       mode: "reply",
       conversation: state.conversation,
-      // New template and Sync from Meta inside the dialog, for this chat's business account (Matloob 2026-10-20).
-      canCreate: true,
+      // New template and Sync from Meta inside the dialog, for this chat's business account (Matloob 2026-10-20);
+      // not on the handover desk, whose agent holds no number of ours (scoped).
+      canCreate: !scoped,
       isAdmin: Boolean(me?.is_wa_admin),
       templatesFor: async () => asList(await inbox.conversationTemplates(state.id), "templates"),
       // The composer outlives this chat when the agent opened another meanwhile.

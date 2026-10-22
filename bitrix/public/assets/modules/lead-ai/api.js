@@ -72,6 +72,13 @@ export const leadAiApi = {
 
   moveToInbox: (id) => apiFetch(`/api/leadai/chats/${id}/move-to-inbox/`, { method: "POST", body: {} }),
 
+  /**
+   * The handover desk (handover_desk.py): the chats handed to a person whose Bitrix responsible the agent is, each the
+   * chat and the customer only; an admin may pass another agent's Bitrix user id. `deskDone` is their Done.
+   */
+  deskMine: ({ agent = "" } = {}) => apiFetch(`/api/leadai/desk/mine/${agent ? `?agent=${encodeURIComponent(agent)}` : ""}`),
+  deskDone: (id) => apiFetch(`/api/leadai/chats/${id}/desk/done/`, { method: "POST", body: {} }),
+
   /** The assistant stops answering this chat until someone resumes it. Returns the row. */
   pauseAi: (id) => apiFetch(`/api/leadai/chats/${id}/pause-ai/`, { method: "POST", body: {} }),
 

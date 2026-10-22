@@ -63,11 +63,30 @@ export function renderNoNumbersScreen(host, { me, onAssigned, onLinkedDevices } 
       ])
     : null;
 
+  // The handover desk (modules/lead-ai/handovers.js): the chats the AI handed to this agent as the lead's Bitrix
+  // responsible open here too, with no number of their own; the count comes with the sign-in (handover_desk).
+  const deskCount = Math.max(0, Number(me.handover_desk?.count) || 0);
+  const handovers = me.handover_desk
+    ? el("div.access__leadai.access__handovers", {}, [
+        el("p.access__lead", {}, [
+          deskCount
+            ? `${deskCount} chat${deskCount === 1 ? "" : "s"} the AI handed to you ${deskCount === 1 ? "is" : "are"} waiting for you.`
+            : "Chats the AI hands to you (as the lead's responsible) open here; no number is needed for that.",
+        ]),
+        el(
+          "button.btn.btn--primary.access__leadai-btn",
+          { type: "button", onclick: () => window.a7wa?.openHandovers?.() },
+          [icon("messageSquare", { size: 15 }), deskCount ? `My handovers (${deskCount})` : "My handovers"]
+        ),
+      ])
+    : null;
+
   clear(host).append(
     el("div.access", {}, [
       el("div.access__card", {}, [
         el("div.access__icon", {}, [icon("hash", { size: 26 })]),
         el("h2.access__title", {}, ["No WhatsApp number assigned yet"]),
+        handovers,
         leadAi,
         el("p.access__lead", {}, [
           `${me.display_name || "Agent"} — no conversations will be visible until a number is assigned to your account. ` +

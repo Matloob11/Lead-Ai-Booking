@@ -23,14 +23,33 @@ import { notifyNewMessage } from "../../core/notifications.js";
 import { asList, leadAiApi } from "./api.js";
 import { contactName } from "./thread.js";
 import { closeScreen, deliverToScreen, isScreenOpen, openChatId, openLeadAiScreen, resyncScreen } from "./screen.js";
+import { deliverToHandovers, isHandoversOpen, openHandoversScreen } from "./handovers.js";
 
 let me = null;
 let unreadChats = 0;
 let socketReadyCount = 0;
 const badges = new Set();
+const deskBadges = new Set();
+
+function scopedAgent() {
+  // The handover desk (handovers.js): an agent with neither admin rights nor Lead AI access has their own screen.
+  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai;
+}
 
 function open(conversationId, { highlightMessageId } = {}) {
+  if (scopedAgent()) {
+    openHandoversScreen({ me, conversationId });
+    return;
+  }
   openLeadAiScreen({ conversationId, highlightMessageId, me, onUnreadChanged: setUnread });
+}
+
+function setDeskBadge() {
+  const count = Math.max(0, Number(me?.handover_desk?.count) || 0);
+  for (const badge of deskBadges) {
+    badge.textContent = count ? String(count) : "";
+    badge.hidden = !count;
+  }
 }
 
 async function findLeadAiChat(waId) {
@@ -46,6 +65,7 @@ async function findLeadAiChat(waId) {
 
 window.a7wa = window.a7wa || {};
 window.a7wa.openLeadAi = (conversationId, options = {}) => open(conversationId, options);
+window.a7wa.openHandovers = (options = {}) => openHandoversScreen({ me, ...options });
 window.a7wa.findLeadAiChat = (waId) => findLeadAiChat(waId);
 
 /* ------------------------------------------------------------ unread count */
@@ -89,6 +109,14 @@ function injectMenuItem() {
     "Lead AI",
     badge,
   ]);
+  // "My handovers" (handovers.js): the chats the AI handed to this agent as the lead's responsible; the badge counts them.
+  const deskBadge = el("span.lai-menu-badge", { hidden: true });
+  deskBadges.add(deskBadge);
+  const desk = el("button.btn.menu__item.lai-menu-item.lai-menu-item--handovers", { type: "button", onclick: () => openHandoversScreen({ me }) }, [
+    icon("messageSquare", { size: 16 }),
+    "My handovers",
+    deskBadge,
+  ]);
 
   // Before the first section heading that follows "Campaign", so the items
   // under Campaign (Excel campaigns, Linked phone agents) stay where they were.
@@ -96,8 +124,9 @@ function injectMenuItem() {
   const campaign = children.find((node) => node.classList?.contains("menu__item") && node.textContent.trim() === "Campaign");
   const from = campaign ? children.indexOf(campaign) + 1 : 0;
   const nextSection = children.slice(from).find((node) => node.classList?.contains("menu__section"));
-  if (nextSection) nextSection.before(heading, item);
-  else menu.append(heading, item);
+  if (nextSection) nextSection.before(heading, item, desk);
+  else menu.append(heading, item, desk);
+  setDeskBadge();
 
   // A dot on the menu button, since the item itself is hidden in the menu.
   const menuButton = document.querySelector(".sidebar__menu-btn");
@@ -282,6 +311,7 @@ window.addEventListener("wa:event", (event) => {
   }
 
   if (isScreenOpen()) deliverToScreen(name, data);
+  if (isHandoversOpen()) deliverToHandovers(name, data);
   if (!String(name).startsWith("leadai.")) return;
 
   if (name === "leadai.alert") {
@@ -325,6 +355,7 @@ function start() {
   me = window.a7wa?.getMe?.() || me;
   watchMenu();
   refreshUnread();
+  setDeskBadge();
 }
 
 window.addEventListener("wa:ready", (event) => {
