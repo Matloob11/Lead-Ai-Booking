@@ -147,25 +147,31 @@ def desk_groups(user) -> list[str]:
     return [DESK_GROUP] if has_desk_access(user) and not sees_all_inbox_chats(user) else []
 
 
-def desk_event_groups(event: str, conversation=None) -> list[str]:
-    """The groups besides the number's and the owner's that hear an event in full (inbox.events.publish): a Lead AI
-    chat's own ("leadai.*") reach the desk. A chat back in the main inbox is no desk chat, and its plain events never
-    do. The chat's Bitrix responsible, who has it through the handover desk alone, hears it trimmed instead
-    (desk_scoped_groups)."""
+def desk_groups_for(event: str, conversation=None) -> tuple[list[str], list[str]]:
+    """The groups besides the number's and the owner's that hear an event (inbox.events.publish), as (in full, trimmed):
+    a Lead AI chat's own ("leadai.*") reach the desk in full, and the chat's Bitrix responsible on the handover desk
+    (handover_desk.live_groups) in full when they hold the chat's number, trimmed when they have the chat through the
+    desk alone (trim_for_desk: the chat and the customer, nothing of the team). A chat back in the main inbox is no
+    desk chat, and its plain events reach neither."""
     if not str(event or "").startswith(EVENT_PREFIX):
-        return []
-    return [DESK_GROUP]
+        return [], []
+    full = [DESK_GROUP]
+    if conversation is None:
+        return full, []
+    from .handover_desk import live_groups
+
+    theirs, trimmed = live_groups(conversation)
+    return full + theirs, trimmed
+
+
+def desk_event_groups(event: str, conversation=None) -> list[str]:
+    """The groups that hear an event in full (desk_groups_for)."""
+    return desk_groups_for(event, conversation)[0]
 
 
 def desk_scoped_groups(event: str, conversation=None) -> list[str]:
-    """The handover desk (handover_desk.py): the chat's Bitrix responsible's own channel, for a chat on their desk that
-    they reach through it alone (handover_desk.live_groups); its frames go trimmed (trim_for_desk: the chat and the
-    customer, nothing of the team)."""
-    if conversation is None or not str(event or "").startswith(EVENT_PREFIX):
-        return []
-    from .handover_desk import live_groups
-
-    return live_groups(conversation)
+    """The groups that hear an event trimmed (desk_groups_for)."""
+    return desk_groups_for(event, conversation)[1]
 
 
 def trim_for_desk(data: dict) -> dict:

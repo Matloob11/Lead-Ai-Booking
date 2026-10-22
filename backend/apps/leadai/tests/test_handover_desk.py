@@ -11,13 +11,14 @@ from django.apps import apps as django_apps
 from django.utils import timezone
 
 from apps.accounts.models import Agent
+from apps.catalog.models import NumberAssignment
 from apps.inbox import events
 from apps.inbox.events import group_for_agent
 from apps.inbox.models import Conversation, Message
 from apps.inbox.serializers import serialize_conversation
 from apps.leadai import bitrix_status, handover_desk, lane, tasks
 from apps.leadai.assistant import engine
-from apps.leadai.models import LeadAiChatState
+from apps.leadai.models import LeadAiAlert, LeadAiChatState
 from apps.leadai.tests.test_desk import DeskBase
 from apps.leadai.tests.test_shops_playbook import ShopsBase, shop_answer
 
@@ -50,6 +51,12 @@ class GrantBase(DeskBase):
 
     def ids(self, payload):
         return sorted(row["id"] for row in payload["results"])
+
+    def backup(self):
+        """An agent who holds the chats' number as a backup (never their owner), no admin rights, no Lead AI access."""
+        agent = Agent.objects.create_user(username="backup", password="x", bitrix_user_id="2600", can_official_api=True, display_name="Backup")
+        NumberAssignment.objects.create(number=self.number, agent=agent)
+        return agent
 
 
 class GrantTests(GrantBase):
@@ -137,6 +144,37 @@ class GrantTests(GrantBase):
         self.assertEqual((state.desk_at, state.handed_over_at), (None, None))
         self.assertEqual(state.paused_at, now)
 
+    def test_done_keeps_a_brokers_pause_set_after_another_handover(self):
+        # A was handed over for a person asked for; the customer then declared themselves a broker (engine._apply pauses
+        # the chat and labels it Broker; the desk's reason stays the stay's first): Done keeps that pause (Q11).
+        now = timezone.now()
+        LeadAiChatState.objects.filter(conversation=self.a).update(paused_at=now, paused_by=None)
+        self.a.labels.add(engine.broker_label())
+        state = handover_desk.done(self.a, self.plain)
+        self.assertEqual((state.desk_at, state.handed_over_at, state.paused_at), (None, None, now))
+        self.assertTrue(handover_desk.is_broker(self.a, state))
+        self.assertFalse(handover_desk.is_broker(self.c, LeadAiChatState.for_conversation(self.c)))
+
+    def test_the_list_and_the_post_endpoints_are_trimmed_too(self):
+        row = self.rows(self.plain)["results"][0]
+        self.assertEqual(row["id"], self.a.pk)
+        self.assertIsNone(row["assigned_agent"])
+        self.assertEqual(set(row["number"]), {"id", "phone_number"})
+        self.assertEqual((row["lead_ai_info"], row["leadbot"]), (None, None))
+        self.client.force_login(self.plain)
+        row = self.client.post(f"/api/leadai/chats/{self.a.pk}/pause-ai/").json()
+        self.assertEqual((row["assigned_agent"], row["lead_ai_info"], row["lead_ai_ai"]["paused_by"]), (None, None, ""))
+        self.assertEqual(LeadAiChatState.objects.get(conversation=self.a).paused_by, self.plain)
+        # A desk agent's list keeps the team.
+        row = self.rows(self.desker)["results"][0]
+        self.assertEqual(row["assigned_agent"]["display_name"], "Matloob")
+
+    def test_the_desk_rows_name_no_colleague_on_a_call(self):
+        now = timezone.now()
+        self.appointment(self.a, starts_at=now + dt.timedelta(days=1), taken_by=self.owner, taken_at=now)
+        self.assertEqual(self.mine(self.plain)["results"][0]["appointment"]["taken_by"], "")
+        self.assertEqual(self.mine(self.admin, "?agent=2500")["results"][0]["appointment"]["taken_by"], "Matloob")
+
     def test_bitrix_users_0_and_1_hold_no_desk(self):
         now = timezone.now()
         self.chat(handed_over_at=now, handover_reason="unclear", desk_at=now, desk_reason="unclear", responsible_bitrix_user_id="1")
@@ -154,6 +192,7 @@ class GrantTests(GrantBase):
         self.assertEqual(set(row["number"]), {"id", "phone_number"})
         self.assertEqual(row["number"]["phone_number"], self.number.phone_number)
         self.assertIsNone(row["lead_ai_info"])
+        self.assertIsNone(row["leadbot"])  # the badge names the Bitrix lead
         self.assertEqual((row["lead_ai_ai"]["memory"], row["lead_ai_ai"]["paused_by"]), ([], ""))
         self.assertEqual(row["contact"]["wa_id"], self.a.contact.wa_id)
         # A desk agent (and an admin) keeps the whole row.
@@ -184,6 +223,22 @@ class GrantTests(GrantBase):
         self.assertEqual(set(mine["conversation"]["number"]), {"id", "phone_number"})
         self.assertEqual([group for group, *_ in sent].count(group_for_agent(self.plain.pk)), 1)
         self.assertTrue(all(event == "leadai.message.new" for _, event, _ in sent))
+        # A message's author goes with the trim; a backup holder of the number, B's responsible, gets the full frame on
+        # their own channel (they join no number group: inbox.consumers).
+        backup = self.backup()
+        LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=backup, responsible_bitrix_user_id="2600")
+        sent.clear()
+        message = {"id": 1, "direction": "out", "sent_by": {"id": self.owner.pk, "display_name": "Matloob"}}
+        with patch("apps.inbox.events.get_channel_layer", return_value=Layer()):
+            events.publish(self.a, "message.new", {"conversation": serialize_conversation(self.a), "message": message})
+            events.publish(self.b, "message.new", {"conversation": serialize_conversation(self.b), "message": message})
+        frames = {(group, data["conversation"]["id"]): data for group, _, data in sent}
+        self.assertIsNone(frames[(group_for_agent(self.plain.pk), self.a.pk)]["message"]["sent_by"])
+        self.assertEqual(frames[(lane.DESK_GROUP, self.a.pk)]["message"]["sent_by"]["display_name"], "Matloob")
+        full = frames[(group_for_agent(backup.pk), self.b.pk)]
+        self.assertEqual((full["conversation"]["assigned_agent"]["display_name"], "title" in full["conversation"]["number"]), ("Matloob", True))
+        self.assertEqual(full["message"]["sent_by"]["display_name"], "Matloob")
+        self.assertNotIn((group_for_agent(backup.pk), self.a.pk), frames)  # not their chat
 
     def test_the_desk_changes_reach_the_screens(self):
         LeadAiChatState.objects.filter(conversation=self.a).update(responsible_agent=self.plain)
@@ -245,15 +300,24 @@ class GrantTests(GrantBase):
 
     def test_live_events_and_the_sign_in_payload(self):
         LeadAiChatState.objects.filter(conversation=self.a).update(responsible_agent=self.plain)
-        self.assertEqual(handover_desk.live_groups(self.a), [group_for_agent(self.plain.pk)])
-        self.assertEqual(handover_desk.live_groups(self.b), [])  # Omar's row names no Agent yet
-        # A desk agent (Omar) hears the desk's group, an admin the number's: no channel of their own for the chat.
-        LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=self.second)
-        self.assertEqual(handover_desk.live_groups(self.b), [])
+        self.assertEqual(handover_desk.live_groups(self.a), ([], [group_for_agent(self.plain.pk)]))
+        self.assertEqual(handover_desk.live_groups(self.b), ([], []))  # Omar's row names no Agent yet
+        # A desk agent (Omar) hears the desk's group, an admin the number's, the owner their own: no channel more.
+        for responsible in (self.second, self.admin, self.owner):
+            LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=responsible)
+            self.assertEqual(handover_desk.live_groups(self.b), ([], []), responsible.username)
+        # A holder of the chat's number who does not own it hears nothing otherwise: their own channel, in full.
+        backup = self.backup()
+        LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=backup, responsible_bitrix_user_id="2600")
+        self.assertEqual(handover_desk.live_groups(self.b), ([group_for_agent(backup.pk)], []))
         self.assertEqual(lane.desk_event_groups("leadai.message.new", self.a), [lane.DESK_GROUP])
         self.assertEqual(lane.desk_scoped_groups("leadai.message.new", self.a), [group_for_agent(self.plain.pk)])
-        self.assertEqual(lane.desk_event_groups("message.new", self.a), [])
-        self.assertEqual(lane.desk_scoped_groups("message.new", self.a), [])
+        self.assertEqual(lane.desk_groups_for("leadai.message.new", self.b), ([lane.DESK_GROUP, group_for_agent(backup.pk)], []))
+        self.assertEqual(lane.desk_groups_for("message.new", self.a), ([], []))
+        self.assertEqual(lane.desk_event_groups("leadai.message.new"), [lane.DESK_GROUP])
+        # B is the backup's now (above), so Omar's desk is empty and the backup's holds one.
+        self.assertEqual((handover_desk.count_for(self.second), handover_desk.count_for(backup)), (0, 1))
+        LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=None, responsible_bitrix_user_id="2401")
         self.client.force_login(self.plain)
         self.assertEqual(self.client.get("/api/auth/me/").json()["handover_desk"], {"count": 1})
         self.assertIsNone(handover_desk.mine_q(Agent.objects.create_user(username="nobody", password="x", can_official_api=True)))
@@ -297,3 +361,23 @@ class BitrixDeskTests(DeskBase):
         self.assertEqual(state.desk_reason, bitrix_status.HANDED_REASON)
         self.assertIsNotNone(state.paused_at)
         resolve.assert_called_with(chat.pk)
+
+    def test_a_reread_of_the_lead_does_not_undo_done(self):
+        with patch("apps.leadai.tasks.resolve_responsible.delay"), patch("apps.leadai.tasks.deliver_alert.delay"), self.captureOnCommitCallbacks(execute=True):
+            chat = self.chat(responsible_bitrix_user_id="2500")
+            bitrix_status.apply(77, bot_status=2478)
+            handover_desk.done(chat, self.plain)
+            alerts_before = LeadAiAlert.objects.filter(kind="bitrix_status").count()  # one row per recipient of the person's change
+            # The lead still says Handed to agent when the next nudge reads it (followups.bitrix_blocks): nothing applied again.
+            self.assertEqual(bitrix_status.apply(77, bot_status=2478, reread=True), 1)
+            state = LeadAiChatState.objects.get(conversation=chat)
+            self.assertEqual((state.desk_at, state.handed_over_at, state.paused_at), (None, None, None))
+            self.assertIsNotNone(state.desk_done_at)
+            self.assertEqual(LeadAiAlert.objects.filter(kind="bitrix_status").count(), alerts_before)  # no "set in Bitrix" nobody set
+            # A person sets it again in Bitrix (C12's call): applied, and the desk's Done forgotten with it.
+            bitrix_status.apply(77, bot_status=2478)
+            state = LeadAiChatState.objects.get(conversation=chat)
+            self.assertEqual((state.desk_at is not None, state.paused_at is not None, state.desk_done_at), (True, True, None))
+            # A re-read while the chat is handed over changes nothing either.
+            self.assertEqual(bitrix_status.apply(77, bot_status=2478, reread=True), 1)
+            self.assertEqual(LeadAiChatState.objects.get(conversation=chat).desk_done_at, None)

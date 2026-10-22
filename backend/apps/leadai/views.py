@@ -391,6 +391,8 @@ def chat_list(request):
 
         approved = followups.approved_wabas()
     kinds = desk.template_kinds(c.pk for c in page if desk.needs_template_kind(scripts.get(c.pk, GENERAL), _state(c)))
+    # The handover desk: an agent who has a chat through it alone sees the chat and the customer, nothing of the team.
+    scoped = handover_desk.scope(request.user)
     results = []
     for c in page:
         row = serialize_lead_ai_conversation(
@@ -399,6 +401,8 @@ def chat_list(request):
         )
         if desk_rows is not None:
             row["lead_ai_desk"] = desk_rows.get(c.pk)
+        if scoped is not None and scoped.through_desk(c):
+            handover_desk.trim(row)
         results.append(row)
     body = {"count": total, "unread_chats": unread, "results": results}
     if offset == 0:
@@ -452,14 +456,26 @@ def desk_mine(request):
         .order_by("-last_message_at", "-pk")
         .distinct()
     )
+    scoped = handover_desk.scope(request.user)
     results = []
     for conversation in queryset:
         row = handover_desk.row(conversation, now)
         if row is None:
             continue
-        row["appointment"] = serialize_appointment(_open_appointment(conversation))
+        appointment = serialize_appointment(_open_appointment(conversation))
+        # The viewing their chat booked; no colleague's name on a call for an agent who has the chat through the desk alone.
+        row["appointment"] = handover_desk.trim_appointment(appointment) if scoped is not None else appointment
         results.append(row)
     return Response({"count": len(results), "results": results, "agent": wanted or handover_desk.bitrix_id(request.user)})
+
+
+def _row_for(user, conversation) -> dict:
+    """The chat as the endpoints answer it: serialize_lead_ai_conversation, trimmed for an agent who has the chat
+    through the handover desk alone (handover_desk.only_through_desk)."""
+    row = serialize_lead_ai_conversation(conversation)
+    if handover_desk.only_through_desk(user, conversation):
+        handover_desk.trim(row)
+    return row
 
 
 @api_view(["POST"])
@@ -509,7 +525,7 @@ def chat_pause_ai(request, pk):
         LeadAiChatState.objects.filter(pk=state.pk).update(paused_at=timezone.now(), paused_by=request.user)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -541,7 +557,7 @@ def chat_draft_used(request, pk):
     copilot.close(conversation, state, kind, agent=request.user, sent_text=sent_text)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -555,7 +571,7 @@ def chat_draft_dismiss(request, pk):
     copilot.close(conversation, state, LeadAiDraftOutcome.Kind.DISMISSED, agent=request.user)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -581,7 +597,7 @@ def chat_resume_ai(request, pk):
     )
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -608,7 +624,7 @@ def appointment_cancel(request, pk):
         transaction.on_commit(lambda apk=appointment.pk, rev=revision: sync_appointment_crm.delay(apk, "cancelled", False, rev))
         _changed(conversation.pk)
     conversation = get_object_or_404(_visible(request.user), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -628,7 +644,7 @@ def appointment_take(request, pk):
         )
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 # Settings ---------------------------------------------------------------------------------

@@ -944,7 +944,9 @@ def bitrix_blocks(conversation, chat, facts: dict | None = None) -> str:
     opt = _enum_id(row.get(crm_fields.FIELD_OPT_OUT)) if isinstance(row, dict) else None
     wanted = bitrix_status.effects(bot, opt)
     if wanted:
-        bitrix_status.apply(lead, bot_status=bot, wa_opt_out=opt)
+        # A re-read, not a person's change: a Handed to agent the responsible finished on the handover desk (Done) is
+        # not applied again (bitrix_status._apply_one).
+        bitrix_status.apply(lead, bot_status=bot, wa_opt_out=opt, reread=True)
         return f"the Bitrix lead says {', '.join(wanted)}"
     if not isinstance(row, dict):
         return ""

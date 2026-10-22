@@ -22,11 +22,14 @@ once a person wrote.
   read, the co-pilot's draft, the chat detail) follows without a change, the main inbox list leaves Lead AI chats out
   as before, and the Lead AI screen's own list is the desk agents' and admins' (the responsible's rows come from
   ``rows``, trimmed to the chat and the customer). An agent who has a chat through the desk alone
-  (``only_through_desk``: no admin, no Lead AI access, not the owner, none of the number's holders) gets its detail
-  and its live frames trimmed the same way (``trim``, ``trim_live``): our number as digits, nothing of the team.
-- **Live**: that agent's own channel (inbox.events.group_for_agent) hears the chat's events trimmed (``live_groups``,
-  via lane.desk_scoped_groups), the handover alerts reach them as before (alerts.recipients names the responsible),
-  and DESK_CHANGED tells them a chat came onto, or left, their desk (``changed``: a Done, a move, a reassignment).
+  (``only_through_desk``: no admin, no Lead AI access, not the owner, none of the number's holders) gets its detail,
+  the list's rows and its live frames trimmed the same way (``trim``, ``trim_live``): our number as digits, nothing
+  of the team.
+- **Live**: a responsible who is no admin, has no Lead AI access and does not own the chat hears nothing of it
+  otherwise (an agent joins no number group), so their own channel (inbox.events.group_for_agent) gets the chat's
+  events (``live_groups``, via lane.desk_groups_for): trimmed when they have the chat through the desk alone, in full
+  when they hold its number. The handover alerts reach them as before (alerts.recipients names the responsible), and
+  DESK_CHANGED tells them a chat came onto, or left, their desk (``changed``: a Done, a move, a reassignment).
 """
 
 from __future__ import annotations
@@ -50,8 +53,9 @@ UNCLEAR = "unclear"
 # The responsible's own channel hears this when a chat comes onto, or leaves, their desk (handovers.js reads its list
 # again; lead-ai.js sets the menu's count from it).
 DESK_CHANGED = "leadai.desk.changed"
-# What a chat's row keeps nothing of for an agent who has it through the desk alone (trim).
-TEAM_KEYS = ("assigned_agent", "linked_number", "linked_conversation_id", "lead_ai_info")
+# What a chat's row keeps nothing of for an agent who has it through the desk alone (trim): the owner, a transfer's
+# peer, where the chat came from, and the leadbot badge (it names the Bitrix lead).
+TEAM_KEYS = ("assigned_agent", "linked_number", "linked_conversation_id", "lead_ai_info", "leadbot")
 
 
 def bitrix_id(user) -> str:
@@ -135,19 +139,29 @@ def _read_responsible(conversation_id: int) -> None:
         logger.exception("Lead AI could not queue the responsible read for conversation %s", conversation_id)
 
 
+def is_broker(conversation, state) -> bool:
+    """The chat is a broker's as it stands now: the Broker label (engine._apply and bitrix_status add it with the pause),
+    or a broker's handover or desk reason. The stay's first desk reason alone is not enough: a broker may declare
+    themselves after a handover for another reason, and the pause set then is theirs."""
+    from .assistant import engine
+
+    if engine.BROKER in (state.handover_reason, state.desk_reason):
+        return True
+    return conversation.labels.filter(name__iexact=engine.BROKER_LABEL).exists()
+
+
 def done(conversation, user, now=None) -> LeadAiChatState:
     """Their Done (the responsible's, or an admin's): off the desk; a handover still open ends with it, and so does the
     handover's own pause (Bitrix's Handed to agent: paused by nobody), so the assistant answers in full again, as it does
-    once a person wrote. An agent's own Pause stays (their choice), and so does a broker's (the assistant never talks
-    to a broker: Q11; Resume is the admins')."""
-    from .assistant import engine
-
+    once a person wrote. An agent's own Pause stays (their choice), and so does a broker's (is_broker: the assistant
+    never talks to a broker, Q11; Resume is the admins'). A re-read of the lead's Bot Status after this (followups.
+    bitrix_blocks) applies no Handed to agent again while desk_done_at stands (bitrix_status.apply's ``reread``)."""
     now = now or timezone.now()
     state = LeadAiChatState.for_conversation(conversation)
     values = {"desk_at": None, "desk_done_at": now, "desk_done_by": user if getattr(user, "pk", None) else None}
     if state.handed_over_at is not None:
         values.update(handed_over_at=None, handover_reason="", holding_line_at=None, draft=None)
-    if state.paused_at is not None and state.paused_by_id is None and state.desk_reason != engine.BROKER:
+    if state.paused_at is not None and state.paused_by_id is None and not is_broker(conversation, state):
         values.update(paused_at=None, paused_by=None)
     LeadAiChatState.objects.filter(pk=state.pk).update(**values)
     changed(state.responsible_agent_id, conversation.pk, False)
@@ -247,25 +261,51 @@ def row(conversation, now=None) -> dict | None:
     }
 
 
-def only_through_desk(user, conversation) -> bool:
-    """The agent reaches this chat through the desk alone: no panel admin, no Lead AI access, not the chat's owner,
-    none of its number's holders. Their screen is then the chat and the customer, nothing of the team (``trim``)."""
-    from apps.inbox.visibility import held_numbers, sees_all_inbox_chats
+class Scope:
+    """What an agent who is no admin and has no Lead AI access reaches through the desk alone, worked out once per
+    request (views.chat_list has many rows): not their own chat, none on a number they hold."""
+
+    def __init__(self, user):
+        from apps.inbox.visibility import held_numbers
+
+        self.user_pk = user.pk
+        self.held = set(held_numbers(user).values_list("pk", flat=True))
+
+    def through_desk(self, conversation) -> bool:
+        return getattr(conversation, "assigned_agent_id", None) != self.user_pk and conversation.number_id not in self.held
+
+
+def scope(user):
+    """The agent's Scope, or None for one who sees chats in full wherever they may open them (a panel admin, an agent
+    with Lead AI access) or who can have no desk at all."""
+    from apps.inbox.visibility import sees_all_inbox_chats
 
     from .lane import has_desk_access
 
-    if user is None or sees_all_inbox_chats(user) or has_desk_access(user):
-        return False
-    if getattr(conversation, "assigned_agent_id", None) == getattr(user, "pk", None):
-        return False
-    return not held_numbers(user).filter(pk=conversation.number_id).exists()
+    if user is None or not may_use(user) or sees_all_inbox_chats(user) or has_desk_access(user):
+        return None
+    return Scope(user)
+
+
+def only_through_desk(user, conversation) -> bool:
+    """The agent reaches this chat through the desk alone: no panel admin, no Lead AI access, not the chat's owner,
+    none of its number's holders. Their screen is then the chat and the customer, nothing of the team (``trim``)."""
+    found = scope(user)
+    return found is not None and found.through_desk(conversation)
+
+
+def trim_appointment(appointment):
+    """A serialized appointment (views.serialize_appointment) with no agent's name on the call."""
+    if not isinstance(appointment, dict):
+        return appointment
+    return {**appointment, "taken_by": "", "taken_by_id": None}
 
 
 def trim(row: dict) -> dict:
     """A serialized chat (inbox.serializers.serialize_conversation, views.serialize_lead_ai_conversation) for an agent
     who has it through the desk alone: our number as its digits (the composer says which line the reply goes from),
-    nothing of the team (no owner, no number's name, no campaign or lead id, no earlier chats on our other numbers, no
-    agent's name on a pause or a call). In place, and returned."""
+    nothing of the team (no owner, no number's name, no campaign or lead id, no leadbot lead, no earlier chats on our
+    other numbers, no agent's name on a pause or a call). In place, and returned."""
     number = row.get("number")
     row["number"] = {"id": number.get("id"), "phone_number": number.get("phone_number", "")} if isinstance(number, dict) else None
     for key in TEAM_KEYS:
@@ -275,18 +315,22 @@ def trim(row: dict) -> dict:
     ai = row.get("lead_ai_ai")
     if isinstance(ai, dict):
         row["lead_ai_ai"] = {**ai, "memory": [], "paused_by": ""}
-    appointment = row.get("lead_ai_appointment")
-    if isinstance(appointment, dict):
-        row["lead_ai_appointment"] = {**appointment, "taken_by": "", "taken_by_id": None}
+    if "lead_ai_appointment" in row:
+        row["lead_ai_appointment"] = trim_appointment(row["lead_ai_appointment"])
     return row
 
 
 def trim_live(data: dict) -> dict:
-    """A live frame's data (inbox.events.publish) for the responsible's own channel: its conversation trimmed."""
-    conversation = data.get("conversation") if isinstance(data, dict) else None
-    if not isinstance(conversation, dict):
+    """A live frame's data (inbox.events.publish) for the responsible's own channel: its conversation trimmed, and no
+    colleague's name on a message (the desk's thread shows no author line either)."""
+    if not isinstance(data, dict):
         return data
-    return {**data, "conversation": trim(dict(conversation))}
+    out = dict(data)
+    if isinstance(out.get("conversation"), dict):
+        out["conversation"] = trim(dict(out["conversation"]))
+    if isinstance(out.get("message"), dict) and out["message"].get("sent_by") is not None:
+        out["message"] = {**out["message"], "sent_by": None}
+    return out
 
 
 def refresh_responsibles(now=None) -> int:
@@ -308,12 +352,17 @@ def refresh_responsibles(now=None) -> int:
     return len(stale)
 
 
-def live_groups(conversation) -> list[str]:
-    """The responsible's own live channel for a chat on their desk that they reach through the desk alone
-    (only_through_desk; inbox.events.publish, via lane.desk_scoped_groups): they hold no number group and are not the
-    chat's owner, so nothing else would reach them, and the frames go trimmed (trim_live). An admin, a desk agent or a
-    holder of the chat's number hears the number's or the desk's group as before: no channel of their own."""
+def live_groups(conversation) -> tuple[list[str], list[str]]:
+    """The responsible's own live channel for a chat on their desk (inbox.events.publish, via lane.desk_groups_for),
+    as (the groups that hear the chat's frames in full, the ones that hear them trimmed). A panel admin hears the
+    number's group, an agent with Lead AI access the desk's, the chat's owner their own channel already: nothing more
+    for them. Any other responsible hears nothing otherwise (an agent joins no number group, not even for a number
+    they hold: inbox.consumers), so they get the frames on their channel: in full when they hold the chat's number or
+    own it, trimmed (trim_live) when they have the chat through the desk alone (only_through_desk)."""
     from apps.inbox.events import group_for_agent
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    from .lane import has_desk_access
 
     state = (
         LeadAiChatState.objects.filter(conversation_id=getattr(conversation, "pk", None), desk_at__isnull=False)
@@ -321,9 +370,13 @@ def live_groups(conversation) -> list[str]:
         .select_related("responsible_agent")
         .first()
     )
-    if state is None or not only_through_desk(state.responsible_agent, conversation):
-        return []
-    return [group_for_agent(state.responsible_agent_id)]
+    if state is None:
+        return [], []
+    agent = state.responsible_agent
+    if sees_all_inbox_chats(agent) or has_desk_access(agent) or getattr(conversation, "assigned_agent_id", None) == agent.pk:
+        return [], []
+    group = [group_for_agent(agent.pk)]
+    return ([], group) if only_through_desk(agent, conversation) else (group, [])
 
 
 def count_for(user) -> int:

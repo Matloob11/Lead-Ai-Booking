@@ -68,13 +68,12 @@ def publish(conversation, event, data):
     # agents with Lead AI access hear those events on the desk's own group.
     extra_groups, scoped_groups, scoped_data = [], [], None
     try:
-        from apps.leadai.lane import desk_event_groups, desk_scoped_groups, event_name, trim_for_desk
+        from apps.leadai.lane import desk_groups_for, event_name, trim_for_desk
 
         event = event_name(conversation, event)
-        extra_groups = desk_event_groups(event, conversation)
-        # The chat's Bitrix responsible, who has it through the handover desk alone: the frame trimmed to the chat
-        # and the customer (apps/leadai/handover_desk.py).
-        scoped_groups = desk_scoped_groups(event, conversation)
+        # The desk, and the chat's Bitrix responsible on the handover desk: in full, or trimmed to the chat and the
+        # customer when they have the chat through the desk alone (apps/leadai/handover_desk.py).
+        extra_groups, scoped_groups = desk_groups_for(event, conversation)
         if scoped_groups:
             scoped_data = trim_for_desk({**data, "number_id": conversation.number_id})
     except Exception:  # noqa: BLE001

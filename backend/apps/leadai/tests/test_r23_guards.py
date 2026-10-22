@@ -12,12 +12,16 @@ The fakes are test_assistant's: the clock is Monday 12 October 2026, 14:00 Dubai
 """
 
 import datetime as dt
+from dataclasses import replace
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from apps.leadai.assistant import engine, filters, rules
 from apps.leadai.models import LeadAiAppointment
 from apps.leadai.tests.test_assistant import NOW
+from apps.leadai.tests.test_eval_command import answer as eval_answer
+from apps.leadai.tests.test_eval_guard_fixes import run_scenario
+from apps.leadai.tests.test_eval_guards import scenario
 from apps.leadai.tests.test_shops_playbook import ShopsBase, at, shop_answer
 
 COMPLAINT = "Your agent said she would call me this morning and nobody called. Very bad service, I wasted my whole morning waiting"
@@ -65,6 +69,16 @@ class ComplaintHandoverTests(ShopsBase):
         theirs = {"handover": {"needed": True, "reason": "call_requested"}, "opt_out": "none", "send": True, "reply": APOLOGY}
         self.assertFalse(engine.complaint_handover(theirs, [COMPLAINT]))
         self.assertEqual(theirs["handover"]["reason"], "call_requested")
+
+
+class EvalMirrorTests(TestCase):
+    def test_the_eval_mirrors_the_guard_and_its_quiet_exception(self):
+        run, _ = run_scenario(scenario("complaint"), eval_answer(APOLOGY))
+        self.assertEqual(run.answer["handover"], {"needed": True, "reason": "complaint_or_upset"})
+        # A person has the chat (handed_over): the guard stands aside live (settle's quiet), so in the eval too.
+        held = replace(scenario("complaint"), handed_over="yes (call_requested)")
+        run, _ = run_scenario(held, eval_answer(APOLOGY))
+        self.assertNotEqual((run.answer or {}).get("handover", {}).get("reason"), "complaint_or_upset")
 
 
 class LateArrivalTurnTests(ShopsBase):

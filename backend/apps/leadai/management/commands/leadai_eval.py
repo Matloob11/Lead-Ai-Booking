@@ -7200,6 +7200,8 @@ def run_once(scenario: Scenario, label: str) -> Run:
                 residential=res,
                 residential_facts=DEFAULT_RESIDENTIAL_FACTS,
                 track=run.decision.track if res and run.decision is not None else "",
+                # As live: a person has the chat (engine.complaint_handover never adds a second handover then).
+                quiet=scenario.handed_over != "no",
             )
         if shops_chat and engine.broker_holds(answer):
             when, still_invalid = None, False  # as live (Q11): a broker books nothing, the time stays a tentative
