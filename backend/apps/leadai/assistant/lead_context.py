@@ -189,6 +189,57 @@ def parse(row) -> dict:
     return {key: value for key, value in context.items() if value not in (None, "")}
 
 
+# The inventory's unit values (assistant/inventory.py, tracks.py) as the context's own keys: the lead's fields' words.
+_UNIT_HOMES = ("studio", "one_br", "two_plus")
+_PROPERTY_KINDS = ("villa", "townhouse", "shop")
+_CLUSTER_NAMES = frozenset(CLUSTERS.values())
+
+
+def _cluster_of(sub_area) -> str:
+    """"Spain Cluster" (a listing's sub-area) as the context writes a cluster ("Spain"), only one of CLUSTERS' names."""
+    match = re.match(r"\s*([A-Za-z]+)", str(sub_area or ""))
+    name = match.group(1).title() if match else ""
+    return name if name in _CLUSTER_NAMES else ""
+
+
+def enrich(context) -> dict:
+    """The context with what the listing it names says (inventory.enquired: A7's reference or the portal's listing id),
+    for the values the lead's own fields left empty: the unit and the property type, rent or sale, the community and
+    International City's cluster. A lead that names a listing and nothing else (Property Finder's often carry only
+    "Listing ID: …") is then a studio to rent in Spain Cluster, not "nothing said", for tracks.decide and the greet
+    (round 22e). The lead's own fields always win; a listing the inventory lacks changes nothing. Never raises."""
+    if not isinstance(context, dict):
+        return {}
+    out = {key: value for key, value in context.items() if value not in (None, "")}
+    if not (out.get("listing_ref") or out.get("listing_id")):
+        return out
+    from . import inventory
+
+    try:
+        unit = inventory.enquired(out)
+    except Exception:  # noqa: BLE001 - the listing is a help, never a reason to fail a turn or a greet
+        logger.exception("Lead AI could not read the listing a lead context names")
+        unit = None
+    if unit is None:
+        return out
+    kind = str(getattr(unit, "unit", "") or "")
+    if not out.get("unit") and not out.get("property"):
+        if kind in _UNIT_HOMES:
+            out["unit"], out["property"] = kind, "apartment"
+        elif kind in _PROPERTY_KINDS:
+            out["property"] = kind
+    if not out.get("deal") and str(getattr(unit, "deal", "") or "") in ("rent", "sale"):
+        out["deal"] = str(unit.deal)
+    community = _community(getattr(unit, "community", ""))
+    if not out.get("community") and community:
+        out["community"] = community
+    if not out.get("cluster") and (out.get("community") or "").casefold() == "international city":
+        cluster = _cluster_of(getattr(unit, "sub_area", ""))
+        if cluster:
+            out["cluster"] = cluster
+    return out
+
+
 def lines(context) -> list[str]:
     """The residential context's line (slice B): one JSON object, data the model may be told is out of date."""
     shown = {key: context[key] for key in CONTEXT_KEYS if isinstance(context, dict) and context.get(key) not in (None, "")}
@@ -201,7 +252,7 @@ def keep(state, row, now) -> dict:
     """Store the context of a lead read just now (here, or by lead_history's read of the same lead)."""
     from ..models import LeadAiChatState
 
-    context = parse(row)
+    context = enrich(parse(row))
     LeadAiChatState.objects.filter(pk=state.pk).update(lead_context=context, lead_context_at=now)
     state.lead_context, state.lead_context_at = context, now
     return context

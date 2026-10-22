@@ -27,6 +27,8 @@ NEW_STATUS = "NEW"
 # The template's second variable: the listing in words ("the 2-bedroom in Serena"); "your enquiry" when nothing is known.
 UNIT_WORDS = {"studio": "the studio", "one_br": "the one-bedroom", "two_plus": "the apartment", "villa": "the villa", "townhouse": "the townhouse", "shop": "the shop"}
 FALLBACK_WORDS = "your enquiry"
+# The first variable for a lead with no usable name, the popup's own word (campaigns.crm_leads._GREETING_FALLBACK).
+GREETING_FALLBACK = "there"
 
 
 def settings_ready(settings_row) -> str:
@@ -61,11 +63,17 @@ def greet_template(settings_row):
 
 
 def template_ready(template) -> str:
-    """'' when the greet may use this template, else why not: the greet carries no media and fills {{1}} and {{2}} only."""
+    """'' when the greet may use this template, else why not: the greet carries no media, fills {{1}} and {{2}} only, and
+    is a portal template by name (ic_templates.PORTAL: the engine reads a reply to it with the lead context first; a
+    template it reads as a shops one would put a studio lead's chat on the shop track, as chat 52745 was, round 22e)."""
+    from .. import ic_templates
+
     if getattr(template, "requires_header_media", False):
         return "greet template has a media header"
     if int(getattr(template, "variable_count", 0) or 0) > 2:
         return "greet template needs more than {{1}} and {{2}}"
+    if ic_templates.kind(getattr(template, "name", "")) != ic_templates.PORTAL:
+        return f"greet template must be a portal one (a name starting {ic_templates.PORTAL_PREFIX})"
     return ""
 
 
@@ -120,13 +128,17 @@ def listing_words(context: dict, unit=None) -> str:
 
 def popup_row(lead_id: int, row: dict, phone: str) -> dict:
     """The lead as the campaign popup sends it (campaigns.crm_leads.build_recipients reads these keys)."""
-    from . import crm_fields
+    from . import crm_fields, filters
 
+    # {{1}} as the assistant's own lines greet (filters.first_name): "AHMED KHAN" is Ahmed, "Bayut WhatsApp | Md Sumon"
+    # (a title) is Sumon; a placeholder ("Unknown", "Lead", an e-mail) is nobody, greeted "there" as the popup greets a
+    # lead with no usable name (crm_leads._GREETING_FALLBACK; round 22e's review).
+    first = filters.first_name(str(row.get("NAME") or "")) or filters.first_name(str(row.get("TITLE") or "")) or GREETING_FALLBACK
     return {
         "id": lead_id,
         "phone": phone,
-        "name": str(row.get("NAME") or ""),
-        "first_name": str(row.get("NAME") or ""),
+        "name": first,
+        "first_name": first,
         "last_name": str(row.get("LAST_NAME") or ""),
         "title": str(row.get("TITLE") or ""),
         "bot_status": row.get(crm_fields.FIELD_BOT_STATUS),
@@ -176,7 +188,7 @@ def greet(lead_id: int, *, now=None) -> dict:
         return {"skipped": f"not a new lead ({str(row.get('STATUS_ID') or '')[:24]})"}
     # A portal's lead only (lead_context.SOURCES: Property Finder, Bayut, Dubizzle): a lead the inbox's "Create lead"
     # made for a chat in progress, a hand-made lead, an agent's own test lead is nobody's enquiry to greet.
-    context = lead_context.parse(row)
+    context = lead_context.enrich(lead_context.parse(row))
     if not context.get("source"):
         return {"skipped": f"not a portal lead ({str(row.get('SOURCE_ID') or '')[:24]})"}
     created = _created_at(row)

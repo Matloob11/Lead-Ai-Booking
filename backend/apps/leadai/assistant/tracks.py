@@ -629,7 +629,11 @@ def _from_lead(context: dict) -> Decision | None:
     if home is not None:
         return _home(home[0], home[1], deal_from=LEAD if home[0] else "", reason=LEAD)
     if context.get("unit") == TWO_PLUS or context.get("property") in ("villa", "townhouse"):
-        return Decision(OTHER, context.get("unit") if context.get("unit") == TWO_PLUS else "", reason=LEAD)
+        # The lead's rent or sale rides along: a pack (pack_decision) makes a Serena villa for sale the sale track, never
+        # rent by default (round 22e's review: a sale villa lead's "Is it still available?" ran as a rent chat).
+        deal = context.get("deal") if context.get("deal") in (RENT, SALE) else ""
+        unit = context.get("property") if context.get("property") in (VILLA, TOWNHOUSE) else context.get("unit") if context.get("unit") == TWO_PLUS else ""
+        return Decision(OTHER, unit, deal=deal, deal_from=LEAD if deal else "", reason=LEAD)
     return None
 
 
@@ -698,7 +702,9 @@ def pack_decision(decision, texts, known: dict, need, lead, *, packs=(), stored:
     # The deal: a buy word or intent, else the stored track's own (a Villanova sale chat asking the villa's price stays a
     # sale), else rent; a rent word on anything but a stored sale track says rent.
     buying = (need is not None and need.kind == needs.BUY) or wants_buy(texts) or known.get("intent") == needs.BUY
-    deal = decision.deal or (SALE if buying else stored if stored in (RENT, SALE) else RENT)
+    # ... else the lead's own rent or sale when a step read it already (a portal lead on a villa for sale; round 22e).
+    lead_deal = str((lead.get() or {}).get("deal") or "") if isinstance(lead, _Lead) and lead.loaded else ""
+    deal = decision.deal or (SALE if buying else stored if stored in (RENT, SALE) else lead_deal if lead_deal in (RENT, SALE) else RENT)
     if rent_said and deal == SALE and stored != SALE:
         deal = RENT
     track = deal if deal == RENT or SALE_LIVE else OTHER
@@ -875,6 +881,10 @@ def first_yes(decision: Decision, *, for_client_known: bool = False) -> str:
         return FOR_WHOM
     if decision.track in (RENT, SALE):
         if for_client_known:
+            return ""
+        if decision.community:
+            # A home in a community with a pack (a Mudon villa, a Serena townhouse: the portal greet's leads, round 22e):
+            # the pack's own flow opens it with the model; the shops' "a shop, a studio or a one-bedroom" is no question there.
             return ""
         return OPEN_LEAD if decision.unit in UNITS else WHAT_NEED
     if decision.track == OTHER and decision.reason in (WORDS, BOTH, TAG, STORED, FACTS):

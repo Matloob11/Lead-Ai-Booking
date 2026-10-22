@@ -421,6 +421,29 @@ MIXED = Campaign(
     body=shop_templates.rendered(ic_templates.mixed_body(DEFAULT_SHOPS_FACTS), {"1": "{name}", "2": "Malik"}),
     buttons=ic_templates.MIXED_BUTTONS,
 )
+# The new-lead greet (ic_templates.PORTAL_NAME; assistant/newlead.py, round 22): UTILITY, {{1}} the first name, {{2}} the
+# listing in words. Its reply is the lead context's to answer for (tracks.decide's step 4), never the shops' (round 22e).
+PORTAL = Campaign(
+    template=ic_templates.PORTAL_NAME,
+    category="UTILITY",
+    record="record: lead",
+    body=(
+        "Hi {name}, thank you for your enquiry about the studio in International City with A7 Group Real Estate. "
+        "Are you still looking? Reply here and I will share the details, photos and available viewing times."
+    ),
+)
+PORTAL_SHOP = Campaign(
+    template=ic_templates.PORTAL_NAME,
+    category="UTILITY",
+    record="record: lead",
+    body=PORTAL.body.replace("the studio in International City", "the shop in International City"),
+)
+PORTAL_MUDON = Campaign(
+    template=ic_templates.PORTAL_NAME,
+    category="UTILITY",
+    record="record: lead",
+    body=PORTAL.body.replace("the studio in International City", "the 3-bedroom townhouse in Mudon"),
+)
 IC_SHOPS = "ic_shops"
 
 
@@ -4976,6 +4999,88 @@ SCENARIOS = [
             track("sale", "studio", deal="sale"), invited(False),
         ],
         words=CODE,
+    ),
+    # Round 22e: the new-lead greet (Campaign PORTAL) is answered for by the lead context first, as the mixed template is.
+    # The first live greet's reply (chat 52745, 2026-10-22: a Bayut studio lead, "Hi i need payment plan details and other
+    # charges") ran on the shop track and got the shop types list, the greet read as a shops template.
+    Scenario(
+        "shops-portal-studio-payment-plan",
+        "portal greet: a Bayut studio lead (England Cluster, rent) asking about the payment plan enters the rent track and gets code's opener for that studio, never the shop list",
+        playbook=IC_SHOPS,
+        campaign=PORTAL,
+        lead_context={"source": "Bayut", "listing_ref": "a7group-1726", "unit": "studio", "property": "apartment", "cluster": "England", "community": "International City", "deal": "rent"},
+        new=["Hi i need payment plan details and other charges"],
+        expect=[track("rent", "studio", clusters=("England",)), sends_res("open"), no_step(), no_shop_words(), out_says(r"Studios in England Cluster", "open on the lead's studio"), questions_at_most(2), no_person_named()],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-portal-studio-payment-plan-after-opener",
+        "portal greet: after the opener, 'For myself. What is the payment plan?' is the model's rent turn: no shop list, no cash-or-finance, the cheques or our agent",
+        playbook=IC_SHOPS,
+        campaign=PORTAL,
+        track="rent",
+        unit="studio",
+        chat=[("customer", "Hi i need payment plan details and other charges"), ("assistant", "Sure! Studios in England Cluster are generally around AED 29,000–33,000 a year. Are you looking for yourself or for a client?")],
+        lead_context={"source": "Bayut", "listing_ref": "a7group-1726", "unit": "studio", "property": "apartment", "cluster": "England", "community": "International City", "deal": "rent"},
+        new=["For myself. What is the payment plan?"],
+        expect=[track("rent", "studio"), no_step(), no_shop_words(), segment("residential_tenant"), never_out(r"\bcash\b|financ|mortgage", "ask a tenant cash or finance"), questions_at_most(2), no_person_named()],
+    ),
+    Scenario(
+        "shops-portal-yes-studio-lead",
+        "portal greet: a studio lead's typed 'Yes' gets code's opener for that studio, never the shops' for-whom line",
+        playbook=IC_SHOPS,
+        campaign=PORTAL,
+        lead_context={"source": "Bayut", "listing_ref": "a7group-1726", "unit": "studio", "property": "apartment", "cluster": "England", "deal": "rent"},
+        new=["Yes"],
+        expect=[
+            out_says(r"^Great! Is the studio in England Cluster for yourself, or are you checking for a client\?$", "open on the lead's studio"),
+            track("rent", "studio", clusters=("England",)), invited(False), wants("home"),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-portal-yes-shop-lead",
+        "portal greet: a shop lead's yes gets the shops' 'for yourself, or for a client?'",
+        playbook=IC_SHOPS,
+        campaign=PORTAL_SHOP,
+        lead_context={"source": "Property Finder", "property": "shop", "cluster": "China"},
+        new=["Yes"],
+        expect=[sends_line("for_whom"), track("shop")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-portal-yes-nothing-known",
+        "portal greet: a yes from a lead whose fields say nothing asks what they want, never 'for yourself?'",
+        playbook=IC_SHOPS,
+        campaign=PORTAL,
+        lead_context={"source": "Property Finder"},
+        new=["Yes"],
+        expect=[sends_line("res_what_need"), invited(False), track("")],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-portal-mudon-townhouse-available",
+        "portal greet: a Mudon townhouse lead asking whether it is still available is on Mudon's rent track with the model, never the shop list nor 'a shop, a studio or a one-bedroom'",
+        playbook=IC_SHOPS,
+        campaign=PORTAL_MUDON,
+        lead_context={"source": "Property Finder", "listing_ref": "a7group-1633", "unit": "two_plus", "property": "townhouse", "community": "Mudon", "deal": "rent"},
+        new=["Yes, is it still available?"],
+        expect=[
+            track("rent"), no_step(), no_shop_words(), segment("residential_tenant", "buyer"),
+            never_out(r"a shop, a studio or a one-bedroom", "ask the shops' what-need question"), questions_at_most(2), no_person_named(),
+        ],
+    ),
+    Scenario(
+        "shops-portal-villanova-villa-sale-available",
+        "portal greet: a Villanova villa-for-sale lead asking whether it is still available is on Villanova's sale track (the lead's deal), never rent nor the shop list",
+        playbook=IC_SHOPS,
+        campaign=PORTAL_MUDON,
+        lead_context={"source": "Property Finder", "listing_ref": "a7group-1901", "property": "villa", "community": "Villanova", "deal": "sale"},
+        new=["Is the villa still available?"],
+        expect=[
+            track("sale", deal="sale"), no_step(), no_shop_words(), segment("buyer", "residential_tenant"), never_out(RENT_FIGURES, "a rent figure to a buyer"),
+            never_out(r"a shop, a studio or a one-bedroom", "ask the shops' what-need question"), questions_at_most(2), no_person_named(),
+        ],
     ),
     Scenario(
         "shops-mixed-yes-known-shop",
