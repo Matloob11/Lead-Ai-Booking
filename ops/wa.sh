@@ -73,6 +73,7 @@
 #   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
+#   ops/wa.sh submit-portal-enquiry-template [--dry-run] [--category UTILITY|MARKETING]  C68 portal_enquiry_reply to the 8 sending WABAs
 #   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
 #   ops/wa.sh load                        host load, RAM, disk, top containers
 #   ops/wa.sh leadai-greet-settings on|off [number] [bitrix id] [template] [hours]  the new-lead greet's settings
@@ -1199,6 +1200,24 @@ case "$cmd" in
       die "submit-shops-templates takes no arguments, or --dry-run"
     fi
     remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_shops_templates $flag"
+    ;;
+
+  submit-portal-enquiry-template)
+    # Board C68: portal_enquiry_reply (UTILITY by default; --category MARKETING if Meta
+    # refuses) to the eight sending numbers' WABAs (board D4). Idempotent. --dry-run lists
+    # WABAs and submits nothing. Optional: --category UTILITY|MARKETING.
+    flag=""
+    category=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --dry-run) flag="--dry-run"; shift ;;
+        --category)
+          [[ "${2:-}" =~ ^(UTILITY|MARKETING)$ ]] || die "--category takes UTILITY or MARKETING"
+          category="--category $2"; shift 2 ;;
+        *) die "submit-portal-enquiry-template takes --dry-run and/or --category UTILITY|MARKETING" ;;
+      esac
+    done
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_portal_enquiry_template $flag $category"
     ;;
 
   submit-ic-templates)
