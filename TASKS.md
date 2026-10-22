@@ -1,3 +1,11 @@
+## 2026-10-22 — Lead AI screen: an "Unread" filter under the search box, live 11:56 UTC (Claude Code)
+
+Matloob (11:55 UTC): a button under the search box that shows only the unread chats. A chip "Unread" first in the filter row (before Brokers and Hot first), pressed = only the chats with a customer message nobody has read yet (the list endpoint's `?unread=1`, which filters `unread_count > 0` and was there already: `views.py`), pressed again = every chat; it carries the count the unfiltered list reports (the menu badge's figure); hidden on the Needs a person and Today views, which keep their own lists. Live events: a chat the customer just wrote to joins the Unread list; a chat somebody read meanwhile leaves it (the open chat stays until the list loads again). `bitrix/public/assets/modules/lead-ai/screen.js`, `api.js` (the `unread` param), pushed with `ops/wa.sh push`; md5 and served sizes verified (screen.js 48,112 bytes, api.js 6,827). No backend change, no CSS change (the chip uses `.lai-filter`).
+
+**Shared:** `TASKS.md`. Panel: `modules/lead-ai/screen.js`, `api.js`.
+
+---
+
 ## 2026-10-22 — "Reconnect again" sent: the 19 October campaign's customers who never said no got the second template; the assistant is talking to those who answered (Claude Code)
 
 Template `intl_city_property_reconnect_again` approved on all eight WABAs at 10:37 UTC (submitted 09:35). Sends on Matloob's standing instruction ("send it to anyone with a 1% chance; never to those who said no"), from **10:38 UTC**, inside Template B's hours, a canary of 60 chats first, then passes over every chat and the fresh leads (`ops/wa.sh leadai-reconnect-again 549,550,551,552,553 --send --limit …`).
