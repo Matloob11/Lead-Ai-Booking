@@ -92,7 +92,34 @@ class AudienceTests(ReconnectBase):
         Message.objects.create(
             conversation=done, direction=Message.Direction.OUTBOUND, kind=Message.Kind.TEMPLATE, template=self.again, body="x", status=Message.Status.SENT
         )
+        # What the words say that the state does not (the review before the gate): rented elsewhere, "Not now" with a
+        # check-back planned, a no in words to the campaign; and a fresh lead whose customer talks to us already, or
+        # whose Lead AI chat a person took over.
+        rented = self.recipient(facts={"already_rented": True})
+        not_now = self.recipient(followup_due_at=NOW + dt.timedelta(days=20))
+        declined = self.recipient()
+        Message.objects.create(
+            conversation=declined, direction=Message.Direction.OUTBOUND, kind=Message.Kind.TEMPLATE, template=self.template, body="Hi, shops?",
+            status=Message.Status.DELIVERED, created_at=NOW - dt.timedelta(days=3, minutes=5),
+        )
+        Message.objects.create(
+            conversation=declined, direction=Message.Direction.INBOUND, kind=Message.Kind.TEXT, body="No thanks", status=Message.Status.RECEIVED,
+            created_at=NOW - dt.timedelta(days=3),
+        )
+        Conversation.objects.filter(pk=declined.pk).update(last_inbound_at=NOW - dt.timedelta(days=3))
+        self.recipient(chat=False, status="skipped", phone="971509990097", lead_id=997)
+        talking = Contact.objects.create(wa_id="971509990097", display_name="Talking")
+        Conversation.objects.create(number=self.number, contact=talking, assigned_agent=self.agent, last_inbound_at=NOW - dt.timedelta(days=30))
+        self.recipient(chat=False, status="skipped", phone="971509990096", lead_id=996)
+        taken = Contact.objects.create(wa_id="971509990096", display_name="Taken")
+        taken_chat = Conversation.objects.create(number=self.number, contact=taken, assigned_agent=self.agent)
+        LeadAiChat.objects.create(conversation=taken_chat, active=False, crm_entity="lead", crm_id=996)
         rows = self.rows()
+        self.assertEqual(rows[rented.contact.wa_id].why, "rented elsewhere already")
+        self.assertEqual(rows[not_now.contact.wa_id].why, "said not now (a check-back is planned)")
+        self.assertEqual(rows[declined.contact.wa_id].why, "declined in words")
+        self.assertEqual(rows["971509990097"].why, "talking to us already")
+        self.assertEqual(rows["971509990096"].why, "a Lead AI chat of theirs exists already")
         self.assertEqual(rows[self.contact.wa_id].path, reconnect.CHAT)  # the campaign's own chat: never wrote back
         self.assertEqual(rows[quiet.contact.wa_id].path, reconnect.CHAT)
         self.assertEqual(rows[recent.contact.wa_id].why, "wrote to us in the last 48 hours")
@@ -107,10 +134,16 @@ class AudienceTests(ReconnectBase):
         self.assertEqual(rows[off.contact.wa_id].why, "not on the Lead AI screen")
         self.assertEqual(rows[done.contact.wa_id].why, "sent already")
         counts = reconnect.summary(list(rows.values()))
-        self.assertEqual((counts["recipients"], counts[reconnect.CHAT], counts[reconnect.FRESH]), (13, 3, 1))
+        self.assertEqual((counts["recipients"], counts[reconnect.CHAT], counts[reconnect.FRESH]), (18, 3, 1))
         self.assertEqual(counts["out"]["stopped"], 1)
-        # A failed reconnect-again message does not count as sent: the next run tries that chat again.
-        Message.objects.filter(conversation=done, template=self.again).update(status=Message.Status.FAILED)
+        # A failed reconnect-again message: Meta's refusal after the gateway took it (a wamid), or the gateway's own
+        # refusal, never reached them, so the next run tries again; a failure that may have gone (a timeout, no wamid,
+        # no refusal word) counts as sent, so nobody gets it twice.
+        Message.objects.filter(conversation=done, template=self.again).update(status=Message.Status.FAILED, wamid="wamid.x", error_code="131049")
+        self.assertEqual(self.rows()[done.contact.wa_id].path, reconnect.CHAT)
+        Message.objects.filter(conversation=done, template=self.again).update(wamid=None, error_code="", error_detail="ReadTimeout after 30 s")
+        self.assertEqual(self.rows()[done.contact.wa_id].why, "sent already")
+        Message.objects.filter(conversation=done, template=self.again).update(error_detail="Gateway: no credit left")
         self.assertEqual(self.rows()[done.contact.wa_id].path, reconnect.CHAT)
 
     def test_a_phone_in_two_campaigns_goes_once(self):
@@ -134,6 +167,13 @@ class SendTests(ReconnectBase):
         with patch("apps.inbox.services.send_template", side_effect=RuntimeError("131049")):
             self.assertTrue(reconnect.send_in_chat(row, NOW).startswith("failed (RuntimeError"))
         self.assertFalse(reconnect.sent_already(self.conversation))
+        # What the Bitrix lead says now holds the send (followups.bitrix_blocks: a person's status, a booked meeting).
+        with patch("apps.leadai.followups.bitrix_blocks", return_value="the Bitrix lead shows a person has it: a meeting") as blocks, patch(
+            "apps.inbox.services.send_template"
+        ) as send:
+            self.assertEqual(reconnect.send_in_chat(row, NOW), "the Bitrix lead shows a person has it: a meeting")
+        self.assertEqual(blocks.call_args.args[0].pk, self.conversation.pk)
+        send.assert_not_called()
         # No approved template on the number: nothing goes.
         WaTemplate.objects.filter(pk=self.again.pk).update(status=WaTemplate.Status.PENDING)
         self.assertEqual(reconnect.send_in_chat(row, NOW), "no approved reconnect-again template on this number")

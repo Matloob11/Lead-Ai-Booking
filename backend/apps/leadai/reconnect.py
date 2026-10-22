@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from django.utils import timezone
 
 from . import followups, ic_templates, lane
-from .assistant import transcript
+from .assistant import newlead, transcript
 from .models import LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ class Row:
     path: str = ""  # CHAT, FRESH, or "" when left out
     why: str = ""  # why it is left out, or "" when it goes
     conversation: object = None
+    chat: object = None
     state: object = None
     result: str = ""  # what the send did
 
@@ -83,18 +84,37 @@ def approved_template(number):
     return next((row for row in rows if _sendable(row)), None)
 
 
+# A failed send that provably never reached the customer: the gateway refused it outright, or Meta refused it after
+# taking it (the per-customer cap, an unreachable number): the next run may try again.
+NEVER_LEFT = ("credit", "not approved", "needs", "value", "invalid", "131049", "131026", "131047", "130472", "400", "401", "403", "404", "422", "429")
+
+
+def never_left(message) -> bool:
+    """A FAILED reconnect-again row that did not reach the customer: a wamid (the gateway took it, Meta then failed it:
+    the cap, undeliverable), or the gateway's own refusal (no credit, not approved, a bad value). A failure with no
+    wamid and none of those words (a read timeout, a 502 after the send) may have gone out: it counts as sent, so no
+    customer gets the template twice (the review before the gate, 2026-10-22)."""
+    if getattr(message, "wamid", None):
+        return True
+    detail = f"{message.error_code or ''} {message.error_detail or ''}".lower()
+    return any(word in detail for word in NEVER_LEFT)
+
+
 def sent_already(conversation) -> bool:
-    """The reconnect-again template went to this chat already and was not refused by Meta."""
+    """The reconnect-again template went to this chat already (sent, delivered, read, queued, or failed in a way that
+    may have reached them)."""
     from apps.inbox.models import Message
 
-    return (
-        Message.objects.filter(
-            conversation=conversation, direction=Message.Direction.OUTBOUND, kind=Message.Kind.TEMPLATE,
-            template__name=ic_templates.AGAIN_NAME,
-        )
-        .exclude(status=Message.Status.FAILED)
-        .exists()
+    rows = Message.objects.filter(
+        conversation=conversation, direction=Message.Direction.OUTBOUND, kind=Message.Kind.TEMPLATE, template__name=ic_templates.AGAIN_NAME
     )
+    return any(row.status != Message.Status.FAILED or not never_left(row) for row in rows)
+
+
+def lead_ai_chat_before(phone: str) -> bool:
+    """A Lead AI chat exists for this phone on any of our numbers: an active one the popup's rules refuse; one off the
+    screen a person took over (moved to the inbox), and the campaign must not pull it back."""
+    return LeadAiChat.objects.filter(conversation__contact__wa_id=phone).exists()
 
 
 def in_reconnect_campaign(phone: str) -> bool:
@@ -153,18 +173,24 @@ def audience(campaign_ids, now=None, quiet_hours: int = QUIET_HOURS) -> list[Row
             row.why = "in a reconnect-again campaign already"
             continue
         if recipient.conversation_id is None:
+            # Never messaged: a fresh send, unless the customer talks to us already (a campaign would pull an agent's
+            # chat onto the Lead AI screen: the review before the gate) or a Lead AI chat of theirs exists already.
             if recipient.status not in (CampaignRecipient.Status.SKIPPED, CampaignRecipient.Status.EXHAUSTED, CampaignRecipient.Status.FAILED):
                 row.why = f"no chat and not skipped ({recipient.status})"
             elif not row.lead_id:
                 row.why = "no Bitrix lead on the row"
+            elif newlead.talking_already(phone):
+                row.why = "talking to us already"
+            elif lead_ai_chat_before(phone):
+                row.why = "a Lead AI chat of theirs exists already"
             else:
                 row.path = FRESH
             continue
         conversation = recipient.conversation
         row.conversation = conversation
-        chat = LeadAiChat.objects.filter(conversation=conversation).first()
+        row.chat = LeadAiChat.objects.filter(conversation=conversation).first()
         row.state = LeadAiChatState.objects.filter(conversation=conversation).first()
-        why = followups.blocked(conversation, chat, row.state, settings_row)
+        why = followups.blocked(conversation, row.chat, row.state, settings_row)
         if why:
             row.why = why
             continue
@@ -176,6 +202,22 @@ def audience(campaign_ids, now=None, quiet_hours: int = QUIET_HOURS) -> list[Row
             continue
         if conversation.last_inbound_at is not None and conversation.last_inbound_at > quiet_since:
             row.why = f"wrote to us in the last {int(quiet_hours)} hours"
+            continue
+        # What the chat's words say that the state does not (the follow-ups' own holds, followups.holds): they rented
+        # elsewhere, said "Not now" (a check-back planned), turned the offer down in words, or wait for the reply cap.
+        reading = followups.read_since(conversation)
+        facts = (row.state.facts if row.state is not None else None) or {}
+        if followups.rented_still(facts, reading):
+            row.why = "rented elsewhere already"
+            continue
+        if followups.said_not_now(row.state, reading, now):
+            row.why = "said not now (a check-back is planned)"
+            continue
+        if followups.turned_down(reading, now):
+            row.why = "declined in words"
+            continue
+        if followups.cap_pending(conversation, reading):
+            row.why = "their last message waits for the reply cap"
             continue
         if sent_already(conversation):
             row.why = "sent already"
@@ -208,6 +250,11 @@ def send_in_chat(row: Row, now=None) -> str:
         return "no approved reconnect-again template on this number"
     if sent_already(conversation):
         return "sent already"
+    # What the Bitrix lead says now (one REST read): a person's Bot Status or opt-out that never reached us, a meeting a
+    # person booked, a closed stage (followups.bitrix_blocks, as before Template B). A lead that cannot be read waits.
+    why = followups.bitrix_blocks(conversation, row.chat, (row.state.facts if row.state is not None else None) or {})
+    if why:
+        return why
     attempt = f"{FOLLOWUP_KIND}:{now.isoformat()}"
     values = {"1": reminders.template_value(followups._first_name(conversation, row.state) or "there")}
     try:

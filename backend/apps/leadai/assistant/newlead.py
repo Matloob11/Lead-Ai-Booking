@@ -165,7 +165,11 @@ def label_greeted() -> int:
         .distinct()[:LABEL_BATCH]
     )
     if pending:
+        from .. import lane
+
         label.conversations.add(*pending)
+        for conversation_id in pending:
+            lane._announce(conversation_id)  # the chip shows on open screens now, not on the next reload
     return len(pending)
 
 
