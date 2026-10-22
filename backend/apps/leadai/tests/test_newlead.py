@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import time
+import types
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -14,10 +15,13 @@ from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from apps.campaigns.models import Campaign, CampaignRecipient
 from apps.catalog.models import WaTemplate
-from apps.leadai.assistant import inventory, lead_context, newlead
-from apps.leadai.models import LeadAiCampaign, LeadAiSettings, LeadAiUnit
+from apps.inbox.models import Message
+from apps.leadai import ic_templates
+from apps.leadai.assistant import communities, engine, inventory, lead_context, newlead, prompt, rules, tracks
+from apps.leadai.models import LeadAiCampaign, LeadAiChatState, LeadAiSettings, LeadAiUnit
 from apps.leadai.tests.test_assistant import NOW, TEST_SETTINGS, Base
 from apps.leadai.tests.test_residential_turns import RentBase, res_answer
+from apps.leadai.tests.test_shops_playbook import ShopsBase
 
 URL = "/api/leadai/bitrix/new-lead/"
 SECRET = TEST_SETTINGS["CRM_LEAD_WA_SECRET"]
@@ -85,7 +89,9 @@ class EnquiredTests(TestCase):
 class GreetTests(Base):
     def setUp(self):
         super().setUp()
-        LeadAiSettings.objects.filter(pk=1).update(greet_enabled=True, greet_agent=self.admin, greet_number=self.number, greet_template="ic_shops")
+        # The fixture's template, named as the greet's (a portal one: round 22e's template_ready refuses any other kind).
+        WaTemplate.objects.filter(pk=self.template.pk).update(name=ic_templates.PORTAL_NAME)
+        LeadAiSettings.objects.filter(pk=1).update(greet_enabled=True, greet_agent=self.admin, greet_number=self.number, greet_template=ic_templates.PORTAL_NAME)
         self.rows = {900: lead_row()}
         patcher = patch("apps.campaigns.tasks.run_campaign.delay")
         self.run = patcher.start()
@@ -109,7 +115,7 @@ class GreetTests(Base):
         result = newlead.greet(900, now=NOW)
         self.assertTrue(result.get("sent"), result)
         campaign = Campaign.objects.get(pk=result["campaign_id"])
-        self.assertEqual(campaign.name, "New lead · Lead AI · ic_shops")
+        self.assertEqual(campaign.name, "New lead · Lead AI · portal_enquiry_reply")
         recipient = CampaignRecipient.objects.get(campaign=campaign)
         self.assertEqual((recipient.phone, recipient.crm_lead_id, recipient.variables), ("971509998888", 900, {"1": "Ahmed"}))
         self.assertEqual((campaign.lead_ai.playbook, campaign.lead_ai.community), ("ic_shops", "Serena"))
@@ -121,6 +127,7 @@ class GreetTests(Base):
 
     @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
     def test_the_listing_names_the_second_variable_when_the_template_has_one(self):
+        WaTemplate.objects.filter(pk=self.template.pk).update(name="ic_shops")  # the fixture's one-variable template steps aside
         WaTemplate.objects.create(
             waba_business_id="waba1", name="portal_enquiry_reply", language="en", category="UTILITY", status=WaTemplate.Status.APPROVED,
             components=[{"type": "BODY", "text": "Hi {{1}}, thank you for your enquiry about {{2}}."}],
@@ -138,12 +145,27 @@ class GreetTests(Base):
         self.assertEqual(Campaign.objects.get(pk=result["campaign_id"]).lead_ai.community, "Serena")
 
     @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
+    def test_the_greeting_name_is_a_safe_first_name(self):
+        # "AHMED" greets Ahmed; a placeholder in NAME greets nobody by that word: the popup's "there" (round 22e's review).
+        self.rows[904] = lead_row(ID="904", NAME="AHMED", LAST_NAME="KHAN", TITLE="Bayut WhatsApp | AHMED KHAN", PHONE=[{"VALUE": "+971509996666"}])
+        result = newlead.greet(904, now=NOW)
+        self.assertTrue(result.get("sent"), result)
+        self.assertEqual(CampaignRecipient.objects.get(campaign_id=result["campaign_id"]).variables["1"], "Ahmed")
+        self.rows[905] = lead_row(ID="905", NAME="Unknown", LAST_NAME="", TITLE="Property Finder WhatsApp | Unknown", PHONE=[{"VALUE": "+971509995555"}])
+        result = newlead.greet(905, now=NOW)
+        self.assertTrue(result.get("sent"), result)
+        self.assertEqual(CampaignRecipient.objects.get(campaign_id=result["campaign_id"]).variables["1"], "there")
+        from apps.campaigns import crm_leads
+
+        self.assertEqual(newlead.GREETING_FALLBACK, crm_leads._GREETING_FALLBACK)
+
+    @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
     def test_what_is_left_alone(self):
         LeadAiSettings.objects.filter(pk=1).update(greet_enabled=False)
         self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "greet off"})
         LeadAiSettings.objects.filter(pk=1).update(greet_enabled=True, greet_template="")
         self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "no greet template"})
-        LeadAiSettings.objects.filter(pk=1).update(greet_template="ic_shops")
+        LeadAiSettings.objects.filter(pk=1).update(greet_template=ic_templates.PORTAL_NAME)
         for extra, why in (
             ({"STATUS_ID": "IN_PROCESS"}, "not a new lead (IN_PROCESS)"),
             ({"SOURCE_ID": "OTHER"}, "not a portal lead (OTHER)"),  # the inbox's "Create lead", a hand-made or a test lead
@@ -160,7 +182,7 @@ class GreetTests(Base):
         LeadAiSettings.objects.filter(pk=1).update(greet_template="no_such_template")
         self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "no approved template on the greet number"})
         # The agent must be able to send from the greet number; the template carries no media and two variables at most.
-        LeadAiSettings.objects.filter(pk=1).update(greet_template="ic_shops", greet_agent=self.agent)
+        LeadAiSettings.objects.filter(pk=1).update(greet_template=ic_templates.PORTAL_NAME, greet_agent=self.agent)
         self.assertEqual(newlead.greet(900, now=NOW), {"skipped": "greet number not the greet agent's"})
         LeadAiSettings.objects.filter(pk=1).update(greet_agent=self.admin)
         WaTemplate.objects.create(
@@ -196,10 +218,7 @@ class GreetTests(Base):
 
     @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
     def test_the_english_template_is_preferred(self):
-        WaTemplate.objects.create(
-            waba_business_id="waba1", name="portal_enquiry_reply", language="en", category="UTILITY", status=WaTemplate.Status.APPROVED,
-            components=[{"type": "BODY", "text": "Hi {{1}}, about {{2}}."}],
-        )
+        # The fixture's template is the English portal_enquiry_reply (setUp); an Arabic copy of the same name beside it.
         WaTemplate.objects.create(
             waba_business_id="waba1", name="portal_enquiry_reply", language="ar", category="UTILITY", status=WaTemplate.Status.APPROVED,
             components=[{"type": "BODY", "text": "مرحبا {{1}}، بخصوص {{2}}."}],
@@ -265,3 +284,161 @@ class FirstTurnTests(RentBase):
         body = self.outbound()[-1].body
         self.assertNotIn("a7group-1789", body)
         self.assertNotIn("still available", body)
+
+
+# Round 22e: the greet template is a portal one, answered for by the lead context first ----------------------------------
+# The first live greet's reply (chat 52745, 2026-10-22 06:02 UTC): a Bayut studio lead (England Cluster, rent, a7group-1726)
+# wrote "Hi i need payment plan details and other charges" and got the shop types list, the chat on the shop track: the greet
+# template read as a shops one (ic_templates.kind), so tracks.decide's step 4 (the lead context alone, as for the mixed
+# template's first answer) never ran and step 5 chose the shop track by the template.
+
+LIVE_52745 = {
+    "deal": "rent", "unit": "studio", "source": "Bayut", "cluster": "England", "property": "apartment", "community": "International City",
+    "listing_ref": "a7group-1726", "listing_url": "https://www.bayut.com/property/details-123.html",
+}
+PACKS = (
+    communities.pack_of({"name": "Mudon", "aliases": ["mudon"], "units": ["villa", "townhouse", "two_plus"]}),
+    communities.pack_of({"name": "Villanova", "aliases": ["villanova"], "units": ["villa", "townhouse"]}),
+)
+
+
+class PortalKindTests(SimpleTestCase):
+    def test_the_greet_template_is_a_portal_one(self):
+        self.assertEqual(ic_templates.kind("portal_enquiry_reply"), ic_templates.PORTAL)
+        self.assertEqual(ic_templates.kind("Portal_Enquiry_Reply_v2"), ic_templates.PORTAL)
+        self.assertEqual(ic_templates.kind(ic_templates.MIXED_NAME), ic_templates.MIXED)
+        self.assertEqual(ic_templates.kind("ic_shops_offer"), ic_templates.SHOP)
+        self.assertEqual(ic_templates.kind(""), ic_templates.SHOP)
+        self.assertIn(ic_templates.PORTAL_NAME, ic_templates.NOT_SHOP_NAMES)
+
+    def test_the_greet_refuses_a_template_the_engine_reads_as_a_shops_one(self):
+        portal = types.SimpleNamespace(name="portal_enquiry_reply", variable_count=2, requires_header_media=False)
+        shops = types.SimpleNamespace(name="ic_shops_offer", variable_count=2, requires_header_media=False)
+        self.assertEqual(newlead.template_ready(portal), "")
+        self.assertIn("portal", newlead.template_ready(shops))
+
+    def test_the_portal_greets_first_answer_is_the_lead_contexts(self):
+        words = ["Hi i need payment plan details and other charges"]
+        decision = tracks.decide(words=words, facts={}, lead=LIVE_52745, template_kind=ic_templates.PORTAL, first_answer=True, clusters=tracks.DEFAULT_CLUSTERS)
+        self.assertEqual((decision.track, decision.unit, decision.clusters, decision.reason), ("rent", "studio", ("England",), tracks.LEAD))
+        # The same words after a shops template: the shop track by the template (what chat 52745 got).
+        decision = tracks.decide(words=words, facts={}, lead=LIVE_52745, template_kind=ic_templates.SHOP, first_answer=True, clusters=tracks.DEFAULT_CLUSTERS)
+        self.assertEqual((decision.track, decision.reason), ("shop", tracks.TEMPLATE))
+        # A shop lead, a lead whose fields say nothing, a sale lead.
+        self.assertEqual(tracks.decide(words=["Yes"], facts={}, lead={"source": "Property Finder", "property": "shop"}, template_kind=ic_templates.PORTAL, first_answer=True).track, "shop")
+        self.assertEqual(tracks.decide(words=["Yes"], facts={}, lead={"source": "Property Finder"}, template_kind=ic_templates.PORTAL, first_answer=True).track, "")
+        buyer = tracks.decide(words=["Yes"], facts={}, lead={**LIVE_52745, "deal": "sale"}, template_kind=ic_templates.PORTAL, first_answer=True)
+        self.assertEqual((buyer.track, buyer.unit, buyer.deal), ("sale", "studio", "sale"))
+        # Not the first answer (our reply went since): the stored track, as always.
+        later = tracks.decide(words=["How much?"], facts={}, stored="rent", stored_unit="studio", lead=LIVE_52745, template_kind=ic_templates.PORTAL)
+        self.assertEqual((later.track, later.unit), ("rent", "studio"))
+
+    def test_a_pack_leads_yes_is_the_models_turn_on_the_packs_track(self):
+        lead = {"source": "Property Finder", "unit": "two_plus", "property": "townhouse", "community": "Mudon", "deal": "rent"}
+        mudon = tracks.decide(words=["Yes, is it still available?"], facts={}, lead=lead, template_kind=ic_templates.PORTAL, first_answer=True, packs=PACKS)
+        self.assertEqual((mudon.track, mudon.community, mudon.reason), ("rent", "Mudon", tracks.PACK))
+        self.assertEqual(tracks.first_yes(mudon), "")
+        self.assertEqual(engine.shops_rule("Yes", first_answer=True, template_kind=ic_templates.PORTAL, mixed=tracks.first_yes(mudon), track=mudon.track), "")
+        # A villa for sale in a pack community: the sale track, by the lead's deal (the pre-mortem review: it ran as rent).
+        villa = {"source": "Property Finder", "property": "villa", "community": "Villanova", "deal": "sale"}
+        for words in ("Yes", "Is the villa still available?"):
+            sale = tracks.decide(words=[words], facts={}, lead=villa, template_kind=ic_templates.PORTAL, first_answer=True, packs=PACKS)
+            self.assertEqual((sale.track, sale.unit, sale.deal, sale.community), ("sale", "villa", "sale", "Villanova"), words)
+        rent = tracks.decide(words=["Is the villa still available?"], facts={}, lead={**villa, "deal": "rent"}, template_kind=ic_templates.PORTAL, first_answer=True, packs=PACKS)
+        self.assertEqual((rent.track, rent.deal), ("rent", "rent"))
+        # International City's own: the opener for a studio or a one-bedroom, the what-need line for a bigger home, the shops' for-whom line.
+        self.assertEqual(tracks.first_yes(tracks.Decision("rent", "studio", deal="rent")), tracks.OPEN_LEAD)
+        self.assertEqual(tracks.first_yes(tracks.Decision("rent", "two_plus", deal="rent")), tracks.WHAT_NEED)
+        self.assertEqual(tracks.first_yes(tracks.Decision("shop")), tracks.FOR_WHOM)
+
+
+class EnrichTests(TestCase):
+    def test_the_listing_fills_what_the_fields_left_empty(self):
+        LeadAiUnit.objects.create(source="pf", source_id=LISTING_ID, reference="a7group-1789", community="International City", sub_area="Spain Cluster", unit="studio", bedrooms="studio", deal="rent", price=31000)
+        context = lead_context.enrich({"source": "Property Finder", "listing_id": LISTING_ID})
+        self.assertEqual(
+            context,
+            {"source": "Property Finder", "listing_id": LISTING_ID, "unit": "studio", "property": "apartment", "deal": "rent", "community": "International City", "cluster": "Spain"},
+        )
+        # The lead's own fields win; a listing the inventory lacks, or none named, changes nothing.
+        own = {"source": "Property Finder", "listing_ref": "a7group-1789", "unit": "one_br", "deal": "sale", "cluster": "England", "community": "International City"}
+        self.assertEqual(lead_context.enrich(own), own)
+        self.assertEqual(lead_context.enrich({"source": "Bayut", "listing_ref": "a7group-1"}), {"source": "Bayut", "listing_ref": "a7group-1"})
+        self.assertEqual(lead_context.enrich({"source": "Bayut"}), {"source": "Bayut"})
+        self.assertEqual(lead_context.enrich(None), {})
+
+    def test_a_townhouse_and_a_shop_listing(self):
+        LeadAiUnit.objects.create(source="pf", source_id="t1", reference="a7group-1800", community="Serena", sub_area="Casa Viva", unit="townhouse", bedrooms="3", deal="sale", price=2500000)
+        LeadAiUnit.objects.create(source="bitrix", source_id="s1", reference="a7group-1901", community="International City", sub_area="France Cluster", unit="shop", deal="rent", price=40000)
+        self.assertEqual(lead_context.enrich({"listing_ref": "a7group-1800"}), {"listing_ref": "a7group-1800", "property": "townhouse", "deal": "sale", "community": "Serena"})
+        self.assertEqual(lead_context.enrich({"listing_ref": "a7group-1901"}), {"listing_ref": "a7group-1901", "property": "shop", "deal": "rent", "community": "International City", "cluster": "France"})
+
+
+class PortalFirstTurnTests(ShopsBase):
+    """A chat the greet template opened (the campaign's template is a portal one): what the first reply gets."""
+
+    GREET = "Hi Ahmed, thank you for your enquiry about the studio in International City with A7 Group Real Estate. Are you still looking? Reply here and I will share the details, photos and available viewing times."
+
+    def setUp(self):
+        super().setUp()
+        WaTemplate.objects.filter(pk=self.template.pk).update(name=ic_templates.PORTAL_NAME, category="UTILITY")
+        Message.objects.filter(pk=self.campaign_message.pk).update(body=self.GREET)
+
+    def lead(self, **context):
+        self.set_state(lead_context=context, lead_context_at=NOW)
+
+    def outbound(self):
+        return list(Message.objects.filter(conversation=self.conversation, direction=Message.Direction.OUTBOUND).order_by("pk"))
+
+    def test_chat_52745_a_studio_leads_payment_plan_question_runs_on_the_rent_track(self):
+        self.lead(**LIVE_52745)
+        outcome, calls, _, _ = self.turn(self.inbound("Hi i need payment plan details and other charges"), [res_answer("Sure!")])
+        # The rent track entered on the lead's studio: code's opener for the England Cluster studio with no model, never the
+        # shop types list the live chat got.
+        self.assertEqual(calls, [])
+        body = self.body(outcome)
+        self.assertIn("Studios in England Cluster", body)
+        self.assertIn("for yourself or for a client", body)
+        self.assertNotIn("Type 1", body)
+        self.assertEqual((self.state().track, self.state().unit), ("rent", "studio"))
+        self.assertEqual(self.sent_lists.call_count, 0)
+        self.assertFalse([m for m in self.outbound() if m.payload.get("shop_list")])
+        # The next turn is the model's, prompted as the rent flow with the lead's listing in its context.
+        reply = "Sure! Our agent will share the payment plan and the charges for the studio in England Cluster. Would you like to visit our office to see it?"
+        outcome, calls, _, _ = self.turn(self.inbound("For myself. What is the payment plan?", seconds_ago=0), [res_answer(reply)])
+        self.assertEqual(len(calls), 1)
+        messages, _, _ = self.requests[-1]
+        self.assertEqual(messages[0]["content"], prompt.RES_SYSTEM)
+        self.assertIn("LEAD CONTEXT", messages[1]["content"])
+        self.assertIn("a7group-1726", messages[1]["content"])
+        self.assertIn("payment plan", self.body(outcome))
+        self.assertEqual(self.sent_lists.call_count, 0)
+
+    def test_yes_to_the_greet_opens_on_the_leads_studio_with_no_model(self):
+        self.lead(**LIVE_52745)
+        outcome, calls, _, _ = self.turn(self.inbound("Yes"), [])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.body(outcome), "Great! Is the studio in England Cluster for yourself, or are you checking for a client?")
+        self.assertEqual((self.state().track, self.state().unit), ("rent", "studio"))
+        self.assertEqual(self.sent_lists.call_count, 0)
+
+    def test_a_shop_leads_yes_gets_the_shops_for_whom_line(self):
+        self.lead(source="Property Finder", property="shop", cluster="China")
+        outcome, calls, _, _ = self.turn(self.inbound("Yes"), [])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.body(outcome), rules.line_for("for_whom", "en", shops=True))
+        self.assertEqual(self.state().track, "shop")
+
+    def test_a_lead_whose_fields_say_nothing_is_asked_what_they_want(self):
+        self.lead(source="Property Finder")
+        outcome, calls, _, _ = self.turn(self.inbound("Yes"), [])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.body(outcome), rules.line("res_what_need", "en"))
+        self.assertEqual(self.state().track, "")
+
+    def test_the_stored_context_carries_what_the_listing_says(self):
+        LeadAiUnit.objects.create(source="pf", source_id=LISTING_ID, reference="a7group-1789", community="International City", sub_area="Spain Cluster", unit="studio", bedrooms="studio", deal="rent", price=31000)
+        state = LeadAiChatState.for_conversation(self.conversation)
+        context = lead_context.keep(state, {"SOURCE_ID": "UC_KQ0WO3", "COMMENTS": f"Listing ID: {LISTING_ID}"}, NOW)
+        self.assertEqual((context["unit"], context["property"], context["deal"], context["cluster"]), ("studio", "apartment", "rent", "Spain"))
+        self.assertEqual(self.state().lead_context["unit"], "studio")

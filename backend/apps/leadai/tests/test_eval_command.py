@@ -524,6 +524,20 @@ RIGHT = {
     "shops-mixed-yes-1br-lead-arabic": answer("", send=False),
     "shops-mixed-yes-shop-lead": answer("", send=False),
     "shops-mixed-yes-buyer-lead": answer("", send=False),
+    # Round 22e: the portal greet's first answer (chat 52745's words), code's or the model's rent turn.
+    "portal-studio-payment-plan": answer("", send=False),
+    "portal-studio-payment-plan-after-opener": answer(
+        "Sure. The rent is paid by cheque, and our agent will confirm the charges with you. Would you like to visit our office?", segment="residential_tenant"
+    ),
+    "portal-yes-studio-lead": answer("", send=False),
+    "portal-yes-shop-lead": answer("", send=False),
+    "portal-yes-nothing-known": answer("", send=False),
+    "portal-mudon-townhouse-available": answer(
+        "Our agent will confirm the townhouse in Mudon is still available and share the details. Would you like to visit our office?", segment="residential_tenant"
+    ),
+    "portal-villanova-villa-sale-available": answer(
+        "Our sales team will confirm the villa in Villanova is still available and share the details. Would you like to visit our office?", segment="buyer"
+    ),
     "shops-mixed-yes-known-shop": answer("", send=False),
     "shops-mixed-yes-known-studio": answer("", send=False),
     "shops-mixed-not-now": answer("", send=False),
@@ -889,6 +903,8 @@ class EvalCommandTests(TestCase):
             sorted(settled),
             [
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
+                # Round 22e: the portal greet's first answer is the lead context's (the rent flow's opener, the yes lines).
+                "portal-studio-payment-plan", "portal-yes-nothing-known", "portal-yes-shop-lead", "portal-yes-studio-lead",
                 "shops-a-yes-known", "shops-asked-for-studio-132", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
                 # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
                 "shops-book-tap",

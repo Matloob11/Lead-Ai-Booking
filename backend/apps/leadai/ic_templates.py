@@ -19,11 +19,19 @@ from .assistant import shops
 
 MIXED_NAME = "intl_city_property_reconnect"
 NAMES = (MIXED_NAME,)
-# What kind() says of a campaign template (2e spec §6.1).
+# The new-lead greet's template (assistant/newlead.py, round 22; Cursor's C68): "Hi {{1}}, thank you for your enquiry
+# about {{2}} … Are you still looking?" to a portal lead minutes after it lands. Any template named portal_… is one.
+PORTAL_NAME = "portal_enquiry_reply"
+PORTAL_PREFIX = "portal_"
+# What kind() says of a campaign template (2e spec §6.1). A portal greet is answered for by the lead context first
+# (tracks.decide's step 4, as the mixed template's first answer): the first live greet's reply (chat 52745, 2026-10-22,
+# a Bayut studio lead asking about the payment plan) ran on the shop track and got the shop types list, because the
+# greet read as a shops template (round 22e).
 SHOP = "shop"
 MIXED = "mixed"
+PORTAL = "portal"
 # The template names kind() reads as no shops one: Template B never follows them (followups).
-NOT_SHOP_NAMES = (MIXED_NAME,)
+NOT_SHOP_NAMES = (MIXED_NAME, PORTAL_NAME)
 CATEGORY = "MARKETING"
 LANGUAGE = "en"
 MIXED_BUTTONS = ("Yes, still looking", "Not now", "Stop messages")
@@ -65,8 +73,14 @@ def mixed_form(facts) -> dict:
 
 
 def kind(name: str) -> str:
-    """'mixed' for the mixed template, 'shop' for every other campaign template (2e spec §6.1)."""
-    return MIXED if str(name or "").strip() == MIXED_NAME else SHOP
+    """'mixed' for the mixed template, 'portal' for the new-lead greet's (a name starting portal_), 'shop' for every
+    other campaign template (2e spec §6.1)."""
+    text = str(name or "").strip()
+    if text == MIXED_NAME:
+        return MIXED
+    if text.lower().startswith(PORTAL_PREFIX):
+        return PORTAL
+    return SHOP
 
 
 def kind_of(message) -> str:

@@ -496,4 +496,4 @@ class FirstYesTests(SimpleTestCase):
         self.assertEqual(ic_templates.kind_of(shops), "shop")
         self.assertEqual(ic_templates.kind_of(None), "shop")
         self.assertEqual(ic_templates.kind_of(types.SimpleNamespace(template_id=None, template=None)), "shop")
-        self.assertEqual(ic_templates.NOT_SHOP_NAMES, (ic_templates.MIXED_NAME,))
+        self.assertEqual(ic_templates.NOT_SHOP_NAMES, (ic_templates.MIXED_NAME, ic_templates.PORTAL_NAME))  # the portal greet: round 22e

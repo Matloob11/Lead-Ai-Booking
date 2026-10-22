@@ -355,8 +355,19 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   have pulled the agent's chat onto the Lead AI screen), a customer talking to us already or greeted within 24 hours
   left alone, the settings a send would refuse named as skips, a villa named a villa, a retired enquired listing kept
   from code's guards and the photos.
+- **22d (2026-10-22, the first live greets):** a lead with no Community field takes the enquired listing's community
+  for its chat (the first greet left a Serena townhouse's chat with none).
+- **22e (2026-10-22, the first real reply):** chat 52745, a Bayut studio lead asking for the payment plan, got the shop
+  types list: `ic_templates.kind` read the greet template as a shops one, so `tracks.decide` never let the lead context
+  decide (step 4 is the mixed template's) and chose the shop track by the template. The greet template is now its own
+  kind (`ic_templates.PORTAL`, any template named `portal_…`), answered for by the lead context first as the mixed
+  template is; `lead_context.enrich` fills a lead that names only a listing from the inventory (unit, property, deal,
+  community, cluster; stored by `keep`, used by the greet); a pack lead's yes is the model's turn (`tracks.first_yes`),
+  never "a shop, a studio or a one-bedroom"; `newlead.template_ready` refuses a greet template of another kind; five
+  `portal-*` eval scenarios. The greet was off from 06:10 UTC until 22e went live.
 - **Not yet:** the client-first half (the customer writes first to the ad's number: T80/T81), a "closer" prompt (T82),
-  the enquired unit's photos on the first turn outside the pack flow, an eval family for portal leads.
+  the enquired unit's photos on the first turn outside the pack flow, the rest of an eval family for portal leads (a
+  reply in Arabic or Urdu, a voice note, a reply after 24 hours, a listing gone).
 
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
