@@ -2790,3 +2790,13 @@ a.lai-media__name:hover {
 .access__handovers {
   margin-bottom: 14px;
 }
+/* The handover desk has no rail: two columns, not the Lead AI screen's three (the review before the gate). */
+.lai-body--handovers {
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+}
+@media (max-width: 760px) {
+  .lai-body--handovers {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 34%) minmax(0, 1fr);
+  }
+}

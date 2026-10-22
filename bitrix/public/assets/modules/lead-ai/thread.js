@@ -1213,12 +1213,14 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     }
     state.composerOpen = Boolean(conversation.is_session_open);
 
+    // The handover desk (scoped): our number as digits only, never its name.
+    const fromLabel = scoped ? `+${String(conversation.number?.phone_number || "").replace(/\D/g, "")}` : ourNumberLabel(conversation.number);
     if (!conversation.is_session_open) {
       clear(composer).append(
         el("div.lai-locked", {}, [
           el("div.lai-locked__text", {}, [
             "The 24-hour window is closed. Only an approved template can go out until the customer writes back.",
-            el("div.lai-composer__from", {}, [`Messages to this customer go from our number ${ourNumberLabel(conversation.number)}.`]),
+            el("div.lai-composer__from", {}, [`Messages to this customer go from our number ${fromLabel}.`]),
           ]),
           el("button.lai-btn.lai-btn--primary", { type: "button", onclick: openTemplates }, [
             icon("file", { size: 15 }),
@@ -1290,7 +1292,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
 
     clear(composer).append(
       el("div.lai-composer", {}, [attach, templates, input, send]),
-      el("div.lai-composer__from", {}, [`Sending from our number ${ourNumberLabel(conversation.number)}.`]),
+      el("div.lai-composer__from", {}, [`Sending from our number ${fromLabel}.`]),
     );
     state.submit = submit; // the co-pilot's "Send as me" sends through the same box (renderDraft)
     teardownFiles = bindFileSources({

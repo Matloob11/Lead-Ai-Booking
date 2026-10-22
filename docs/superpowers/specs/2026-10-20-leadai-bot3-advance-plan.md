@@ -382,6 +382,41 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   dry run unless `--send`; Template B's hours. The 19 October campaign's facts that shaped it: 1,295 leads, 781
   reached, 246 replied, 412 never messaged for Meta's marketing daily cap, 102 failed.
 
+## 6h. Round 23 (2026-10-22): the handover desk ("My handovers")
+
+- **Matloob's order:** when the AI hands a chat to a person (a human or a call asked for, a complaint, legal, a broker,
+  a person's Bot Status in Bitrix), the lead's Bitrix Responsible sees that chat, and only their handed-over chats, on
+  their own screen: the chat and the customer, their own chat's viewing, nothing else of the panel (no other chats, no
+  numbers, no counts, no meetings list). They reply there, send a template from the chat's own number, press Done. The
+  assistant keeps its ways (quiet while handed over, the co-pilot draft, back in full once a person wrote); admins keep
+  everything. Access needs no grant: every agent has a Bitrix id.
+- **Backend (`apps/leadai/handover_desk.py`, migration 0019):** `LeadAiChatState.desk_at` / `desk_reason` /
+  `desk_done_at` / `desk_done_by`, the durable marker (`handed_over_at` clears the moment a person writes), set by `mark`
+  from `engine._apply` at every handover and broker and from `bitrix_status.apply` for a person's Handed/Broker; cleared
+  by Done (`POST /api/leadai/chats/<id>/desk/done/`: it ends an open handover and the handover's own pause, Bitrix's
+  Handed to agent, so the assistant answers in full again; an agent's own Pause stays, and a broker's) and by Move to
+  inbox; the migration puts the chats handed over before it (59 live, the oldest from the 15th) on their desks. **Who:**
+  `responsible_bitrix_user_id == the agent's bitrix_user_id` at query time (Bitrix users 0 and 1, who hold unassigned
+  leads, have no desk), read again every hour while on a desk (`refresh_responsibles`) and at every handover.
+  **Visibility:** one clause, `mine_q`, OR-ed into `inbox.visibility.visible_conversation_q`, so every inbox and Lead AI
+  endpoint follows unchanged. **List:** `GET /api/leadai/desk/mine/` (`?agent=` for an admin), rows trimmed to the chat
+  and the customer, "they wrote" one `Exists` for the whole list. An agent who has a chat through the desk alone
+  (`only_through_desk`: no admin, no Lead AI access, not the owner, none of the number's holders) gets the chat detail
+  and the live frames trimmed the same way (`trim`, `trim_live`; `lane.desk_scoped_groups`), and `leadai.desk.changed`
+  tells their screen a chat came onto, or left, their desk (Done, a move, a Bitrix reassignment), with their count.
+- **Panel:** `modules/lead-ai/handovers.js` ("My handovers": the hamburger menu item with the count, the no-number
+  card's door, a live socket of its own for an agent with no number), `thread.js` in scoped mode (Done; no AI controls,
+  no Move to inbox, no line on the owner, the campaign, the CRM record or the memory; our number as digits only),
+  `lead-ai.js` (an agent with no admin rights, no Lead AI access and no number opens every Lead AI door on this screen;
+  the badge follows `leadai.desk.changed`; no chime for the chat open on the desk), `lead-ai.css` (two columns).
+- **The gate's two eval guards (the same day, the deployed gate's eval):** a complaint the model apologised for without
+  the handover is `complaint_or_upset` (`engine.complaint_handover`; eval `complaint`, both runs); "I will reach by 5:30"
+  after the Running Late tap, read by the model as a reschedule to 17:30, is their late arrival
+  (`engine.late_arrival`; eval `booked-running-late`, one run of two). Tests: `tests/test_r23_guards.py`.
+- **Not yet:** the messages endpoint's embedded chat (`apps/inbox/views.py`; Cursor's uncommitted copy is what the
+  server holds, so it was left alone) still carries the owner's name and the number's title to a scoped agent, which the
+  panel hides; a handover's Bitrix notification still says "until someone from the team writes".
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).

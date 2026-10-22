@@ -23,7 +23,7 @@ import { notifyNewMessage } from "../../core/notifications.js";
 import { asList, leadAiApi } from "./api.js";
 import { contactName } from "./thread.js";
 import { closeScreen, deliverToScreen, isScreenOpen, openChatId, openLeadAiScreen, resyncScreen } from "./screen.js";
-import { deliverToHandovers, isHandoversOpen, openHandoversScreen } from "./handovers.js";
+import { deliverToHandovers, handoversChatId, isHandoversOpen, openHandoversScreen } from "./handovers.js";
 
 let me = null;
 let unreadChats = 0;
@@ -32,13 +32,15 @@ const badges = new Set();
 const deskBadges = new Set();
 
 function scopedAgent() {
-  // The handover desk (handovers.js): an agent with neither admin rights nor Lead AI access has their own screen.
-  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai;
+  // The handover desk (handovers.js): an agent with neither admin rights, nor Lead AI access, nor a number of their
+  // own can see nothing of Lead AI but their desk, so every door opens that screen. A number-holder keeps the Lead AI
+  // screen (their own Lead AI chats live there; the desk's chats are visible to them there too).
+  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai && !(Array.isArray(me.numbers) && me.numbers.length);
 }
 
 function open(conversationId, { highlightMessageId } = {}) {
   if (scopedAgent()) {
-    openHandoversScreen({ me, conversationId });
+    openHandoversScreen({ me, conversationId, highlightMessageId });
     return;
   }
   openLeadAiScreen({ conversationId, highlightMessageId, me, onUnreadChanged: setUnread });
@@ -319,6 +321,14 @@ window.addEventListener("wa:event", (event) => {
     return;
   }
 
+  if (name === "leadai.desk.changed") {
+    // A chat came onto, or left, this agent's handover desk (handover_desk.changed): the menu's count follows; the
+    // handovers screen, when open, read its list again above (deliverToHandovers).
+    if (me) me.handover_desk = { ...(me.handover_desk || {}), count: Math.max(0, Number(data?.count) || 0) };
+    setDeskBadge();
+    return;
+  }
+
   if (name === "leadai.message.new") {
     const message = data?.message;
     const conversation = data?.conversation;
@@ -331,10 +341,10 @@ window.addEventListener("wa:event", (event) => {
       seenMessages.add(key);
       if (seenMessages.size > 200) seenMessages.delete(seenMessages.values().next().value);
     }
+    const chatId = String(conversation?.id ?? message?.conversation_id);
     const reading =
-      isScreenOpen() &&
-      String(openChatId()) === String(conversation?.id ?? message?.conversation_id) &&
-      document.visibilityState === "visible";
+      document.visibilityState === "visible" &&
+      ((isScreenOpen() && String(openChatId()) === chatId) || (isHandoversOpen() && String(handoversChatId()) === chatId));
     if (!reading) {
       notifyNewMessage({
         contactName: `Lead AI · ${contactName(conversation)}`,

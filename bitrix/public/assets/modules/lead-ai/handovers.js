@@ -34,14 +34,20 @@ export function closeHandovers() {
   screen?.close();
 }
 
-export function openHandoversScreen({ me, conversationId } = {}) {
+/** The chat open on the desk, or null (lead-ai.js: a customer's message in it is being read, not chimed). */
+export function handoversChatId() {
+  return screen?.activeId ?? null;
+}
+
+export function openHandoversScreen({ me, conversationId, highlightMessageId } = {}) {
   if (screen) {
-    if (conversationId) screen.select(conversationId);
+    if (conversationId) screen.select(conversationId, { highlightMessageId });
     return screen;
   }
   const state = {
     rows: [],
     activeId: conversationId ? Number(conversationId) : null,
+    pendingHighlight: highlightMessageId || null,
     thread: null,
     loadSeq: 0,
     socket: null,
@@ -91,6 +97,9 @@ export function openHandoversScreen({ me, conversationId } = {}) {
     get thread() {
       return state.thread;
     },
+    get activeId() {
+      return state.activeId;
+    },
   };
   screen = self;
   renderEmptyMain();
@@ -132,6 +141,11 @@ export function openHandoversScreen({ me, conversationId } = {}) {
       const payload = await leadAiApi.deskMine();
       if (seq !== state.loadSeq || screen !== self) return;
       state.rows = asList(payload, "results");
+      // The open chat left the desk meanwhile (a Done elsewhere, a reassignment in Bitrix, a move): its thread goes too.
+      if (state.activeId && state.thread && !state.rows.some((row) => String(row.id) === String(state.activeId))) {
+        state.activeId = null;
+        renderEmptyMain("This chat is no longer on your desk.");
+      }
       renderRows();
       if (state.activeId && !state.thread) openThread(state.activeId);
     } catch (error) {
@@ -191,17 +205,21 @@ export function openHandoversScreen({ me, conversationId } = {}) {
     return parts.slice(0, 2).map((word) => word[0].toUpperCase()).join("") || "?";
   }
 
-  function select(id) {
+  function select(id, { highlightMessageId } = {}) {
     state.activeId = Number(id);
+    state.pendingHighlight = highlightMessageId || null;
     renderRows();
     openThread(id);
   }
 
   function openThread(id) {
     state.thread?.destroy();
+    const highlight = state.pendingHighlight;
+    state.pendingHighlight = null;
     state.thread = mountThread(main, Number(id), {
       me,
       scoped: true,
+      highlightMessageId: highlight || undefined,
       onConversation: (conversation) => upsertRow(conversation),
       onDone: () => {
         state.rows = state.rows.filter((row) => String(row.id) !== String(id));
@@ -239,6 +257,12 @@ export function openHandoversScreen({ me, conversationId } = {}) {
     const conversation = data?.conversation;
     const message = data?.message;
     const id = conversation?.id ?? message?.conversation_id ?? data?.conversation_id;
+    if (event === "leadai.desk.changed") {
+      // The desk changed under us (a Done elsewhere, a reassignment in Bitrix, a move, a chat that is now ours): the list
+      // is the server's; read it again now (load drops the open thread when its chat left).
+      reloadSoon();
+      return;
+    }
     if (String(state.activeId) === String(id)) state.thread?.onEvent(event, data);
     if (event === "leadai.ai.state") return;
     const listed = state.rows.some((row) => String(row.id) === String(id));
