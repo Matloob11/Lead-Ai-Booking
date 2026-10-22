@@ -1372,6 +1372,17 @@ case "$cmd" in
     ;;
 
   ""|-h|--help|help) usage ;;
+  probe-leadai-desk)
+    # Read-only: as the real responsibles of the chats on a handover desk (round 23), does the desk show exactly their
+    # chats, trimmed, and refuse the rest (ops/catalog/probe-leadai-desk.py)? Phones masked; nothing written.
+    [[ $# -eq 0 ]] || die "probe-leadai-desk takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-desk.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-desk.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
   leadai-greet-settings)
     # The new-lead greet's settings (apps/leadai/assistant/newlead.py, round 22), set as the
     # Django admin form would and checked as the greet checks them (ops/catalog/leadai-greet-settings.py):
