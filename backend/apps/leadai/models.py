@@ -267,6 +267,15 @@ class LeadAiChatState(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     responsible_checked_at = models.DateTimeField(null=True, blank=True)
+    # The handover desk (handover_desk.py; Matloob 2026-10-22): on the Bitrix responsible's own screen since ``desk_at``,
+    # set at every handover and kept when a person writes (handed_over_at clears then), cleared by their Done or by
+    # Move to inbox; the reason it landed there; who said Done and when.
+    desk_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    desk_reason = models.CharField(max_length=40, blank=True, default="", db_default="")
+    desk_done_at = models.DateTimeField(null=True, blank=True)
+    desk_done_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

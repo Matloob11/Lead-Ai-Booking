@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 Agent = get_user_model()
 
 
+def _handover_desk_count(agent) -> int:
+    try:
+        from apps.leadai.handover_desk import count_for
+
+        return count_for(agent)
+    except Exception:  # noqa: BLE001 - the sign-in payload never fails for a badge
+        return 0
+
+
 def _serialize(agent):
     from apps.inbox.send_health import with_send_health
     from apps.inbox.serializers import serialize_number
@@ -42,6 +51,9 @@ def _serialize(agent):
         "can_linked_devices": bool(agent.can_linked_devices),
         # Lead AI access (apps/leadai/lane.has_desk_access): an agent who holds no number still opens the Lead AI screen.
         "can_lead_ai": bool(getattr(agent, "can_lead_ai", False)) and bool(agent.can_official_api),
+        # The handover desk (apps/leadai/handover_desk.py): how many Lead AI chats handed to a person are this agent's
+        # as their Bitrix responsible; the panel's "My handovers" door and badge.
+        "handover_desk": {"count": _handover_desk_count(agent)},
         "role": "Administrator" if agent.has_admin_rights else "Agent",
         "numbers": [serialize_number(n) for n in numbers],
         "capabilities": {

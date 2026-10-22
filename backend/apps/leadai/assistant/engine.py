@@ -179,7 +179,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
-from .. import ic_templates, lane, unit_media
+from .. import handover_desk, ic_templates, lane, unit_media
 from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 from . import (
     alerts,
@@ -5586,6 +5586,12 @@ def _apply(
             conversation.labels.add(broker_label())
             done["handover"] = BROKER
             done["broker"] = True
+        # The handover desk (handover_desk.py; Matloob 2026-10-22): every handover, brokers included, puts the chat on
+        # its Bitrix responsible's own screen, where it stays once they write (handed_over_at clears then).
+        if (handover["needed"] or answer.get("broker")) and fresh.desk_at is None:
+            desk_reason = fresh.handover_reason or str(handover.get("reason") or "") or (BROKER if answer.get("broker") else "unclear")
+            if handover_desk.mark(fresh, now, desk_reason, fields):
+                done["desk"] = desk_reason
         # The co-pilot (copilot.py): from the turn that hands the chat over, and on every turn while a person has it,
         # the model's own words — the ones code did not send — wait for the agent as a draft.
         if answer.get("copilot_draft") and (handover["needed"] or fresh.handed_over_at is not None or answer.get("broker")):

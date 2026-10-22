@@ -147,10 +147,18 @@ def desk_groups(user) -> list[str]:
     return [DESK_GROUP] if has_desk_access(user) and not sees_all_inbox_chats(user) else []
 
 
-def desk_event_groups(event: str) -> list[str]:
+def desk_event_groups(event: str, conversation=None) -> list[str]:
     """The groups besides the number's and the owner's that hear an event (inbox.events.publish): a Lead AI chat's
-    own ("leadai.*") reach the desk. A chat back in the main inbox is no desk chat, and its plain events never do."""
-    return [DESK_GROUP] if str(event or "").startswith(EVENT_PREFIX) else []
+    own ("leadai.*") reach the desk, and the chat's Bitrix responsible when it is on their handover desk
+    (handover_desk.live_groups). A chat back in the main inbox is no desk chat, and its plain events never do."""
+    if not str(event or "").startswith(EVENT_PREFIX):
+        return []
+    groups = [DESK_GROUP]
+    if conversation is not None:
+        from .handover_desk import live_groups
+
+        groups += live_groups(conversation)
+    return groups
 
 
 def only_lead_ai(queryset):
@@ -383,6 +391,10 @@ def move_to_inbox(conversation, agent) -> bool:
         active=False, moved_by=agent, moved_at=timezone.now(), updated_at=timezone.now()
     )
     if updated:
+        # Off its responsible's handover desk too: the chat is a person's in the main inbox now.
+        from .handover_desk import clear
+
+        clear(conversation, agent)
         _announce(conversation.pk)
     return bool(updated)
 

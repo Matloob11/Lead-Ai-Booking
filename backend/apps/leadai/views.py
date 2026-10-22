@@ -46,7 +46,7 @@ from apps.inbox.serializers import serialize_conversation
 from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
-from . import desk, ic_templates
+from . import desk, handover_desk, ic_templates
 from .assistant import hours, memory, openai_client, residential, score, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
@@ -410,6 +410,63 @@ def chat_list(request):
 def desk_counts(request):
     """The numbers on the desk's Needs a person and Today buttons, over every Lead AI chat the agent may open."""
     return Response(desk.counts(only_lead_ai(_visible(request.user))))
+
+
+@api_view(["GET"])
+def desk_mine(request):
+    """The handover desk (handover_desk.py; Matloob 2026-10-22): the chats handed to a person whose Bitrix responsible
+    the agent is, each row the chat and the customer only (no other agent, no campaign, no number's title, no counts
+    of anything else). A panel admin may look at an agent's desk with ?agent=<Bitrix user id>."""
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    wanted = "".join(ch for ch in request.GET.get("agent", "") if ch.isdigit())
+    if wanted and not sees_all_inbox_chats(request.user):
+        return Response({"detail": "Only a panel admin may look at another agent's desk."}, status=status.HTTP_403_FORBIDDEN)
+    if wanted:
+        clause = handover_desk.desk_q(wanted)
+    else:
+        clause = handover_desk.mine_q(request.user)
+        if clause is None and sees_all_inbox_chats(request.user) and handover_desk.bitrix_id(request.user):
+            clause = handover_desk.desk_q(handover_desk.bitrix_id(request.user))
+        if clause is not None:
+            # Their first look after signing in: the rows that know only their Bitrix id now name their account too, so
+            # the chat's live events reach them at once (handover_desk.live_groups) instead of at the next hourly read.
+            LeadAiChatState.objects.filter(
+                desk_at__isnull=False, responsible_bitrix_user_id=handover_desk.bitrix_id(request.user), responsible_agent__isnull=True
+            ).update(responsible_agent=request.user)
+    if clause is None:
+        return Response({"count": 0, "results": [], "agent": wanted or handover_desk.bitrix_id(request.user)})
+    now = timezone.now()
+    queryset = (
+        Conversation.objects.filter(clause)
+        .select_related("contact", "lead_ai_state")
+        .prefetch_related(
+            Prefetch(
+                "lead_ai_appointments",
+                queryset=LeadAiAppointment.objects.filter(status__in=OPEN_STATUSES).select_related("taken_by").order_by("-id"),
+                to_attr="lead_ai_open_appointments",
+            )
+        )
+        .order_by("-last_message_at", "-pk")
+        .distinct()
+    )
+    results = []
+    for conversation in queryset:
+        row = handover_desk.row(conversation, now)
+        if row is None:
+            continue
+        row["appointment"] = serialize_appointment(_open_appointment(conversation))
+        results.append(row)
+    return Response({"count": len(results), "results": results, "agent": wanted or handover_desk.bitrix_id(request.user)})
+
+
+@api_view(["POST"])
+def desk_done(request, pk):
+    """Their Done (the responsible's, or an admin's): the chat leaves the desk; a handover still open ends with it."""
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    state = handover_desk.done(conversation, request.user)
+    _changed(conversation.pk)
+    return Response({"id": conversation.pk, "done": True, "desk_at": None, "handed_over": state.handed_over_at is not None})
 
 
 @api_view(["GET"])

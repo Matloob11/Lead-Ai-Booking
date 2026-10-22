@@ -187,7 +187,13 @@ class AccessTests(DeskBase):
         self.assertIsNone(lane.desk_q(self.plain))
         with self.assertNumQueries(0):
             lane.desk_q(self.plain)
-        self.assertNotIn("leadai", str(visible_conversation_q(self.plain, held=WabaNumber.objects.none())))
+            # The handover desk's clause (handover_desk.mine_q) is a Subquery: built, never run here.
+            clause = visible_conversation_q(self.plain, held=WabaNumber.objects.none())
+        self.assertNotIn("LeadAiChat", str(clause))
+        # An agent who is no Bitrix user cannot have a handover desk: no clause at all.
+        nobody = Agent.objects.create_user(username="nobody", password="x", can_official_api=True)
+        with self.assertNumQueries(0):
+            self.assertNotIn("lead_ai_chat", str(visible_conversation_q(nobody, held=WabaNumber.objects.none())))
 
     def test_a_panel_admin_grants_lead_ai_access_in_agents_and_access(self):
         self.client.force_login(self.plain)

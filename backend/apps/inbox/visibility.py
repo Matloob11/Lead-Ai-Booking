@@ -8,6 +8,10 @@ they can move work.
 One exception, for the Lead AI screen only (apps/leadai/lane.py, Q37): an
 agent with Lead AI access (``can_lead_ai``) also opens every chat on that
 screen, whatever its number. The main inbox list leaves those chats out.
+
+A second, narrower one (apps/leadai/handover_desk.py, 2026-10-22): the Bitrix
+responsible of a lead whose Lead AI chat was handed to a person opens that chat,
+and only that chat, on their own "My handovers" screen.
 """
 
 from django.db.models import Q
@@ -42,6 +46,13 @@ def visible_conversation_q(user, held=None):
     desk = desk_q(user)
     if desk is not None:
         visible |= desk
+    # The handover desk (apps/leadai/handover_desk.py): the Lead AI chats handed to a person whose Bitrix responsible
+    # this agent is, and nothing else of the Lead AI screen (None for an agent who cannot have a desk).
+    from apps.leadai.handover_desk import mine_q
+
+    mine = mine_q(user)
+    if mine is not None:
+        visible |= mine
     # staff_only is a rotate-campaign thread. The assignee of that number must
     # not see it, including when the chat is still unclaimed.
     return visible & ~Q(staff_only=True)

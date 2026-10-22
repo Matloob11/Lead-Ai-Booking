@@ -71,7 +71,7 @@ def publish(conversation, event, data):
         from apps.leadai.lane import desk_event_groups, event_name
 
         event = event_name(conversation, event)
-        extra_groups = desk_event_groups(event)
+        extra_groups = desk_event_groups(event, conversation)
     except Exception:  # noqa: BLE001
         logger.exception("Lead AI routing failed for conversation %s", getattr(conversation, "pk", None))
     message = {

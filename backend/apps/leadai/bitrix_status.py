@@ -40,6 +40,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from . import handover_desk
 from .models import LeadAiAppointment, LeadAiChat, LeadAiChatState
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ def _apply_one(chat, wanted: list[str], now) -> list[str]:
                 fields += ["handed_over_at", "handover_reason"]
             conversation.labels.add(engine.broker_label())
             changed.append("broker")
+            handover_desk.mark(state, now, engine.BROKER, fields)
         if "handed" in wanted and (state.paused_at is None or state.handed_over_at is None):
             if state.paused_at is None:
                 state.paused_at = now
@@ -134,6 +136,7 @@ def _apply_one(chat, wanted: list[str], now) -> list[str]:
                 state.handover_reason = HANDED_REASON
                 fields += ["handed_over_at", "handover_reason"]
             changed.append("handed")
+            handover_desk.mark(state, now, HANDED_REASON, fields)
         if fields:
             state.save(update_fields=sorted(set(fields)) + ["updated_at"])
         appointment = (
