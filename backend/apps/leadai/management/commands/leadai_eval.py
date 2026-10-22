@@ -5004,7 +5004,7 @@ SCENARIOS = [
     # The first live greet's reply (chat 52745, 2026-10-22: a Bayut studio lead, "Hi i need payment plan details and other
     # charges") ran on the shop track and got the shop types list, the greet read as a shops template.
     Scenario(
-        "portal-studio-payment-plan",
+        "shops-portal-studio-payment-plan",
         "portal greet: a Bayut studio lead (England Cluster, rent) asking about the payment plan enters the rent track and gets code's opener for that studio, never the shop list",
         playbook=IC_SHOPS,
         campaign=PORTAL,
@@ -5014,7 +5014,7 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
-        "portal-studio-payment-plan-after-opener",
+        "shops-portal-studio-payment-plan-after-opener",
         "portal greet: after the opener, 'For myself. What is the payment plan?' is the model's rent turn: no shop list, no cash-or-finance, the cheques or our agent",
         playbook=IC_SHOPS,
         campaign=PORTAL,
@@ -5026,7 +5026,7 @@ SCENARIOS = [
         expect=[track("rent", "studio"), no_step(), no_shop_words(), segment("residential_tenant"), never_out(r"\bcash\b|financ|mortgage", "ask a tenant cash or finance"), questions_at_most(2), no_person_named()],
     ),
     Scenario(
-        "portal-yes-studio-lead",
+        "shops-portal-yes-studio-lead",
         "portal greet: a studio lead's typed 'Yes' gets code's opener for that studio, never the shops' for-whom line",
         playbook=IC_SHOPS,
         campaign=PORTAL,
@@ -5039,7 +5039,7 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
-        "portal-yes-shop-lead",
+        "shops-portal-yes-shop-lead",
         "portal greet: a shop lead's yes gets the shops' 'for yourself, or for a client?'",
         playbook=IC_SHOPS,
         campaign=PORTAL_SHOP,
@@ -5049,7 +5049,7 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
-        "portal-yes-nothing-known",
+        "shops-portal-yes-nothing-known",
         "portal greet: a yes from a lead whose fields say nothing asks what they want, never 'for yourself?'",
         playbook=IC_SHOPS,
         campaign=PORTAL,
@@ -5059,7 +5059,7 @@ SCENARIOS = [
         words=CODE,
     ),
     Scenario(
-        "portal-mudon-townhouse-available",
+        "shops-portal-mudon-townhouse-available",
         "portal greet: a Mudon townhouse lead asking whether it is still available is on Mudon's rent track with the model, never the shop list nor 'a shop, a studio or a one-bedroom'",
         playbook=IC_SHOPS,
         campaign=PORTAL_MUDON,
@@ -5071,7 +5071,7 @@ SCENARIOS = [
         ],
     ),
     Scenario(
-        "portal-villanova-villa-sale-available",
+        "shops-portal-villanova-villa-sale-available",
         "portal greet: a Villanova villa-for-sale lead asking whether it is still available is on Villanova's sale track (the lead's deal), never rent nor the shop list",
         playbook=IC_SHOPS,
         campaign=PORTAL_MUDON,

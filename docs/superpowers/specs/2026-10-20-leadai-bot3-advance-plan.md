@@ -363,8 +363,8 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   kind (`ic_templates.PORTAL`, any template named `portal_…`), answered for by the lead context first as the mixed
   template is; `lead_context.enrich` fills a lead that names only a listing from the inventory (unit, property, deal,
   community, cluster; stored by `keep`, used by the greet); a pack lead's yes is the model's turn (`tracks.first_yes`),
-  never "a shop, a studio or a one-bedroom"; `newlead.template_ready` refuses a greet template of another kind; five
-  `portal-*` eval scenarios. The greet was off from 06:10 UTC until 22e went live.
+  never "a shop, a studio or a one-bedroom"; `newlead.template_ready` refuses a greet template of another kind; seven
+  `shops-portal-*` eval scenarios. The greet was off from 06:10 UTC until 22e went live.
 - **Not yet:** the client-first half (the customer writes first to the ad's number: T80/T81), a "closer" prompt (T82),
   the enquired unit's photos on the first turn outside the pack flow, the rest of an eval family for portal leads (a
   reply in Arabic or Urdu, a voice note, a reply after 24 hours, a listing gone).
