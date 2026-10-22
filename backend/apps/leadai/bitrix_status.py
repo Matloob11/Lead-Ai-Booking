@@ -40,6 +40,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from . import handover_desk
 from .models import LeadAiAppointment, LeadAiChat, LeadAiChatState
 
 logger = logging.getLogger(__name__)
@@ -91,14 +92,19 @@ def effects(bot_status, wa_opt_out) -> list[str]:
     return out
 
 
-def _apply_one(chat, wanted: list[str], now) -> list[str]:
-    """Apply the effects to one chat; the ones that changed something."""
+def _apply_one(chat, wanted: list[str], now, reread: bool = False) -> list[str]:
+    """Apply the effects to one chat; the ones that changed something. ``reread``: the lead's value read again by us
+    (followups.bitrix_blocks), not a person's change: a Handed to agent still on the lead after the responsible pressed
+    Done on the handover desk (handover_desk.done: desk_done_at set, and cleared by the next handover) is not applied
+    again, or Done would be undone at the next nudge."""
     from .assistant import engine
 
     conversation = chat.conversation
     changed: list[str] = []
     with transaction.atomic():
         state, _ = LeadAiChatState.objects.select_for_update().get_or_create(conversation=conversation)
+        if reread and "handed" in wanted and state.desk_done_at is not None:
+            wanted = [effect for effect in wanted if effect != "handed"]
         fields: list[str] = []
         if "stop" in wanted and state.stopped_at is None:
             state.stopped_at = now
@@ -124,6 +130,7 @@ def _apply_one(chat, wanted: list[str], now) -> list[str]:
                 fields += ["handed_over_at", "handover_reason"]
             conversation.labels.add(engine.broker_label())
             changed.append("broker")
+            handover_desk.mark(state, now, engine.BROKER, fields)
         if "handed" in wanted and (state.paused_at is None or state.handed_over_at is None):
             if state.paused_at is None:
                 state.paused_at = now
@@ -134,6 +141,7 @@ def _apply_one(chat, wanted: list[str], now) -> list[str]:
                 state.handover_reason = HANDED_REASON
                 fields += ["handed_over_at", "handover_reason"]
             changed.append("handed")
+            handover_desk.mark(state, now, HANDED_REASON, fields)
         if fields:
             state.save(update_fields=sorted(set(fields)) + ["updated_at"])
         appointment = (
@@ -210,9 +218,10 @@ def remember(chat, lead_id: int, bot_status, wa_opt_out, changed_by, now) -> lis
     return kept
 
 
-def apply(lead_id: int, bot_status=None, wa_opt_out=None, changed_by=None, at: str = "") -> int:
+def apply(lead_id: int, bot_status=None, wa_opt_out=None, changed_by=None, at: str = "", *, reread: bool = False) -> int:
     """Apply a person's Bitrix change to every active Lead AI chat of the lead. Returns how
-    many chats there are (0 when none, or when the change asks nothing of the assistant)."""
+    many chats there are (0 when none, or when the change asks nothing of the assistant).
+    ``reread``: the lead's current value read by us, not a person's change (_apply_one)."""
     from . import optout
     from .assistant import live
 
@@ -227,7 +236,7 @@ def apply(lead_id: int, bot_status=None, wa_opt_out=None, changed_by=None, at: s
         for phone in lead_phones(lead_id, chats):
             optout.record(phone, reason=f"Set in Bitrix on lead {lead_id}", source=optout.Source.BITRIX, conversation=conversation)
     for chat in chats:
-        changed = _apply_one(chat, wanted, now)
+        changed = _apply_one(chat, wanted, now, reread=reread)
         remember(chat, lead_id, bot_status, wa_opt_out, changed_by, now)
         if changed:
             _alert(chat, lead_id, bot_status, wa_opt_out, changed_by, changed, at)

@@ -133,6 +133,7 @@ def send_due_reminders() -> None:
         # cache), and must never delay a reminder. A sweep cut off here resumes them next minute.
         _follow_ups,
         _label_greeted,
+        _refresh_desk_responsibles,
         _escalate_handovers,
     ):
         try:
@@ -141,6 +142,15 @@ def send_due_reminders() -> None:
             raise
         except Exception:  # noqa: BLE001 - one job must not stop the others
             logger.exception("Lead AI sweep step %s failed", job.__name__)
+
+
+def _refresh_desk_responsibles() -> None:
+    """The Bitrix responsible of every chat on a handover desk, read again every hour (handover_desk.py)."""
+    from . import handover_desk
+
+    queued = handover_desk.refresh_responsibles()
+    if queued:
+        logger.info("Lead AI: the responsible of %s desk chat(s) is being read again", queued)
 
 
 def _label_greeted() -> None:
@@ -801,14 +811,22 @@ def _agent_for_bitrix(bitrix_user_id: str):
 
 
 def _remember_responsible(conversation, bitrix_user_id: str) -> None:
+    from . import handover_desk
     from .models import LeadAiChatState
 
     agent = _agent_for_bitrix(bitrix_user_id)
     state = LeadAiChatState.for_conversation(conversation)
+    before = state.responsible_agent_id
     state.responsible_bitrix_user_id = bitrix_user_id if bitrix_user_id.isdigit() else ""
     state.responsible_agent = agent
     state.responsible_checked_at = timezone.now()
     state.save(update_fields=["responsible_bitrix_user_id", "responsible_agent", "responsible_checked_at", "updated_at"])
+    # The handover desk: a reassignment in Bitrix moves the chat between desks the moment it is read, and both screens
+    # hear it (handover_desk.changed); a responsible named for the first time hears their new chat.
+    after = agent.pk if agent is not None else None
+    if state.desk_at is not None and after != before:
+        handover_desk.changed(before, conversation.pk, False)
+        handover_desk.changed(after, conversation.pk, True)
 
 
 def _retry_or_give_up(task, exc):

@@ -46,7 +46,7 @@ from apps.inbox.serializers import serialize_conversation
 from apps.inbox.visibility import visible_conversation_q
 from apps.leadbot.models import LeadAutomation
 
-from . import desk, ic_templates
+from . import desk, handover_desk, ic_templates
 from .assistant import hours, memory, openai_client, residential, score, shops
 from .lane import GENERAL, IC_SHOPS, move_to_inbox, only_lead_ai, playbooks
 from .models import LeadAiAppointment, LeadAiCampaign, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
@@ -391,6 +391,8 @@ def chat_list(request):
 
         approved = followups.approved_wabas()
     kinds = desk.template_kinds(c.pk for c in page if desk.needs_template_kind(scripts.get(c.pk, GENERAL), _state(c)))
+    # The handover desk: an agent who has a chat through it alone sees the chat and the customer, nothing of the team.
+    scoped = handover_desk.scope(request.user)
     results = []
     for c in page:
         row = serialize_lead_ai_conversation(
@@ -399,6 +401,8 @@ def chat_list(request):
         )
         if desk_rows is not None:
             row["lead_ai_desk"] = desk_rows.get(c.pk)
+        if scoped is not None and scoped.through_desk(c):
+            handover_desk.trim(row)
         results.append(row)
     body = {"count": total, "unread_chats": unread, "results": results}
     if offset == 0:
@@ -413,6 +417,77 @@ def desk_counts(request):
 
 
 @api_view(["GET"])
+def desk_mine(request):
+    """The handover desk (handover_desk.py; Matloob 2026-10-22): the chats handed to a person whose Bitrix responsible
+    the agent is, each row the chat and the customer only (no other agent, no campaign, no number's title, no counts
+    of anything else). A panel admin may look at an agent's desk with ?agent=<Bitrix user id>."""
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    wanted = "".join(ch for ch in request.GET.get("agent", "") if ch.isdigit())
+    if wanted and not sees_all_inbox_chats(request.user):
+        return Response({"detail": "Only a panel admin may look at another agent's desk."}, status=status.HTTP_403_FORBIDDEN)
+    if wanted:
+        clause = handover_desk.desk_q(wanted)
+    else:
+        clause = handover_desk.mine_q(request.user)
+        if clause is None and sees_all_inbox_chats(request.user) and handover_desk.bitrix_id(request.user):
+            clause = handover_desk.desk_q(handover_desk.bitrix_id(request.user))
+        if clause is not None:
+            # Their first look after signing in: the rows that know only their Bitrix id now name their account too, so
+            # the chat's live events reach them at once (handover_desk.live_groups) instead of at the next hourly read.
+            LeadAiChatState.objects.filter(
+                desk_at__isnull=False, responsible_bitrix_user_id=handover_desk.bitrix_id(request.user), responsible_agent__isnull=True
+            ).update(responsible_agent=request.user)
+    if clause is None:
+        return Response({"count": 0, "results": [], "agent": wanted or handover_desk.bitrix_id(request.user)})
+    now = timezone.now()
+    queryset = (
+        Conversation.objects.filter(clause)
+        .select_related("contact", "lead_ai_state")
+        # Whether a person wrote since the handover, for the whole list in the one query (handover_desk.row reads it).
+        .annotate(desk_person_wrote=handover_desk.person_wrote_exists())
+        .prefetch_related(
+            Prefetch(
+                "lead_ai_appointments",
+                queryset=LeadAiAppointment.objects.filter(status__in=OPEN_STATUSES).select_related("taken_by").order_by("-id"),
+                to_attr="lead_ai_open_appointments",
+            )
+        )
+        .order_by("-last_message_at", "-pk")
+        .distinct()
+    )
+    scoped = handover_desk.scope(request.user)
+    results = []
+    for conversation in queryset:
+        row = handover_desk.row(conversation, now)
+        if row is None:
+            continue
+        appointment = serialize_appointment(_open_appointment(conversation))
+        # The viewing their chat booked; no colleague's name on a call for an agent who has the chat through the desk alone.
+        row["appointment"] = handover_desk.trim_appointment(appointment) if scoped is not None else appointment
+        results.append(row)
+    return Response({"count": len(results), "results": results, "agent": wanted or handover_desk.bitrix_id(request.user)})
+
+
+def _row_for(user, conversation) -> dict:
+    """The chat as the endpoints answer it: serialize_lead_ai_conversation, trimmed for an agent who has the chat
+    through the handover desk alone (handover_desk.only_through_desk)."""
+    row = serialize_lead_ai_conversation(conversation)
+    if handover_desk.only_through_desk(user, conversation):
+        handover_desk.trim(row)
+    return row
+
+
+@api_view(["POST"])
+def desk_done(request, pk):
+    """Their Done (the responsible's, or an admin's): the chat leaves the desk; a handover still open ends with it."""
+    conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
+    state = handover_desk.done(conversation, request.user)
+    _changed(conversation.pk)
+    return Response({"id": conversation.pk, "done": True, "desk_at": None, "handed_over": state.handed_over_at is not None})
+
+
+@api_view(["GET"])
 def chat_detail(request, pk):
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
     row = serialize_lead_ai_conversation(conversation)
@@ -420,6 +495,9 @@ def chat_detail(request, pk):
     row["lead_ai_ai"]["memory"] = [
         memory.describe(entry) for entry in memory.recall(conversation.contact.wa_id, exclude_conversation=conversation.pk)
     ]
+    # The handover desk: an agent who has the chat through it alone sees the chat and the customer, nothing of the team.
+    if handover_desk.only_through_desk(request.user, conversation):
+        handover_desk.trim(row)
     return Response(row)
 
 
@@ -447,7 +525,7 @@ def chat_pause_ai(request, pk):
         LeadAiChatState.objects.filter(pk=state.pk).update(paused_at=timezone.now(), paused_by=request.user)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -479,7 +557,7 @@ def chat_draft_used(request, pk):
     copilot.close(conversation, state, kind, agent=request.user, sent_text=sent_text)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -493,7 +571,7 @@ def chat_draft_dismiss(request, pk):
     copilot.close(conversation, state, LeadAiDraftOutcome.Kind.DISMISSED, agent=request.user)
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -519,7 +597,7 @@ def chat_resume_ai(request, pk):
     )
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -546,7 +624,7 @@ def appointment_cancel(request, pk):
         transaction.on_commit(lambda apk=appointment.pk, rev=revision: sync_appointment_crm.delay(apk, "cancelled", False, rev))
         _changed(conversation.pk)
     conversation = get_object_or_404(_visible(request.user), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 @api_view(["POST"])
@@ -566,7 +644,7 @@ def appointment_take(request, pk):
         )
     _changed(conversation.pk)
     conversation = get_object_or_404(only_lead_ai(_visible(request.user)), pk=pk)
-    return Response(serialize_lead_ai_conversation(conversation))
+    return Response(_row_for(request.user, conversation))
 
 
 # Settings ---------------------------------------------------------------------------------

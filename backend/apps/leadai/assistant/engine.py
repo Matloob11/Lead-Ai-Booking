@@ -179,7 +179,7 @@ from django.utils import timezone
 
 from apps.inbox.models import Message
 
-from .. import ic_templates, lane, unit_media
+from .. import handover_desk, ic_templates, lane, unit_media
 from ..models import DEFAULT_SHOPS_FACTS, LeadAiAppointment, LeadAiChat, LeadAiChatState, LeadAiSettings, LeadAiTurn
 from . import (
     alerts,
@@ -711,6 +711,29 @@ def effective_action(action: str, appointment: LeadAiAppointment | None) -> str:
     return action
 
 
+def late_arrival(proposal: dict, appointment) -> bool:
+    """A move to a later hour on the day of the visit, after the customer tapped Running Late and we asked what time
+    they will reach (the appointment's customer_state): their late arrival, never a new booking. The deployed gate's
+    eval, 2026-10-22 (booked-running-late, one run of two): "I will reach by 5:30" came back as a reschedule to 17:30,
+    and the confirmation went out again. The proposal becomes running_late with their time, so check_proposal reads it
+    as an arrival (hours.check_late_arrival: after the visit's time, before the last start, not past), never a slot
+    another client may hold. True when it changed the proposal (live and in the eval: ask_model's shaped)."""
+    if proposal.get("action") != "reschedule" or appointment is None:
+        return False
+    if appointment.status != LeadAiAppointment.Status.CONFIRMED or not appointment.starts_at:
+        return False
+    if appointment.customer_state != LeadAiAppointment.CustomerState.RUNNING_LATE:
+        return False
+    at = hours.parse_time(proposal.get("time"))
+    if at is None:
+        return False
+    local = appointment.starts_at.astimezone(hours.DUBAI)
+    if proposal.get("date") not in (None, "", local.date().isoformat()) or at < local.time():
+        return False
+    proposal["action"] = "running_late"
+    return True
+
+
 def turn_action(action: str, appointment: LeadAiAppointment | None, when, still_invalid: bool = False) -> str:
     """The action a turn takes (live and in the eval): effective_action, with the engine's own readings: the time already
     booked said again (reconfirm: nothing moves), a move with no new time (reschedule_requested), a late arrival at the
@@ -985,8 +1008,40 @@ def _settle_shops_handover(answer: dict, earlier: list, new_texts: list | None) 
     return answer
 
 
+# A complaint in their words, for complaint_handover (residential._COMPLAINS is the opener's sibling list: there the
+# words send the turn to the model; here they hand it over when the model said sorry and forgot to).
+_COMPLAINS = re.compile(
+    r"\b(?:complain\w*|worst|disappoint\w*|rude|useless|unprofessional|pathetic|not\s+happy|unhappy|angry|upset"
+    r"|bad\s+service|poor\s+service|terrible\s+service|horrible\s+service"
+    r"|wast(?:e|ed|ing)\s+(?:of\s+)?my\s+(?:whole\s+)?(?:time|morning|day|evening|afternoon)|waste\s+of\s+time"
+    r"|nobody\s+(?:called|replied|answered|came)|no\s+one\s+(?:called|replied|answered|came)|never\s+called)\b"
+    r"|شكوى|محتال|نصاب|دھوکہ|شکایت|शिकायत|धोखा",
+    re.IGNORECASE,
+)
+_COMPLAINT = "complaint_or_upset"
+
+
+def complaint_handover(answer: dict, new_texts, *, quiet: bool = False) -> bool:
+    """The prompt's rule 12 (if they are unhappy, apologise in one sentence and hand over) with the handover the model
+    left out: a complaint in their words (_COMPLAINS) answered with an apology (people.is_apology) and no handover is
+    complaint_or_upset. The deployed gate's eval, 2026-10-22 (complaint, both runs): "nobody called... Very bad service"
+    got "We apologize for the inconvenience caused. Our specialist will contact you here soon." and nobody was told.
+    Not while a person has the chat already (``quiet``: their chase gets people.settle's apology and its urgent alert,
+    never a second handover), not over a stop or a wrong number, not for an answer that sends nothing (a spam rule).
+    True when it set the handover (live and in the eval: settle_handover)."""
+    if answer["handover"]["needed"] or quiet or answer["opt_out"] != "none" or not answer.get("send", True):
+        return False
+    said = " ".join(" ".join(str(text or "").replace("’", "'").split()) for text in new_texts or ())
+    if not _COMPLAINS.search(said):
+        return False
+    if not any(people.is_apology(sentence) for sentence in filters.split_sentences(answer.get("reply") or "")):
+        return False
+    answer["handover"] = {"needed": True, "reason": _COMPLAINT}
+    return True
+
+
 def settle_handover(
-    answer: dict, earlier: list, new_texts: list | None = None, shops_chat: bool = False, *, invites: int = 0
+    answer: dict, earlier: list, new_texts: list | None = None, shops_chat: bool = False, *, invites: int = 0, quiet: bool = False
 ) -> dict:
     """The model's handover, corrected where code knows better: a renewal's price
     question is renewal_terms; the first price question is no handover; asking
@@ -1016,6 +1071,8 @@ def settle_handover(
             if promised:
                 answer["reply"] = kept
                 answer["trimmed"] = [*(answer.get("trimmed") or []), COLLEAGUE_REPLY]
+    # Every playbook: a complaint the model apologised for without the handover (``quiet``: a person has the chat).
+    complaint_handover(answer, new_texts, quiet=quiet)
     if shops_chat:
         return _settle_shops_handover(answer, earlier, new_texts)
     handover = answer["handover"]
@@ -2053,6 +2110,7 @@ def settle(
     residential: bool = False,
     residential_facts=None,
     track: str = "",
+    quiet: bool = False,
 ) -> dict:
     """Everything code corrects in the model's answer before it is used (live and in the eval).
 
@@ -2111,7 +2169,7 @@ def settle(
     declined = answer["opt_out"] == "none" and rules.declines(last_said)
     if declined:
         answer["opt_out"] = rules.NOT_INTERESTED
-    settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites)
+    settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites, quiet=quiet)
     if shops_chat:
         # Launch review issues 15 and 26: only what is theirs goes on the record, before code adds notes of its own
         # (crm_facts): their own questions as notes, never ours or the prompt's examples; a budget they gave, never our
@@ -2471,6 +2529,8 @@ def ask_model(
             normal["segment"] = need_segment
         # A booked sales call moved stays a call (place null or "office" unless they ask for the office: sales.keep_call).
         sales.keep_call(normal["appointment"], appointment, said, places)
+        # Their arrival after the Running Late tap, read by the model as a move (late_arrival): running_late, their time.
+        late_arrival(normal["appointment"], appointment)
         return _shape(normal, places)
 
     answer = shaped(first.data)
@@ -4698,6 +4758,8 @@ def _run_claimed(
         residential_facts=settings_row.residential_facts,
         # The track as the model's tag leaves it, on the residential path (a shop chat's turn stays 2d's: shops guards on).
         track=decision.track if res else "",
+        # A person has the chat (complaint_handover: their chase is no second handover).
+        quiet=state.handed_over_at is not None,
     )
     if shops_chat and broker_holds(answer):
         # A broker books nothing (Q11): the broker line goes, the time stays a tentative for our agent.
@@ -5586,6 +5648,12 @@ def _apply(
             conversation.labels.add(broker_label())
             done["handover"] = BROKER
             done["broker"] = True
+        # The handover desk (handover_desk.py; Matloob 2026-10-22): every handover, brokers included, puts the chat on
+        # its Bitrix responsible's own screen, where it stays once they write (handed_over_at clears then).
+        if (handover["needed"] or answer.get("broker")) and fresh.desk_at is None:
+            desk_reason = fresh.handover_reason or str(handover.get("reason") or "") or (BROKER if answer.get("broker") else "unclear")
+            if handover_desk.mark(fresh, now, desk_reason, fields):
+                done["desk"] = desk_reason
         # The co-pilot (copilot.py): from the turn that hands the chat over, and on every turn while a person has it,
         # the model's own words — the ones code did not send — wait for the agent as a draft.
         if answer.get("copilot_draft") and (handover["needed"] or fresh.handed_over_at is not None or answer.get("broker")):

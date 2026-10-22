@@ -147,10 +147,43 @@ def desk_groups(user) -> list[str]:
     return [DESK_GROUP] if has_desk_access(user) and not sees_all_inbox_chats(user) else []
 
 
-def desk_event_groups(event: str) -> list[str]:
-    """The groups besides the number's and the owner's that hear an event (inbox.events.publish): a Lead AI chat's
-    own ("leadai.*") reach the desk. A chat back in the main inbox is no desk chat, and its plain events never do."""
-    return [DESK_GROUP] if str(event or "").startswith(EVENT_PREFIX) else []
+def desk_groups_for(event: str, conversation=None) -> tuple[list[str], list[str]]:
+    """The groups besides the number's and the owner's that hear an event (inbox.events.publish), as (in full, trimmed):
+    a Lead AI chat's own ("leadai.*") reach the desk in full, and the chat's Bitrix responsible on the handover desk
+    (handover_desk.live_groups) in full when they hold the chat's number, trimmed when they have the chat through the
+    desk alone (trim_for_desk: the chat and the customer, nothing of the team). A chat back in the main inbox is no
+    desk chat, and its plain events reach neither."""
+    if not str(event or "").startswith(EVENT_PREFIX):
+        return [], []
+    full = [DESK_GROUP]
+    if conversation is None:
+        return full, []
+    # Routing must never stop a live event: a failed responsible lookup leaves the desk's group as it is.
+    try:
+        from .handover_desk import live_groups
+
+        theirs, trimmed = live_groups(conversation)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lead AI handover desk routing failed for conversation %s", getattr(conversation, "pk", None))
+        return full, []
+    return full + theirs, trimmed
+
+
+def desk_event_groups(event: str, conversation=None) -> list[str]:
+    """The groups that hear an event in full (desk_groups_for)."""
+    return desk_groups_for(event, conversation)[0]
+
+
+def desk_scoped_groups(event: str, conversation=None) -> list[str]:
+    """The groups that hear an event trimmed (desk_groups_for)."""
+    return desk_groups_for(event, conversation)[1]
+
+
+def trim_for_desk(data: dict) -> dict:
+    """A live frame's data for the responsible's channel (handover_desk.trim_live)."""
+    from .handover_desk import trim_live
+
+    return trim_live(data)
 
 
 def only_lead_ai(queryset):
@@ -383,6 +416,10 @@ def move_to_inbox(conversation, agent) -> bool:
         active=False, moved_by=agent, moved_at=timezone.now(), updated_at=timezone.now()
     )
     if updated:
+        # Off its responsible's handover desk too: the chat is a person's in the main inbox now.
+        from .handover_desk import clear
+
+        clear(conversation, agent)
         _announce(conversation.pk)
     return bool(updated)
 

@@ -18,6 +18,9 @@ urlpatterns = [
     # The agent desk (batch 2e): I'll call, and the counts on Needs a person and Today.
     path("chats/<int:pk>/appointment/take/", views.appointment_take, name="appointment-take"),
     path("desk/", views.desk_counts, name="desk-counts"),
+    # The handover desk (handover_desk.py): the responsible's own chats, and their Done.
+    path("desk/mine/", views.desk_mine, name="desk-mine"),
+    path("chats/<int:pk>/desk/done/", views.desk_done, name="desk-done"),
     path("settings/", views.assistant_settings, name="settings"),
     # The daily digests (assistant/digest.py) for the Reports dialog: the stored days and today so far.
     path("digests/", views.digests, name="digests"),
