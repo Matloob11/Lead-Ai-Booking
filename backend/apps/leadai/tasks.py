@@ -811,14 +811,22 @@ def _agent_for_bitrix(bitrix_user_id: str):
 
 
 def _remember_responsible(conversation, bitrix_user_id: str) -> None:
+    from . import handover_desk
     from .models import LeadAiChatState
 
     agent = _agent_for_bitrix(bitrix_user_id)
     state = LeadAiChatState.for_conversation(conversation)
+    before = state.responsible_agent_id
     state.responsible_bitrix_user_id = bitrix_user_id if bitrix_user_id.isdigit() else ""
     state.responsible_agent = agent
     state.responsible_checked_at = timezone.now()
     state.save(update_fields=["responsible_bitrix_user_id", "responsible_agent", "responsible_checked_at", "updated_at"])
+    # The handover desk: a reassignment in Bitrix moves the chat between desks the moment it is read, and both screens
+    # hear it (handover_desk.changed); a responsible named for the first time hears their new chat.
+    after = agent.pk if agent is not None else None
+    if state.desk_at is not None and after != before:
+        handover_desk.changed(before, conversation.pk, False)
+        handover_desk.changed(after, conversation.pk, True)
 
 
 def _retry_or_give_up(task, exc):

@@ -148,17 +148,31 @@ def desk_groups(user) -> list[str]:
 
 
 def desk_event_groups(event: str, conversation=None) -> list[str]:
-    """The groups besides the number's and the owner's that hear an event (inbox.events.publish): a Lead AI chat's
-    own ("leadai.*") reach the desk, and the chat's Bitrix responsible when it is on their handover desk
-    (handover_desk.live_groups). A chat back in the main inbox is no desk chat, and its plain events never do."""
+    """The groups besides the number's and the owner's that hear an event in full (inbox.events.publish): a Lead AI
+    chat's own ("leadai.*") reach the desk. A chat back in the main inbox is no desk chat, and its plain events never
+    do. The chat's Bitrix responsible, who has it through the handover desk alone, hears it trimmed instead
+    (desk_scoped_groups)."""
     if not str(event or "").startswith(EVENT_PREFIX):
         return []
-    groups = [DESK_GROUP]
-    if conversation is not None:
-        from .handover_desk import live_groups
+    return [DESK_GROUP]
 
-        groups += live_groups(conversation)
-    return groups
+
+def desk_scoped_groups(event: str, conversation=None) -> list[str]:
+    """The handover desk (handover_desk.py): the chat's Bitrix responsible's own channel, for a chat on their desk that
+    they reach through it alone (handover_desk.live_groups); its frames go trimmed (trim_for_desk: the chat and the
+    customer, nothing of the team)."""
+    if conversation is None or not str(event or "").startswith(EVENT_PREFIX):
+        return []
+    from .handover_desk import live_groups
+
+    return live_groups(conversation)
+
+
+def trim_for_desk(data: dict) -> dict:
+    """A live frame's data for the responsible's channel (handover_desk.trim_live)."""
+    from .handover_desk import trim_live
+
+    return trim_live(data)
 
 
 def only_lead_ai(queryset):

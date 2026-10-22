@@ -440,6 +440,8 @@ def desk_mine(request):
     queryset = (
         Conversation.objects.filter(clause)
         .select_related("contact", "lead_ai_state")
+        # Whether a person wrote since the handover, for the whole list in the one query (handover_desk.row reads it).
+        .annotate(desk_person_wrote=handover_desk.person_wrote_exists())
         .prefetch_related(
             Prefetch(
                 "lead_ai_appointments",
@@ -477,6 +479,9 @@ def chat_detail(request, pk):
     row["lead_ai_ai"]["memory"] = [
         memory.describe(entry) for entry in memory.recall(conversation.contact.wa_id, exclude_conversation=conversation.pk)
     ]
+    # The handover desk: an agent who has the chat through it alone sees the chat and the customer, nothing of the team.
+    if handover_desk.only_through_desk(request.user, conversation):
+        handover_desk.trim(row)
     return Response(row)
 
 
