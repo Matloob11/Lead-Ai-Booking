@@ -139,15 +139,14 @@ def _read_responsible(conversation_id: int) -> None:
         logger.exception("Lead AI could not queue the responsible read for conversation %s", conversation_id)
 
 
-def is_broker(conversation, state) -> bool:
-    """The chat is a broker's as it stands now: the Broker label (engine._apply and bitrix_status add it with the pause),
-    or a broker's handover or desk reason. The stay's first desk reason alone is not enough: a broker may declare
-    themselves after a handover for another reason, and the pause set then is theirs."""
+def is_broker(state) -> bool:
+    """The stay is a broker's by its reasons, the handover's or the desk's (engine._apply, bitrix_status). The Broker
+    label alone is not it: it outlives a Resume (from then on a labelled chat's broker is an ordinary handover,
+    engine.settle's broker_labelled), so a pause under an old label is the stay's own (Bitrix's Handed to agent); and a
+    broker declared after a handover for another reason is handed over again the moment they write."""
     from .assistant import engine
 
-    if engine.BROKER in (state.handover_reason, state.desk_reason):
-        return True
-    return conversation.labels.filter(name__iexact=engine.BROKER_LABEL).exists()
+    return engine.BROKER in (state.handover_reason, state.desk_reason)
 
 
 def done(conversation, user, now=None) -> LeadAiChatState:
@@ -161,7 +160,7 @@ def done(conversation, user, now=None) -> LeadAiChatState:
     values = {"desk_at": None, "desk_done_at": now, "desk_done_by": user if getattr(user, "pk", None) else None}
     if state.handed_over_at is not None:
         values.update(handed_over_at=None, handover_reason="", holding_line_at=None, draft=None)
-    if state.paused_at is not None and state.paused_by_id is None and not is_broker(conversation, state):
+    if state.paused_at is not None and state.paused_by_id is None and not is_broker(state):
         values.update(paused_at=None, paused_by=None)
     LeadAiChatState.objects.filter(pk=state.pk).update(**values)
     changed(state.responsible_agent_id, conversation.pk, False)
@@ -317,6 +316,9 @@ def trim(row: dict) -> dict:
         row["lead_ai_ai"] = {**ai, "memory": [], "paused_by": ""}
     if "lead_ai_appointment" in row:
         row["lead_ai_appointment"] = trim_appointment(row["lead_ai_appointment"])
+    # The Lead AI list's Today rows (desk.TodayRow) name who took a call too.
+    if isinstance(row.get("lead_ai_desk"), dict) and "taken_by" in row["lead_ai_desk"]:
+        row["lead_ai_desk"] = trim_appointment(row["lead_ai_desk"])
     return row
 
 
@@ -360,9 +362,6 @@ def live_groups(conversation) -> tuple[list[str], list[str]]:
     they hold: inbox.consumers), so they get the frames on their channel: in full when they hold the chat's number or
     own it, trimmed (trim_live) when they have the chat through the desk alone (only_through_desk)."""
     from apps.inbox.events import group_for_agent
-    from apps.inbox.visibility import sees_all_inbox_chats
-
-    from .lane import has_desk_access
 
     state = (
         LeadAiChatState.objects.filter(conversation_id=getattr(conversation, "pk", None), desk_at__isnull=False)
@@ -373,10 +372,15 @@ def live_groups(conversation) -> tuple[list[str], list[str]]:
     if state is None:
         return [], []
     agent = state.responsible_agent
-    if sees_all_inbox_chats(agent) or has_desk_access(agent) or getattr(conversation, "assigned_agent_id", None) == agent.pk:
+    if getattr(conversation, "assigned_agent_id", None) == agent.pk:
+        return [], []
+    # An admin or a desk agent hears the chat elsewhere; one who can have no desk (no Official API inbox, inactive)
+    # cannot open it and hears nothing of it.
+    found = scope(agent)
+    if found is None:
         return [], []
     group = [group_for_agent(agent.pk)]
-    return ([], group) if only_through_desk(agent, conversation) else (group, [])
+    return ([], group) if found.through_desk(conversation) else (group, [])
 
 
 def count_for(user) -> int:

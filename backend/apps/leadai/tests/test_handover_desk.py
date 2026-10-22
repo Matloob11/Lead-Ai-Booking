@@ -144,16 +144,20 @@ class GrantTests(GrantBase):
         self.assertEqual((state.desk_at, state.handed_over_at), (None, None))
         self.assertEqual(state.paused_at, now)
 
-    def test_done_keeps_a_brokers_pause_set_after_another_handover(self):
+    def test_done_and_the_broker_label(self):
         # A was handed over for a person asked for; the customer then declared themselves a broker (engine._apply pauses
-        # the chat and labels it Broker; the desk's reason stays the stay's first): Done keeps that pause (Q11).
+        # the chat and labels it Broker; the stay's reasons stay). Done ends that pause as the stay's own: the label
+        # outlives a Resume too, and a labelled chat's broker is an ordinary handover the moment they write again.
         now = timezone.now()
         LeadAiChatState.objects.filter(conversation=self.a).update(paused_at=now, paused_by=None)
         self.a.labels.add(engine.broker_label())
         state = handover_desk.done(self.a, self.plain)
-        self.assertEqual((state.desk_at, state.handed_over_at, state.paused_at), (None, None, now))
-        self.assertTrue(handover_desk.is_broker(self.a, state))
-        self.assertFalse(handover_desk.is_broker(self.c, LeadAiChatState.for_conversation(self.c)))
+        self.assertEqual((state.desk_at, state.handed_over_at, state.paused_at), (None, None, None))
+        self.assertFalse(handover_desk.is_broker(state))
+        # A broker's stay by its reason keeps its pause (the Done test above); the label alone never counts.
+        self.assertTrue(handover_desk.is_broker(LeadAiChatState(handover_reason=engine.BROKER)))
+        self.assertTrue(handover_desk.is_broker(LeadAiChatState(desk_reason=engine.BROKER)))
+        self.assertFalse(handover_desk.is_broker(LeadAiChatState(handover_reason=bitrix_status.HANDED_REASON)))
 
     def test_the_list_and_the_post_endpoints_are_trimmed_too(self):
         row = self.rows(self.plain)["results"][0]
@@ -168,6 +172,12 @@ class GrantTests(GrantBase):
         # A desk agent's list keeps the team.
         row = self.rows(self.desker)["results"][0]
         self.assertEqual(row["assigned_agent"]["display_name"], "Matloob")
+        # The Today rows name who took a call: not for them (the trim covers the desk row as the appointment).
+        trimmed = handover_desk.trim({"lead_ai_desk": {"view": "today", "taken_by": "Matloob", "taken_by_id": self.owner.pk}})
+        self.assertEqual(trimmed["lead_ai_desk"], {"view": "today", "taken_by": "", "taken_by_id": None})
+        self.appointment(self.a, starts_at=timezone.now() + dt.timedelta(hours=1), taken_by=self.owner, taken_at=timezone.now())
+        for row in self.rows(self.plain, "?today=1")["results"]:
+            self.assertEqual(((row.get("lead_ai_desk") or {}).get("taken_by", ""), row["lead_ai_appointment"]["taken_by"]), ("", ""))
 
     def test_the_desk_rows_name_no_colleague_on_a_call(self):
         now = timezone.now()
@@ -306,10 +316,17 @@ class GrantTests(GrantBase):
         for responsible in (self.second, self.admin, self.owner):
             LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=responsible)
             self.assertEqual(handover_desk.live_groups(self.b), ([], []), responsible.username)
+        # One who can have no desk (no Official API inbox) cannot open the chat: nothing for them either.
+        outsider = Agent.objects.create_user(username="outsider", password="x", bitrix_user_id="2700", can_official_api=False)
+        LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=outsider)
+        self.assertEqual(handover_desk.live_groups(self.b), ([], []))
         # A holder of the chat's number who does not own it hears nothing otherwise: their own channel, in full.
         backup = self.backup()
         LeadAiChatState.objects.filter(conversation=self.b).update(responsible_agent=backup, responsible_bitrix_user_id="2600")
         self.assertEqual(handover_desk.live_groups(self.b), ([group_for_agent(backup.pk)], []))
+        # A failed lookup never stops a live event: the desk's group keeps the frame.
+        with patch("apps.leadai.handover_desk.live_groups", side_effect=RuntimeError("db")):
+            self.assertEqual(lane.desk_groups_for("leadai.message.new", self.b), ([lane.DESK_GROUP], []))
         self.assertEqual(lane.desk_event_groups("leadai.message.new", self.a), [lane.DESK_GROUP])
         self.assertEqual(lane.desk_scoped_groups("leadai.message.new", self.a), [group_for_agent(self.plain.pk)])
         self.assertEqual(lane.desk_groups_for("leadai.message.new", self.b), ([lane.DESK_GROUP, group_for_agent(backup.pk)], []))

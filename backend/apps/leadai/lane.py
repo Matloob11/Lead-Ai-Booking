@@ -158,9 +158,14 @@ def desk_groups_for(event: str, conversation=None) -> tuple[list[str], list[str]
     full = [DESK_GROUP]
     if conversation is None:
         return full, []
-    from .handover_desk import live_groups
+    # Routing must never stop a live event: a failed responsible lookup leaves the desk's group as it is.
+    try:
+        from .handover_desk import live_groups
 
-    theirs, trimmed = live_groups(conversation)
+        theirs, trimmed = live_groups(conversation)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lead AI handover desk routing failed for conversation %s", getattr(conversation, "pk", None))
+        return full, []
     return full + theirs, trimmed
 
 
