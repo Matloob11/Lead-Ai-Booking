@@ -1109,6 +1109,21 @@ case "$cmd" in
     remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_switch test-numbers $*"
     ;;
 
+  leadai-move-to-inbox)
+    # Desk "Move to inbox" for Lead AI chat ids (pk of leadai_leadaichat). Digits only.
+    [[ $# -ge 1 ]] || die "leadai-move-to-inbox takes one or more Lead AI chat ids"
+    ids=()
+    for n in "$@"; do
+      [[ "$n" =~ ^[0-9]{1,10}$ ]] || die "'$n' is not a Lead AI chat id"
+      ids+=("$n")
+    done
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-move-to-inbox.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-move-to-inbox.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
+      -e LEADAI_MOVE_INBOX_IDS='${ids[*]}' web python manage.py shell"
+    ;;
+
   leadai-alert-ids)
     # Bitrix user ids that also get the assistant's booking, broker, handover
     # and unanswered-message alerts. No argument clears the list.
@@ -1218,6 +1233,40 @@ case "$cmd" in
       esac
     done
     remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_portal_enquiry_template $flag $category"
+    ;;
+
+  submit-reconnect-again-template)
+    # Reconnect again (apps/leadai/reconnect.py; Matloob 2026-10-22): intl_city_property_reconnect_again (MARKETING,
+    # {{1}} the first name, the mixed template's three quick replies) to the eight sending numbers' WABAs. A WABA that
+    # has it already, in any status, keeps it. --dry-run says what would go and submits nothing.
+    flag=""
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      flag="--dry-run"
+    elif [[ $# -ne 0 ]]; then
+      die "submit-reconnect-again-template takes no arguments, or --dry-run"
+    fi
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_reconnect_again_template $flag"
+    ;;
+
+  leadai-reconnect-again)
+    # Reconnect again: the audience of these Lead AI campaigns (who gets the second template in their chat, who gets a
+    # fresh send, who is left out and why), and with --send the sends themselves, inside Template B's hours:
+    #   ops/wa.sh leadai-reconnect-again 549,550,551,552,553
+    #   ops/wa.sh leadai-reconnect-again 549,550,551,552,553 --show 20
+    #   ops/wa.sh leadai-reconnect-again 549,550,551,552,553 --send [--limit N] [--agent <bitrix id>] [--quiet-hours N] [--any-hour]
+    ids="${1:-}"
+    [[ "$ids" =~ ^[0-9]{1,7}(,[0-9]{1,7}){0,30}$ ]] || die "campaign ids: digits separated by commas, e.g. 549,550"
+    shift
+    args=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --send|--any-hour) args="$args $1"; shift ;;
+        --limit|--quiet-hours|--show) [[ "${2:-}" =~ ^[0-9]{1,5}$ ]] || die "$1 takes a number"; args="$args $1 $2"; shift 2 ;;
+        --agent) [[ "${2:-}" =~ ^[0-9]{1,8}$ ]] || die "--agent takes a Bitrix user id"; args="$args --agent $2"; shift 2 ;;
+        *) die "leadai-reconnect-again: unknown option $1" ;;
+      esac
+    done
+    remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_reconnect_again --campaigns $ids$args"
     ;;
 
   submit-ic-templates)
