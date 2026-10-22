@@ -23,11 +23,13 @@ import { notifyNewMessage } from "../../core/notifications.js";
 import { asList, leadAiApi } from "./api.js";
 import { contactName } from "./thread.js";
 import { closeScreen, deliverToScreen, isScreenOpen, openChatId, openLeadAiScreen, resyncScreen } from "./screen.js";
-import { deliverToHandovers, handoversChatId, isHandoversOpen, openHandoversScreen } from "./handovers.js";
+import { InboxSocket } from "../../core/realtime.js";
+import { deliverToHandovers, handoversChatId, isHandoversOpen, openHandoversScreen, resyncHandovers } from "./handovers.js";
 
 let me = null;
 let unreadChats = 0;
 let socketReadyCount = 0;
+let ownSocket = null;
 const badges = new Set();
 const deskBadges = new Set();
 
@@ -52,6 +54,28 @@ function setDeskBadge() {
     badge.textContent = count ? String(count) : "";
     badge.hidden = !count;
   }
+  // The no-number card's line and button (modules/access-requests.js) say the same count.
+  const text = document.querySelector(".access__handovers-text");
+  const button = document.querySelector(".access__handovers-btn");
+  if (text) {
+    text.textContent = count
+      ? `${count} chat${count === 1 ? "" : "s"} the AI handed to you ${count === 1 ? "is" : "are"} waiting for you.`
+      : "Chats the AI hands to you (as the lead's responsible) open here; no number is needed for that.";
+  }
+  if (button) button.replaceChildren(icon("messageSquare", { size: 15 }), count ? `My handovers (${count})` : "My handovers");
+}
+
+/**
+ * An agent with no number has no inbox layout, so the inbox opens no live socket for them. One is opened here for the
+ * page's life (core/realtime.js re-broadcasts its frames as "wa:event"), so the handover alerts, the chime, the
+ * desk's count and the handovers screen all hear the server while the screen is closed too.
+ */
+function openOwnSocket() {
+  if (ownSocket || document.querySelector(".sidebar__menu-btn") || window.a7wa?.liveSocket) return;
+  if (!me || !scopedAgent()) return;
+  ownSocket = new InboxSocket({ onEvent: () => {}, onStatus: () => {} });
+  window.a7wa.liveSocket = ownSocket;
+  ownSocket.connect();
 }
 
 async function findLeadAiChat(waId) {
@@ -308,6 +332,7 @@ window.addEventListener("wa:event", (event) => {
     if (socketReadyCount > 1) {
       refreshUnread();
       resyncScreen();
+      resyncHandovers();
     }
     return;
   }
@@ -366,6 +391,7 @@ function start() {
   watchMenu();
   refreshUnread();
   setDeskBadge();
+  openOwnSocket();
 }
 
 window.addEventListener("wa:ready", (event) => {

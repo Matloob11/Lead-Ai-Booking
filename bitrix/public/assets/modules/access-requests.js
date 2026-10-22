@@ -68,13 +68,14 @@ export function renderNoNumbersScreen(host, { me, onAssigned, onLinkedDevices } 
   const deskCount = Math.max(0, Number(me.handover_desk?.count) || 0);
   const handovers = me.handover_desk
     ? el("div.access__leadai.access__handovers", {}, [
-        el("p.access__lead", {}, [
+        // lead-ai.js keeps the count current on these two (a live leadai.desk.changed).
+        el("p.access__lead.access__handovers-text", {}, [
           deskCount
             ? `${deskCount} chat${deskCount === 1 ? "" : "s"} the AI handed to you ${deskCount === 1 ? "is" : "are"} waiting for you.`
             : "Chats the AI hands to you (as the lead's responsible) open here; no number is needed for that.",
         ]),
         el(
-          "button.btn.btn--primary.access__leadai-btn",
+          "button.btn.btn--primary.access__leadai-btn.access__handovers-btn",
           { type: "button", onclick: () => window.a7wa?.openHandovers?.() },
           [icon("messageSquare", { size: 15 }), deskCount ? `My handovers (${deskCount})` : "My handovers"]
         ),

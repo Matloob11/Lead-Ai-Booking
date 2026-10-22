@@ -1115,8 +1115,9 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const failed = outbound && (message.status === "failed" || message.status === "exhausted");
     const failure = failed ? failureText(message) : "";
     const tick = outbound ? TICKS[message.status] : null;
+    // The handover desk (scoped): no colleague's name above a bubble (the frames carry none either: handover_desk.trim_live).
     const author =
-      outbound && message.sent_by?.display_name && String(message.sent_by.id) !== String(me?.id)
+      !scoped && outbound && message.sent_by?.display_name && String(message.sent_by.id) !== String(me?.id)
         ? message.sent_by.display_name
         : "";
     const badge = fromAi
@@ -1325,12 +1326,18 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
 
   function openTemplates() {
     if (!state.conversation) return;
+    // The handover desk (scoped): the dialog's "From our number" line gets the digits alone, never the number's name.
+    const number = state.conversation.number;
+    const conversation = scoped
+      ? { ...state.conversation, number: number ? { id: number.id, phone_number: number.phone_number || "" } : null }
+      : state.conversation;
     openTemplateComposer({
       mode: "reply",
-      conversation: state.conversation,
+      conversation,
       // New template and Sync from Meta inside the dialog, for this chat's business account (Matloob 2026-10-20);
       // not on the handover desk, whose agent holds no number of ours (scoped).
       canCreate: !scoped,
+      canSync: !scoped,
       isAdmin: Boolean(me?.is_wa_admin),
       templatesFor: async () => asList(await inbox.conversationTemplates(state.id), "templates"),
       // The composer outlives this chat when the agent opened another meanwhile.

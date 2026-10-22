@@ -402,8 +402,13 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   endpoint follows unchanged. **List:** `GET /api/leadai/desk/mine/` (`?agent=` for an admin), rows trimmed to the chat
   and the customer, "they wrote" one `Exists` for the whole list. An agent who has a chat through the desk alone
   (`only_through_desk`: no admin, no Lead AI access, not the owner, none of the number's holders) gets the chat detail
-  and the live frames trimmed the same way (`trim`, `trim_live`; `lane.desk_scoped_groups`), and `leadai.desk.changed`
-  tells their screen a chat came onto, or left, their desk (Done, a move, a Bitrix reassignment), with their count.
+  the list's rows and the live frames trimmed the same way (`trim`, `trim_live`; `lane.desk_groups_for`), and
+  `leadai.desk.changed` tells their screen a chat came onto, or left, their desk (Done, a move, a Bitrix
+  reassignment), with their count. A responsible who is no admin, has no Lead AI access and does not own the chat
+  hears nothing of it otherwise (an agent joins no number group), so their own channel gets the chat's frames: in full
+  when they hold its number, trimmed when they have the chat through the desk alone. A re-read of the lead's Bot
+  Status before a nudge (`followups.bitrix_blocks`) applies no Handed to agent again after Done
+  (`bitrix_status.apply(reread=True)` while `desk_done_at` stands); a person's fresh change still does.
 - **Panel:** `modules/lead-ai/handovers.js` ("My handovers": the hamburger menu item with the count, the no-number
   card's door, a live socket of its own for an agent with no number), `thread.js` in scoped mode (Done; no AI controls,
   no Move to inbox, no line on the owner, the campaign, the CRM record or the memory; our number as digits only),
@@ -413,9 +418,11 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   the handover is `complaint_or_upset` (`engine.complaint_handover`; eval `complaint`, both runs); "I will reach by 5:30"
   after the Running Late tap, read by the model as a reschedule to 17:30, is their late arrival
   (`engine.late_arrival`; eval `booked-running-late`, one run of two). Tests: `tests/test_r23_guards.py`.
-- **Not yet:** the messages endpoint's embedded chat (`apps/inbox/views.py`; Cursor's uncommitted copy is what the
-  server holds, so it was left alone) still carries the owner's name and the number's title to a scoped agent, which the
-  panel hides; a handover's Bitrix notification still says "until someone from the team writes".
+- **Not yet:** in `apps/inbox/views.py` (Cursor's uncommitted copy is what the server holds, so it was left alone) the
+  messages endpoint's embedded chat still carries the owner's name and the number's title to a scoped agent, which the
+  panel hides, and `contact_detail` gives them the owner's Bitrix id, the number roster and the assignment history;
+  Resume AI on a Bitrix-handed chat has the re-read hole Done had; a handover's Bitrix notification still says "until
+  someone from the team writes".
 
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone

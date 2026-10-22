@@ -39,6 +39,11 @@ export function handoversChatId() {
   return screen?.activeId ?? null;
 }
 
+/** The socket came back after a gap (lead-ai.js, on the server's "ready"): the list is read again. */
+export function resyncHandovers() {
+  screen?.resync();
+}
+
 export function openHandoversScreen({ me, conversationId, highlightMessageId } = {}) {
   if (screen) {
     if (conversationId) screen.select(conversationId, { highlightMessageId });
@@ -76,8 +81,9 @@ export function openHandoversScreen({ me, conversationId, highlightMessageId } =
   const timer = setInterval(() => {
     if (document.visibilityState === "visible") load({ keep: true });
   }, RELOAD_MS);
-  // No inbox layout (an agent with no number): no live socket yet, so this screen opens its own.
-  if (!document.querySelector(".sidebar__menu-btn")) {
+  // No inbox layout (an agent with no number): no live socket from the inbox. lead-ai.js opens one for the page's life
+  // (window.a7wa.liveSocket); only when it did not (an older lead-ai.js) does this screen open its own.
+  if (!document.querySelector(".sidebar__menu-btn") && !window.a7wa?.liveSocket) {
     state.socket = new InboxSocket({
       onEvent: () => {},
       onStatus: ({ state: connState, resync }) => {
@@ -94,6 +100,7 @@ export function openHandoversScreen({ me, conversationId, highlightMessageId } =
     onEvent,
     select,
     close,
+    resync: () => load({ keep: true }),
     get thread() {
       return state.thread;
     },

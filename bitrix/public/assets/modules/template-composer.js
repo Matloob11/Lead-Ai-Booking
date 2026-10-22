@@ -162,6 +162,8 @@ function mediaGlyph(format) {
  */
 export function openTemplateComposer({
   mode, conversation, numbers = [], templatesFor, onSent, findExisting, onOpenExisting, to = "", canCreate = false, isAdmin = false,
+  // Sync from Meta in the reply dialog; off on the Lead AI handover desk, whose agent holds no number of ours.
+  canSync = true,
 }) {
   const isNew = mode === "new";
   // Reply mode: the chat's own number, in full, and the two things an agent needs when the template they want is not in
@@ -699,7 +701,7 @@ export function openTemplateComposer({
           " New template",
         ])
       : null;
-  const syncFromMetaBtn = ourNumber
+  const syncFromMetaBtn = ourNumber && canSync
     ? el("button.btn.btn--ghost.btn--sm", { type: "button", title: "Refresh this list from Meta (a template approved just now)" }, [
         icon("refresh", { size: 14 }),
         " Sync from Meta",
