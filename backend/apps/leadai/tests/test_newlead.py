@@ -131,6 +131,11 @@ class GreetTests(Base):
         self.assertTrue(result.get("sent"), result)
         recipient = CampaignRecipient.objects.get(campaign_id=result["campaign_id"])
         self.assertEqual(recipient.variables, {"1": "Ahmed", "2": "the 2-bedroom apartment in Serena"})
+        # The lead with no Community field: the enquired listing's community is the chat's (the first live greet, 2026-10-22).
+        self.rows[903] = lead_row(ID="903", PHONE=[{"VALUE": "+971509997777"}], UF_CRM_1770537051525="")
+        result = newlead.greet(903, now=NOW)
+        self.assertTrue(result.get("sent"), result)
+        self.assertEqual(Campaign.objects.get(pk=result["campaign_id"]).lead_ai.community, "Serena")
 
     @override_settings(BITRIX_WEBHOOK_URL="https://bitrix.test/rest/1/x/")
     def test_what_is_left_alone(self):

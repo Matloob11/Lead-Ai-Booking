@@ -203,7 +203,11 @@ def greet(lead_id: int, *, now=None) -> dict:
         return {"skipped": why}
     from . import inventory
 
-    words = listing_words(context, inventory.enquired(context))
+    unit = inventory.enquired(context)
+    words = listing_words(context, unit)
+    # The chat's community: the lead's Community field, else the enquired listing's (a Property Finder lead carries the
+    # listing and often no community: the first greet, 2026-10-22, left the Serena townhouse's chat with none).
+    community = str(context.get("community") or (unit.community if unit is not None else "") or "")
     field_map = {"1": "name"}
     extra_body = {"2": words} if int(template.variable_count or 0) >= 2 else {}
     try:
@@ -229,7 +233,7 @@ def greet(lead_id: int, *, now=None) -> dict:
     campaign = Campaign.objects.filter(pk=result["campaign_id"]).first()
     if campaign is not None:
         Campaign.objects.filter(pk=campaign.pk).update(name=f"{NAME_PREFIX} · {template.name}"[:200])
-        # The chat's community from the lead (communities.campaign_community reads it until their words say otherwise).
-        lane.mark_campaign(campaign, playbook=lane.IC_SHOPS, community=str(context.get("community") or ""))
+        # The chat's community (communities.campaign_community reads it until their words say otherwise).
+        lane.mark_campaign(campaign, playbook=lane.IC_SHOPS, community=community)
     logger.info("Lead AI greet: lead %s gets %s from %s (%s)", lead_id, template.name, number.phone_number, words)
     return {"sent": True, "campaign_id": result.get("campaign_id"), "words": words, "template": template.name}
