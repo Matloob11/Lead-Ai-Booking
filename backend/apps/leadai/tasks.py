@@ -132,6 +132,7 @@ def send_due_reminders() -> None:
         # Last: they only queue one task per due chat, or read the Bitrix escalation map (round 20: one call on a cold
         # cache), and must never delay a reminder. A sweep cut off here resumes them next minute.
         _follow_ups,
+        _label_greeted,
         _escalate_handovers,
     ):
         try:
@@ -140,6 +141,15 @@ def send_due_reminders() -> None:
             raise
         except Exception:  # noqa: BLE001 - one job must not stop the others
             logger.exception("Lead AI sweep step %s failed", job.__name__)
+
+
+def _label_greeted() -> None:
+    """The "AI auto reply" label on the chats the new-lead greet opened (assistant/newlead.py; Matloob 2026-10-22)."""
+    from .assistant import newlead
+
+    done = newlead.label_greeted()
+    if done:
+        logger.info("Lead AI: %s greeted chat(s) labelled %s", done, newlead.AUTO_REPLY_LABEL)
 
 
 def _copilot_auto_send() -> None:

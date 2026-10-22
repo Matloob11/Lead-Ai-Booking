@@ -369,6 +369,19 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   the enquired unit's photos on the first turn outside the pack flow, the rest of an eval family for portal leads (a
   reply in Arabic or Urdu, a voice note, a reply after 24 hours, a listing gone).
 
+## 6g. Round 22f (2026-10-22): the "AI auto reply" label and "reconnect again"
+
+- **The label:** every chat a new-lead greet campaign made carries the inbox label "AI auto reply"
+  (`newlead.label_greeted`, from the sweep), so an agent tells an automatic reply's chat from a campaign's.
+- **Reconnect again (`reconnect.py`, `leadai_reconnect_again`):** one more template to the mixed campaign's
+  customers who never said no, so the assistant can talk to them. Per recipient: *in the chat* (the campaign reached
+  them; nothing says no per `followups.blocked`; no viewing open; quiet 48 h; the number not dead; not sent already)
+  the template `intl_city_property_reconnect_again` (MARKETING, `{{1}}` the first name, the mixed template's quick
+  replies; `ic_templates.kind` MIXED) inside the same chat, as Template B goes; *fresh* (never messaged: the cap
+  skipped them) a Lead AI campaign per original number through the popup's path and rules; *out* with the reason. A
+  dry run unless `--send`; Template B's hours. The 19 October campaign's facts that shaped it: 1,295 leads, 781
+  reached, 246 replied, 412 never messaged for Meta's marketing daily cap, 102 failed.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).

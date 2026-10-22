@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 NAME_PREFIX = "New lead · Lead AI"
 NEW_STATUS = "NEW"
+# The inbox label every chat the greet opened carries (Matloob 2026-10-22): agents tell an automatic reply's chat from a
+# campaign's. Put on by the sweep (label_greeted) once the campaign's send made the chat.
+AUTO_REPLY_LABEL = "AI auto reply"
+AUTO_REPLY_COLOUR = "#7C3AED"
+LABEL_BATCH = 200
 # The template's second variable: the listing in words ("the 2-bedroom in Serena"); "your enquiry" when nothing is known.
 UNIT_WORDS = {"studio": "the studio", "one_br": "the one-bedroom", "two_plus": "the apartment", "villa": "the villa", "townhouse": "the townhouse", "shop": "the shop"}
 FALLBACK_WORDS = "your enquiry"
@@ -144,6 +149,28 @@ def popup_row(lead_id: int, row: dict, phone: str) -> dict:
         "bot_status": row.get(crm_fields.FIELD_BOT_STATUS),
         "wa_opt_out": row.get(crm_fields.FIELD_OPT_OUT),
     }
+
+
+def label_greeted() -> int:
+    """The "AI auto reply" label on every chat a greet campaign made that lacks it (LABEL_BATCH a run). Returns how many."""
+    from apps.campaigns.models import CampaignRecipient
+    from apps.inbox.models import Label
+
+    label, _ = Label.objects.get_or_create(name=AUTO_REPLY_LABEL, defaults={"colour": AUTO_REPLY_COLOUR})
+    pending = list(
+        CampaignRecipient.objects.filter(campaign__name__startswith=NAME_PREFIX, campaign__lead_ai__isnull=False, conversation__isnull=False)
+        .exclude(conversation__labels=label)
+        .order_by("pk")
+        .values_list("conversation_id", flat=True)
+        .distinct()[:LABEL_BATCH]
+    )
+    if pending:
+        from .. import lane
+
+        label.conversations.add(*pending)
+        for conversation_id in pending:
+            lane._announce(conversation_id)  # the chip shows on open screens now, not on the next reload
+    return len(pending)
 
 
 def _created_at(row: dict):

@@ -18,7 +18,12 @@ from __future__ import annotations
 from .assistant import shops
 
 MIXED_NAME = "intl_city_property_reconnect"
-NAMES = (MIXED_NAME,)
+# "Reconnect again" (Matloob 2026-10-22; reconnect.py): one more template to the mixed campaign's customers who never
+# refused (never reached, never answered, or quiet since), read by the engine exactly as the mixed template is (kind MIXED:
+# the lead context's first answer, the same yes / "Not now" / "Stop messages" taps). One variable: the first name.
+AGAIN_NAME = "intl_city_property_reconnect_again"
+NAMES = (MIXED_NAME, AGAIN_NAME)
+MIXED_NAMES = (MIXED_NAME, AGAIN_NAME)
 # The new-lead greet's template (assistant/newlead.py, round 22; Cursor's C68): "Hi {{1}}, thank you for your enquiry
 # about {{2}} … Are you still looking?" to a portal lead minutes after it lands. Any template named portal_… is one.
 PORTAL_NAME = "portal_enquiry_reply"
@@ -31,7 +36,7 @@ SHOP = "shop"
 MIXED = "mixed"
 PORTAL = "portal"
 # The template names kind() reads as no shops one: Template B never follows them (followups).
-NOT_SHOP_NAMES = (MIXED_NAME, PORTAL_NAME)
+NOT_SHOP_NAMES = (MIXED_NAME, PORTAL_NAME, AGAIN_NAME)
 CATEGORY = "MARKETING"
 LANGUAGE = "en"
 MIXED_BUTTONS = ("Yes, still looking", "Not now", "Stop messages")
@@ -47,6 +52,30 @@ MIXED_BODY = (
     "{studio_from} a year, one-bedrooms from around AED {one_br_from} a year and shops from AED {shop_from} a year. "
     "Are you still looking?"
 )
+
+
+AGAIN_BODY = (
+    "Hi {{{{1}}}}, this is {brand}. You asked us about a property in International City a while ago. We still have shops "
+    "to rent, and studios and one-bedroom apartments to rent or buy there, with viewings this week. Are you still looking?"
+)
+AGAIN_EXAMPLES = {"1": "Sumon"}
+
+
+def again_body(brand: str) -> str:
+    """The reconnect-again body, {{1}} the first name; ``brand`` the AI settings' brand name ("AR Properties")."""
+    return AGAIN_BODY.format(brand=" ".join(str(brand or "AR Properties").split()))
+
+
+def again_form(brand: str) -> dict:
+    """The reconnect-again template as the composer sends it (catalog.views._parse_template_form)."""
+    return {
+        "name": AGAIN_NAME,
+        "category": CATEGORY,
+        "language": LANGUAGE,
+        "body_text": again_body(brand),
+        "body_examples": dict(AGAIN_EXAMPLES),
+        "buttons": [{"type": "QUICK_REPLY", "text": label} for label in MIXED_BUTTONS],
+    }
 
 
 def figures(facts) -> dict:
@@ -73,10 +102,10 @@ def mixed_form(facts) -> dict:
 
 
 def kind(name: str) -> str:
-    """'mixed' for the mixed template, 'portal' for the new-lead greet's (a name starting portal_), 'shop' for every
-    other campaign template (2e spec §6.1)."""
+    """'mixed' for the mixed template and its reconnect-again, 'portal' for the new-lead greet's (a name starting
+    portal_), 'shop' for every other campaign template (2e spec §6.1)."""
     text = str(name or "").strip()
-    if text == MIXED_NAME:
+    if text in MIXED_NAMES:
         return MIXED
     if text.lower().startswith(PORTAL_PREFIX):
         return PORTAL
