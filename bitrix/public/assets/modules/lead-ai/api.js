@@ -48,10 +48,12 @@ export const leadAiApi = {
    * `needs` lists the chats that need a person, `today` the visits and calls of
    * today, each row with lead_ai_desk. The first page carries desk_counts.
    */
-  chats({ q = "", label = "", track = "", needs = false, today = false, sort = "", limit = 40, offset = 0 } = {}) {
+  chats({ q = "", label = "", track = "", needs = false, today = false, sort = "", unread = false, limit = 40, offset = 0 } = {}) {
     const query = new URLSearchParams({ limit, offset });
     if (q) query.set("q", q);
     if (label) query.set("label", label);
+    // Only the chats with a customer message nobody has read yet (the list's Unread filter; views: unread_count > 0).
+    if (unread) query.set("unread", "1");
     if (track) query.set("track", track);
     if (needs) query.set("needs", "1");
     else if (today) query.set("today", "1");

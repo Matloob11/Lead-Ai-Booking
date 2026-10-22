@@ -93,6 +93,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     brokers: false, // only the chats labelled Broker
     track: "", // the desk's track filter: "shop", "rent", "sale", "other" or none
     hotFirst: false, // the hottest leads first (?sort=score; lead_ai_ai.score)
+    unread: false, // only the chats with a customer message nobody has read yet (?unread=1)
     activeId: conversationId ? Number(conversationId) : null,
     pendingHighlight: highlightMessageId || null,
     thread: null,
@@ -117,6 +118,23 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     }, 250),
   });
+  // Unread (Matloob 2026-10-22): only the chats with a customer message nobody has read yet; pressed again, every chat.
+  // The chip carries the count the unfiltered list reports (unread_chats), the same figure as the menu's badge.
+  const unreadButton = el("button.lai-filter.lai-filter--unread", {
+    type: "button",
+    "aria-pressed": "false",
+    title: "Only the chats with a customer message nobody has read yet",
+    onclick: () => {
+      state.unread = !state.unread;
+      unreadButton.setAttribute("aria-pressed", String(state.unread));
+      unreadButton.classList.toggle("is-on", state.unread);
+      loadChats();
+    },
+  }, ["Unread"]);
+  function setUnreadChip(count) {
+    const n = Math.max(0, Number(count) || 0);
+    clear(unreadButton).append(n ? `Unread ${n}` : "Unread");
+  }
   const tabChats = railButton("chats", "messageSquare", "Chats");
   const tabSara = railButton("sara", "users", "Sara leads");
   // The agent desk (desk.js): Needs a person and Today, each a view of the chats; pressed again, back to Chats.
@@ -151,7 +169,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   });
-  const filters = el("div.lai-filters", {}, [brokersButton, hotButton, ...tracks.buttons]);
+  const filters = el("div.lai-filters", {}, [unreadButton, brokersButton, hotButton, ...tracks.buttons]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -290,6 +308,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     search.hidden = !isListTab(tab);
     filters.hidden = !isListTab(tab);
     hotButton.hidden = isDeskTab(tab); // Needs a person and Today keep their own order
+    unreadButton.hidden = isDeskTab(tab); // ... and their own lists
     // Another view's rows must not stand in for this one's while it loads.
     if (isListTab(tab)) loadChats({ keep: !switched });
     else loadSara();
@@ -315,6 +334,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
         label: state.brokers ? BROKER_LABEL : "",
         ...deskParams(tab, state.track),
         sort: state.hotFirst && tab === "chats" ? "score" : "",
+        unread: state.unread && tab === "chats",
         limit: PAGE,
         offset,
       });
@@ -324,9 +344,10 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.rows = append ? mergeRows(state.rows, page) : page;
       state.offset = offset + page.length;
       state.exhausted = page.length < PAGE;
-      // Only an unfiltered first page counts every unread Lead AI chat.
+      // Only an unfiltered first page counts every unread Lead AI chat (the Unread list itself is every unread chat too).
       if (!append && tab === "chats" && !state.q && !state.brokers && !state.track && typeof payload?.unread_chats === "number") {
         onUnreadChanged?.(payload.unread_chats);
+        setUnreadChip(payload.unread_chats);
       }
       if (payload?.desk_counts) rail.setCounts(payload.desk_counts);
       renderRows();
@@ -462,6 +483,10 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     } else {
       // Keep the campaign details the list endpoint gave; live payloads lack them.
       state.rows[index] = { ...state.rows[index], ...conversation, lead_ai_info: state.rows[index].lead_ai_info };
+      // The Unread list: a chat somebody read meanwhile leaves it (the open chat stays until the list is loaded again).
+      if (state.unread && state.tab === "chats" && !Number(state.rows[index].unread_count || 0) && String(conversation.id) !== String(state.activeId)) {
+        state.rows.splice(index, 1);
+      }
     }
     if (!quiet || isListTab(state.tab)) renderRows();
   }
@@ -534,7 +559,9 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     }
 
     // A search, the Brokers or a track filter, or a desk view narrows the list; a chat that does not match it stays out.
-    const narrowed = state.q || state.brokers || state.track || isDeskTab(state.tab);
+    // The Unread list takes a chat the customer just wrote to (it is unread now), nothing else.
+    const customerWrote = event === "leadai.message.new" && Number(conversation?.unread_count || 0) > 0 && String(state.activeId) !== String(id);
+    const narrowed = state.q || state.brokers || state.track || isDeskTab(state.tab) || (state.unread && !customerWrote);
     if (narrowed && !state.rows.some((row) => String(row.id) === String(id))) return;
 
     if (event === "leadai.message.new" && conversation) {
