@@ -70,6 +70,7 @@
 #   ops/wa.sh leadai-alert-ids [ids…]       Bitrix users who also get booking/broker/handover alerts
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
 #   ops/wa.sh set-leadai-office-address "TEXT"  the office address text Lead AI sends
+#   ops/wa.sh set-leadai-visit-contact "NAME" PHONE ["BACKUP NAME" BACKUP_PHONE]  whom a client on the way is told to call
 #   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
@@ -1152,16 +1153,17 @@ case "$cmd" in
   set-leadai-visit-contact)
     # Whom a client on the way is told to call (Lead AI settings; assistant/filters.on_my_way): the office contact and
     # an optional backup, set the way the AI settings dialog sets them and kept in the settings history. Names: letters,
-    # digits, spaces and . ' - (2-60); phones: digits with the country code (8-15). Two empty backup values clear it.
+    # digits, spaces and . - (2-60; no quote of any kind: the values sit inside the remote command's quoting below);
+    # phones: digits with the country code (8-15, no leading 0). Two empty backup values clear the backup.
     #   ops/wa.sh set-leadai-visit-contact "Shoaib Malik" 971581058726 "Abdul Malik" 971555484423
     [[ $# -eq 2 || $# -eq 4 ]] || die "set-leadai-visit-contact takes \"NAME\" PHONE [\"BACKUP NAME\" BACKUP_PHONE]"
-    name_ok="^[A-Za-z0-9 .'-]{2,60}$"; phone_ok='^[0-9]{8,15}$'
-    [[ "$1" =~ $name_ok ]] || die "the name may hold letters, digits, spaces and . ' - (2-60 characters)"
-    [[ "$2" =~ $phone_ok ]] || die "the phone is digits with the country code (8-15)"
+    name_ok='^[A-Za-z0-9 .-]{2,60}$'; phone_ok='^[1-9][0-9]{7,14}$'
+    [[ "$1" =~ $name_ok ]] || die "the name may hold letters, digits, spaces and . - (2-60 characters)"
+    [[ "$2" =~ $phone_ok ]] || die "the phone is digits with the country code (8-15, no leading 0)"
     backup_name="${3:-}"; backup_phone="${4:-}"
     if [[ -n "$backup_name$backup_phone" ]]; then
-      [[ "$backup_name" =~ $name_ok ]] || die "the backup name may hold letters, digits, spaces and . ' - (2-60 characters)"
-      [[ "$backup_phone" =~ $phone_ok ]] || die "the backup phone is digits with the country code (8-15)"
+      [[ "$backup_name" =~ $name_ok ]] || die "the backup name may hold letters, digits, spaces and . - (2-60 characters)"
+      [[ "$backup_phone" =~ $phone_ok ]] || die "the backup phone is digits with the country code (8-15, no leading 0)"
     fi
     script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-leadai-visit-contact.py"
     [[ -f "$script" ]] || die "missing ops/catalog/set-leadai-visit-contact.py"

@@ -3,7 +3,8 @@
 Run through `ops/wa.sh set-leadai-visit-contact "NAME" PHONE ["BACKUP NAME" BACKUP_PHONE]`: the verb passes the
 four as environment variables and pipes this file into `manage.py shell` in the web container. Names are cleaned the
 way the settings view cleans them (one line, no markup), phones kept as digits with the country code, and the change
-is recorded in the settings history. Two empty backup values clear the backup; an empty name and phone clear the lot.
+is recorded in the settings history. Two empty backup values clear the backup; the contact itself is cleared from the
+AI settings dialog (the verb always takes a name and a phone).
 """
 
 import os
@@ -23,8 +24,10 @@ def name_of(key: str) -> str:
 
 def phone_of(key: str) -> str:
     digits = "".join(ch for ch in os.environ.get(key, "") if ch.isdigit())
-    if digits and not 8 <= len(digits) <= 15:
-        raise SystemExit(f"REFUSED: {key}: give digits with the country code (8 to 15).")
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits and (digits.startswith("0") or not 8 <= len(digits) <= 15):
+        raise SystemExit(f"REFUSED: {key}: give digits with the country code (8 to 15, no leading 0).")
     return digits
 
 
