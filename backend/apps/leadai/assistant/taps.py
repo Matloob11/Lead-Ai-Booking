@@ -41,11 +41,12 @@ STATES = {
 }
 
 
-def reply_line(action: str, language: str, slots: list | None = None, now=None) -> str:
+def reply_line(action: str, language: str, slots: list | None = None, now=None, contact=None) -> str:
     """The owner's words for a tap (rules 54-56), in the customer's language. ``slots``: a
-    shops chat's two nearest free starts, offered for "Need to Reschedule" (T44)."""
+    shops chat's two nearest free starts, offered for "Need to Reschedule" (T44). ``contact``: whom a client on the
+    way may call (LeadAiSettings.visit_contact), with "On My Way"."""
     if action == "on_my_way":
-        return filters.on_my_way(language)
+        return filters.on_my_way(language, contact)
     if action == "reschedule" and slots is not None:
         from . import shop_flow
 
@@ -107,11 +108,14 @@ def handle(message_id: int) -> str:
 
     live.appointment_changed(conversation.pk)
     reason = f"tap: {action}"
-    if LeadAiSettings.load().answers(conversation.contact.wa_id) and _window_open(conversation, now):
+    settings_row = LeadAiSettings.load()
+    if settings_row.answers(conversation.contact.wa_id) and _window_open(conversation, now):
         language = LeadAiChatState.objects.filter(conversation=conversation).values_list("language", flat=True).first() or "en"
         slots = _reschedule_slots(conversation, appointment, now) if action == "reschedule" else None
         # A buyer's call (batch 2e slice C): "On My Way" is ready for the call, "Running Late" a later call (spec §3.3.7).
-        line = (calls.tap_line(action, language) if calls.is_sales_call(appointment) else "") or reply_line(action, language, slots, now)
+        line = (calls.tap_line(action, language) if calls.is_sales_call(appointment) else "") or reply_line(
+            action, language, slots, now, contact=settings_row.visit_contact()
+        )
         try:
             from apps.inbox import services as inbox_services
 

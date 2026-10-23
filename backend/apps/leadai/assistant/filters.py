@@ -482,6 +482,51 @@ ON_MY_WAY = {
     "hi_latin": "Perfect. Jald milte hain.",
     "hi": "बहुत बढ़िया। जल्द मिलते हैं।",
 }
+# A client on the way is told whom to call (Matloob 2026-10-23): the person waiting for them at the office first, and
+# the backup when he does not answer (LeadAiSettings.visit_contact: the names and phones are settings, never code's).
+# {primary} and {backup} read "Shoaib Malik on +971 58 105 8726"; {name} is the first one's name.
+VISIT_CONTACT = {
+    "en": "If you need anything on the way, call {primary}.",
+    "ar": "إذا احتجت أي شيء في الطريق، اتصل بـ {primary}.",
+    "ur_latin": "Raste mein kuch chahiye ho to {primary} ko call karein.",
+    "ur": "راستے میں کچھ چاہیے ہو تو {primary} کو کال کریں۔",
+    "hi_latin": "Raste mein kuch chahiye ho to {primary} ko call karein.",
+    "hi": "रास्ते में कुछ चाहिए हो तो {primary} को कॉल करें।",
+}
+VISIT_CONTACT_BACKUP = {
+    "en": "If {name} does not answer, call {backup}.",
+    "ar": "إذا لم يرد {name}، اتصل بـ {backup}.",
+    "ur_latin": "Agar {name} na uthayein to {backup} ko call karein.",
+    "ur": "اگر {name} نہ اٹھائیں تو {backup} کو کال کریں۔",
+    "hi_latin": "Agar {name} na uthayein to {backup} ko call karein.",
+    "hi": "अगर {name} न उठाएँ तो {backup} को कॉल करें।",
+}
+# The joining word between a name and a phone in each language ("Shoaib Malik on +971 …").
+_CONTACT_ON = {"en": "on", "ar": "على", "ur_latin": "par", "ur": "پر", "hi_latin": "par", "hi": "पर"}
+
+
+def phone_label(digits) -> str:
+    """A phone for a message: "+971 58 105 8726" for a UAE mobile (971 and nine digits), "+<digits>" otherwise."""
+    text = "".join(ch for ch in str(digits or "") if ch.isdigit())
+    if not text:
+        return ""
+    if len(text) == 12 and text.startswith("971"):
+        return f"+971 {text[3:5]} {text[5:8]} {text[8:]}"
+    return f"+{text}"
+
+
+def visit_contact(language: str, contact) -> str:
+    """The contact line for a client on the way, '' with no contact (LeadAiSettings.visit_contact)."""
+    if not isinstance(contact, dict) or not contact.get("name") or not contact.get("phone"):
+        return ""
+    lang = _lang(language, VISIT_CONTACT)
+    on = _CONTACT_ON[lang]
+    primary = f"{contact['name']} {on} {phone_label(contact['phone'])}"
+    text = VISIT_CONTACT[lang].format(primary=primary)
+    if contact.get("backup_name") and contact.get("backup_phone"):
+        backup = f"{contact['backup_name']} {on} {phone_label(contact['backup_phone'])}"
+        text += " " + VISIT_CONTACT_BACKUP[lang].format(name=contact["name"], backup=backup)
+    return text
 
 
 def _lang(language: str, table: dict) -> str:
@@ -651,8 +696,11 @@ def arrival(language: str, at) -> str:
     return ARRIVAL[_lang(language, ARRIVAL)].format(time=hours.time_label(at))
 
 
-def on_my_way(language: str) -> str:
-    return ON_MY_WAY[_lang(language, ON_MY_WAY)]
+def on_my_way(language: str, contact=None) -> str:
+    """The owner's words for a client on the way, with whom to call when the settings name someone (visit_contact)."""
+    text = ON_MY_WAY[_lang(language, ON_MY_WAY)]
+    line = visit_contact(language, contact)
+    return f"{text}\n{line}" if line else text
 
 
 def _tidy(text: str) -> str:
