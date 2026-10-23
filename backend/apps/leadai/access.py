@@ -135,7 +135,12 @@ def needs_q():
         )
         .values("conversation_id")
     )
-    held = LeadAiAppointment.objects.filter(status=LeadAiAppointment.Status.TENTATIVE).values("conversation_id")
+    held = (
+        LeadAiAppointment.objects.filter(status=LeadAiAppointment.Status.TENTATIVE)
+        .exclude(conversation__lead_ai_state__stopped_at__isnull=False)
+        .exclude(conversation__lead_ai_state__not_interested_at__isnull=False)
+        .values("conversation_id")
+    )
     return Q(pk__in=Subquery(states)) | Q(pk__in=Subquery(held))
 
 
@@ -186,6 +191,10 @@ def event_groups(conversation) -> list[str]:
         bitrix_user_id__in=ids, is_active=True, can_official_api=True, can_lead_ai=False, is_wa_admin=False, is_superuser=False
     )
     return [group_for_agent(agent_pk) for agent_pk in agents.order_by("pk").values_list("pk", flat=True)]
+
+
+# The events that cannot move a chat into or out of a list: a receipt, "the AI is writing", a reaction. No ping for them.
+CHATTER_EVENTS = ("leadai.message.status", "leadai.ai.state", "leadai.message.reaction")
 
 
 def ping_groups(conversation, covered: list[str]) -> list[str]:

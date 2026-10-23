@@ -450,7 +450,10 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   through `lane.desk_groups_for`: the agents whose Today or Needs a person grant covers the chat); the open
   socket reads its groups again on `leadai.access.changed` (`inbox.consumers._rejoin`); a chat of the Lead AI desk
   that is not in their lists reaches them as an id-only `leadai.access.resync` (`access.ping_groups`, through
-  `inbox.events.publish`), so a chat that just left a list goes from their screen. A chat on someone's handover
+  `inbox.events.publish_resync`; never for a receipt, "the AI is writing" or a reaction, which move no chat between
+  lists; from Move to inbox to the desk's group too), so a chat that just left a list goes from their screen (the
+  panel lets the row go as for a chat moved back to the inbox; the open chat's note says so in those words until
+  screen.js carries a note of its own). A stopped chat with a tentative is no Needs chat. A chat on someone's handover
   desk counts as waiting for a person until Done (`needs_q`: `desk_at` set, `desk_done_at` not), so the chat a
   granted agent answered stays with them while the assistant takes over again; their New template writes for their
   chats' accounts (`catalog._covered_waba_ids`). The migration backfills a

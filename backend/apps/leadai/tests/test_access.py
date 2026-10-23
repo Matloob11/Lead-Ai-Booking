@@ -381,6 +381,54 @@ class SecondReviewTests(AccessBase):
         self.assertEqual(_covered_waba_ids(Agent.objects.get(pk=self.plain.pk)), held)
 
 
+class ThirdReviewTests(AccessBase):
+    """The third review's findings: the publisher hands the covered groups over (one routing pass); a chatter event
+    sends no ping; a stopped chat with a tentative is no Needs chat; a chat moved to the inbox pings the desk and the
+    granted agents."""
+
+    def test_the_covered_groups_are_passed_through_and_chatter_sends_no_ping(self):
+        from apps.inbox.events import group_for_agent
+
+        mine = group_for_agent(self.plain.pk)
+        access.grant("2500", {"today": True}, by=self.admin)
+        self.assertEqual(lane.ping_groups("leadai.message.new", self.quiet), [mine])
+        self.assertEqual(lane.ping_groups("leadai.message.new", self.quiet, covered=[mine]), [])
+        self.assertEqual(lane.ping_groups("leadai.message.new", self.quiet, covered=[]), [mine])
+        with patch("apps.leadai.lane.desk_groups_for") as routing:
+            self.assertEqual(lane.ping_groups("leadai.message.new", self.quiet, covered=[]), [mine])
+        routing.assert_not_called()  # the caller's list is used as it is
+        for event in ("leadai.message.status", "leadai.ai.state", "leadai.message.reaction"):
+            self.assertEqual(lane.ping_groups(event, self.quiet), [], event)
+
+    def test_a_stopped_chat_with_a_tentative_is_no_needs_chat(self):
+        from apps.inbox.models import Conversation
+
+        self.appointment(self.quiet, status="tentative", starts_at=None)
+        self.assertTrue(Conversation.objects.filter(pk=self.quiet.pk).filter(access.needs_q()).exists())
+        LeadAiChatState.objects.update_or_create(conversation=self.quiet, defaults={"stopped_at": timezone.now()})  # the customer said STOP
+        self.assertFalse(Conversation.objects.filter(pk=self.quiet.pk).filter(access.needs_q()).exists())
+        access.grant("2500", {"needs": True}, by=self.admin)
+        self.assertEqual(self.status(Agent.objects.get(pk=self.plain.pk), self.quiet), 404)
+        self.assertEqual(access.event_groups(self.quiet), [])
+
+    def test_a_chat_moved_to_the_inbox_pings_the_desk_and_the_granted_agents(self):
+        from apps.inbox import events
+
+        access.grant("2500", {"today": True}, by=self.admin)
+        sent = []
+
+        class Layer:
+            async def group_send(self, group, message):
+                sent.append((group, message))
+
+        with patch("apps.inbox.events.get_channel_layer", return_value=Layer()):
+            self.assertTrue(lane.move_to_inbox(self.booked, self.admin))
+        pings = sorted(group for group, message in sent if message["event"] == "leadai.access.resync")
+        self.assertEqual(pings, sorted([lane.DESK_GROUP, events.group_for_agent(self.plain.pk)]))
+        self.assertTrue(all(message["data"] == {"id": self.booked.pk, "number_id": self.booked.number_id} for _, message in sent if message["event"] == "leadai.access.resync"))
+        self.assertIn("conversation.updated", [message["event"] for _, message in sent])  # the plain frame still goes
+
+
 class BitrixUsersTests(SimpleTestCase):
     def test_the_portals_users_are_paged_and_cached(self):
         access._users_cache.update(at=0.0, read_at=None, rows=[], error="")

@@ -177,16 +177,21 @@ def desk_groups_for(event: str, conversation=None) -> tuple[list[str], list[str]
     return in_full, [group for group in trimmed if group not in in_full]
 
 
-def ping_groups(event: str, conversation=None) -> list[str]:
+def ping_groups(event: str, conversation=None, covered: list[str] | None = None) -> list[str]:
     """The channels that hear an id-only "leadai.access.resync" for a Lead AI chat's event (inbox.events.publish): the
     Today / Needs a person agents whose lists the chat is not in now (access.ping_groups), so their screen reads its
-    lists again. Never for a plain event; never stops a live event."""
+    lists again. ``covered`` is desk_groups_for's full list when the caller has it (publish does; it is worked out
+    here otherwise). Never for a plain event, never for one that cannot move a chat between lists (a receipt, "the AI
+    is writing"); never stops a live event."""
     if conversation is None or not str(event or "").startswith(EVENT_PREFIX):
         return []
     try:
         from . import access
 
-        covered, _ = desk_groups_for(event, conversation)
+        if event in access.CHATTER_EVENTS:
+            return []
+        if covered is None:
+            covered, _ = desk_groups_for(event, conversation)
         return access.ping_groups(conversation, covered)
     except Exception:  # noqa: BLE001
         logger.exception("Lead AI access resync routing failed for conversation %s", getattr(conversation, "pk", None))
@@ -445,7 +450,22 @@ def move_to_inbox(conversation, agent) -> bool:
 
         clear(conversation, agent)
         _announce(conversation.pk)
+        _resync_after_move(conversation)
     return bool(updated)
+
+
+def _resync_after_move(conversation) -> None:
+    """A chat moved to the main inbox is no Lead AI chat, so the plain frame _announce sends reaches neither the desk's
+    group nor a granted agent's channel (desk_groups_for: no desk chat): the id-only resync goes to them instead, and
+    the row leaves their screen."""
+    try:
+        from apps.inbox.events import publish_resync
+
+        from . import access
+
+        publish_resync([DESK_GROUP] + access.ping_groups(conversation, []), conversation)
+    except Exception:  # noqa: BLE001 - the move stands even if no socket hears it
+        logger.exception("Could not send the resync for conversation %s", getattr(conversation, "pk", None))
 
 
 def _announce(conversation_pk) -> None:
