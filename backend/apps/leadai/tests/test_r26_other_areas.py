@@ -133,6 +133,23 @@ class FirstNoTests(ShopsBase):
         self.assertIsNone(self.state().not_interested_at)
         self.assertTrue(LeadAiAppointment.objects.filter(conversation=self.conversation, status="confirmed").exists())
 
+    def test_the_reconnect_list_holds_the_offer_too(self):
+        from apps.leadai import followups
+
+        self.turn(self.inbound(AREA_NO), [closing()])
+        reading = followups.read_since(self.conversation)
+        self.assertTrue(followups.other_areas_pending(reading))
+        # The customer answers it: no longer pending.
+        self.inbound("Maybe JVC, a studio", seconds_ago=5)
+        self.assertFalse(followups.other_areas_pending(followups.read_since(self.conversation)))
+
+    def test_a_backstop_turn_with_codes_own_step_keeps_it(self):
+        # The model's none over an area decline, but code had its own words this turn (a handover): no offer over them.
+        handover = shop_answer("Our specialist will reply here.", handover="customer_asked_human")
+        outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [handover])
+        self.assertIsNone(self.state().facts.get("other_areas_offered"))
+        self.assertNotIn("Which area", self.body(outcome))
+
     def test_after_the_offer_their_answer_is_never_read_as_a_no(self):
         self.set_state(facts={"other_areas_offered": True})
         reply = "Noted. Would you like to visit our office to go through the options in Al Nahda?"
@@ -251,6 +268,8 @@ class GuardTests(SimpleTestCase):
             # The second review: a yes, or a choice among our shops, is never a no.
             "No, not looking for anything else. See you there tomorrow.",
             "Not interested in the corner shop there, the one near the entrance is fine",
+            # The third: a unit turned down is no area.
+            "Not interested in that place, it's too small",
         ):
             self.assertFalse(engine.area_decline(text), text)
 
@@ -264,8 +283,13 @@ class GuardTests(SimpleTestCase):
             self.assertFalse(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {"already_rented": True}}, words), words)
         self.assertTrue(engine.plain_no("We are no longer looking, thanks"))
         self.assertTrue(engine.plain_no(AREA_NO))
+        self.assertTrue(engine.place_found("we are sorted in JLT, no longer looking"))
         self.assertFalse(engine.plain_no("we are sorted in JLT, no longer looking"))
         self.assertFalse(engine.place_found("We are no longer looking, thanks"))
+        # The third review: a greeting beside a plain no is still one (the rent flow read it as rented elsewhere).
+        for words in ("Hi, we are not looking anymore", "All good, not looking anymore", "We're fine, no longer looking"):
+            self.assertTrue(engine.plain_no(words), words)
+            self.assertTrue(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {"already_rented": True}}, words), words)
 
     def test_a_stale_handover_is_no_hold_for_the_rule_path(self):
         held = types.SimpleNamespace(facts={}, stopped_at=None, handed_over_at=leadai_eval.NOW)

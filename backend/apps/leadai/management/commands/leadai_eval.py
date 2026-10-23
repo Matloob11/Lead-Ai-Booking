@@ -6654,11 +6654,11 @@ def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | 
 
 
 def scenario_state(scenario: Scenario) -> types.SimpleNamespace:
-    """The chat's state as engine.offers_other_areas reads it (round 26): its facts, whether a person holds it, its track."""
-    pre = decide(scenario)
+    """The chat's state as engine.offers_other_areas reads it (round 26): its facts, whether a person holds it, its stored
+    track (as live reads state.track, never this turn's decision)."""
     return types.SimpleNamespace(
         facts=dict(scenario.facts),
-        track=pre.track if pre is not None else "",
+        track=scenario.track or "",
         stopped_at=None,
         handed_over_at=None if scenario.handed_over == "no" else scenario.now,
         not_interested_at=scenario.now if scenario.not_interested else None,
@@ -7391,8 +7391,14 @@ def run_once(scenario: Scenario, label: str) -> Run:
             tapped=tapped_opt_out(scenario, answer["opt_out"]), visit_open=built.appointment is not None,
         ):
             engine.other_areas_answer(answer, scripts.follow(answer["language"], run.customer_script))
-        elif answer.get("backstop") == engine.AREA_BACKSTOP and answer["opt_out"] == rules.NOT_INTERESTED:
-            answer["opt_out"] = "none"  # as live: settle's own reading only ever brings the offer, never a close
+        elif (
+            answer["opt_out"] == "none"
+            and answer.get("backstop") == engine.AREA_BACKSTOP
+            and engine.plain_turn(answer, when, still_invalid)
+            and engine.offers_other_areas(scenario_state(scenario), rules.NOT_INTERESTED, answer, said, visit_open=built.appointment is not None)
+        ):
+            # As live (engine._run_claimed): settle's own reading of a decline, on an otherwise plain reply: the offer.
+            engine.other_areas_answer(answer, scripts.follow(answer["language"], run.customer_script))
         # As live, code's own lines follow the script the customer types in (scripts.follow).
         run.line_language = scripts.follow(answer["language"], run.customer_script)
         run.calls = len(completions)

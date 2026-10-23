@@ -216,6 +216,9 @@ def audience(campaign_ids, now=None, quiet_hours: int = QUIET_HOURS) -> list[Row
         if followups.turned_down(reading, now):
             row.why = "declined in words"
             continue
+        if followups.other_areas_pending(reading):
+            row.why = "offered other areas after a no, no answer yet"
+            continue
         if followups.cap_pending(conversation, reading):
             row.why = "their last message waits for the reply cap"
             continue

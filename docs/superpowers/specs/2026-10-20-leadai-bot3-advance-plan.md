@@ -495,8 +495,10 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   is a no whatever the model tagged — only as the gist of the message: never in a question, never beside a want or
   another search ("..., I am looking in JVC for a studio"), never once the offer went (their answer to it is the
   model's to read), never with a visit booked or a person holding the chat; the area is tied to the negation ("not
-  looking for properties in that area", never "... see you there"), and a sink that cannot offer keeps the model's
-  own answer: code's reading never produces a close.
+  looking for properties in that area", never "... see you there" or "that place"). It only marks the answer: every
+  guard after settle runs on the model's own answer, and at the dispatch the offer replaces the reply only when the
+  turn is otherwise plain (`engine.plain_turn`: no handover, no line or step of code's, no booking); code's reading
+  never produces a close. The reconnect list holds a chat whose newest words are the unanswered offer too.
 - **The eval:** three strict scenarios, code's words (`shops-area-decline`, `shops-no-thanks-offer`,
   `shops-area-decline-again`), mirrored in `leadai_eval` (`code_first`, `run_once`, `outgoing`). The prompt is
   untouched.

@@ -2185,11 +2185,11 @@ def settle(
         and not (facts or {}).get(OTHER_AREAS_FLAG)
         and area_decline(last_said)
     ):
-        # Round 26: "We are not looking for properties in that area anymore" (chat 54622): a no with its reason, whatever
-        # the model tagged; its first one gets the other-areas offer at the sink (offers_other_areas), not the close. Never
-        # once the offer went (their answer to it is the model's to read), never in a question or beside a want, never
-        # with a visit booked or a person holding the chat; marked, so a sink that cannot offer keeps the model's none.
-        answer["opt_out"] = rules.NOT_INTERESTED
+        # Round 26: "We are not looking for properties in that area anymore" (chat 54622): a no with its reason the model
+        # did not tag. Only marked: every guard after settle still runs on the model's answer, and at the dispatch its first
+        # one gets the other-areas offer when the turn is otherwise a plain reply (plain_turn); never a close of code's
+        # making. Never once the offer went, never in a question or beside a want, never with a visit booked or a person
+        # holding the chat.
         answer["backstop"] = AREA_BACKSTOP
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites, quiet=quiet)
     if shops_chat:
@@ -4126,14 +4126,8 @@ _HAS_PLACE = re.compile(
 )
 _HAS_PLACE_MORE = re.compile(
     r"\b(?:moved|shifted|relocated)\s+(?:in|into|to)\b|\b(?:rented|bought|purchased|took|leased|found|booked)\s+(?:in|at|near|from|with)\b"
-    r"|\bsettled\s+(?:in|at)\b",
+    r"|\b(?:settled|sorted)\s+(?:in|at)\b",
     re.IGNORECASE,
-)
-# The words a plain no may carry beside "not looking anymore" (plain_no): anything else said is no plain no.
-_PLAIN_FILLER = frozenset(
-    "we are i am im i'm we're were was is thanks thank you thx sorry now anymore any more for properties property a an the at "
-    "this that moment time right ok okay no so but really actually just currently anything else there here in area location "
-    "bro sir dear brother please looking searching interested longer not yet".split()
 )
 # The plain no of residential._RENTED_ELSEWHERE ("not looking anymore", "no longer looking"): no place is named, so no proof
 # they found one; the rent flow reads it as rented elsewhere, round 26 offers the other areas first.
@@ -4146,15 +4140,25 @@ _WANTS_BESIDE = re.compile(r"\b(?:need|needs|want|wants|looking|searching|intere
 # "Not looking in that area anymore", "no longer interested": a no with its reason the model's own tag varies on.
 AREA_DECLINE = re.compile(
     r"\bnot\s+(?:looking|searching|interested)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:in|at|around)\s+(?:that|this|the|your)\s+"
-    r"(?:area|location|community|place|side)\b"
+    r"(?:area|location|community)\b"
     r"|\bnot\s+(?:looking|searching|interested)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:in|at|around)\s+international\s+city\b"
     r"|\bnot\s+(?:looking|searching)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:there|here)\s+(?:anymore|any\s+more)\b"
     r"|\bno\s+longer\s+(?:looking|interested|searching)\b",
     re.IGNORECASE,
 )
-# Settle's mark on a no it read itself (area_decline): at the sink such a no only ever brings the offer; refused there,
-# the model's own answer stands (never a close of code's making).
+# Settle's mark on a no it read itself (area_decline): the answer stays the model's (opt_out none) through every guard, and
+# at the dispatch the other-areas offer goes in its place only when the turn is otherwise a plain reply (plain_turn).
 AREA_BACKSTOP = "area_decline"
+
+
+def plain_turn(answer: dict, when=None, still_invalid: bool = False) -> bool:
+    """Nothing of code's goes this turn besides the model's words: no handover, no line or step of code's, no booking or
+    time to book (the backstop's offer replaces only a plain reply)."""
+    return not (
+        answer["handover"]["needed"] or answer.get("converted") or answer.get("res_line") or answer.get("shop_step")
+        or answer.get("not_a_shop") or answer.get("slot_taken") or answer.get("broker") or when is not None or still_invalid
+        or (answer.get("appointment") or {}).get("action") not in (None, "none")
+    )
 
 
 def place_found(words: str) -> bool:
@@ -4168,14 +4172,10 @@ def place_found(words: str) -> bool:
 
 
 def plain_no(words: str) -> bool:
-    """The no is only "not looking anymore" / "not in that area anymore" (_PLAIN_NO, AREA_DECLINE), with nothing else
-    said beside it but the usual small words (_PLAIN_FILLER): "We are no longer looking, thanks"; never "we're settled in
-    JLT now, not looking anymore"."""
+    """The no is "not looking anymore" / "not in that area anymore" (_PLAIN_NO, AREA_DECLINE) and names no place
+    (place_found): "Hi, we are no longer looking, thanks"; never "we're settled in JLT now, not looking anymore"."""
     said = str(words or "")
-    if not (_PLAIN_NO.search(said) or AREA_DECLINE.search(said)):
-        return False
-    rest = _PLAIN_NO.sub(" ", AREA_DECLINE.sub(" ", said)).lower()
-    return all(word in _PLAIN_FILLER for word in re.findall(r"[a-z']+", rest))
+    return bool(_PLAIN_NO.search(said) or AREA_DECLINE.search(said)) and not place_found(said)
 
 
 def area_decline(text: str) -> bool:
@@ -5243,11 +5243,20 @@ def _run_claimed(
     # From here the reply goes out: "if you send first, it drops its reply" no longer holds.
     live.thinking(conversation, False)
 
-    if answer.get("backstop") == AREA_BACKSTOP and answer["opt_out"] == rules.NOT_INTERESTED and not offers_other_areas(
-        state, answer["opt_out"], answer, _their_words(burst, heard), visit_open=_open_appointment(conversation) is not None
+    if (
+        answer["opt_out"] == "none"
+        and answer.get("backstop") == AREA_BACKSTOP
+        and plain_turn(answer, when, still_invalid)
+        and offers_other_areas(
+            state, rules.NOT_INTERESTED, answer, _their_words(burst, heard), visit_open=_open_appointment(conversation) is not None
+        )
     ):
-        # Settle's own reading of a decline (area_decline) only ever brings the offer: refused, the model's none stands.
-        answer["opt_out"] = "none"
+        # Settle's own reading of a decline (area_decline), on a turn that is otherwise a plain reply: the other-areas
+        # offer in place of the model's words. Refused, the model's answer goes as every guard left it.
+        outcome = other_areas_offer(turn, conversation, chat, state, line_language, answer, playbook=playbook)
+        if shops_chat:
+            outcome.actions = {**plan, **outcome.actions}
+        return outcome
     if answer["opt_out"] != "none":
         outcome = _opt_out(
             turn, conversation, chat, state, answer["opt_out"], line_language, answer,
