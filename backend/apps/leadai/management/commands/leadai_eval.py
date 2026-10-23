@@ -3476,6 +3476,42 @@ SCENARIOS = [
         loose=("handover",),
     ),
     Scenario(
+        "shops-area-decline",
+        "round 26: 'not looking in that area anymore' gets the other-areas offer once, never the close (chat 54622)",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["No I'm good thanks", "We are not looking for properties in that area anymore"],
+        expect=[
+            opt_out("none"), fact_bool("other_areas_offered", True), out_says(r"which area", "ask which area"),
+            out_says(r"other areas", "offer the other areas"), no_handover(), invited(False),
+        ],
+        words=CODE,
+    ),
+    Scenario(
+        "shops-area-decline-again",
+        "round 26: a second no after the other-areas offer closes the lead as before",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        chat=[
+            ("customer", "We are not looking for properties in that area anymore"),
+            ("assistant", rules.line("other_areas", "en").replace("{areas}", "")),
+        ],
+        facts={"other_areas_offered": True},
+        new=["No thanks"],
+        expect=[opt_out("not_interested"), sends_line("not_interested")],
+        words=CODE,
+        loose=("handover",),
+    ),
+    Scenario(
+        "shops-no-thanks-offer",
+        "round 26: a plain 'No thanks' to the campaign, code's before any model, gets the other-areas offer first",
+        playbook=IC_SHOPS,
+        campaign=SHOPS_A,
+        new=["No thanks"],
+        expect=[opt_out("none"), fact_bool("other_areas_offered", True), out_says(r"which area", "ask which area"), no_handover()],
+        words=CODE,
+    ),
+    Scenario(
         "shops-stop",
         "shops: a tap on 'Stop messages' opts out with 'Done, you won't receive more messages from us.'",
         playbook=IC_SHOPS,
@@ -6617,6 +6653,27 @@ def decide(scenario: Scenario, answer: dict | None = None) -> tracks.Decision | 
     return tracks.decide(model_tag=answer.get("need_tag") or "", fresh=answer["facts"], **inputs)
 
 
+def scenario_state(scenario: Scenario) -> types.SimpleNamespace:
+    """The chat's state as engine.offers_other_areas reads it (round 26): its facts, whether a person holds it."""
+    return types.SimpleNamespace(
+        facts=dict(scenario.facts),
+        stopped_at=None,
+        handed_over_at=None if scenario.handed_over == "no" else scenario.now,
+        not_interested_at=scenario.now if scenario.not_interested else None,
+        followup_asked_at=scenario.now if scenario.followup_asked else None,
+    )
+
+
+def tapped_opt_out(scenario: Scenario, kind: str) -> bool:
+    """As engine._rule_opt_out (round 26): a tap in the burst that is this opt-out, so no typed no."""
+    shops_chat = scenario.playbook == IC_SHOPS
+    for text in scenario.new:
+        tap = _TAP.match(text)
+        if tap and (rules.opt_out_from_button(tap[1]) or (rules.shops_opt_out(tap[1]) if shops_chat else None)) == kind:
+            return True
+    return False
+
+
 def code_first(scenario: Scenario) -> dict | None:
     """The answer when engine._run_claimed settles the turn without the model, else None.
 
@@ -6645,6 +6702,14 @@ def code_first(scenario: Scenario) -> dict | None:
         opt, deletion = rules.STOP_ALL, True  # as live (batch 2e, PDPL): a stop on every number, res_deleted
     language = scenario.language_so_far if scenario.language_so_far != "en" else rules.guess_language(key)
     silent = schema.normalize({"language": language, "segment": "other", "send": False}, shops=shops_chat)
+    if opt == rules.NOT_INTERESTED and not tapped_opt_out(scenario, opt) and engine.offers_other_areas(
+        scenario_state(scenario), opt, None, key, visit_open=meeting
+    ):
+        # As live (engine._rule_opt_out, round 26): the first "not interested" typed gets the other-areas offer, not the
+        # close, in the language that follows the script they type in.
+        offer_language = scripts.follow(language, scripts.customer_script(typed(scenario)))
+        offer = schema.normalize({"language": offer_language, "segment": "other", "send": True, "reply": "-"}, shops=shops_chat)
+        return engine.other_areas_answer(offer, offer_language)
     if opt:
         silent["opt_out"] = opt
         silent["send"] = True  # the code's own polite line goes out
@@ -6821,6 +6886,8 @@ def outgoing(run: Run, built: Built) -> tuple[str, str]:
     scenario, answer = run.scenario, run.answer
     lang = run.line_language or answer["language"]
     shops_chat = scenario.playbook == IC_SHOPS
+    if answer.get("other_areas"):
+        return CODE, answer["reply"]  # as live (round 26): the other-areas offer in place of the close, code's words
     if answer["opt_out"] == rules.SPAM:
         return "", ""  # spam gets no line at all
     if answer.get("deletion"):
@@ -7315,6 +7382,13 @@ def run_once(scenario: Scenario, label: str) -> Run:
         shop_flow.step_flags(answer)
         if copies and when is None and not still_invalid and scenario.handed_over == "no":
             shop_flow.thank_first(answer, answer["language"])  # as live: when the model's words go out
+        # As live (engine._opt_out, round 26): a first "not interested" the model or settle found, with no stop, no tap
+        # and no place found elsewhere, gets the other-areas offer in place of the close, and the chat stays open.
+        if answer["opt_out"] == rules.NOT_INTERESTED and engine.offers_other_areas(
+            scenario_state(scenario), answer["opt_out"], answer, said,
+            tapped=tapped_opt_out(scenario, answer["opt_out"]), visit_open=built.appointment is not None,
+        ):
+            engine.other_areas_answer(answer, scripts.follow(answer["language"], run.customer_script))
         # As live, code's own lines follow the script the customer types in (scripts.follow).
         run.line_language = scripts.follow(answer["language"], run.customer_script)
         run.calls = len(completions)

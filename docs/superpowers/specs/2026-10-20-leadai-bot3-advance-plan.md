@@ -471,6 +471,31 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   uncommitted copies are what the server holds); so the screen's rail is not yet shaped by the grant: every tab
   lists the visible chats, which for a Today or Needs a person grant are those chats alone.
 
+## 6j. Round 26 (2026-10-23): the AI does not give up on a first "no" (the other-areas offer)
+
+- **Matloob's order (from chat 54622 / lead 73988, the reconnect campaign):** "No I'm good thanks / We are not looking
+  for properties in that area anymore" got "No problem, thank you for letting us know." and the lead went Lost. The AI
+  must not give up: it says we can show other areas too, wherever they say, and asks where they are looking.
+- **The rule (`engine.offers_other_areas`, `other_areas_offer`; `rules.LINES["other_areas"]`, six languages):** a first
+  "not interested" gets, in place of the close, "No problem. We also have options in other areas of Dubai, for example
+  X, Y and Z. Which area are you looking in, and what kind of unit? We can show you there." (up to three other
+  communities with a live unit, `communities.named_packs`; none named when none). The chat stays open, nothing is Lost,
+  `facts.other_areas_offered` remembers it (written only once the line went); a second no closes as before. In both
+  sinks: `_opt_out` (the model's tag, or settle's) and `_rule_opt_out` (code's whole-message "No thanks", before any
+  model). Never for a STOP or a wrong number, a tap that is the opt-out anywhere in the burst, a shops rule (the
+  check-back's No, the second-shop No), a pending check-back, a place found elsewhere (`place_found`: `_HAS_PLACE` with
+  the Roman Urdu, Urdu and Hindi forms, `needs.rented_already`, `residential.rented_elsewhere` minus its plain "not
+  looking anymore"), an open visit, a chat a person holds, a stopped chat, or a lead closed already (`not_interested_at`).
+  The rent flow's plain "no longer looking" (which it reads as rented elsewhere) gets the offer too, its
+  `already_rented` dropped; the model's own `already_rented` in other words is trusted.
+- **The backstop (`engine.area_decline`, in `settle`):** "not looking ... in that area anymore" / "no longer looking"
+  is a no whatever the model tagged — only as the gist of the message: never in a question, never beside a want or
+  another search ("..., I am looking in JVC for a studio"), never once the offer went (their answer to it is the
+  model's to read).
+- **The eval:** three strict scenarios, code's words (`shops-area-decline`, `shops-no-thanks-offer`,
+  `shops-area-decline-again`), mirrored in `leadai_eval` (`code_first`, `run_once`, `outgoing`). The prompt is
+  untouched.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).

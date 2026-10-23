@@ -62,6 +62,10 @@ SPECIALIST_REPLIES = "Thank you. Our specialist will reply to you here."
 
 # What a right answer looks like for each scenario: each of these must pass.
 RIGHT = {
+    # Round 26: the model's own close; code offers the other areas in its place (engine.offers_other_areas).
+    "shops-area-decline": answer("No problem, thank you for letting us know.", opt_out="not_interested"),
+    "shops-area-decline-again": answer(),  # code's before any model
+    "shops-no-thanks-offer": answer(),  # code's before any model
     "shop-activity": answer(),
     "shop-licence": answer("Thank you. Do you already have a trade licence for it?", facts={"business_activity": "restaurant"}),
     "shop-no-licence": answer("No problem. Do you have the initial approval for it yet?", facts={"trade_licence": "no"}),
@@ -903,7 +907,7 @@ class EvalCommandTests(TestCase):
             sorted(settled),
             [
                 "away-message", "booked-emoji", "booked-ok-thanks", "defer-massage", "defer-message", "defer-with-time",
-                "shops-a-yes-known", "shops-asked-for-studio-132", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
+                "shops-a-yes-known", "shops-area-decline-again", "shops-asked-for-studio-132", "shops-b-not-now", "shops-b-yes-known", "shops-b-yes-tap",
                 # Chat 120's "No thankyou" (launch review issue 26): code's now, as "No thank you" always was.
                 "shops-book-tap",
                 # The CRM lane's studio seeker in Spain: the rent flow's opener, code's (its fields are the opener's facts).
@@ -913,7 +917,7 @@ class EvalCommandTests(TestCase):
                 "shops-mixed-buy-one-bedroom", "shops-mixed-not-now", "shops-mixed-one-bedroom-comma-to-buy", "shops-mixed-stop",
                 "shops-mixed-studio-comma-to-buy", "shops-mixed-typed-yes", "shops-mixed-yes-1br-lead-arabic",
                 "shops-mixed-yes-buyer-lead", "shops-mixed-yes-known-shop", "shops-mixed-yes-known-studio", "shops-mixed-yes-shop-lead",
-                "shops-mixed-yes-studio-lead", "shops-mixed-yes-tap", "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no",
+                "shops-mixed-yes-studio-lead", "shops-mixed-yes-tap", "shops-no-thanks-offer", "shops-no-thankyou-120", "shops-not-now", "shops-not-now-no",
                 "shops-not-now-studio-68", "shops-not-now-yes", "shops-other-types-tap",
                 # Round 22e: the portal greet's first answer is the lead context's (the rent flow's opener, the yes lines).
                 "shops-portal-studio-payment-plan", "shops-portal-yes-nothing-known", "shops-portal-yes-shop-lead", "shops-portal-yes-studio-lead",
