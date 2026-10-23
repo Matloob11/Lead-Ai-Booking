@@ -2679,8 +2679,21 @@ def upgrade_exact_time(
     deployed gate's eval shops-gate-half-hour).
     """
     proposal = answer["appointment"]
-    if proposal["action"] != "tentative" or not proposal.get("date"):
+    if proposal["action"] != "tentative":
         return None
+    if not proposal.get("date"):
+        # A tentative with no day at all, over a day and a time of their own, their half hour passed over by the reply's
+        # own claim ("viewings start on the hour": claims.says_hourly; "the closest available slot": says_closest): their
+        # day is the visit's, and passed_over_hour below reads the hour. The gate of round 24 (shops-gate-half-hour #2):
+        # "Can I come today at 4:30?" got that claim and 4:00 PM or 6:00 PM with no date, so nothing here ever ran. Any
+        # other tentative with no day stays the model's.
+        day_said = hours.named_days(said, now)
+        claimed = any(
+            claims.says_hourly(text) or claims.says_closest(text) for text in (answer.get("reply") or "", answer.get("reply_en") or "")
+        )
+        if len(day_said) != 1 or not claimed:
+            return None
+        proposal = {**proposal, "date": next(iter(day_said)).isoformat()}
     # A fixed line, someone outside our segments, a handover in this answer or a call (_code_may_act).
     if proposal.get("place") not in (None, "office") or not _code_may_act(answer, said):
         return None
