@@ -41,16 +41,6 @@ function granted() {
   return Boolean(access && (access.admin || access.all_chats || access.today || access.needs));
 }
 
-function grantedOnly() {
-  // A grant of the Today or the Needs a person list with no Lead AI access and no admin rights.
-  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai && granted();
-}
-
-const resyncGranted = debounce(() => {
-  refreshUnread();
-  resyncScreen();
-}, 1500);
-
 function scopedAgent() {
   // The handover desk (handovers.js): an agent with neither admin rights, nor Lead AI access, nor a grant, nor a
   // number of their own can see nothing of Lead AI but their desk, so every door opens that screen. A number-holder
@@ -369,15 +359,15 @@ window.addEventListener("wa:event", (event) => {
     return;
   }
 
-  if (isScreenOpen()) deliverToScreen(name, data);
-  if (isHandoversOpen()) deliverToHandovers(name, data);
-  if (!String(name).startsWith("leadai.")) return;
-
-  if (name === "leadai.alert") {
-    showAlert(data);
+  // The two access events (access.py, round 25) are this module's own: neither screen gets them as a chat's frame.
+  if (name === "leadai.access.resync") {
+    // Id-only: the chat is not in this agent's Lead AI lists now (or is no Lead AI chat any more). The open screen
+    // lets the row go the way it does for a chat moved back to the inbox; nothing is refetched for a chat it does
+    // not list.
+    refreshUnread();
+    if (isScreenOpen() && data?.id) deliverToScreen("conversation.updated", { conversation: { id: data.id, lead_ai: false } });
     return;
   }
-
   if (name === "leadai.access.changed") {
     // A panel admin changed this agent's grants (access.py): what the panel knows of them follows, and the open screen
     // reads its list again (the server decides what it may show).
@@ -392,14 +382,14 @@ window.addEventListener("wa:event", (event) => {
     return;
   }
 
-  // An agent granted the Today or the Needs a person list alone hears a chat's frames only while the chat is in their
-  // lists, and an id-only "resync" when a chat of the Lead AI desk is not (access.ping_groups): either way the open
-  // screen reads its lists again, so a chat that came into a list, or left it, shows or goes without a reload.
-  if (name === "leadai.access.resync") {
-    resyncGranted();
+  if (isScreenOpen()) deliverToScreen(name, data);
+  if (isHandoversOpen()) deliverToHandovers(name, data);
+  if (!String(name).startsWith("leadai.")) return;
+
+  if (name === "leadai.alert") {
+    showAlert(data);
     return;
   }
-  if (grantedOnly() && String(name).startsWith("leadai.")) resyncGranted();
 
   if (name === "leadai.desk.changed") {
     // A chat came onto, or left, this agent's handover desk (handover_desk.changed): the menu's count follows; the
