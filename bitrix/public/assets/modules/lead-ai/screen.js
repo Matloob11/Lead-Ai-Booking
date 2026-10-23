@@ -37,6 +37,16 @@ import { shopsForm, shopsValues } from "./shops.js";
 import { residentialForm, residentialValues } from "./residential.js";
 import { BROKER_LABEL, aiStateView, chatChips, contactName, isBrokerChat, momentLabel, mountThread, screenModal } from "./thread.js";
 
+/** The inbox label every chat the new-lead greet opened carries (apps/leadai/assistant/newlead.py AUTO_REPLY_LABEL). */
+const GREET_LABEL = "AI auto reply";
+
+function isGreetedChat(conversation) {
+  const wanted = GREET_LABEL.toLowerCase();
+  return (Array.isArray(conversation?.labels) ? conversation.labels : []).some(
+    (label) => String(label?.name || "").trim().toLowerCase() === wanted
+  );
+}
+
 const PAGE = 40;
 // The desk's wait times and counts are drawn again this often while the screen is open.
 const DESK_TICK_MS = 60000;
@@ -91,6 +101,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     exhausted: false,
     q: "",
     brokers: false, // only the chats labelled Broker
+    greeted: false, // only the chats the new-lead greet opened (labelled "AI auto reply"; Matloob 2026-10-23)
     track: "", // the desk's track filter: "shop", "rent", "sale", "other" or none
     hotFirst: false, // the hottest leads first (?sort=score; lead_ai_ai.score)
     unread: false, // only the chats with a customer message nobody has read yet (?unread=1)
@@ -139,17 +150,37 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   const tabSara = railButton("sara", "users", "Sara leads");
   // The agent desk (desk.js): Needs a person and Today, each a view of the chats; pressed again, back to Chats.
   const rail = deskRail({ onSelect: (tab) => setTab(state.tab === tab ? "chats" : tab) });
+  // Brokers and Auto new lead are each one label (?label=), so one at a time: pressing one lets the other go.
+  function setLabelChip(button, on) {
+    button.setAttribute("aria-pressed", String(on));
+    button.classList.toggle("is-on", on);
+  }
   const brokersButton = el("button.lai-filter", {
     type: "button",
     "aria-pressed": "false",
     title: "Only the chats the AI labelled Broker",
     onclick: () => {
       state.brokers = !state.brokers;
-      brokersButton.setAttribute("aria-pressed", String(state.brokers));
-      brokersButton.classList.toggle("is-on", state.brokers);
+      state.greeted = false;
+      setLabelChip(brokersButton, state.brokers);
+      setLabelChip(greetedButton, false);
       loadChats();
     },
   }, ["Brokers"]);
+  // Auto new lead (Matloob 2026-10-23): only the chats the new-lead greet opened by itself (a portal lead's first
+  // template, then the AI's own conversation); every such chat carries the "AI auto reply" label (newlead.label_greeted).
+  const greetedButton = el("button.lai-filter", {
+    type: "button",
+    "aria-pressed": "false",
+    title: "Only the new portal leads the AI messaged by itself and talks to",
+    onclick: () => {
+      state.greeted = !state.greeted;
+      state.brokers = false;
+      setLabelChip(greetedButton, state.greeted);
+      setLabelChip(brokersButton, false);
+      loadChats();
+    },
+  }, ["Auto new lead"]);
   // The lead score's sort (?sort=score): the hottest leads first, the unscored last; pressed again, back to the newest.
   const hotButton = el("button.lai-filter.lai-filter--hot", {
     type: "button",
@@ -169,7 +200,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       loadChats();
     },
   });
-  const filters = el("div.lai-filters", {}, [unreadButton, brokersButton, hotButton, ...tracks.buttons]);
+  const filters = el("div.lai-filters", {}, [unreadButton, brokersButton, greetedButton, hotButton, ...tracks.buttons]);
   const main = el("main.lai-main");
 
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
@@ -331,7 +362,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     try {
       const payload = await leadAiApi.chats({
         q: state.q,
-        label: state.brokers ? BROKER_LABEL : "",
+        label: state.brokers ? BROKER_LABEL : state.greeted ? GREET_LABEL : "",
         ...deskParams(tab, state.track),
         sort: state.hotFirst && tab === "chats" ? "score" : "",
         unread: state.unread && tab === "chats",
@@ -345,7 +376,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.offset = offset + page.length;
       state.exhausted = page.length < PAGE;
       // Only an unfiltered first page counts every unread Lead AI chat (the Unread list itself is every unread chat too).
-      if (!append && tab === "chats" && !state.q && !state.brokers && !state.track && typeof payload?.unread_chats === "number") {
+      if (!append && tab === "chats" && !state.q && !state.brokers && !state.greeted && !state.track && typeof payload?.unread_chats === "number") {
         onUnreadChanged?.(payload.unread_chats);
         setUnreadChip(payload.unread_chats);
       }
@@ -383,8 +414,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     // The desk's views keep the server's order: the longest wait, the start time.
     if (state.tab === "chats") sortRows();
     clear(listNode);
-    // A row that lost its Broker label meanwhile leaves the Brokers list.
-    const shown = state.brokers ? state.rows.filter(isBrokerChat) : state.rows;
+    // A row that lost its Broker label meanwhile leaves the Brokers list (the greeted label never goes).
+    const shown = state.brokers ? state.rows.filter(isBrokerChat) : state.greeted ? state.rows.filter(isGreetedChat) : state.rows;
     for (const row of shown) listNode.append(chatRow(row));
     statusNode.textContent = shown.length
       ? ""
@@ -394,7 +425,9 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
           ? deskEmptyText(state.tab, state.track)
           : state.brokers
             ? "No broker chats. The AI labels a chat Broker when the customer is a broker or asks for a client."
-            : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
+            : state.greeted
+              ? "No auto-replied new leads yet. Every new portal lead the AI greets by itself comes here."
+              : "No Lead AI chats yet. Tick the Lead AI box when you send a CRM campaign, and the replies come here.";
     moreButton.hidden = state.exhausted || !shown.length;
   }
 
@@ -561,7 +594,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     // A search, the Brokers or a track filter, or a desk view narrows the list; a chat that does not match it stays out.
     // The Unread list takes a chat the customer just wrote to (it is unread now), nothing else.
     const customerWrote = event === "leadai.message.new" && Number(conversation?.unread_count || 0) > 0 && String(state.activeId) !== String(id);
-    const narrowed = state.q || state.brokers || state.track || isDeskTab(state.tab) || (state.unread && !customerWrote);
+    const narrowed = state.q || state.brokers || state.greeted || state.track || isDeskTab(state.tab) || (state.unread && !customerWrote);
     if (narrowed && !state.rows.some((row) => String(row.id) === String(id))) return;
 
     if (event === "leadai.message.new" && conversation) {
