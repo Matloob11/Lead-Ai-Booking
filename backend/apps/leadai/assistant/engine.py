@@ -2180,13 +2180,17 @@ def settle(
     elif (
         answer["opt_out"] == "none"
         and not answer["handover"]["needed"]
+        and not quiet
+        and booked is None
         and not (facts or {}).get(OTHER_AREAS_FLAG)
         and area_decline(last_said)
     ):
         # Round 26: "We are not looking for properties in that area anymore" (chat 54622): a no with its reason, whatever
         # the model tagged; its first one gets the other-areas offer at the sink (offers_other_areas), not the close. Never
-        # once the offer went (their answer to it is the model's to read), never in a question or beside a want.
+        # once the offer went (their answer to it is the model's to read), never in a question or beside a want, never
+        # with a visit booked or a person holding the chat; marked, so a sink that cannot offer keeps the model's none.
         answer["opt_out"] = rules.NOT_INTERESTED
+        answer["backstop"] = AREA_BACKSTOP
     settle_handover(answer, earlier, new_texts, shops_chat=shops_chat, invites=invites, quiet=quiet)
     if shops_chat:
         # Launch review issues 15 and 26: only what is theirs goes on the record, before code adds notes of its own
@@ -3873,8 +3877,12 @@ def _rule_opt_out(
     # A tap anywhere in the burst that is this opt-out ("Not interested", then "Good luck"): _burst_opt_out let it decide,
     # so it is no typed no.
     tapped = any(item.kind in ("button", "interactive") and _item_opt_out(item, False, playbook == lane.IC_SHOPS) == kind for item in said)
+    # A handover gone stale (12 hours, or an agent wrote since), as _run_claimed reads it: the assistant's chat again.
+    held = state.handed_over_at is not None and not (
+        timezone.now() - state.handed_over_at > HANDOVER_QUIET or human_after(message, campaign_templates, since=state.handed_over_at)
+    )
     if not deletion and may_speak and offers_other_areas(
-        state, kind, None, _their_words(burst), tapped=tapped, visit_open=_open_appointment(conversation) is not None
+        state, kind, None, _their_words(burst), tapped=tapped, visit_open=_open_appointment(conversation) is not None, held=held
     ):
         # Round 26: the first "not interested" typed gets the other-areas offer, not the close; nothing is recorded.
         return _finish(turn, other_areas_offer(turn, conversation, chat, state, _rule_line_language(state, burst), None, playbook=playbook))
@@ -4108,12 +4116,24 @@ def record_opt_out(
 # ONE offer of the other areas (rules.LINES other_areas) instead of the close, the chat stays open, and only a second no
 # closes it as before. Live in both sinks (_opt_out, _rule_opt_out) and mirrored by the eval (leadai_eval).
 OTHER_AREAS_FLAG = "other_areas_offered"
+OFFER_MARK = "other_areas"  # the offer's message payload ("offer"), read by followups.other_areas_pending
 _HAS_PLACE = re.compile(
     r"\b(?:already|alredy|allready)\s+(?:have\s+|'ve\s+|got\s+)?(?:rented|found|took|taken|got|leased|booked|bought|purchased|moved)\b"
     r"|\b(?:found|rented|got|took|leased|bought|purchased|signed)\s+(?:a|an|another|one|other|my|our|the)\b"
     r"|\b(?:got|found)\s+one\b|\bdeal\s+(?:is\s+)?done\b|\bmil\s+(?:gaya|gayi|gai|gya)\b|\ble\s+(?:liya|li|lia|lea)\b"
     r"|مل\s*(?:گیا|گئی|گئ)|لے\s*(?:لیا|لی)|मिल\s*(?:गया|गई|गयी)|ले\s*(?:लिया|ली)|وجدت|استأجرت|اشتريت",
     re.IGNORECASE,
+)
+_HAS_PLACE_MORE = re.compile(
+    r"\b(?:moved|shifted|relocated)\s+(?:in|into|to)\b|\b(?:rented|bought|purchased|took|leased|found|booked)\s+(?:in|at|near|from|with)\b"
+    r"|\bsettled\s+(?:in|at)\b",
+    re.IGNORECASE,
+)
+# The words a plain no may carry beside "not looking anymore" (plain_no): anything else said is no plain no.
+_PLAIN_FILLER = frozenset(
+    "we are i am im i'm we're were was is thanks thank you thx sorry now anymore any more for properties property a an the at "
+    "this that moment time right ok okay no so but really actually just currently anything else there here in area location "
+    "bro sir dear brother please looking searching interested longer not yet".split()
 )
 # The plain no of residential._RENTED_ELSEWHERE ("not looking anymore", "no longer looking"): no place is named, so no proof
 # they found one; the rent flow reads it as rented elsewhere, round 26 offers the other areas first.
@@ -4125,19 +4145,37 @@ _PLAIN_NO = re.compile(
 _WANTS_BESIDE = re.compile(r"\b(?:need|needs|want|wants|looking|searching|interested|require|prefer|chahiye)\b", re.IGNORECASE)
 # "Not looking in that area anymore", "no longer interested": a no with its reason the model's own tag varies on.
 AREA_DECLINE = re.compile(
-    r"\bnot\s+(?:looking|searching|interested)\b.*\b(?:area|location|there|here|community|international\s+city)\b"
+    r"\bnot\s+(?:looking|searching|interested)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:in|at|around)\s+(?:that|this|the|your)\s+"
+    r"(?:area|location|community|place|side)\b"
+    r"|\bnot\s+(?:looking|searching|interested)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:in|at|around)\s+international\s+city\b"
+    r"|\bnot\s+(?:looking|searching)\s+(?:for\s+(?:[\w'-]+\s+){0,3}?)?(?:there|here)\s+(?:anymore|any\s+more)\b"
     r"|\bno\s+longer\s+(?:looking|interested|searching)\b",
-    re.IGNORECASE | re.DOTALL,
+    re.IGNORECASE,
 )
+# Settle's mark on a no it read itself (area_decline): at the sink such a no only ever brings the offer; refused there,
+# the model's own answer stands (never a close of code's making).
+AREA_BACKSTOP = "area_decline"
 
 
 def place_found(words: str) -> bool:
-    """Their words say they found, took or bought a place elsewhere (_HAS_PLACE, needs.rented_already, the rent flow's
-    residential.rented_elsewhere), a plain "not looking anymore" with no place named excepted (_PLAIN_NO)."""
-    said = str(words or "")
-    if _HAS_PLACE.search(said) or needs.rented_already([said]):
+    """Their words say they found, took or bought a place elsewhere (_HAS_PLACE, _HAS_PLACE_MORE, needs.rented_already,
+    the rent flow's residential.rented_elsewhere), read on the words without a plain "not looking anymore" (_PLAIN_NO),
+    which names no place."""
+    rest = _PLAIN_NO.sub(" ", str(words or ""))
+    if _HAS_PLACE.search(rest) or _HAS_PLACE_MORE.search(rest) or needs.rented_already([rest]):
         return True
-    return residential.rented_elsewhere([said]) and not _PLAIN_NO.search(said)
+    return residential.rented_elsewhere([rest])
+
+
+def plain_no(words: str) -> bool:
+    """The no is only "not looking anymore" / "not in that area anymore" (_PLAIN_NO, AREA_DECLINE), with nothing else
+    said beside it but the usual small words (_PLAIN_FILLER): "We are no longer looking, thanks"; never "we're settled in
+    JLT now, not looking anymore"."""
+    said = str(words or "")
+    if not (_PLAIN_NO.search(said) or AREA_DECLINE.search(said)):
+        return False
+    rest = _PLAIN_NO.sub(" ", AREA_DECLINE.sub(" ", said)).lower()
+    return all(word in _PLAIN_FILLER for word in re.findall(r"[a-z']+", rest))
 
 
 def area_decline(text: str) -> bool:
@@ -4151,12 +4189,15 @@ def area_decline(text: str) -> bool:
     return not _WANTS_BESIDE.search(said[: match.start()] + " " + said[match.end():])
 
 
-def offers_other_areas(state, kind: str, answer: dict | None, words: str, *, tapped: bool = False, visit_open: bool = False) -> bool:
+def offers_other_areas(
+    state, kind: str, answer: dict | None, words: str, *, tapped: bool = False, visit_open: bool = False, held: bool | None = None
+) -> bool:
     """Whether this "not interested" gets the other-areas offer in place of the close: a first one (facts
     other_areas_offered unset), typed (not a tap, not a shops rule's), with no place found elsewhere in their words
     (place_found; the model's or the rent flow's facts.already_rented unless the words are a plain no, _PLAIN_NO), no
-    visit open, a chat nobody holds and nobody closed already (not_interested_at), and no check-back of ours pending
-    (its no is the close it always was)."""
+    visit open, a chat nobody holds and nobody closed already (not_interested_at), no check-back of ours pending (its
+    no is the close it always was), and no 2d "not a shop" chat off the rent and sale tracks (facts.need: the owner's
+    line offered every option across Dubai already)."""
     if kind != rules.NOT_INTERESTED or tapped or visit_open or (answer or {}).get("rule"):
         return False
     known = dict(getattr(state, "facts", None) or {})
@@ -4164,15 +4205,22 @@ def offers_other_areas(state, kind: str, answer: dict | None, words: str, *, tap
         return False
     if getattr(state, "not_interested_at", None) is not None:
         return False  # a lead closed already (a tap, the check-back's no, an earlier turn): this no is a second one
-    if getattr(state, "stopped_at", None) is not None or getattr(state, "handed_over_at", None) is not None:
+    if held is None:
+        held = getattr(state, "handed_over_at", None) is not None
+    if getattr(state, "stopped_at", None) is not None or held:
         return False
     if getattr(state, "followup_asked_at", None) is not None:
         return False  # their no answers our "Should I check back with you in a month?": the close, as before
+    track = str(getattr(state, "track", "") or "")
+    if needs.of(known) is not None and not (residential.RENT_LIVE and track in (tracks.RENT, tracks.SALE)):
+        # A 2d "not a shop" chat (facts.need): the owner's line offered every option across Dubai already, and their no
+        # stops the invitations, never Lost (the owner's rule of 2026-10-15). The rent and sale tracks' no is Lost (Q10):
+        # those get the offer.
+        return False
     said = str(words or "")
     if place_found(said):
         return False
-    plain = bool(_PLAIN_NO.search(said) or AREA_DECLINE.search(said))
-    if ((answer or {}).get("facts") or {}).get("already_rented") is True and not plain:
+    if ((answer or {}).get("facts") or {}).get("already_rented") is True and not plain_no(said):
         return False  # the model read a place found elsewhere in words that are no plain no: trusted, the close
     return True
 
@@ -4206,13 +4254,14 @@ def other_areas_answer(answer: dict, language: str, names=()) -> dict:
     return answer
 
 
-def _other_area_names(chat) -> list[str]:
-    """The communities with a live unit other than the chat's campaign's (communities.named_packs), at most three."""
+def _other_area_names(chat, state=None) -> list[str]:
+    """The communities with a live unit other than the chat's campaign's and the chat's own (state.community: the one they
+    just turned down), from communities.named_packs, at most three."""
     try:
         from . import communities
 
-        here = communities.campaign_community(chat).casefold()
-        return [pack.name for pack in communities.named_packs(with_units=True) if pack.name.casefold() != here][:3]
+        here = {communities.campaign_community(chat).casefold(), str(getattr(state, "community", "") or "").casefold()} - {""}
+        return [pack.name for pack in communities.named_packs(with_units=True) if pack.name.casefold() not in here][:3]
     except Exception:  # noqa: BLE001 - the offer stands without the names
         logger.exception("Lead AI other-areas names failed for chat %s", getattr(chat, "pk", None))
         return []
@@ -4221,10 +4270,11 @@ def _other_area_names(chat) -> list[str]:
 def other_areas_offer(turn, conversation, chat, state, language: str, answer: dict | None, *, playbook: str = lane.GENERAL) -> Outcome:
     """The offer sent and remembered (facts other_areas_offered, with the model's facts when it answered): the chat stays
     open, nothing is recorded as Lost. A send that fails ends the turn FAILED, never with the close."""
-    text = rules.line(rules.OTHER_AREAS, language).replace("{areas}", other_areas_text(language, _other_area_names(chat)))
+    text = rules.line(rules.OTHER_AREAS, language).replace("{areas}", other_areas_text(language, _other_area_names(chat, state)))
     actions = {"offer": "other_areas", "opt_out": "none", "by": "model" if answer is not None else "rule", "playbook": playbook}
     try:
-        sent = _send(conversation, text, turn)
+        # Marked (followups.other_areas_pending): a decline is what it answers, so no nudge or template follows it.
+        sent = _send(conversation, text, turn, extra={"offer": OFFER_MARK})
     except SoftTimeLimitExceeded:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -5193,6 +5243,11 @@ def _run_claimed(
     # From here the reply goes out: "if you send first, it drops its reply" no longer holds.
     live.thinking(conversation, False)
 
+    if answer.get("backstop") == AREA_BACKSTOP and answer["opt_out"] == rules.NOT_INTERESTED and not offers_other_areas(
+        state, answer["opt_out"], answer, _their_words(burst, heard), visit_open=_open_appointment(conversation) is not None
+    ):
+        # Settle's own reading of a decline (area_decline) only ever brings the offer: refused, the model's none stands.
+        answer["opt_out"] = "none"
     if answer["opt_out"] != "none":
         outcome = _opt_out(
             turn, conversation, chat, state, answer["opt_out"], line_language, answer,

@@ -487,11 +487,16 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   the Roman Urdu, Urdu and Hindi forms, `needs.rented_already`, `residential.rented_elsewhere` minus its plain "not
   looking anymore"), an open visit, a chat a person holds, a stopped chat, or a lead closed already (`not_interested_at`).
   The rent flow's plain "no longer looking" (which it reads as rented elsewhere) gets the offer too, its
-  `already_rented` dropped; the model's own `already_rented` in other words is trusted.
+  `already_rented` dropped; the model's own `already_rented` in other words is trusted. A 2d "not a shop" chat
+  (`facts.need`, already told "we have many options across Dubai") keeps the owner's never-Lost no (2026-10-15)
+  without a second push. The offer's message is marked (`payload.offer`), and `followups.other_areas_pending` holds
+  every nudge and Template B after it as a decline.
 - **The backstop (`engine.area_decline`, in `settle`):** "not looking ... in that area anymore" / "no longer looking"
   is a no whatever the model tagged — only as the gist of the message: never in a question, never beside a want or
   another search ("..., I am looking in JVC for a studio"), never once the offer went (their answer to it is the
-  model's to read).
+  model's to read), never with a visit booked or a person holding the chat; the area is tied to the negation ("not
+  looking for properties in that area", never "... see you there"), and a sink that cannot offer keeps the model's
+  own answer: code's reading never produces a close.
 - **The eval:** three strict scenarios, code's words (`shops-area-decline`, `shops-no-thanks-offer`,
   `shops-area-decline-again`), mirrored in `leadai_eval` (`code_first`, `run_once`, `outgoing`). The prompt is
   untouched.

@@ -114,6 +114,25 @@ class FirstNoTests(ShopsBase):
         self.assertIsNone(self.state().not_interested_at)
         self.assertNotIn(self.body(outcome), (CLOSE, rules.line_for(rules.NOT_INTERESTED, "en", shops=True)))
 
+    def test_no_nudge_follows_the_offer(self):
+        from apps.leadai import followups
+
+        self.turn(self.inbound(AREA_NO), [closing()])
+        state = self.state()
+        self.assertTrue(followups.other_areas_pending(followups.read_since(self.conversation)))
+        for kind in (followups.NUDGE_1, followups.NUDGE_2, followups.REENGAGE):
+            self.assertEqual(followups.holds(self.conversation, state, leadai_eval.NOW, kind), followups.HELD_DECLINED, kind)
+
+    def test_a_booked_visit_is_never_closed_by_code_s_reading(self):
+        from apps.leadai.models import LeadAiAppointment
+        from apps.leadai.tests.test_assistant import TUESDAY_5PM
+
+        LeadAiAppointment.objects.create(conversation=self.conversation, status="confirmed", place="office", starts_at=TUESDAY_5PM)
+        reply = "Great, see you tomorrow!"
+        self.turn(self.inbound("No, not looking for anything else in that area. See you tomorrow."), [shop_answer(reply)])
+        self.assertIsNone(self.state().not_interested_at)
+        self.assertTrue(LeadAiAppointment.objects.filter(conversation=self.conversation, status="confirmed").exists())
+
     def test_after_the_offer_their_answer_is_never_read_as_a_no(self):
         self.set_state(facts={"other_areas_offered": True})
         reply = "Noted. Would you like to visit our office to go through the options in Al Nahda?"
@@ -174,6 +193,30 @@ class GuardTests(SimpleTestCase):
         held = types.SimpleNamespace(facts={}, stopped_at=None, handed_over_at=leadai_eval.NOW)
         self.assertFalse(engine.offers_other_areas(held, rules.NOT_INTERESTED, None, "no thanks"))
 
+    def test_a_2d_need_chat_keeps_its_never_lost_no_and_the_rent_track_gets_the_offer(self):
+        from apps.leadai.assistant import residential
+
+        need = {"need": "home", "wanted": "a studio"}
+        off_track = types.SimpleNamespace(facts=need, stopped_at=None, handed_over_at=None, track="")
+        self.assertFalse(engine.offers_other_areas(off_track, rules.NOT_INTERESTED, None, "no thanks"))
+        with patch.object(residential, "RENT_LIVE", True):
+            for track in ("rent", "sale"):
+                on_track = types.SimpleNamespace(facts=need, stopped_at=None, handed_over_at=None, track=track)
+                self.assertTrue(engine.offers_other_areas(on_track, rules.NOT_INTERESTED, None, "no thanks"), track)
+        with patch.object(residential, "RENT_LIVE", False):
+            on_track = types.SimpleNamespace(facts=need, stopped_at=None, handed_over_at=None, track="rent")
+            self.assertFalse(engine.offers_other_areas(on_track, rules.NOT_INTERESTED, None, "no thanks"))
+        # A shop lead (chat 54622's facts) is no 2d need chat: the offer.
+        shop = types.SimpleNamespace(facts={"intent": "rent", "community": "International City", "property_type": "shop"}, stopped_at=None, handed_over_at=None, track="")
+        self.assertTrue(engine.offers_other_areas(shop, rules.NOT_INTERESTED, None, AREA_NO))
+
+    def test_the_offer_names_no_community_the_chat_is_on(self):
+        packs = [types.SimpleNamespace(name="Mudon"), types.SimpleNamespace(name="JVC"), types.SimpleNamespace(name="Al Furjan")]
+        with patch("apps.leadai.assistant.communities.named_packs", return_value=packs):
+            names = engine._other_area_names(types.SimpleNamespace(campaign=None), types.SimpleNamespace(community="Mudon"))
+            self.assertEqual(names, ["JVC", "Al Furjan"])
+            self.assertEqual(engine._other_area_names(types.SimpleNamespace(campaign=None)), ["Mudon", "JVC", "Al Furjan"])
+
     def test_the_line_names_the_other_communities(self):
         self.assertEqual(engine.other_areas_text("en", ["JVC", "Discovery Gardens", "Dubai Silicon Oasis", "Extra"]), ", for example JVC, Discovery Gardens and Dubai Silicon Oasis")
         self.assertEqual(engine.other_areas_text("en", ["JVC"]), ", for example JVC")
@@ -198,15 +241,36 @@ class GuardTests(SimpleTestCase):
             self.assertFalse(engine.AREA_DECLINE.search(text), text)
 
     def test_the_backstop_reads_the_gist_only(self):
-        for text in (AREA_NO, "No longer looking", "Not interested in that location anymore"):
+        for text in (AREA_NO, "No longer looking", "Not interested in that location anymore", "we are not searching there anymore"):
             self.assertTrue(engine.area_decline(text), text)
         for text in (
             "Not looking in International City anymore, I am looking in JVC for a studio",
             "Not interested in a shop, is there a studio?",
             "Not interested in that area, do you have anything in JVC?",
             "We are not looking there, we need a bigger place",
+            # The second review: a yes, or a choice among our shops, is never a no.
+            "No, not looking for anything else. See you there tomorrow.",
+            "Not interested in the corner shop there, the one near the entrance is fine",
         ):
             self.assertFalse(engine.area_decline(text), text)
+
+    def test_a_place_said_beside_a_plain_no_is_a_place(self):
+        for words in (
+            "We moved into a new apartment last week, not looking anymore",
+            "We rented in Silicon Oasis, no longer looking",
+            "we're settled in JLT now, not looking anymore",
+        ):
+            self.assertTrue(engine.place_found(words), words)
+            self.assertFalse(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {"already_rented": True}}, words), words)
+        self.assertTrue(engine.plain_no("We are no longer looking, thanks"))
+        self.assertTrue(engine.plain_no(AREA_NO))
+        self.assertFalse(engine.plain_no("we are sorted in JLT, no longer looking"))
+        self.assertFalse(engine.place_found("We are no longer looking, thanks"))
+
+    def test_a_stale_handover_is_no_hold_for_the_rule_path(self):
+        held = types.SimpleNamespace(facts={}, stopped_at=None, handed_over_at=leadai_eval.NOW)
+        self.assertFalse(engine.offers_other_areas(held, rules.NOT_INTERESTED, None, "no thanks"))
+        self.assertTrue(engine.offers_other_areas(held, rules.NOT_INTERESTED, None, "no thanks", held=False))
 
     def test_a_lead_closed_already_or_a_place_in_urdu_or_hindi_gets_no_offer(self):
         closed = types.SimpleNamespace(facts={}, stopped_at=None, handed_over_at=None, not_interested_at=leadai_eval.NOW)
