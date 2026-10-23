@@ -71,6 +71,7 @@
 #   ops/wa.sh set-leadai-office URL LAT LNG  the office's Google Maps short link and pin for Lead AI
 #   ops/wa.sh set-leadai-office-address "TEXT"  the office address text Lead AI sends
 #   ops/wa.sh set-leadai-visit-contact "NAME" PHONE ["BACKUP NAME" BACKUP_PHONE]  whom a client on the way is told to call
+#   ops/wa.sh probe-leadai-grants           read-only: the Lead AI access screen's list, backfill and sign-in payloads (round 25)
 #   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
@@ -1405,6 +1406,17 @@ case "$cmd" in
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-leadai-grants)
+    # Read-only: "Lead AI access" per Bitrix user (round 25): as a real panel admin the list answers (the portal's
+    # users live, the panel's accounts, the grants), a non-admin is refused, the migration's backfill is whole and the
+    # sign-in payloads agree with access.of (ops/catalog/probe-leadai-grants.py). Names and counts only; nothing written.
+    [[ $# -eq 0 ]] || die "probe-leadai-grants takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-grants.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-grants.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
   leadai-greet-settings)
