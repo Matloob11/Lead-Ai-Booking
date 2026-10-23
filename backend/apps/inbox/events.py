@@ -66,9 +66,9 @@ def publish(conversation, event, data):
     # main inbox does not listen for those, so it never shows the chat. Routing
     # must never stop a live event, so any failure keeps the plain name. The
     # agents with Lead AI access hear those events on the desk's own group.
-    extra_groups, scoped_groups, scoped_data = [], [], None
+    extra_groups, scoped_groups, scoped_data, resync_groups = [], [], None, []
     try:
-        from apps.leadai.lane import desk_groups_for, event_name, trim_for_desk
+        from apps.leadai.lane import desk_groups_for, event_name, ping_groups, trim_for_desk
 
         event = event_name(conversation, event)
         # The desk, and the chat's Bitrix responsible on the handover desk: in full, or trimmed to the chat and the
@@ -76,6 +76,8 @@ def publish(conversation, event, data):
         extra_groups, scoped_groups = desk_groups_for(event, conversation)
         if scoped_groups:
             scoped_data = trim_for_desk({**data, "number_id": conversation.number_id})
+        # The agents granted a Lead AI list the chat is not in now: an id-only resync (apps/leadai/access.py).
+        resync_groups = ping_groups(event, conversation)
     except Exception:  # noqa: BLE001
         logger.exception("Lead AI routing failed for conversation %s", getattr(conversation, "pk", None))
     message = {
@@ -93,6 +95,10 @@ def publish(conversation, event, data):
             async_to_sync(layer.group_send)(group, message)
         for group in scoped_groups:
             async_to_sync(layer.group_send)(group, {**message, "data": scoped_data})
+        for group in resync_groups:
+            async_to_sync(layer.group_send)(
+                group, {"type": "inbox.event", "event": "leadai.access.resync", "data": {"id": conversation.pk, "number_id": conversation.number_id}}
+            )
     except Exception:  # noqa: BLE001 - a dead socket must not fail the write path
         logger.exception("Failed to publish %s for conversation %s", event, conversation.pk)
 

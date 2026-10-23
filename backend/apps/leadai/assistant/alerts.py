@@ -34,6 +34,7 @@ import time
 import httpx
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q, Subquery
 from django.utils import timezone
 
 from ..models import LeadAiAlert, LeadAiChatState
@@ -148,7 +149,16 @@ def desk_agents(conversation=None) -> list:
 
     if conversation is not None and not LeadAiChat.objects.filter(conversation_id=conversation.pk, active=True).exists():
         return []
-    return list(get_user_model().objects.filter(is_active=True, can_lead_ai=True, can_official_api=True).order_by("pk"))
+    from ..models import LeadAiAccess
+
+    # The grant on the account (Agents & access), or on the Bitrix user's row (the Lead AI access screen, access.py).
+    granted = LeadAiAccess.objects.filter(all_chats=True).values("bitrix_user_id")
+    return list(
+        get_user_model()
+        .objects.filter(is_active=True, can_official_api=True)
+        .filter(Q(can_lead_ai=True) | Q(bitrix_user_id__in=Subquery(granted)))
+        .order_by("pk")
+    )
 
 
 # A title that names its track already: an alert raised again for another person (reach_responsible), or one

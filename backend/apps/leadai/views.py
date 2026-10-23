@@ -464,9 +464,64 @@ def desk_mine(request):
             continue
         appointment = serialize_appointment(_open_appointment(conversation))
         # The viewing their chat booked; no colleague's name on a call for an agent who has the chat through the desk alone.
-        row["appointment"] = handover_desk.trim_appointment(appointment) if scoped is not None else appointment
+        row["appointment"] = handover_desk.trim_appointment(appointment) if scoped is not None and scoped.through_desk(conversation) else appointment
         results.append(row)
     return Response({"count": len(results), "results": results, "agent": wanted or handover_desk.bitrix_id(request.user)})
+
+
+@api_view(["GET"])
+def access_list(request):
+    """Lead AI access per Bitrix user (access.py, round 25): the portal's active users, read live, merged with the panel's
+    accounts, each with its grants (all_chats, today, needs), what they come to (effective), its handovers and whether
+    it is an admin. Panel admins only. ?refresh=1 reads the portal again before the cache's minute is up."""
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    from . import access
+
+    if not sees_all_inbox_chats(request.user):
+        return Response({"detail": "Only a panel admin may see who has Lead AI access."}, status=status.HTTP_403_FORBIDDEN)
+    rows = access.rows(refresh=request.GET.get("refresh") == "1")
+    return Response({"count": len(rows), "results": rows, "bitrix": access.bitrix_state(), "flags": list(access.FLAGS), "me": access.bitrix_id(request.user)})
+
+
+def _flag_value(value) -> bool:
+    """A grant as sent: a boolean, or the usual words for one; anything else is no grant and no revoke (ValueError)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    word = str(value).strip().lower() if isinstance(value, str) else None
+    if word in ("true", "1", "yes", "on"):
+        return True
+    if word in ("false", "0", "no", "off", ""):
+        return False
+    raise ValueError(f"not a boolean: {value!r}")
+
+
+@api_view(["PUT"])
+def access_update(request, bitrix_id):
+    """A panel admin sets one Bitrix user's grants: only the flags sent ({all_chats, today, needs} as booleans). Never
+    one's own; never a hold user (0, 1). The account's Lead AI access follows all_chats; the agent's panel is told."""
+    from apps.inbox.visibility import sees_all_inbox_chats
+
+    from . import access
+
+    if not sees_all_inbox_chats(request.user):
+        return Response({"detail": "Only a panel admin may change Lead AI access."}, status=status.HTTP_403_FORBIDDEN)
+    wanted = "".join(ch for ch in str(bitrix_id or "") if ch.isdigit())
+    if not wanted or wanted in access.HOLD_USERS:
+        return Response({"detail": "Give a Bitrix user id."}, status=status.HTTP_400_BAD_REQUEST)
+    if wanted == access.bitrix_id(request.user):
+        return Response({"detail": "You cannot change your own Lead AI access."}, status=status.HTTP_400_BAD_REQUEST)
+    data = request.data if isinstance(request.data, dict) else {}
+    try:
+        changes = {flag: _flag_value(data[flag]) for flag in access.FLAGS if flag in data}
+    except ValueError:
+        changes = {}
+    if not changes:
+        return Response({"detail": "Send all_chats, today or needs as true or false."}, status=status.HTTP_400_BAD_REQUEST)
+    access.grant(wanted, changes, by=request.user)
+    return Response(access.row(wanted))
 
 
 def _row_for(user, conversation) -> dict:

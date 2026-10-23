@@ -32,11 +32,24 @@ def _handover_desk_count(agent) -> int:
         return 0
 
 
+def _lead_ai_access(agent) -> dict:
+    try:
+        from apps.leadai.access import payload_for
+
+        return payload_for(agent)
+    except Exception:  # noqa: BLE001 - the sign-in payload never fails for a grant
+        admin = bool(getattr(agent, "is_wa_admin", False) or getattr(agent, "is_superuser", False))
+        return {"admin": admin, "all_chats": admin, "today": admin, "needs": admin, "any": admin}
+
+
 def _serialize(agent):
     from apps.inbox.send_health import with_send_health
     from apps.inbox.serializers import serialize_number
 
     numbers = with_send_health(agent.visible_numbers)
+    # Read before the flag below: a grant made before the account existed reaches the account's own flag here
+    # (apps/leadai/access.of), so can_lead_ai says what the grants say.
+    lead_ai_access = _lead_ai_access(agent)
 
     return {
         "id": agent.pk,
@@ -54,6 +67,9 @@ def _serialize(agent):
         # The handover desk (apps/leadai/handover_desk.py): how many Lead AI chats handed to a person are this agent's
         # as their Bitrix responsible; the panel's "My handovers" door and badge.
         "handover_desk": {"count": _handover_desk_count(agent)},
+        # Lead AI access per Bitrix user (apps/leadai/access.py, round 25): what the agent may see of the Lead AI screen
+        # (every chat, the Today list, the Needs a person list); a panel admin everything.
+        "lead_ai_access": lead_ai_access,
         "role": "Administrator" if agent.has_admin_rights else "Agent",
         "numbers": [serialize_number(n) for n in numbers],
         "capabilities": {

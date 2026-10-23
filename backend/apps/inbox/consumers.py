@@ -27,9 +27,36 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
 
     async def inbox_event(self, message):
         await self.send_json({"event": message["event"], "data": message["data"]})
+        if message.get("event") == "leadai.access.changed":
+            await self._rejoin()
+
+    async def _rejoin(self):
+        """A Lead AI grant of this agent changed (apps/leadai/access.py): the open socket's groups follow it, so the
+        agent hears the desk from now on, or stops hearing it, without a reload."""
+        user = self.scope.get("user")
+        if not user or not user.is_authenticated:
+            return
+        wanted = await self._fresh_groups(user)
+        joined = set(getattr(self, "groups_joined", []))
+        for group in set(wanted) - joined:
+            await self.channel_layer.group_add(group, self.channel_name)
+        for group in joined - set(wanted):
+            await self.channel_layer.group_discard(group, self.channel_name)
+        self.groups_joined = wanted
 
     @database_sync_to_async
     def _number_groups(self, user):
+        return self._groups_for(user)
+
+    @database_sync_to_async
+    def _fresh_groups(self, user):
+        """The groups for the agent's row as it is now, not the socket's copy of it (a grant may have changed it)."""
+        from django.contrib.auth import get_user_model
+
+        fresh = get_user_model().objects.filter(pk=user.pk).first()
+        return self._groups_for(fresh) if fresh is not None and fresh.is_active else []
+
+    def _groups_for(self, user):
         groups = [group_for_agent(user.pk)]
         # Number groups carry every chat on the line. Only panel admins join
         # them; everyone else hears their own assigned threads on the agent

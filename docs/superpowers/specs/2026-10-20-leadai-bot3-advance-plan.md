@@ -424,6 +424,50 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   Resume AI on a Bitrix-handed chat has the re-read hole Done had; a handover's Bitrix notification still says "until
   someone from the team writes".
 
+## 6i. Round 25 (2026-10-23): "Lead AI access" per Bitrix user (All chats / Today / Needs a person)
+
+- **Matloob's order:** an access management screen, agent by agent: if someone should see the Today bookings, or
+  whatever we choose, we manage it there, connected to Bitrix in real time.
+- **Backend (`apps/leadai/access.py`, migration 0021 `LeadAiAccess`):** three grants keyed by the **Bitrix user id**
+  (as the handover desk is, so a grant made before the person ever signed in holds from their first sign-in):
+  **All chats** (every active Lead AI chat on any number, its live group and its alerts; the same grant Agents & access
+  calls Lead AI access, `Agent.can_lead_ai`, kept in step both ways: `access.grant` writes the account's flag, the
+  Agents & access change calls `access.sync_from_agent`), **Today** (the chats with an open visit or call of the day,
+  Dubai time, `desk.today_window`), **Needs a person** (the chats handed over or broker-paused and not stopped, or with
+  an open tentative). `access.of(user)` is the effective dict, read once per request; a panel admin has everything, an
+  inactive account or one without the Official API inbox nothing. `access.q_for(user)` is one clause OR-ed into every
+  agent's visibility through `lane.desk_q`, so every inbox and Lead AI endpoint follows unchanged, and an agent with
+  no grant keeps exactly what they had (their own chats, "My handovers"); the Today and Needs a person lists are views
+  of the visible chats. `lane.has_desk_access` reads the row too; `alerts.desk_agents` both the flag and the rows.
+  `GET /api/leadai/access/` (admins) merges the portal's active users (`user.get` through the webhook, the `user`
+  scope; paged by 50, cached a minute, `?refresh=1`) with the panel's accounts by Bitrix id (the hold users 0 and 1
+  left out), each with the handovers on their desk; `PUT /api/leadai/access/<bitrix id>/` sets one or more flags
+  (never a hold user, never one's own id), records who and when in the row's history, and publishes
+  `leadai.access.changed` to the agent's own channel: their open socket reads its groups again from the row as it is
+  now (`inbox.consumers._rejoin`), their panel reads its lists again. `/api/auth/me/` carries `lead_ai_access`.
+- **A granted agent's chats:** in full, as the team sees them (`handover_desk.Scope`: nothing trimmed as for a
+  responsible through the desk alone), with their live frames on the agent's own channel (`access.event_groups`
+  through `lane.desk_groups_for`: the agents whose Today or Needs a person grant covers the chat); the open
+  socket reads its groups again on `leadai.access.changed` (`inbox.consumers._rejoin`); a chat of the Lead AI desk
+  that is not in their lists reaches them as an id-only `leadai.access.resync` (`access.ping_groups`, through
+  `inbox.events.publish`), so a chat that just left a list goes from their screen. A chat on someone's handover
+  desk counts as waiting for a person until Done (`needs_q`: `desk_at` set, `desk_done_at` not), so the chat a
+  granted agent answered stays with them while the assistant takes over again; their New template writes for their
+  chats' accounts (`catalog._covered_waba_ids`). The migration backfills a
+  row for every account granted Lead AI access in Agents & access before, so the screen can revoke it (a revoke
+  clears the row and the flag); a grant made before the account exists reaches the account's own flag the first
+  time it is seen (`access.of`). "Admin" on the screen is a panel admin (`sees_all_inbox_chats`), as the
+  endpoints mean it: a Bitrix portal admin who is no panel admin gets switches like anyone.
+- **Panel (`modules/lead-ai/access.js`, new; `lead-ai.js`, `access-requests.js`):** the hamburger menu's "Lead AI access" (panel admins):
+  name and position from the portal, the account's state (signed in when, never, inactive, no account yet), the
+  handovers, three switches (an admin's locked as everything, one's own locked, an unusable account's locked), a
+  search, "Refresh from Bitrix"; each switch one PUT (the row's three switches held while it is in flight), the row
+  replaced by the server's answer. An agent granted the Today or the Needs a person list opens the Lead AI screen
+  (not the handover desk's), from the menu and from the no-number card's door, and sees the chats of their grant.
+- **Not touched:** `screen.js`, `thread.js`, `lead-ai.css`, `api.js`, `inbox.js`, `index.html` (another session's
+  uncommitted copies are what the server holds); so the screen's rail is not yet shaped by the grant: every tab
+  lists the visible chats, which for a Today or Needs a person grant are those chats alone.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
