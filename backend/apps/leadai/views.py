@@ -768,9 +768,10 @@ def _contact_phone(value) -> tuple[str, str]:
     text = str(value if value is not None else "").strip()
     if not text:
         return "", ""
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if not digits or not 8 <= len(digits) <= 15 or not re.fullmatch(r"[+\d\s().-]+", text):
-        return text, "Give the phone as digits with the country code (8 to 15 digits), e.g. 971501234567."
+    # As the test numbers are read (_phone_digits: a leading 00 dropped); a leading 0 is a local number, not dialable.
+    digits = _phone_digits(text)
+    if not digits or digits.startswith("0") or not 8 <= len(digits) <= 15 or not re.fullmatch(r"[+\d\s().-]+", text):
+        return text, "Give the phone as digits with the country code (8 to 15 digits, no leading 0), e.g. 971501234567."
     return digits, ""
 
 

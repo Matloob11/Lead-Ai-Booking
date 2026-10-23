@@ -111,6 +111,8 @@ class SettingsTests(ShopsBase):
 
     def test_a_bad_phone_or_a_marked_up_name_is_refused(self):
         self.assertIn("visit_contact_phone", self.put({"visit_contact_phone": "0501234"}).json()["errors"])
+        self.assertIn("visit_contact_phone", self.put({"visit_contact_phone": "058 105 8726"}).json()["errors"])  # a local number
         self.assertIn("visit_contact_phone", self.put({"visit_contact_phone": "call me"}).json()["errors"])
+        self.assertEqual(self.put({"visit_contact_phone": "00971581058726"}).json()["visit_contact_phone"], "971581058726")
         self.assertIn("visit_contact_backup_name", self.put({"visit_contact_backup_name": "<b>Malik</b>"}).json()["errors"])
         self.assertEqual(self.put({"visit_contact_phone": "(971) 58-105 8726"}).json()["visit_contact_phone"], "971581058726")
