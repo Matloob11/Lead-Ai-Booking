@@ -22,6 +22,9 @@ urlpatterns = [
     path("desk/mine/", views.desk_mine, name="desk-mine"),
     path("chats/<int:pk>/desk/done/", views.desk_done, name="desk-done"),
     path("settings/", views.assistant_settings, name="settings"),
+    # Lead AI access per Bitrix user (access.py, round 25): the admin screen's list, and one user's grants.
+    path("access/", views.access_list, name="access-list"),
+    path("access/<str:bitrix_id>/", views.access_update, name="access-update"),
     # The daily digests (assistant/digest.py) for the Reports dialog: the stored days and today so far.
     path("digests/", views.digests, name="digests"),
     # The community packs (assistant/communities.py): the list for the panel; edited in Django admin for now.

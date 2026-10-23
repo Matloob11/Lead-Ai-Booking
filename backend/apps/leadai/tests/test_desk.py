@@ -287,13 +287,13 @@ class LiveTests(DeskBase):
         self.assertEqual(lane.desk_groups(self.admin), [])  # the number groups carry it already
 
     def test_the_consumer_joins_it(self):
-        from asgiref.sync import async_to_sync
-
         from apps.inbox.consumers import InboxConsumer
 
-        groups = async_to_sync(InboxConsumer()._number_groups)(self.desker)
-        self.assertIn(lane.DESK_GROUP, groups)
-        self.assertNotIn(lane.DESK_GROUP, async_to_sync(InboxConsumer()._number_groups)(self.plain))
+        # The plain method, not the database_sync_to_async wrapper: the wrapper closes the thread's connection first
+        # (close_old_connections), which inside a TestCase's transaction is the test's own, and since round 25 the
+        # desk access is a query (access.of).
+        self.assertIn(lane.DESK_GROUP, InboxConsumer()._groups_for(self.desker))
+        self.assertNotIn(lane.DESK_GROUP, InboxConsumer()._groups_for(self.plain))
 
     def test_a_lead_ai_chats_events_reach_the_desk_group_and_no_other_chats_do(self):
         from apps.inbox import events

@@ -141,10 +141,13 @@ class MoveTests(LeadAiBase):
         row = LeadAiChat.objects.get(conversation=chat)
         self.assertFalse(row.active)
         self.assertEqual(row.moved_by, self.agent)
-        # A plain event whose payload says lead_ai False: the main inbox lists it again.
-        self.assertTrue(sent)
-        self.assertTrue(all(m["event"] == "conversation.updated" for m in sent))
-        self.assertTrue(all(m["data"]["conversation"]["lead_ai"] is False for m in sent))
+        # A plain event whose payload says lead_ai False: the main inbox lists it again. Beside it, since round 25, the
+        # id-only resync to the Lead AI desk and the granted agents (lane._resync_after_move), nothing else.
+        plain = [m for m in sent if m["event"] == "conversation.updated"]
+        self.assertTrue(plain)
+        self.assertTrue(all(m["data"]["conversation"]["lead_ai"] is False for m in plain))
+        self.assertEqual({m["event"] for m in sent} - {"conversation.updated"}, {"leadai.access.resync"})
+        self.assertTrue(all(m["data"] == {"id": chat.pk, "number_id": chat.number_id} for m in sent if m["event"] == "leadai.access.resync"))
         again = self.client.post(f"/api/leadai/chats/{chat.pk}/move-to-inbox/")
         self.assertEqual(again.status_code, 409)
 

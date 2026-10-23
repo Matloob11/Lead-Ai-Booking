@@ -262,15 +262,22 @@ def row(conversation, now=None) -> dict | None:
 
 class Scope:
     """What an agent who is no admin and has no Lead AI access reaches through the desk alone, worked out once per
-    request (views.chat_list has many rows): not their own chat, none on a number they hold."""
+    request (views.chat_list has many rows): not their own chat, none on a number they hold. An agent granted the Today
+    or the Needs a person list (access.py, round 25) reaches nothing through the desk alone: the grant is the team's
+    trust, so every chat they may open shows the team as it does for a number-holder."""
 
     def __init__(self, user):
         from apps.inbox.visibility import held_numbers
 
+        from . import access
+
         self.user_pk = user.pk
         self.held = set(held_numbers(user).values_list("pk", flat=True))
+        self.granted = bool(access.of(user)["any"])
 
     def through_desk(self, conversation) -> bool:
+        if self.granted:
+            return False
         return getattr(conversation, "assigned_agent_id", None) != self.user_pk and conversation.number_id not in self.held
 
 

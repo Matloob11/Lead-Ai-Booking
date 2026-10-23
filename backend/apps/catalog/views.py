@@ -35,7 +35,7 @@ def _covered_waba_ids(user):
             "waba_business_id", flat=True
         )
     )
-    from apps.leadai.lane import has_desk_access
+    from apps.leadai.lane import desk_q, has_desk_access
 
     if has_desk_access(user):
         covered |= set(
@@ -44,6 +44,17 @@ def _covered_waba_ids(user):
             .values_list("number__waba_business_id", flat=True)
             .distinct()
         )
+    else:
+        # A grant of the Today or the Needs a person list (apps.leadai.access, round 25) opens those chats, and the
+        # Send-template dialog's New template writes for their accounts the same way.
+        clause = desk_q(user)
+        if clause is not None:
+            covered |= set(
+                Conversation.objects.filter(clause, number__is_active=True)
+                .exclude(number__waba_business_id="")
+                .values_list("number__waba_business_id", flat=True)
+                .distinct()
+            )
     return covered
 
 
@@ -724,6 +735,11 @@ def set_agent_admin(request, pk):
         )
 
     agent.save(update_fields=updates)
+    if "can_lead_ai" in updates:
+        # The Lead AI access screen's row for this Bitrix user follows (apps/leadai/access.py), so the two never disagree.
+        from apps.leadai.access import sync_from_agent
+
+        sync_from_agent(agent)
     return Response(serialize_agent_row(agent))
 
 

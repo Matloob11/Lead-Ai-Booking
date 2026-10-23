@@ -674,6 +674,29 @@ class LeadAiCrmField(models.Model):
         return f"{self.field}={self.value} on lead {self.lead_id}"
 
 
+class LeadAiAccess(models.Model):
+    """What a Bitrix user may see of the Lead AI screen beyond their own handovers (apps/leadai/access.py; Matloob
+    2026-10-23): every Lead AI chat (``all_chats``, the grant Agents & access calls Lead AI access, Agent.can_lead_ai,
+    kept in step both ways), the Today list (every open visit and call of the day, and those chats), the Needs a person
+    list (every chat waiting for a person, and those chats). Keyed by the Bitrix user id, as the handover desk is, so a
+    grant made before the person ever signed in holds from their first sign-in; a panel admin sees everything whatever
+    the row says. Database defaults: rows the old code inserts during a deploy name none."""
+
+    bitrix_user_id = models.CharField(max_length=16, unique=True)
+    all_chats = models.BooleanField(default=False, db_default=False)
+    today = models.BooleanField(default=False, db_default=False)
+    needs = models.BooleanField(default=False, db_default=False)
+    history = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    def flags(self) -> dict:
+        return {"all_chats": bool(self.all_chats), "today": bool(self.today), "needs": bool(self.needs)}
+
+
 class LeadAiAlert(models.Model):
     """A heads-up for an agent: a booking, a hot lead, "on my way", "running
     late", a reschedule, a request for a person, a reminder that failed.
