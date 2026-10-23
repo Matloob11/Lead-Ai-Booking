@@ -1,3 +1,11 @@
+## 2026-10-23 — Lead AI screen: an "Auto new lead" filter chip (the chats the new-lead greet opened), live 06:11 UTC (Claude Code)
+
+Matloob (05:55 UTC, with a screenshot of the filter row): a chip beside Brokers that shows only the chats the AI messaged by itself (new portal leads) and talks to. Those chats carry the "AI auto reply" inbox label since round 22f (`newlead.label_greeted`), so the chip is `?label=AI auto reply` on the list endpoint, as Brokers is `?label=Broker`: one label at a time (pressing one releases the other), its own empty text, live rows as the Brokers list (a chat the server has not listed stays out while the chip is on). He also asked that these chats appear in the lead's Bitrix timeline: they do already — crmlink's mirror posts every customer and assistant line on the chat's own lead (checked on Bitrix's `b_crm_timeline`: lead 80090 carries 7 customer lines, 10 assistant lines, the greet template's comment and a summary; 80089 6/2/1; 80052 1/2/1) — nothing changed there. `modules/lead-ai/screen.js` only, pushed with `ops/wa.sh push`, md5 and served size verified (49806 bytes). No backend change, no CSS change.
+
+**Shared:** `TASKS.md`. Panel: `modules/lead-ai/screen.js`.
+
+---
+
 ## 2026-10-22 — Lead AI round 23 is live: the handover desk ("My handovers": a handed-over chat is its Bitrix responsible's to see, reply to and finish, and nothing else is) (Claude Code)
 
 Branch `leadai-2e` `4f2c1b6` → main. Live **16:58 UTC** (`build app` + `migrate-new-image` (leadai 0019, with its backfill) + `up app`; `django-check` No changes). The gate: eval **594 of 598 (99.3%), the model's own words 316 of 320 (98.8%), every code, money and policy scenario every run (the 13:40 run; the engine and the prompt byte-for-byte the same since, the last run's ssh dropped)**; leadai 2097 tests, crmlink 118, inbox 15, accounts 0 (the app has none). Panel pushed and verified by md5 and served size.
