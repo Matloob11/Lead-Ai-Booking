@@ -842,6 +842,7 @@ function valuesSection(data) {
       ["Office address", data.office_address || "Not set"],
       ["Google Maps link", mapsLink(data.office_maps_url)],
       ["Office pin", pin],
+      ["Contact on the way", visitContactText(data)],
       ["Closed dates", closed.length ? closed.join(", ") : "None"],
       ["Test numbers", tests ? String(tests) : "None"],
       ["Daily call limit", count(data.daily_call_limit)],
@@ -850,6 +851,19 @@ function valuesSection(data) {
       ["Lead AI access", deskAgentsText(data)],
     ])
   );
+}
+
+/** "Shoaib Malik +971581058726; then Abdul Malik +971555484423": whom a client on the way is told to call (settings). */
+function visitContactText(data) {
+  const one = (name, phone) => {
+    const digits = String(phone || "").replace(/\D/g, "");
+    const who = String(name || "").trim();
+    return who && digits ? `${who} +${digits}` : "";
+  };
+  const first = one(data.visit_contact_name, data.visit_contact_phone);
+  if (!first) return "Not set (the client is told nobody to call)";
+  const backup = one(data.visit_contact_backup_name, data.visit_contact_backup_phone);
+  return backup ? `${first}; then ${backup}` : first;
 }
 
 /** An admin who may not edit may still stop the assistant everywhere. */
@@ -972,6 +986,7 @@ function formSection(data, { onSaved, onClose }) {
   });
 
   const pinHintId = "lai-set-pin-hint";
+  const contactHintId = "lai-set-contact-hint";
   const save = el("button.lai-btn.lai-btn--primary", { type: "submit" }, ["Save"]);
   // The shops playbook's facts, brand and viewing agent (shops.js).
   const shopsPart = shopsForm(data);
@@ -1011,6 +1026,12 @@ function formSection(data, { onSaved, onClose }) {
     if (lat !== String(data.office_latitude || "") || lng !== String(data.office_longitude || "")) {
       out.office_latitude = lat;
       out.office_longitude = lng;
+    }
+
+    // Whom a client on the way is told to call: sent as typed; the server keeps the phone's digits and says which is wrong.
+    for (const key of ["visit_contact_name", "visit_contact_phone", "visit_contact_backup_name", "visit_contact_backup_phone"]) {
+      const typed = fields[key].input.value.replace(/\s+/g, " ").trim();
+      if (typed !== String(data[key] || "")) out[key] = typed;
     }
 
     const limit = fields.daily_call_limit.input.value.trim();
@@ -1110,6 +1131,38 @@ function formSection(data, { onSaved, onClose }) {
     ]),
     el("div.lai-set__hint", { id: pinHintId }, [
       "The office pin, sent as a location after a booking. Leave both empty to send no pin.",
+    ]),
+    // Whom a client on the way is told to call (Matloob 2026-10-23): the person waiting at the office, then a backup.
+    el("div.lai-set__pair", {}, [
+      field("visit_contact_name", "Contact on the way", "", {
+        value: data.visit_contact_name || "",
+        placeholder: "Shoaib Malik",
+        sharedHintId: contactHintId,
+      }),
+      field("visit_contact_phone", "Their phone", "", {
+        value: data.visit_contact_phone || "",
+        inputmode: "tel",
+        placeholder: "971581058726",
+        sharedHintId: contactHintId,
+      }),
+    ]),
+    el("div.lai-set__pair", {}, [
+      field("visit_contact_backup_name", "Backup contact", "", {
+        value: data.visit_contact_backup_name || "",
+        placeholder: "Abdul Malik",
+        sharedHintId: contactHintId,
+      }),
+      field("visit_contact_backup_phone", "Their phone", "", {
+        value: data.visit_contact_backup_phone || "",
+        inputmode: "tel",
+        placeholder: "971555484423",
+        sharedHintId: contactHintId,
+      }),
+    ]),
+    el("div.lai-set__hint", { id: contactHintId }, [
+      "When a booked client says they are on their way, the AI adds: call the contact for anything on the way, and the " +
+        "backup if the contact does not answer. Phones as digits with the country code. Leave the name or the phone " +
+        "empty to say nothing.",
     ]),
     field(
       "daily_call_limit",

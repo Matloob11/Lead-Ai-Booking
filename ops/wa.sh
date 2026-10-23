@@ -1149,6 +1149,28 @@ case "$cmd" in
       -e LEADAI_OFFICE_MAPS_URL='$1' -e LEADAI_OFFICE_LAT='$2' -e LEADAI_OFFICE_LNG='$3' web python manage.py shell"
     ;;
 
+  set-leadai-visit-contact)
+    # Whom a client on the way is told to call (Lead AI settings; assistant/filters.on_my_way): the office contact and
+    # an optional backup, set the way the AI settings dialog sets them and kept in the settings history. Names: letters,
+    # digits, spaces and . ' - (2-60); phones: digits with the country code (8-15). Two empty backup values clear it.
+    #   ops/wa.sh set-leadai-visit-contact "Shoaib Malik" 971581058726 "Abdul Malik" 971555484423
+    [[ $# -eq 2 || $# -eq 4 ]] || die "set-leadai-visit-contact takes \"NAME\" PHONE [\"BACKUP NAME\" BACKUP_PHONE]"
+    name_ok="^[A-Za-z0-9 .'-]{2,60}$"; phone_ok='^[0-9]{8,15}$'
+    [[ "$1" =~ $name_ok ]] || die "the name may hold letters, digits, spaces and . ' - (2-60 characters)"
+    [[ "$2" =~ $phone_ok ]] || die "the phone is digits with the country code (8-15)"
+    backup_name="${3:-}"; backup_phone="${4:-}"
+    if [[ -n "$backup_name$backup_phone" ]]; then
+      [[ "$backup_name" =~ $name_ok ]] || die "the backup name may hold letters, digits, spaces and . ' - (2-60 characters)"
+      [[ "$backup_phone" =~ $phone_ok ]] || die "the backup phone is digits with the country code (8-15)"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/set-leadai-visit-contact.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/set-leadai-visit-contact.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && base64 -d | docker compose exec -T \
+      -e LEADAI_VISIT_NAME='$1' -e LEADAI_VISIT_PHONE='$2' -e LEADAI_VISIT_BACKUP_NAME='$backup_name' \
+      -e LEADAI_VISIT_BACKUP_PHONE='$backup_phone' web python manage.py shell"
+    ;;
+
   set-leadai-office-address)
     # The office address text Lead AI sends in confirmations and reminders, set the
     # way the AI settings dialog sets it and kept in the settings history. Only
