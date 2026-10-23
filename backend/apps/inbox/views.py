@@ -1,7 +1,7 @@
 import csv
 import logging
 
-from django.db.models import Prefetch, Q
+from django.db.models import Case, IntegerField, Prefetch, Q, When
 from django.http import FileResponse, Http404, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -156,8 +156,8 @@ def conversation_list(request):
 
     # Rotate campaign chats have their own chip. The main list skips them so
     # a page of thirty is thirty normal chats, and Load more keeps moving.
-    rotate = request.GET.get("rotate")
-    if rotate == "1":
+    rotate = request.GET.get("rotate") == "1"
+    if rotate:
         queryset = queryset.filter(staff_only=True)
     else:
         queryset = queryset.filter(staff_only=False)
@@ -169,10 +169,23 @@ def conversation_list(request):
     elif archived == "0":
         queryset = queryset.filter(is_archived=False)
 
-    # WhatsApp order: pinned first, then latest message activity. Opening a
-    # chat must not change this — only send/receive updates last_message_at.
-    # Transferred-in threads stay visible but are not forced above newer chats.
-    queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
+    # WhatsApp / Official / Lead AI: pinned first, then latest message activity.
+    # Opening a chat must not change this — only send/receive updates last_message_at.
+    # Rotate WhatsApp only: unread replies first so agents see who answered the
+    # campaign, then the same pinned + recency order within each group.
+    if rotate:
+        queryset = queryset.order_by(
+            Case(
+                When(unread_count__gt=0, then=0),
+                default=1,
+                output_field=IntegerField(),
+            ),
+            "-is_pinned",
+            "-last_message_at",
+            "-created_at",
+        )
+    else:
+        queryset = queryset.order_by("-is_pinned", "-last_message_at", "-created_at")
 
     limit = min(int(request.GET.get("limit", 50)), 200)
     offset = int(request.GET.get("offset", 0))
@@ -199,9 +212,15 @@ def message_list(request, pk):
     # Take the newest slice, then hand it back oldest-first for rendering.
     page = list(queryset.order_by("-created_at", "-id")[:limit])[::-1]
 
+    from apps.leadai.handover_desk import only_through_desk, trim
+
+    row = serialize_conversation(conversation)
+    if only_through_desk(request.user, conversation):
+        trim(row)
+
     return Response(
         {
-            "conversation": serialize_conversation(conversation),
+            "conversation": row,
             "results": [serialize_message(m, request) for m in page],
         }
     )
@@ -216,6 +235,16 @@ def contact_detail(request, pk):
     """
     conversation = get_object_or_404(_visible_conversations(request.user), pk=pk)
     contact = conversation.contact
+
+    from apps.leadai.handover_desk import only_through_desk
+
+    # Desk-only: the profile would name the owner, the number's roster and the
+    # assignment history — refuse it. Messages still open (trimmed).
+    if only_through_desk(request.user, conversation):
+        return Response(
+            {"detail": "Contact profile is not available for a handed-over chat."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     if request.method == "PATCH":
         if "display_name" in request.data:
