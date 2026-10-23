@@ -25,6 +25,8 @@ import { contactName } from "./thread.js";
 import { closeScreen, deliverToScreen, isScreenOpen, openChatId, openLeadAiScreen, resyncScreen } from "./screen.js";
 import { InboxSocket } from "../../core/realtime.js";
 import { deliverToHandovers, handoversChatId, isHandoversOpen, openHandoversScreen, resyncHandovers } from "./handovers.js";
+import { openAccessDialog } from "./access.js";
+import { refreshLeadAiDoor } from "../access-requests.js";
 
 let me = null;
 let unreadChats = 0;
@@ -33,11 +35,29 @@ let ownSocket = null;
 const badges = new Set();
 const deskBadges = new Set();
 
+function granted() {
+  // Lead AI access per Bitrix user (access.js, round 25): the sign-in payload's effective grants.
+  const access = me?.lead_ai_access;
+  return Boolean(access && (access.admin || access.all_chats || access.today || access.needs));
+}
+
+function grantedOnly() {
+  // A grant of the Today or the Needs a person list with no Lead AI access and no admin rights.
+  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai && granted();
+}
+
+const resyncGranted = debounce(() => {
+  refreshUnread();
+  resyncScreen();
+}, 1500);
+
 function scopedAgent() {
-  // The handover desk (handovers.js): an agent with neither admin rights, nor Lead AI access, nor a number of their
-  // own can see nothing of Lead AI but their desk, so every door opens that screen. A number-holder keeps the Lead AI
-  // screen (their own Lead AI chats live there; the desk's chats are visible to them there too).
-  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai && !(Array.isArray(me.numbers) && me.numbers.length);
+  // The handover desk (handovers.js): an agent with neither admin rights, nor Lead AI access, nor a grant, nor a
+  // number of their own can see nothing of Lead AI but their desk, so every door opens that screen. A number-holder
+  // keeps the Lead AI screen (their own Lead AI chats live there; the desk's chats are visible to them there too), and
+  // so does an agent granted the Today or the Needs a person list (those lists live there; the server shows them
+  // only the chats of their grant).
+  return Boolean(me) && !me.is_wa_admin && !me.can_lead_ai && !granted() && !(Array.isArray(me.numbers) && me.numbers.length);
 }
 
 function open(conversationId, { highlightMessageId } = {}) {
@@ -92,6 +112,7 @@ async function findLeadAiChat(waId) {
 window.a7wa = window.a7wa || {};
 window.a7wa.openLeadAi = (conversationId, options = {}) => open(conversationId, options);
 window.a7wa.openHandovers = (options = {}) => openHandoversScreen({ me, ...options });
+window.a7wa.openLeadAiAccess = () => openAccessDialog({ me });
 window.a7wa.findLeadAiChat = (waId) => findLeadAiChat(waId);
 
 /* ------------------------------------------------------------ unread count */
@@ -144,14 +165,25 @@ function injectMenuItem() {
     deskBadge,
   ]);
 
+  // Lead AI access (access.js; round 25): a panel admin's screen of who sees what of Lead AI, per Bitrix user. The
+  // admin the endpoints mean is the sign-in payload's lead_ai_access.admin (a panel admin), not is_wa_admin, which a
+  // Bitrix portal admin has too.
+  const accessItem = (me?.lead_ai_access ? me.lead_ai_access.admin : me?.is_wa_admin)
+    ? el("button.btn.menu__item.lai-menu-item.lai-menu-item--access", { type: "button", onclick: () => openAccessDialog({ me }) }, [
+        icon("users", { size: 16 }),
+        "Lead AI access",
+      ])
+    : null;
+
   // Before the first section heading that follows "Campaign", so the items
   // under Campaign (Excel campaigns, Linked phone agents) stay where they were.
   const children = [...menu.children];
   const campaign = children.find((node) => node.classList?.contains("menu__item") && node.textContent.trim() === "Campaign");
   const from = campaign ? children.indexOf(campaign) + 1 : 0;
   const nextSection = children.slice(from).find((node) => node.classList?.contains("menu__section"));
-  if (nextSection) nextSection.before(heading, item, desk);
-  else menu.append(heading, item, desk);
+  const items = [heading, item, desk, accessItem].filter(Boolean);
+  if (nextSection) nextSection.before(...items);
+  else menu.append(...items);
   setDeskBadge();
 
   // A dot on the menu button, since the item itself is hidden in the menu.
@@ -345,6 +377,29 @@ window.addEventListener("wa:event", (event) => {
     showAlert(data);
     return;
   }
+
+  if (name === "leadai.access.changed") {
+    // A panel admin changed this agent's grants (access.py): what the panel knows of them follows, and the open screen
+    // reads its list again (the server decides what it may show).
+    // The payload is the effective grants (access.tell, the sign-in payload's shape), so it is taken as is.
+    if (me && data?.access && !data.access.admin) {
+      me.lead_ai_access = { ...(me.lead_ai_access || {}), ...data.access };
+      me.can_lead_ai = Boolean(data.access.all_chats);
+    }
+    refreshLeadAiDoor(me); // the no-number card's door, when that card is on screen
+    refreshUnread();
+    resyncScreen();
+    return;
+  }
+
+  // An agent granted the Today or the Needs a person list alone hears a chat's frames only while the chat is in their
+  // lists, and an id-only "resync" when a chat of the Lead AI desk is not (access.ping_groups): either way the open
+  // screen reads its lists again, so a chat that came into a list, or left it, shows or goes without a reload.
+  if (name === "leadai.access.resync") {
+    resyncGranted();
+    return;
+  }
+  if (grantedOnly() && String(name).startsWith("leadai.")) resyncGranted();
 
   if (name === "leadai.desk.changed") {
     // A chat came onto, or left, this agent's handover desk (handover_desk.changed): the menu's count follows; the

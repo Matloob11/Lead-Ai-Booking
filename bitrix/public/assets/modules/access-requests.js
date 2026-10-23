@@ -12,6 +12,44 @@ import { el, clear, modal, stamp } from "../core/dom.js";
 import { icon } from "../core/icons.js";
 
 /**
+ * The card's door to the Lead AI screen: for Lead AI access, or for a grant of the Today or the Needs a person list
+ * (apps/leadai/access.py, round 25; the screen shows them the chats of their grant). Null when there is none.
+ */
+function leadAiDoor(me) {
+  const grants = me?.lead_ai_access || {};
+  const lists = [grants.today ? "Today" : "", grants.needs ? "Needs a person" : ""].filter(Boolean).join(" and the ");
+  const line =
+    me?.can_lead_ai || grants.all_chats
+      ? "You have Lead AI access. Open the Lead AI screen to follow its chats; no number is needed for that."
+      : lists
+        ? `You may see Lead AI's ${lists} list. Open the Lead AI screen for it; no number is needed for that.`
+        : "";
+  if (!line) return null;
+  return el("div.access__leadai.access__leadai--door", {}, [
+    el("p.access__lead", {}, [line]),
+    el(
+      "button.btn.btn--primary.access__leadai-btn",
+      { type: "button", onclick: () => window.a7wa?.openLeadAi?.() },
+      [icon("smartphone", { size: 15 }), "Open Lead AI"]
+    ),
+  ]);
+}
+
+/**
+ * The door drawn again from what the panel now knows of the agent (lead-ai.js, on leadai.access.changed): a grant
+ * made while the card is on screen opens it, a revoke takes it away, with no reload.
+ */
+export function refreshLeadAiDoor(me) {
+  const card = document.querySelector(".access__card");
+  if (!card) return;
+  const old = card.querySelector(".access__leadai--door");
+  const door = leadAiDoor(me);
+  if (old && door) old.replaceWith(door);
+  else if (old) old.remove();
+  else if (door) (card.querySelector(".access__handovers") || card.querySelector(".access__title"))?.after(door);
+}
+
+/**
  * Fills the whole panel for an agent who has no numbers.
  *
  * @param {{me: object, onAssigned: () => void}} options
@@ -52,16 +90,9 @@ export function renderNoNumbersScreen(host, { me, onAssigned, onLinkedDevices } 
 
   // Lead AI access (Agents & access) needs no number: the agent follows every Lead AI chat on the Lead AI screen
   // (apps/leadai/lane.has_desk_access), so the door to it opens here, before any number is assigned.
-  const leadAi = me.can_lead_ai
-    ? el("div.access__leadai", {}, [
-        el("p.access__lead", {}, ["You have Lead AI access. Open the Lead AI screen to follow its chats; no number is needed for that."]),
-        el(
-          "button.btn.btn--primary.access__leadai-btn",
-          { type: "button", onclick: () => window.a7wa?.openLeadAi?.() },
-          [icon("smartphone", { size: 15 }), "Open Lead AI"]
-        ),
-      ])
-    : null;
+  // A grant of the Today or the Needs a person list (apps/leadai/access.py, round 25) opens the same door: the Lead AI
+  // screen shows them the chats of their grant.
+  const leadAi = leadAiDoor(me);
 
   // The handover desk (modules/lead-ai/handovers.js): the chats the AI handed to this agent as the lead's Bitrix
   // responsible open here too, with no number of their own; the count comes with the sign-in (handover_desk).
