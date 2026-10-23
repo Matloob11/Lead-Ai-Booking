@@ -732,6 +732,12 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         "residential_facts": residential.facts_of(row.residential_facts),
         "brand_name": shops.brand_of(row),
         "viewing_agent_name": shops.agent_of(row),
+        # A client on the way is told whom to call (filters.on_my_way): the office contact, and the backup when he does
+        # not answer (Matloob 2026-10-23). Digits with the country code.
+        "visit_contact_name": row.visit_contact_name or "",
+        "visit_contact_phone": row.visit_contact_phone or "",
+        "visit_contact_backup_name": row.visit_contact_backup_name or "",
+        "visit_contact_backup_phone": row.visit_contact_backup_phone or "",
         "paused_until": _iso(row.paused_until),
         "last_sweep_at": _iso(row.last_sweep_at),
         "updated_at": _iso(row.updated_at),
@@ -755,6 +761,17 @@ def serialize_settings(row: LeadAiSettings, user) -> dict:
         data["numbers_without_reminder_template"] = _missing_templates()
         data["history"] = list(row.history or [])[-20:]
     return data
+
+
+def _contact_phone(value) -> tuple[str, str]:
+    """(a phone as digits with the country code, '' or why it cannot be used); '' clears. The settings' contact phones."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return "", ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits or not 8 <= len(digits) <= 15 or not re.fullmatch(r"[+\d\s().-]+", text):
+        return text, "Give the phone as digits with the country code (8 to 15 digits), e.g. 971501234567."
+    return digits, ""
 
 
 def _coordinate(value, low, high):
@@ -994,6 +1011,22 @@ def assistant_settings(request):
             errors["viewing_agent_name"] = error
         else:
             change("viewing_agent_name", agent)
+    # The office contact a client on the way may call, and the backup: a name as the viewing agent's, a phone as digits
+    # with the country code (8 to 15), each empty to clear.
+    for key in ("visit_contact_name", "visit_contact_backup_name"):
+        if key in data:
+            name, error = shops.clean_text(data.get(key), shops.AGENT_MAX)
+            if error:
+                errors[key] = error
+            else:
+                change(key, name)
+    for key in ("visit_contact_phone", "visit_contact_backup_phone"):
+        if key in data:
+            phone, error = _contact_phone(data.get(key))
+            if error:
+                errors[key] = error
+            else:
+                change(key, phone)
     if errors:
         return Response({"detail": "Some values are not valid.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
     if changes:

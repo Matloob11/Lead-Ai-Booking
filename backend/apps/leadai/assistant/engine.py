@@ -711,6 +711,14 @@ def effective_action(action: str, appointment: LeadAiAppointment | None) -> str:
     return action
 
 
+def visit_contact_for(settings_row, appointment):
+    """Whom a client on the way is told to call (filters.on_my_way; LeadAiSettings.visit_contact): the office contact
+    for a visit, nobody for a sales call (they wait for our call, nobody waits for them)."""
+    if appointment is not None and calls.is_sales_call(appointment):
+        return None
+    return settings_row.visit_contact() if hasattr(settings_row, "visit_contact") else None
+
+
 def late_arrival(proposal: dict, appointment) -> bool:
     """A move to a later hour on the day of the visit, after the customer tapped Running Late and we asked what time
     they will reach (the appointment's customer_state): their late arrival, never a new booking. The deployed gate's
@@ -5141,7 +5149,7 @@ def _run_claimed(
     offer_free = state.handed_over_at is None
     if still_invalid:
         if "no_appointment_otw" in codes:
-            text = filters.on_my_way(language)
+            text = filters.on_my_way(language, visit_contact_for(settings_row, appointment))
             _walk_in_alert(conversation, chat, name)
             plan["fallback"] = "ask_time"
         elif "taken" in codes and alternatives and offer_free:
@@ -5181,7 +5189,8 @@ def _run_claimed(
     elif action == "running_late" and when is not None:
         text = filters.arrival(language, when)
     elif action == "on_time" or (action == "on_my_way" and confirmed):
-        text = filters.on_my_way(language)
+        # With whom to call on the way (Matloob 2026-10-23): the office contact, then the backup; never for a sales call.
+        text = filters.on_my_way(language, visit_contact_for(settings_row, appointment))
     elif action == "reschedule_requested" and shops_chat and offer_free and len(hours.named_times(answer["reply"] or "")) < 2:
         # "Need to reschedule" with no new time (T44): the two nearest free slots, never an
         # open question, and never the slot they are moving from. A reply that names two

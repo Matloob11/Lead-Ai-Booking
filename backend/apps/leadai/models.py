@@ -330,6 +330,13 @@ class LeadAiSettings(models.Model):
     residential_facts = models.JSONField(default=default_residential_facts, blank=True)
     brand_name = models.CharField(max_length=80, default=DEFAULT_BRAND_NAME, db_default=DEFAULT_BRAND_NAME)
     viewing_agent_name = models.CharField(max_length=60, blank=True, default="", db_default="")
+    # A client on the way (assistant/filters.on_my_way; Matloob 2026-10-23): who waits for them at the office, to call
+    # for anything on the way, and who answers when he does not. Phones as digits with the country code; no name or no
+    # phone is no line. Database defaults: rows the old code inserts during a deploy name none.
+    visit_contact_name = models.CharField(max_length=60, blank=True, default="", db_default="")
+    visit_contact_phone = models.CharField(max_length=20, blank=True, default="", db_default="")
+    visit_contact_backup_name = models.CharField(max_length=60, blank=True, default="", db_default="")
+    visit_contact_backup_phone = models.CharField(max_length=20, blank=True, default="", db_default="")
     # The co-pilot (assistant/copilot.py): an ordinary draft nobody sent or dropped goes out by itself after this many
     # minutes (Matloob 2026-10-20: 15; 0 turns it off). A draft for a person (a call, a complaint, legal) never does.
     copilot_auto_send_minutes = models.PositiveSmallIntegerField(default=15, db_default=15)
@@ -352,6 +359,19 @@ class LeadAiSettings(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     updated_at = models.DateTimeField(auto_now=True)
+
+    def visit_contact(self) -> dict | None:
+        """The office contact a client on the way may call (assistant/filters.visit_contact): the name and the phone,
+        and the backup's when both of his are set; None until the first two are."""
+        name = " ".join(str(self.visit_contact_name or "").split())
+        phone = "".join(ch for ch in str(self.visit_contact_phone or "") if ch.isdigit())
+        if not name or not phone:
+            return None
+        backup_name = " ".join(str(self.visit_contact_backup_name or "").split())
+        backup_phone = "".join(ch for ch in str(self.visit_contact_backup_phone or "") if ch.isdigit())
+        if not backup_name or not backup_phone:
+            backup_name = backup_phone = ""
+        return {"name": name, "phone": phone, "backup_name": backup_name, "backup_phone": backup_phone}
 
     class Meta:
         verbose_name_plural = "Lead AI settings"
