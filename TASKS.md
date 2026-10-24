@@ -1,3 +1,33 @@
+## 2026-10-24 — Commit live Cursor work (C44, shops cap, property_enquiry, Campaigns history, ops) (Cursor)
+
+One commit per feature; md5 checked against live before each. No `build`/`up`/backend push (waiting Claude "Lead AI round 28 live").
+
+1. **C44** `6b3c911` — popup Community → Django `mark_lead_ai` (`crm_leads`/`renewals`/`views` + Bitrix JS/PHP). Live sums matched. `a7_lead_guard.js` local WIP restored to HEAD (live).
+2. **Shops cap 30/h** `cc557dc` — `caps.SHOPS_PER_HOUR=30` + `leadai-answer-capped.py` (already live earlier today).
+3. **property_enquiry_reconnect** `6a98cdb` — `ic_templates` MIXED + submit helpers/tests.
+4. **Campaigns history** `a6966a8` — copied `files/temp/r25-merged/` views/urls (HEAD + campaign_list/detail only; round 25 access kept). Live CRLF md5 `2a5d2acc` / `ef07f03e`. Panel + `campaign_history.py` + probe.
+5. **Ops/inbox/Bitrix source** `90a6b68` — `wa.sh` verbs, Old6m/Sept scripts, rotate-unread inbox sort, owner-data/webhooks/booking/community map source.
+
+**Shared:** campaigns + leadai + panel lead-ai + inbox.js + ops/wa.sh + ops/catalog + listed ops/bitrix-aws; TASKS; board.
+
+---
+
+## 2026-10-24 — Send scripts: dedupe, max 2 in flight, agency skip (Cursor)
+
+`leadai-sept-reconnect.py` + `leadai-old6m-send.py` (`92437be`). Before round-robin: drop duplicate lead ids and canonical phones. On send: wait while ≥2 campaigns are queued/running. Dry-run prints audience, duplicates removed, per-number split, skip counts, up to 20 agency examples with masked phones. No second 24h template backstop (Claude round 28). Agency words: Properties, Real Estate, Realty, Brokers, Property Consultant, Specialist, LLC, Group — on name/company/title. **Not applied to a live audience yet:** server `_sept_leads.b64` / `_old6m_send.b64` are empty (0 rows). Bitrix read-only sample since 2026-09-01: **62** agency-like leads; 20 examples shown to Matloob (phones masked). Wait his go before treating the filter as the send default on a rebuilt audience. No customer sends.
+
+**Shared:** `ops/catalog/leadai-sept-reconnect.py`, `ops/catalog/leadai-old6m-send.py`, TASKS, board.
+
+---
+
+## 2026-10-24 — Resend Meta-skipped (681–689 / 710–725) blocked on round 28 (Cursor)
+
+Not run. TASKS has no "Lead AI round 28 live" yet; old cap rule would skip again after 12 Meta-cap fails. Waiting Claude's entry + Matloob go; then one–two campaigns at a time via Resend skipped / `resend_skipped_on_number`.
+
+**Shared:** TASKS only.
+
+---
+
 ## 2026-10-24 — Lead AI round 27 is live: a stopped chat takes itself up again when the customer writes; "Yes I have ma shops" stays on the shop track (Claude Code)
 
 Branch `leadai-2e` `50290b7` → main. Live **12:06 UTC** (`build app` + `up app`; no migration, no panel file). The gate (11:31–11:52 UTC, at b55dc9b): leadai 2183 tests, crmlink 118, inbox 17; eval 597 of 604 (98.8%) with one run of one strict rent scenario failed (`shops-res-cluster-unknown`: the model offered slots without asking the cluster; no shop words, a stored rent track, and `run_turn` never runs in the eval, so round 27 cannot reach it; 10 of 10 in the five gates before, 4 of 4 re-run after). **Shipped without a clean gate re-run on Matloob's "jaldi sa jaldi fix karo or live karo"**; the review's fixes after the gate ran with their modules on the server (test_r27_resume 35, test_assistant 123, test_shops_playbook 115, test_residential 43, test_who_the_customer_is 40, test_campaign_1_tier2 8, test_eval_command 12, test_r26_other_areas 33).
@@ -10,6 +40,30 @@ Branch `leadai-2e` `50290b7` → main. Live **12:06 UTC** (`build app` + `up app
 - **Not changed:** chats already stuck (the customer wrote after the stop before this went live) are not answered by themselves: the sweep never re-runs a skipped message; their next message lifts the stop, or a person presses Resume. The lead's Bitrix Bot Status stays "Opted out" after a lift (as with the panel's Resume).
 
 **Shared:** `TASKS.md`, `SHOPS-BOT-BOARD.md`; `ops/wa.sh` + `ops/catalog/probe-leadai-resume.py` (a read-only probe). Nothing else outside `backend/apps/leadai/`.
+
+---
+
+## 2026-10-24 — Old Leads Before 6 Month: IC template and Dubai template queued (Cursor)
+
+Stage `UC_PVKGEG`. `property_enquiry_reconnect` added to `ic_templates.MIXED_NAMES` / `NOT_SHOP_NAMES` and deployed before the send. Leads with no earlier Lead AI campaign: International City 248 → `intl_city_property_reconnect` (campaigns 710–717, queued 230, playbook `ic_shops`); other communities and blanks 1786 → `property_enquiry_reconnect` (campaigns 718–725, queued 1774, playbook `general`). Total queued **2004**. Skipped at build: already talking 19, opted out 9, duplicate 2. Not included: 89 already on Lead AI, 152 with no phone.
+
+**Shared:** `backend/apps/leadai/ic_templates.py`, tests `test_tracks.py` / `test_reconnect.py`, `ops/wa.sh`, `ops/catalog/leadai-old6m-send.py`, board, TASKS.
+
+---
+
+## 2026-10-24 — Shops reply cap raised to 30 an hour; the one capped chat answered (Cursor)
+
+`caps.SHOPS_PER_HOUR` 12 → 30. The day cap stays 30. Live after `build app` + `up app` (~12:08 UTC). Chats skipped for `reply limit reached` in the last 24 hours: **1** (chat 54668, lead 80115). Requeued message 228993; turn 1801 replied 12:08:43 UTC. The next "Hi" was answered at 12:09 UTC under the new cap.
+
+**Shared:** `backend/apps/leadai/assistant/caps.py`, `backend/apps/leadai/tests/test_silence_caps_people.py`, `ops/wa.sh` (`leadai-answer-capped`), `ops/catalog/leadai-answer-capped.py`, board, TASKS.
+
+---
+
+## 2026-10-24 — property_enquiry_reconnect submitted on 719–726 (Cursor)
+
+For Old Leads Before 6 Month with a blank community. MARKETING, en. Body: "Hi {{1}}, this is {{2}} from AR Properties. You asked us earlier about a property in Dubai. Are you still looking to rent or buy?" Buttons: Yes, still looking / Not now / Stop messages. All eight WABAs **PENDING** at Meta (11:58 UTC). Not sent to any lead. Lead AI still reads an unknown template name as a shops template until this name is added to the mixed list and that code is live — do not send on approval alone.
+
+**Shared:** `ops/wa.sh` (`submit-property-enquiry-template`), `ops/catalog/submit-property-enquiry-reconnect.py`.
 
 ---
 
@@ -30,6 +84,14 @@ Branch `leadai-2e` `214a92e` → main. Live **10:52 UTC** (`build app` + `up app
 
 ---
 
+## 2026-10-23 — Format.xlsx: UAE mobiles only, country code stripped (Cursor)
+
+`Format.xlsx` Sheet1 Name/Number: non-UAE dropped; `971…` → local `05xxxxxxxx`, then leading `0` removed → `5xxxxxxxx`. **5,038** unique UAE mobiles. Local file only.
+
+**Shared:** `Format.xlsx`, `TASKS.md`.
+
+---
+
 ## 2026-10-23 — Lead AI round 25 is live: "Lead AI access", per Bitrix user (All chats / Today / Needs a person), from the portal's users live (Claude Code)
 
 Branch `leadai-2e` `a40d466` → main. Live **13:51 UTC** (`build app` + `migrate-new-image` (leadai 0021) + `up app`; `django-check` No changes). **What happened on the way (12:27–13:51 UTC):** while this round's gate was running its suites on the server (12:27–12:42), another session pushed its uncommitted `apps/leadai/views.py` + `urls.py` (Cursor's campaign history, based on round 24), `apps/inbox/*` and `apps/campaigns/*` into the build context, built and ran `up app` at about 12:41 — so the round-25 backend (already synced into the context) went live under its hand, WITHOUT migration 0021 (every non-admin request hit `relation "leadai_leadaiaccess" does not exist` for about six minutes; the sweep and the workers were not affected) and without the two access endpoints (their `views.py`/`urls.py` copies predate them). Their concurrent test run also recreated the shared test database under this gate's suite (756 errors on a half-migrated test DB, all one message). Done about it: `migrate-new-image` at 12:47 (0021 + the backfill: 3 rows), the panel pushed at 12:49, a clean three-way merge of their working copies with `a40d466` (both features; `git merge-file`, no conflict) pushed into the context, the image rebuilt, the suites run again, `up app` at 13:51. The merged `views.py`/`urls.py` sit in the context uncommitted on their side: Cursor's next commit of those two files must start from main after this merge. The gate: leadai 2137 tests, crmlink 118, inbox 17, accounts 0, catalog 11; no assistant file changed, so round 24's eval verdict stands. Panel `modules/lead-ai/access.js` (new), `lead-ai.js` and `access-requests.js` pushed and verified by md5 and served size.
@@ -42,6 +104,48 @@ Branch `leadai-2e` `a40d466` → main. Live **13:51 UTC** (`build app` + `migrat
 - **Seen live:** `up app` 13:51 UTC on the merged image once the campaigns ended (`ps`: web, worker, worker-leadai, beat Up together; `leadai-switch` sweep 13:51; `django-check` No changes, 0021 applied); `probe-leadai-desk` 13 of 13; `probe-leadai-grants` (new, read-only): the list answers 200 for A7 Administrator with 110 rows (100 of the portal's 101 active users read live at 13:55, 64 panel accounts, 4 admins; the first try at 13:52 got HTTP 429 from the portal while the campaigns were hammering Bitrix, and the list showed the accounts alone with the error line, as designed), 403 for an agent, the backfill whole (3 all_chats rows = the 3 accounts with Lead AI access and a Bitrix id: Hina Sultan, Shoaib Malik and one more), the 3 sign-in payloads equal to access.of; the three panel files served at their sizes; `leadai-health` 74 replied in the last hour, 0 failed. Not seen: a Today or Needs a person grant in use (none set yet: Matloob sets them from the screen), a live frame reaching a granted agent's open socket (the tests cover it).
 
 **Shared:** `TASKS.md`, `SHOPS-BOT-BOARD.md`; `apps/accounts/views.py` (`lead_ai_access` in /api/auth/me/), `apps/catalog/views.py` (Agents & access's Lead AI access change keeps the row in step), `apps/inbox/consumers.py` (the socket's groups read again on `leadai.access.changed`), `apps/inbox/events.py` (the id-only resync to the granted agents a chat's frames do not go to) — small, additive; panel `modules/lead-ai/access.js` (new), `modules/lead-ai/lead-ai.js`, `modules/access-requests.js` (the no-number card's door for a granted agent). Not touched: `screen.js`, `thread.js`, `lead-ai.css`, `api.js`, `inbox.js`, `index.html` (Cursor's uncommitted copies are what the server holds).
+
+---
+
+## 2026-10-23 — Lead AI: "since is not defined" on chat open (co-pilot draft) fixed (Cursor)
+
+Chats with an open AI draft failed to load (`Could not load the chat: since is not defined`). `renderDraft` in `thread.js` called `since()` scoped only inside `modeView`. Fix: module-level `sinceLabel` used by both. Panel live; hard-refresh.
+
+**Shared:** `bitrix/public/assets/modules/lead-ai/thread.js`, board/TASKS.
+
+---
+
+## 2026-10-23 — Sept 2026 Lead AI reconnect queued: campaigns 682–689 (Cursor)
+
+Matloob: send Lead AI campaign to September leads not already on Lead AI. `ops/wa.sh leadai-sept-reconnect --send` at **12:51 UTC**. Template `intl_city_property_reconnect`, numbers 719–726, playbook `ic_shops`, agent 2311. **Queued 1218** (8 campaigns); build-skips: already talking 293, opted out 41, duplicate phone 44. Running/queued on worker now — Tools → Campaigns.
+
+**Shared:** `ops/wa.sh`, `ops/catalog/leadai-sept-reconnect.py`, board/TASKS.
+
+---
+
+## 2026-10-23 — Lead AI Campaigns history live: Tools → Campaigns (queue + delivered/read) (Cursor)
+
+Matloob: after CRM Lead AI sends, see history on the Lead AI screen (sent / failed / seen).
+
+- **API:** `GET /api/leadai/campaigns/` and `/api/leadai/campaigns/<id>/` — Lead AI campaigns only (all creators), `recipient_counts` + Message delivered/read (probe-style match). Auth: `can_lead_ai` or panel admin (`campaign_history.can_view`).
+- **Panel:** Tools → **Campaigns** wide modal (`campaigns.js`, `lai-camp__*`); list + detail; poll while running. No recipient phones / Resend in v1.
+- **Live 12:39 UTC:** `build app` + `up app`; `probe-leadai-campaigns` PROBE_OK — count 37, campaign **681** sent 3 / delivered 3 / read 1 / failed 1; plain 403. Panel md5: campaigns `491e858458bc`, api `dcbbf3691aa0`, screen `4819bb143ebe`, css `1d8998252b0c`.
+- **Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/wa.sh` (`probe-leadai-campaigns`), `ops/catalog/probe-leadai-campaigns.py`. Backend: `apps/leadai/campaign_history.py`, `views.py`, `urls.py`, `tests/test_campaign_history.py`. Panel: `modules/lead-ai/{campaigns.js,api.js,screen.js,lead-ai.css}`.
+
+---
+
+## 2026-10-23 — Combined 08:00 UTC prompt: inbox views on main; panel five live; reconnect dry-run; A/C67b/80052 open (Cursor)
+
+Board note **Cursor → Claude (10:48 UTC)** on SHOPS-BOT-BOARD Requests.
+
+- **Git:** `git pull` already current. Committed+pushed **`7d2b8e8`**: `apps/inbox/views.py` + `tests/test_handover_desk_trim.py` (desk `message_list` trim + `contact_detail` 403; file also carries Rotate unread-first order already live). Live md5 views `7c41f4126a10`.
+- **Panel five (Cursor deploy, round 25 must not overwrite):** `screen.js` `b1e5a716e813` 56694 B; `thread.js` `7190352c4a02` 64167 B; `lead-ai.css` `db4d7649afb0` 56978 B; `inbox.js` `afa9e6a6313e` 112142 B; `index.html` `8d13c36554b7` 10755 B. Still uncommitted in the tree (bytes = live).
+- **A desk browser:** blocked — need agent session (2651/2299/2302/2298 have desk chats).
+- **80052 / 52745:** still no human reply after wrong AI at 06:02 UTC 22 Oct; responsible 2392 Minahil; did not message customer.
+- **C67b:** blocked (no colleague virgin phone).
+- **F:** dry-run 549–553 at 10:47 UTC → chat **407** / fresh **47**; **no `--send`**.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`; committed `backend/apps/inbox/views.py`, `backend/apps/inbox/tests/test_handover_desk_trim.py`. Panel working copies as above.
 
 ---
 
@@ -61,11 +165,61 @@ Branch `leadai-2e` `3a3533e` → main. Live **07:37 UTC** (`build app` + `migrat
 
 ---
 
+## 2026-10-23 — Owner Data field lock narrowed v1.1 (Cursor)
+
+Matloob clarified: kanban/Availability normal use free; card values + field settings free; password **only** on details card for **Select field / Create field / Hide field / Delete section**.
+
+**Live:** `a7_owner_data_fields` **1.1.0** — dropped OnBeforeUserTypeUpdate/Delete; AJAX no longer gates userfieldconfig.update; UI click gate exact labels only (no configure-icon / settings); gates require details context. md5 php `042a48dbcf01fd5336` js `445cb3f5a27b063b`. Prove OK. Ctrl+F5 on an Owner Data **card** (not kanban alone).
+
+**Shared:** `ops/bitrix-aws/a7_owner_data_fields.{php,js}`, `a7_verify_owner_data_fields.php`, `TASKS.md`.
+
+---
+
 ## 2026-10-23 — Lead AI screen: an "Auto new lead" filter chip (the chats the new-lead greet opened), live 06:11 UTC (Claude Code)
 
 Matloob (05:55 UTC, with a screenshot of the filter row): a chip beside Brokers that shows only the chats the AI messaged by itself (new portal leads) and talks to. Those chats carry the "AI auto reply" inbox label since round 22f (`newlead.label_greeted`), so the chip is `?label=AI auto reply` on the list endpoint, as Brokers is `?label=Broker`: one label at a time (pressing one releases the other), its own empty text, live rows as the Brokers list (a chat the server has not listed stays out while the chip is on). He also asked that these chats appear in the lead's Bitrix timeline: they do already — crmlink's mirror posts every customer and assistant line on the chat's own lead (checked on Bitrix's `b_crm_timeline`: lead 80090 carries 7 customer lines, 10 assistant lines, the greet template's comment and a summary; 80089 6/2/1; 80052 1/2/1) — nothing changed there. `modules/lead-ai/screen.js` only, pushed with `ops/wa.sh push`, md5 and served size verified (49806 bytes). No backend change, no CSS change.
 
 **Shared:** `TASKS.md`. Panel: `modules/lead-ai/screen.js`.
+
+---
+
+## 2026-10-23 — Owner Data field lock live (SPA 1042 / CRM_5): create/change/select/hide need stage-admin password (Cursor)
+
+Matloob: Owner Data pe jo fields ab hain unhein lock — naya create, existing change, select, hide — bina admin password ke na ho. Card *values* edit rahen.
+
+**Live (Lightsail):** NEW `a7_owner_data_fields.php` / `.js` / `.css`; `init.php` wired (`A7_OWNER_DATA_FIELDS`); password = `a7_stage_admin.config.php` hash / param `a7_stage_admin_password` (same as stage create + portal Create field). Server: `OnBeforeUserTypeAdd|Update|Delete` for `CRM_5` only; AJAX gate for userfieldconfig + entity-editor config saves when referer/page is `/crm/type/1042/`; UI password modal on Create/Select/Hide/Configure clicks. Hash refreshed on box (plaintext not in TASKS).
+
+**Proved:** Add/Update denied without password; non-`CRM_5` Add still allowed; correct hash verifies / wrong rejects; assets HTTP 200; md5 php `21d50108d50a3776`. **Not proved in browser:** Matloob Ctrl+F5 on an Owner Data card and try Create/Select field (should prompt).
+
+**Shared/touched:** NEW `ops/bitrix-aws/a7_owner_data_fields.{php,js,css}`, `a7_patch_init_owner_data_fields.php`, `a7_verify_owner_data_fields.php`. Hard-refresh Owner Data details.
+
+---
+
+## 2026-10-23 — Lead AI UI cleanup live: blur bg, Filter + Tools + Actions dropdowns, AI violet / agent green (Cursor)
+
+Matloob mockup on the Lead AI screen (Claude's `modules/lead-ai/**`; announced on board first). Panel only — `ops/wa.sh push` of three files; no Django build.
+
+- **CSS (`lead-ai.css`):** `bg.jpg` on `::before` with blur; darker glass wash; AI bubbles vivid violet; agent outbound green; reminder/follow-up keep own tints; dropdown menu styles.
+- **List (`screen.js`):** filters under search as one **Filter** dropdown (Unread, Brokers, Auto new lead, Hot first, track chips — same query behaviour). Top bar: Shop media / Apartment photos / Communities / Reports / AI settings → **Tools** menu; note shortened; Close stays. Escape closes menus first.
+- **Thread (`thread.js`):** Pause/Resume + Move to inbox → **Actions** overflow; AI status pill stays visible; handover desk **Done** unchanged (scoped). Agent badge on human outbound.
+- **Live md5 (06:58 UTC):** css `b5e4069e9bab79725b5b048c9b7ae698`, screen `f626ae69ccf056029e19afe288bcdcc8`, thread `cbd8d25f6e2280bdcd3dc42ab1065061`. Public `/app/assets/modules/lead-ai/screen.js` 200 matched. Hard-refresh the panel to pick up assets.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `bitrix/public/assets/modules/lead-ai/{lead-ai.css,screen.js,thread.js}`.
+
+---
+
+## 2026-10-23 — Evening combined A–F: inbox desk trim+403 live; reconnect D/E/F dry-run; C67 cleanup; desk live browser blocked (Cursor)
+
+Board notes 17:03 / 11:40 / 07:34 / 06:24. Report on SHOPS-BOT-BOARD Requests (05:31 UTC).
+
+- **B:** `apps/inbox/views.py` — `message_list` trims for `only_through_desk`; `contact_detail` 403. Test `test_handover_desk_trim` 2/2 OK. Pre-build board warning 05:28 UTC; pushed views+test only (not local `campaigns/views.py`). `build app` + `up app` all four Up; `django-check` clean; `probe-leadai-desk` 12/12; sweep `2026-10-23 05:30:29+00`. Live md5 views `7c41f4126a10`.
+- **A:** Bitrix **2651** (3 desk chats) / alt **2434** — probe trimmed OK; **no** sit/screen-share for reply/Done/live Handed toast.
+- **C:** C67b real-phone not run. **80052**/52745 still needs hand answer (shop list at 06:02 UTC); Lead AI chat **1120** moved to inbox. Deleted test leads **80045,80046,80047,80050,80051**; moved chats 1117–1119; 80048/49/52 kept.
+- **D:** leads **71498,71657,71734,74525,74537** — one `intl_city_property_reconnect_again` timeline each; Bot NULL except 74537→2480 after later "No thanks".
+- **E:** Bitrix new-lead log since 05:30 UTC: **44** posts (200), **15** greets sent, **~30** skipped (EMAIL portal-skip dominant among non-greeted); `a7_lead_wa.log` missing.
+- **F:** dry-run 549–553: chat 406 / fresh 47; **no `--send`** (awaits Matloob go).
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `backend/apps/inbox/views.py`, `backend/apps/inbox/tests/test_handover_desk_trim.py`. Bitrix one-shot cleanup stubbed.
 
 ---
 
@@ -149,6 +303,14 @@ Branch `leadai-2e` `9f566f3` → main. Live **06:06 UTC** (`build app` + `up app
 
 ---
 
+## 2026-10-22 — C67 new-lead webhook enabled + greet prove (Cursor)
+
+Config `enabled => true`. Lead **80046** (New, PF WhatsApp, Listing ID live Serena 3BR, virgin test recipient our sending line): webhook → Django; worker `Lead AI greet for lead 80046: {'sent': True, 'campaign_id': 618, 'words': 'the 3-bedroom townhouse in Serena', 'template': 'portal_enquiry_reply'}` **05:29:55Z**; template delivered; Lead AI chat 1117. Lead **80045** (2e staff phone) skipped `talking to us already`. Phone reply not run (no personal WA session for the recipient line). `ops/wa.sh` submit-portal-enquiry-template committed `341af62` only.
+
+**Proven:** enabled config; http path; sent:True + delivered + Lead AI chat. **Not:** inbound “Is it still available?” assistant text. **Shared:** box config, board, `TASKS.md`, `ops/wa.sh` (commit).
+
+---
+
 ## 2026-10-21 — Lead AI new-lead greet switched on (Claude Code)
 
 14:40 UTC, through the new `ops/wa.sh leadai-greet-settings` verb (`ops/catalog/leadai-greet-settings.py`: the settings set as the Django admin form would and checked as the greet checks them — the number the agent may send from, the template approved on that WABA, media-free, two variables at most). Number 971581058723, template `portal_enquiry_reply` (UTILITY, en; Cursor's C68, approved on all 8 WABAs at ~13:33 UTC), sender bitrix_2311, leads up to 48 hours old. Cursor's C67 handler is asked to go on now; the first real greet is the proof still owed.
@@ -174,6 +336,30 @@ Branch `leadai-2e` `9a41407` → main. Live **14:15 UTC** (`build app` + `migrat
 
 ---
 
+## 2026-10-21 — C69 portal lead field map (Cursor)
+
+Read-only map on the board: Comment `COMMENTS`; Source `SOURCE_ID` (PF WA `UC_KQ0WO3`, PF Call `UC_6R3AM9`, Bayut WA `UC_Y3VNS9`); Property Link `UF_CRM_1760707550978`; Property Reference `UF_CRM_1760707563281`; Community `UF_CRM_1770537051525`; Sub Community `UF_CRM_1763390179` → SPA 1062; Building Name `UF_CRM_1763390212` → SPA 1082; Bedrooms `UF_CRM_1731838126127`; Client Type `UF_CRM_1756638760279`; Lead Label `UF_CRM_1758005814661` (file). Test stage `UC_2N9EV9`. PF: long Listing ID in Comment + Link path; Property Reference usually `a7group-` (~88% filled). Examples 80029 / 80028 / 80026 phones masked. Probe stubbed.
+
+**Proven:** SQL + three live leads. **Shared:** board, `TASKS.md`, `a7_c69_portal_field_map.php` (stubbed).
+
+---
+
+## 2026-10-21 — C68 portal_enquiry_reply on 8 WABAs (Cursor)
+
+UTILITY en template submitted via `submit_portal_enquiry_template` + `ops/wa.sh submit-portal-enquiry-template`. Meta accepted UTILITY (not resubmitted as MARKETING). All 8 sending WABAs **PENDING**. `build app` + `up app` (also applied pending `leadai.0018_new_lead_greet` already in build context so the image matched).
+
+**Proven:** dry-run 8 WABAs; live submit 8× PENDING in `catalog_watemplate`. **Waits:** Meta APPROVED. **Shared:** `leadbot/management/commands/submit_portal_enquiry_template.py`, `ops/wa.sh`, board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C67 new-lead webhook deployed disabled (Cursor)
+
+`a7_new_lead_webhook.php` 1.0.0 + config `enabled => false` + init.php wire (C46 shape). HMAC `leadai-newlead.` / same secret as C46. Soft-fail; log `/home/bitrix/a7_new_lead_webhook.log`. Prove: Factory lead 80033 + classic Add 80034 both `skip disabled` via `OnAfterCrmLeadAdd`; deleted. Enable after Claude “round 22 is live”; Test Leads create → expect `http=200`.
+
+**Proven:** both create paths while disabled. **Not yet:** enabled http=200 (waits round 22 note). **Shared:** handler + config + init (box), board, `TASKS.md`.
+
+---
+
 ## 2026-10-21 — Lead AI round 21 is live: the lead score (F1) — hot, warm or cold with its reasons, on the chat, on the lead and on the desk (Claude Code)
 
 Branch `leadai-2e` `012792b` → main. Live **12:01 UTC** (`build app` + `migrate-new-image` leadai 0017 + `up app`, all four services up together; `django-check` No changes). The gate: eval **576 of 584 (98.6%)**, the model's own words **306 of 314 (97.5%)**, every code, money and policy scenario every run; leadai 2037 tests, crmlink 118, inbox 15, all OK. Reviewed before the gate by three adversarial readers with a refuter per finding: three findings confirmed (the write gate, the quiet's stamp, the opt-out turn), all absorbed; four refuted as fixed already.
@@ -186,6 +372,50 @@ Branch `leadai-2e` `012792b` → main. Live **12:01 UTC** (`build app` + `migrat
 - **Seen, not fixed:** shops-sale-price-never-hidden and shops-sale-price-and-book failed both runs (neither strict; the gate passed): with four International City studios for sale in the inventory now, the model quotes the listed units' prices (AED 310,000–350,000) instead of the band, and the eval still wants the band — the check is to accept a listed unit's price next round; shop-rent, shops-same-day-window-96, shops-sale-price-early, shops-res-memory-asks-not-states 1/2; 42 handovers waiting for a person (oldest 51 hours).
 
 **Shared:** `TASKS.md`, `SHOPS-BOT-BOARD.md`, `ops/bitrix-aws/a7_leadai_fields.php` (Cursor's C65 lines, carried into the branch so the allow-list test holds; theirs). Panel: `modules/lead-ai/thread.js`, `screen.js`, `api.js`, `lead-ai.css`. Backend under `apps/leadai/` only.
+
+---
+
+## 2026-10-21 — Rotate WhatsApp list: unread on top (Cursor)
+
+Only the Rotate WhatsApp chip: unread campaign replies first, then pinned + recency within each group. Official / All / Unread / Lead AI lists unchanged. Backend `conversation_list` when `rotate=1` orders `unread_count__gt=0` first; panel `inbox.js` re-sorts the same way for that filter. Cache bust `inbox.js?v=rotate3`.
+
+**Proven:** `test_rotate_unread_order` 2/2 on image; `build app` + `up app` (all four Up); panel md5 `inbox.js` matched local; public file carries the rotate-only sort. **Not proven:** Matloob hard-refresh click in Bitrix iframe.
+
+**Shared:** `inbox/views.py`, `inbox/tests/test_rotate_unread_order.py`, `modules/inbox.js`, `index.html`, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C44b popup community → mark_campaign live (Cursor)
+
+`mark_lead_ai` forwards popup `community` into `lane.mark_campaign(..., community=)` when the lane accepts it (round 19). Wired from `crm_leads_send` / `crm_renewals_send` and `send_from_leads` / `send_renewals`. Tests: `PlaybookTests` community forward + blank + older lane (46/46 OK on image). Deploy: no campaign running; `build app` + `up app`; web/worker/worker-leadai/beat Up together; `leadai-switch` `last_sweep_at` under two minutes.
+
+**Proven:** unit tests on image; ps + sweep. **Not proven:** live Mudon popup send → admin community column (needs a real Lead AI campaign send).
+
+**Shared:** `campaigns/crm_leads.py`, `views.py`, `renewals.py`, `tests/test_crm_leads.py`, board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C46 inventory webhook enabled (Cursor)
+
+Config `enabled => true`. Handler **1.0.5**: listens to `onCrmDynamicItemUpdate`, reads stage/category via `get('STAGE_ID')`. Touch card **152073** (PREPARATION): log `http=200` at **2026-10-21T10:09:30Z**; earlier ping 10:02:47 also 200 and `worker-leadai` "Availability card 152073 refreshed". Card field restored after touch.
+
+**Proven:** config on box; handler log; Django refresh line. **Shared:** `a7_inventory_webhook.php`, board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C65 AI score fields on fields tool (Cursor)
+
+Allow-list `UF_CRM_A7_AI_SCORE` (number) + `UF_CRM_A7_AI_SCORE_WHY` (text). Deployed `/bitrix/tools/a7_leadai_fields.php`. Probe lead 80022: write 1 / "probe" → 200; Factory clear; lead deleted. Probe stubbed.
+
+**Proven:** signed tool write + DB values. **Shared:** `a7_leadai_fields.php`, `a7_probe_leadai_fields.php` (stubbed), board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — ops/wa.sh four Claude verbs kept (Cursor)
+
+`git diff ops/wa.sh`: `leadai-health`, `leadai-sync-inventory`, `set-pf-api-keys`, `leadai-grant-access` appear as reorder (− then +), all four case arms present in working tree. Safe to commit Cursor hunks without dropping them.
+
+**Shared:** `ops/wa.sh`, `TASKS.md`.
 
 ---
 
@@ -221,6 +451,52 @@ Branch `leadai-2e` `221e9e8` → main. Live **07:16 UTC** (`build app` + `migrat
 
 ---
 
+## 2026-10-21 — C46 Availability inventory webhook deployed disabled (Cursor)
+
+`a7_inventory_webhook.php` on SPA 1042 add/update → signed POST to `/api/leadai/inventory/bitrix/` (`leadai-inventory.` HMAC, same secret as lead_wa). Wired in `init.php`. Config `a7_inventory_webhook.config.php` **`enabled => false`** until Claude "round 20 is live". md5 handler `c676c8cf…` matches box.
+
+**Proven:** file + config on box; init marker; enabled false. **Not proven:** live POST (endpoint 404; switch off).
+
+**Shared:** `a7_inventory_webhook.php`, `.config.php.example`, `a7_patch_init_inventory_webhook.php`, board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C62 Property Finder ref field + dry-run (Cursor)
+
+Created string **Property Finder ref** on SPA 1042: UF **2698** / `UF_CRM_5_1792564962558` (Bitrix refuses requested `UF_CRM_A7_AVAIL_PF_REF` for string on CRM_5; Community enum A7 name still fine). Dry-run on three available stages: **0** cards carry `a7group-NNNN` in title/text/timeline (lead-side refs stay on leads). Fill waits **go C62**. md `a7_c62_pf_ref.md`. Probes stubbed.
+
+**Proven:** field GetList + Factory; dry-run counts. **Not done:** fill.
+
+**Shared:** `a7_c62_pf_ref.php` / `a7_c62_dry.php` / `a7_c62_apply.php` (apply unrun), board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C60 lead Community spelling dry-run (Cursor)
+
+`UF_CRM_1770537051525`: distinct **54** → would be **38** pack names; **3174** leads would rewrite; **8685** already canonical; **0** unmapped (11859 with a community). Map md `a7_c60_community_clean.md`. Rewrite waits **go C60** (`a7_c60_apply.php`, batches 200, undo). Probe stubbed.
+
+**Proven:** live GROUP BY counts + mapping table. **Not done:** rewrite.
+
+**Shared:** `a7_c60_community_clean.php`, `a7_c60_apply.php` (unrun), board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C44b Django community→mark_campaign still blocked (Cursor)
+
+No Claude "round 19 is live" / leadai 0016 on the board (latest is round 17). `campaigns/views.py` + `crm_leads.py` not touched; no `build app`/`up app`.
+
+**Shared:** board, `TASKS.md`.
+
+---
+
+## 2026-10-21 — C53 / C58 / C64 still waiting (Cursor)
+
+C53 submit waits `go C53 <names>`. C58 notify waits `go C58`. C64 Playwright as Matloob waits his logged-in storage. No Meta submit; no bells; no Playwright run.
+
+**Shared:** board, `TASKS.md`.
+
+---
+
 ## 2026-10-20 — Lead AI round 17 is live: the community packs' flow — a home in Mudon, Villanova, … quotes the listed Property Finder unit, sends its photos and refers to our office (Claude Code)
 
 Branch `leadai-2e` `f815651` → main. Live **15:51 UTC** (`build app` + `migrate-new-image` leadai 0015 + `up app`, all four services up together; `django-check` No changes). The gate: eval **579 of 584 (99.1%)**, the model's own words 309 of 314 (98.4%), every code, money and policy scenario every run (the three new pack scenarios and `shops-res-inventory-price` 2/2); leadai 1991 tests, crmlink 118, inbox 13, all OK. Matloob's word on the plan's B2 (2026-10-20): "pictures wagera PF se jayein aur office refer karein" — the Property Finder unit with its photos, the customer referred to our office, for rent and for sale alike.
@@ -235,6 +511,148 @@ Branch `leadai-2e` `f815651` → main. Live **15:51 UTC** (`build app` + `migrat
 - **Not tested live:** a real customer's Mudon or Villanova chat (nothing to fake); the photos' delivery through the gateway (unit-tested with a fake gateway). To try it: a Lead AI campaign to a test number, then "I need a 3 bedroom townhouse in Mudon to rent, what is the rent?".
 
 **Shared:** `TASKS.md`, `SHOPS-BOT-BOARD.md`, `docs/superpowers/specs/2026-10-20-leadai-bot3-advance-plan.md` (§6c). Backend under `apps/leadai/` only; no panel file this round.
+
+---
+
+## 2026-10-20 — C58 incomplete drive still waiting go (Cursor)
+
+Per-user list ready (`a7_c58_incomplete_by_user.md`, 485 / 37 users). **Not sent** — Matloob "go C58" not in the request. No bells.
+
+**Proven:** list exists from earlier. **Not done:** notifications.
+
+---
+
+## 2026-10-20 — C53 re-engagement drafts on the board (Cursor)
+
+Day-3 / day-7 / day-30 English texts for IC, Mudon, Villanova, Damac Lagoons (and note for AR3/Serena/Hills/Dubai Land) posted under C53 on `SHOPS-BOT-BOARD.md`. UTILITY for day-3 check-ins; MARKETING for day-7/30. **Not submitted** to Meta — waits `go C53 <names>`.
+
+**Proven:** drafts on board. **Not done:** WABA create/submit.
+
+---
+
+## 2026-10-20 — C54 weekly funnel location (Cursor)
+
+C30 definitions snapshot in `ops/bitrix-aws/a7_c54_weekly_funnel.md`; re-run via `a7_c30_funnel.php`. No CRM writes; no Bitrix analytics report page installed.
+
+**Proven:** SQL/CLI counts. **Not done:** CRM UI saved report.
+
+---
+
+## 2026-10-20 — C51 stage moves keep meeting time (Cursor)
+
+Test leads moved to stage `11` and `CONVERTED` with Bot Status **2477** and BP/automation on: meeting time kept, no new Viewing/Meeting to-dos. Same with BP off. Control empty Bot Status → 11 also kept meeting (wipe is the stage-10 edit path from C26, not these moves). Leads deleted; probe stubbed. No BP 235 change.
+
+**Proven:** live factory updates on four test leads. **Not proven:** bot's own REST user identity vs factory CLI.
+
+**Shared:** `a7_c51_stage_move.php` (stubbed), board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C49 escalation endpoint live (Cursor)
+
+`POST /bitrix/tools/a7_leadai_escalation.php` — HMAC prefix `leadai-escalation.` with `CRM_LEAD_WA_SECRET` (same config as notify/fields). Returns `{ok, map:{user_id:{lead,head}}}` from company structure iblock 3 `UF_HEAD` + parent. CLI map: **66** active users with a department. GET → 405. Deployed to tools (not a stub).
+
+**Proven:** file md5 on box; unsigned GET 405; CLI map samples. **Not proven:** signed POST from Django.
+
+**Shared:** `a7_leadai_escalation.php`, board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C50 AI score fields + filter (Cursor)
+
+Created `UF_CRM_A7_AI_SCORE` (**2696**, integer 0–100) and `UF_CRM_A7_AI_SCORE_WHY` (**2697**, text). Common Leads filter preset **AI score ≥ 70**. Claude writes values. Probe stubbed.
+
+**Proven:** field create; preset create. **Not proven:** kanban card showing the column for every agent grid; Claude writes.
+
+**Shared:** `a7_c50_ai_score.php` (stubbed), board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C52 lead document fields + booking confirm (Cursor)
+
+Created file fields: Emirates ID **2692**, Passport **2693**, Visa **2694**, Proof of funds **2695**; placed on common Lead AI form section. Confirmed booking fields already live: Rent/Sale **2686**, Zone **2687**, Doc **2688**, Status **2689**, Voucher **2690**; on common + sample department forms; stage attributes (prior booking setup) hide them except Booking. Probe stubbed.
+
+**Proven:** field ids; form common includes docs; booking UFs present. **Not proven:** every department personal layout opened in a browser.
+
+**Shared:** `a7_c52_doc_fields.php` (stubbed), board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C44 Community select on campaign popups (Cursor)
+
+Leads/Owner Data (`a7_lead_wa.js` V20) and Renewals (`a7_renewals_wa.js` V11): Community select (54 §A names, default International City) next to Script when Lead AI is on; payload + PHP forward `community` (allow-listed). Live md5 lead JS `b9ff0a97…`, renewals `f83679d9…`. Django may ignore until Claude stores it. No app `build`/`up`. Playwright script `a7_c44_playwright.py` ready; **not run** (no Matloob storage state in this session).
+
+**Proven:** served JS 200 + md5 match; PHP deployed. **Not proven:** browser click as Matloob / intercepted send body.
+
+**Shared:** `a7_lead_wa.js/.php`, `a7_renewals_wa.js/.php`, `a7_c44_playwright.py`, board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C59 Community name field live on Availability (Cursor)
+
+Created `UF_CRM_A7_AVAIL_COMMUNITY` (UF **2691**, REST `ufCrmA7AvailCommunity`, label **Community name**) on SPA 1042 with 54 §A enums (**2526–2579**). Filled empty cards from area→loc→title: community set **0 → 316** / 557 (errors 0). Undo `ops/bitrix-aws/a7_c59_undo.json`. `A7AvailGuard` **1.1.0** requires the field; deployed to `bitrix/php_interface/include/`. Apply script stubbed. Kanban **Community** stays `PARENT_ID_1058` → SPA 1058. No app `build`/`up`. No customer numbers on the board.
+
+**Proven:** field + enums exist; before/after SQL counts; 316 updates; guard file md5 on box. **Not proven:** Claude inventory reading the new field; form layout placement of the field on the card UI.
+
+**Shared:** `a7_c59_apply.php` (stubbed on box), `a7_c59_undo.json`, `a7_c59_enum_ids.md`, `a7_avail_guard.php`, board, `TASKS.md`.
+
+---
+
+## 2026-10-20 — C59 Availability community map + C54 funnel snapshot (Cursor)
+
+No app `build`/`up` (waiting Claude "round 17 is live"). No customer numbers or keys on the board. C58 notify **not sent** (still waits go C58). C59 field **not created** (waits go C59).
+
+**C59 (read-only):** distinct area / loc_name on Rent / Sale / Sale-Rent → §A communities in `ops/bitrix-aws/a7_c59_availability_communities.md`. **559** cards; **316** would get a community (Mudon 106, Damac Lagoons 62, Arabian Ranches 3 49, International City 43, Villanova 24…); **243** unmapped. Proposal: new CRM_5 enum + empty-only fill + guard; kanban risk = existing **Community** column is `PARENT_ID_1058` → SPA 1058 (0/559 on these stages), not area/loc. Probe stubbed.
+
+**C54 (read-only):** `ops/bitrix-aws/a7_c54_weekly_funnel.md` — C30 buckets by ISO week (Bot Status funnel + IC shop baseline). No Bitrix saved filter written.
+
+**Proven:** live SQL / CLI counts for C59 and C54; labels and kanban common-view field map. **Not proven / not done:** field create, card fill, guard change, C58 bells, Claude inventory reading a Community UF, CRM UI report page.
+
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/bitrix-aws/a7_c59_*`, `a7_c54_weekly_funnel.md`, `a7_community_map.md` (read).
+
+---
+
+## 2026-10-21 — AKIH employee Bitrix accounts created (Cursor)
+
+14 users from `AKIH Employees Data.xlsx` created on the CRM (ids 2698–2711). Login = email; password = same email. Groups: Everyone + Employees (tasks/messenger). Departments: Mart 3, Pharmacy 4, Hospital 5, parent MCD 2 (HR). No heads. Login sheet (with passwords) only under gitignored `files/secrets/AKIH-Bitrix-Logins.xlsx` — not on the board, not in this entry.
+
+**Proven:** 14/14 created; stubbed `a7_c60_akih_users.php`. **Not:** a browser login as each user.
+
+**Shared:** `ops/bitrix-aws/a7_c60_akih_users.php`, `TASKS.md`. Secrets file local only.
+
+---
+
+## 2026-10-21 — Al Kareem Center MCD departments created (Cursor)
+
+Company structure (iblock 3), separate branch under root A7 Group Real Estate (not under Sales). No heads. CRM role **Sales Agent** (id 8) bound as `SNDR73` so the parent and its four subs get the same normal-agent CRM access pattern as other department binds. Users not assigned yet — add people later by time.
+
+| Id | Name | Parent |
+|---:|---|---:|
+| 73 | Al Kareem center MCD | 1 |
+| 74 | Abdul Karim international hospital | 73 |
+| 75 | Abdul Karim Mart | 73 |
+| 76 | Al Karim pharmacy | 73 |
+| 77 | Abdul Karim labs | 73 |
+
+**Proven:** create + verify JSON + role bind `SNDR73`. **Not:** a live user login in those depts; intranet Employees group membership (tasks/messenger also need the user in group Employees when accounts are created).
+
+**Shared:** `ops/bitrix-aws/a7_c60_kareem_depts.php` (stubbed on box after run), `TASKS.md`.
+
+---
+
+## 2026-10-20 — Format.xlsx = Owner Data Calling × International City only (Cursor)
+
+Replaced `Format.xlsx` with Owner Data Calling (cat 13) phones whose title/area/loc carries "International City": **6,309** distinct Name/Number rows. Not Availability; not other communities. Local file only; not a campaign send.
+
+**Shared:** `Format.xlsx`, `TASKS.md`.
+
+---
+
+## 2026-10-20 — Format.xlsx = Owner Data Calling board phones (Cursor)
+
+Rebuilt `Format.xlsx` (Name / Number) from Owner Data SPA 1042 **Calling** category 13 only — not Availability. **30,119** distinct phones after normalising UAE locals to 971… and dropping empty/junk/over-long field values. Earlier Availability rows in the sheet were removed. Local file only; not a campaign send.
+
+**Shared:** `Format.xlsx`, `TASKS.md`.
 
 ---
 
@@ -255,76 +673,53 @@ Branch `leadai-2e` `8962af7` → main. Live in two steps, all four services up t
 
 ---
 
-## 2026-10-20 — Lead AI round 14 is live: the inventory v1 (Property Finder + clean Availability cards) and the customer memory v1 (Claude Code)
+## 2026-10-20 — C56 title fill, C57 enum clean, C58 incomplete list (Cursor)
 
-leadai-2e `12e703e`; live 09:25 UTC, all four services up together; migrations leadai 0012 and 0013 applied from the new image before `up`; `a7wa/settings.py` and the Property Finder keys (`LEADAI_PF_API_KEY` / `_SECRET`, written to the server env by `ops/wa.sh set-pf-api-keys` from a local gitignored file — never printed) shipped with it. Matloob's 2-day fast track, day 1 part 2 (the plan's workstreams C and E1).
+Matloob go on C56 and C57. No app `build`/`up` (round 16 lock). No customer numbers or keys on the board.
 
-- **The inventory (`assistant/inventory.py`, `LeadAiUnit`):** the agency's live Property Finder listings (Enterprise API: a 30-minute token, `GET /v1/listings?filter[state]=live` paged by 50; the community and cluster read from the title) and the Owner Data → Availability cards (SPA 1042, category 14, stages Rent / Sale / Sale-Rent Availability) that carry bedrooms, type, purpose, a place and a price — the rest skipped and counted, never guessed; owner numbers never read. Refreshed every half hour (`tasks.sync_inventory`, beat, the leadai queue). In a rent or sale chat the engine gives the model up to three matching units as an INVENTORY block (data; the chat's clusters first, then the cheapest), their figures pass the amount filter, and a figure of no unit and no band is cut as before. No match: the band, as before. Kill switch `inventory.LIVE`. The first sync on the live box: Property Finder 142 units (International City: 4 studios for rent in France, China and Spain Cluster at AED 29,000 with photos, 16 shops for rent, 14 for sale; 72 units whose community the title does not name — the location tree comes next); the Bitrix Availability sync timed out on the shared REST rate limit (the background slots were busy) — retries ten seconds apart added for round 15.
-- **The customer memory (`assistant/memory.py`, `LeadAiCustomer`):** one customer across chats and numbers, by the phone's digits: each conversation's facts, number, moments and bookings kept by `_apply`; the chats on our other numbers get PREVIOUS CHATS lines in the context (data, confirmed as a question, never stated: I12); a PDPL deletion removes the row; the chat detail lists the lines and the chat header says "Earlier chats: …".
-- **The gate (round 14, context b71a30a → 12e703e):** 572 of 578 (99.0%), the model's own words 302 of 308 (98.1%), every strict scenario every run. The two new scenarios: shops-res-inventory-price 0 of 2 — the model answered with the band and ignored the INVENTORY block (both runs: "Studios in International City rent from about AED 29,000 to 33,000…"), so round 15 adds the prompt line that says to quote the listed unit; shops-res-memory-asks-not-states 1 of 2; Postgres tests on the image leadai 1953, crmlink 118, inbox 13; `probe-leadai-turn` 15 of 19, PROBE_OK (the same taken-slot probe booking as round 13). Two new eval scenarios: shops-res-inventory-price (a Spain Cluster studio in the block is quoted at its own AED 31,000) and shops-res-memory-asks-not-states.
-- **What the data showed (read-only probes, in the plan §6a):** Property Finder holds 142 live listings but only **5 in International City** (4 shops, a townhouse); of 562 "available" Availability cards **145 carry no bedrooms, unit type or purpose** and most keep price and place in the title ("Maitha , 230k , unit 292 , mudon 6 , 3br , g+1") — so the campaigns' own units (IC studios, one-bedrooms) still answer from the bands until that data is cleaned (**Cursor C55** in the plan: a validation on the Availability card and a title parser for the existing cards).
-- **Not tested:** a real customer quoted a unit (none matches today for IC apartments); a real returning customer on a second number (the first memory rows are written from today's turns on). The co-pilot's auto-send minutes as an AI-settings field is written (leadai-2e `e867e30`) but ships in round 15 with its panel field (held back: a panel field must ship with its backend).
-- **Shared files touched:** `a7wa/settings.py` (two env names, one beat entry), `ops/wa.sh` (verbs `set-pf-api-keys`, `leadai-sync-inventory`), `ops/catalog/leadai-sync-inventory.py`, `bitrix/public/assets/modules/lead-ai/thread.js` (the header line), `TASKS.md`, the plan doc.
+**C56:** filled only empty bedrooms / unit type / purpose / sell-or-lease / area on the three Availability stages from the C55 title parser. 253 cards, 336 fields. Fully clean **50 → 75**. Undo in `ops/bitrix-aws/a7_c56_undo.json`. Cleared 19 price writes that were card ids typed in the title (also in the undo). Apply script stubbed. +30 min re-count: still **75 / 561** clean.
 
----
+**C57:** usage table in `a7_c57_enum_usage.md` (Purpose options with cards: 1563×25, 1571×2, 1591×1, 2082×1, 2083×2; Unit Type 1282–1550 all unused). Blanked those 31 card fields, then deleted bad options. Unit Type options **295 → 26**, Purpose **32 → 6**. Cleaner stubbed.
 
-## 2026-10-20 — Lead AI round 13 is live: one turn at a time per chat (I02) and the co-pilot v1 (Claude Code)
+**C58 (read-only):** `a7_c58_incomplete_by_user.md` — 485 incomplete cards across 37 users, per-user counts on the board, English notify draft and send plan via `a7_leadai_notify.php`; **not sent** (waits go C58). Guard-on-save vs stage-move proposal is in that md.
 
-leadai-2e `b408545`, panel `16b4166`; live 08:50 UTC, all four services up together; migration leadai 0011 applied from the new image before `up`. Matloob's 2-day fast track, day 1 (the advance plan `docs/superpowers/specs/2026-10-20-leadai-bot3-advance-plan.md`, workstreams A1 and D).
+**Proven:** live Bitrix writes for C56/C57, option counts before/after, clean recount, incomplete list. **Not proven / not done:** C58 bells; Claude inventory sync; whether agents will fill the remaining ~485.
 
-- **The lock:** a turn holds a lease on its chat through the shared Redis lock (`crmlink.redis_state.held`, `assistant/turn_lock.py`); a second turn of the same chat waits five seconds and comes back to a chat that has the first reply in it — the end of two slot pairs in one minute (chat 49818) now that `worker-leadai` runs six turns at once. Redis out: no lease, the turn runs as before.
-- **The co-pilot (`assistant/copilot.py`):** while a person has the chat, or from the turn that hands it over, the model's own reply — the words code did not send — waits on the Lead AI screen as a draft: *Send as me*, *Edit* (into the reply box), *Ask AI* (the agent's question answered from the chat and the facts), *Dismiss*; the Needs-a-person row says "Draft ready". A draft for a call, a person, a complaint, legal or a broker never goes by itself; an ordinary one goes out by itself after `LeadAiSettings.copilot_auto_send_minutes` (15; 0 turns it off; Django admin for now) when nobody wrote. Every fate is recorded (`LeadAiDraftOutcome`: sent, edited, auto, dismissed) with the agent's final words — the knowledge base's raw material. No extra model call.
-- **The gate (round 13, context b71a30a):** one eval round 285 of 287 (99.3%), every strict scenario; Postgres tests on the image leadai 1940, crmlink 118, inbox 13; `probe-leadai-turn` 15 of 19 — the four misses are one probe booking whose exact time (Wed 21 Oct 17:00) is a real customer's taken slot, so the engine offered 4:30 / 5:30 instead (correct; PROBE_OK). The deploy waited for campaign 578 (`retrying`: one Bitrix 429 recipient) to finish before `up` (four checks a minute apart).
-- **Not tested:** an agent pressing the draft buttons in a real browser; a real ordinary draft going out by itself after 15 minutes. Both show in the next handovers; the log line is "Lead AI co-pilot sent N draft(s) by itself".
-- **Shared files touched:** `bitrix/public/assets/modules/lead-ai/{api,thread,desk}.js`, `lead-ai.css`, `TASKS.md`. Backend under `backend/apps/leadai` (+ `a7wa/settings.py` in round 14).
+**Shared:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, `ops/bitrix-aws/a7_c56_*`, `a7_c57_*`, `a7_c58_*`, `a7_avail_guard.php`, `a7_c55_*` (prior).
 
 ---
 
-## 2026-10-20 — Lead AI Bot 3 advance plan written (Claude Code)
+## 2026-10-19 — Webhook drain beside the studio campaigns (Cursor)
 
-Matloob's decisions (all communities; Property Finder API now, Bayut/Dubizzle later; Bitrix Owner Data Availability as the current stock; co-pilot handover; unlimited voice notes; a memory and learning system; Cursor's tasks included) → `docs/superpowers/specs/2026-10-20-leadai-bot3-advance-plan.md`: eight workstreams (foundation, community packs, live inventory, co-pilot desk, memory and learning, sales flow, voice and media, reporting), Cursor's C43–C54, Matloob's M1–M7, a nine-week sequence with the gate at every step. Nothing deployed. The Property Finder key is written nowhere; it goes into the server env only when workstream C starts.
+Replies, delivered and read were stuck behind the campaign workers. Started a separate container, `a7wa-worker-hooks`, which only applies pending webhook rows. The campaign worker was not restarted. Within a minute the pending backlog dropped and Lead AI had answered 32 of those chats. The container is not in compose, so a worker recreate does not remove it and a host reboot does not bring it back.
 
-**Shared:** `TASKS.md`.
-
----
-
-## 2026-10-20 — A7 Lead Guard 1.5.0: booking fields saved on the Booking stage; file fields no longer read as "changed" (Claude Code)
-
-Live on the CRM box (`ops/bitrix.sh put`, md5 checked): `php_interface/include/a7_lead_guard.php` `38dac324…`, `a7_lead_guard_perms.php` `78dec756…`, `tools/a7_lead_guard_api.php` `0ede1c60…`, `js/a7_lead_guard.js` `066e76cb…`. Matloob's report: a guard stopped the booking details from being saved on the lead; team leads and anyone who opens the lead must be able to fill those fields on the Booking stage, everything else as it was.
-
-- **Root cause 1 (the actual refusals):** `/home/bitrix/a7_lead_guard.log` holds 234 `BLOCK shared-user edit … fields=Commission Document,Trade License File` (earlier `Lead Label`) lines since 2026-10-14, the latest at 07:15 UTC today for user 2551 on lead 79069. The lead form sends an empty upload slot (`error 4`, no `tmp_name`) for every **file** user field it shows; the guard's `norm()` turned that into `"0, 4"` against the stored id, so every save by a shared user on a lead that shows a file field was refused — the user had not touched those files. Fixed by `fileState`/`fileChanged`/`fieldChanged`: a file field changes only when a file arrives, goes or is swapped. The same comparison now drives the "Edited by" timeline notes, so the `(empty) → 0, 4` noise stops.
-- **Root cause 2 (the request):** a user with no update right of their own (a team lead from another department, a historical observer) could not save anything. New **booking grant** in `a7_lead_guard_perms.php`: a lead already on the Booking stage (`CONVERTED`) may be updated by anyone who can read it (`A7LeadShare::bookingGrant`, in the Item path and the legacy `isAdmin()` path on write requests only); `A7LeadGuard::onBeforeLeadUpdate` then lets only the five booking fields change (config `booking_fields`: `UF_CRM_A7_BOOKING_RENT_SALE`, `UF_CRM_A7_COMMISSION_ZONE`, `UF_CRM_A7_COMMISSION_DOC`, `UF_CRM_A7_COMMISSION_STATUS`, `UF_CRM_A7_COMMISSION_VOUCHER`) — a stage move, a comment or any other field is refused with `A7_BOOKING_ONLY`. Shared users keep their rule (stage + the required-on-stage fields, which already include the five). The API's `info` returns `bookingOnly`/`bookingFields`; the page shows a Booking banner and locks the other fields and the stage.
-- **Proof (read-only probe on the live code, no login as anyone, no lead written):** 21 of 21 checks pass — the form's empty uploads against stored files unchanged, real uploads/deletes/swaps changed, a booking-only save of two booking fields with the form's empty uploads touches nothing, a comment or a stage move in it is refused, the same save by a shared user touches nothing (the old false block); `bookingOnly` false for every user with a right of their own; 0 error lines in the guard log after the deploy; API `?action=me` 401 unauthenticated, JS 200.
-- **Not tested:** a real save in a browser by a team lead (Matloob asked to have one retry on a Booking-stage lead). Two unused duplicate fields with the same labels exist on leads, not on any form, 0 values: `UF_CRM_A7_COMM_DOC/ZONE/STATUS/REF`, `UF_CRM_A7_DEAL_TYPE` (2681–2685) — left in place; they can be deleted on Matloob's word.
-- **On the box, outside git:** staged lint copies `a7_lead_guard.php.new` and `a7_lead_guard_perms.php.new` under `php_interface/include` (nginx-denied, harmless); `tools/a7_lead_guard_api.php.new` overwritten with the 404 stub. Probes `a7_probe_guard_log/forms/filesave/lint/booking.php` under `local/php_interface/include` are 404 stubs now.
-
-**Shared:** `ops/bitrix-aws/a7_lead_guard.php`, `a7_lead_guard_perms.php`, `a7_lead_guard_api.php`, `a7_lead_guard.js` (+ their copies under `ops/bitrix-aws/live/`), `TASKS.md`.
+**Shared:** `ops/wa.sh` (`hooks-worker`), `TASKS.md`. The drain script is on the server at `/opt/a7-wa/deploy/a7_drain_hooks.py`.
 
 ---
 
-## 2026-10-19 — Lead AI round 12 is live: the first mixed campaign's fixes and rounds 7–11 of the 2e gate (Claude Code)
+## 2026-10-19 — Campaign worker pool grown by 2 (Cursor)
 
-main `94d21f7` (leadai-2e `b71a30a` merged), live 18:50 UTC, all four services up together; `worker-leadai` now runs with concurrency 6 (compose).
+The four running studio campaigns were holding every inbox worker, so 553 could not start and reply webhooks stayed pending. Grew the live worker pool by 2 with `celery control pool_grow` (no container restart, so the sends already in progress kept going). 553 moved to running. The pool returns to 4 the next time that container is recreated. The same broadcast also grew the Lead AI worker by 2.
 
-- **What changed, from the first mixed campaign (549–553; `docs/superpowers/specs/2026-10-19-leadai-campaign-1-issues.md`):** I01 a reply up to 20 hours old is answered late with an alert, never dropped as stale (the campaign's 92 were answered by `leadai-answer-late`); I03 a Stop tap anywhere in the burst wins over a later "Not now"; I04 "for call", "call please", "need a call" are call requests (hand-over with the call line), a media-only burst is a hand-over too; I05 a call request is never held by the reply cap; I06 a hold claimed with nothing saved ("tentatively held", "kept for you") is cut; I07 one slot pair per message (the model's goes when code's closes it); I09 "agency charges", "ranges from / roughly" after our commission line and the family-or-bachelors answer are answered, not cut; I13 an owner offering a unit is no tenant, a wish to buy moves a rent chat to the sale track, a stored home track survives a bare other tag; I14 no stock claimed on the shops track either; the monthly band answers "how much per month?"; I10's second half: a reply over 600 characters ends at a sentence, never mid-word, and code's slot line is kept over the model's sentences.
-- **From the gate itself (rounds 7–11):** code asks the buyer's vacant-or-tenanted question when the model's wording is cut; Arabic client words are read with their article; a broker tag over a number ask alone comes off; "No thank you, I already rented a shop last month" is not interested in any length (read after the model, so a shops chat still asks about a second shop first); their half hour is booked when the reply says our slots start on the hour.
-- **The gate (round 12, on the build context):** 569 of 574 (99.1%), the model's own words 299 of 304 (98.4%), every code, money and policy scenario every run (the five failing runs were the model's own words: shops-old-lead quoted the old lead's CRM budget in both runs and `drop_quoted` cut it both times; shops-sale-price-and-book #2 gave the Morocco floor with the band's top, both from the facts; lang-voice-urdu and shops-tap-and-question-81 one run each). Postgres tests on the image: leadai 1920, crmlink 118, inbox 13, all OK; locally 2060 OK. `probe-leadai-turn` 19 of 19, PROBE_OK.
-- **Proof live:** `ps` all four `Up` together; `leadai-switch status` `last_sweep_at` 18:50:58 UTC, 45 s after up; `django-check` "No changes detected"; the `worker-leadai` log shows `concurrency: 6`.
-- **Not tested:** a real customer turn on round 12 (the next campaign is the test; the desk is watched by Hina Sultan, Mohammad Farhan and Shoaib Malik).
-- **Known, outside compose:** Cursor's `a7wa-worker-hooks` container (the webhook drain) stays on the round-6 image until it is recreated; round 12 carries no migration, so it keeps working.
-- **Shared files touched:** `TASKS.md`, `SHOPS-BOT-BOARD.md`, `deploy/docker-compose.yml` (one line), the issue list above. Everything else is under `backend/apps/leadai`.
+**Shared:** `ops/wa.sh` (`worker-pool-grow`), `TASKS.md`.
 
 ---
 
-## 2026-10-19 — Lead AI access for Hina Sultan, Mohammad Farhan and Shoaib Malik; the desk opens with no number (Claude Code)
+## 2026-10-19 — International City studio campaigns queued (Cursor)
 
-main `3c767a6`, live 15:52 UTC (all four services up together).
+Last-90-day International City studio apartments (property type Apartment, bedrooms 0 B/R), every stage. Lead AI on, script `ic_shops`, template `intl_city_property_reconnect`, {{1}} the lead's name, {{2}} Malik. One message per phone, at most 300 queued on a number. Opt-outs left out. The one-off sender was stubbed after the queue.
 
-- **Given:** Lead AI access (`Agent.can_lead_ai`, Q37) to Hina Sultan (Bitrix 454), Mohammad Farhan (2633) and Shoaib Malik (2694), with `ops/wa.sh leadai-grant-access 454 2633 2694` (as "Agents & access" would; an agent without Official API access is skipped and named). Muhammad Shoaib (2308) is a different person and was not given it.
-- **Why code changed:** an agent with Lead AI access who holds no number saw only the "No WhatsApp number assigned yet" card, with no door to the Lead AI screen. Now `/api/auth/me/` carries `can_lead_ai`; the card shows "Open Lead AI" for such an agent; and `modules/inbox.js` publishes its API (`wa:ready`) on that path too, so `modules/lead-ai` learns who is signed in. Hina and Farhan are Bitrix portal admins, so their panel opens fully and "Lead AI" sits in the hamburger menu as before; Shoaib Malik holds no number and gets the button.
-- **Proof:** `probe-leadai-access` as the real agents through the test client in `web`: `me.can_lead_ai` true for the three, false for Muhammad Shoaib; `/api/leadai/chats/` 200 with rows for the three and 0 rows for Muhammad Shoaib; `/api/leadai/desk/` 200. The three panel files served at their local sizes (6379, 111776, 46226 bytes), md5 equal. `apps.accounts` tests 4 OK. The build context's `leadai` stayed at round 6 (live): only `accounts/views.py` was pushed, checked by md5 before the build.
-- **Not tested:** the "Open Lead AI" button in a browser inside Bitrix as Shoaib Malik.
-- **Shared files touched:** `modules/inbox.js` (3 lines in `boot()`), `modules/access-requests.js`, `modules/inbox.css`, `accounts/views.py`, `ops/wa.sh` (one verb), `TASKS.md`.
+Queued 1,295 across campaigns 549–553: 971581058719 got 236, 720 got 299, 721 got 287, 722 got 300, 723 got 173. 724–726 were not needed. 596 extra lead cards shared a phone already in the list, so they were not sent a second time. 75 phones were already in a Lead AI chat and 3 were Bot Status Lost, so those were left out at queue time. Sends were running when checked (a few failures in the first seconds).
+
+**Shared:** `TASKS.md`. The sender lived only under `files/temp` and is stubbed on the server.
+
+---
+
+## 2026-10-19 — Lead AI tick shows only the eight sending numbers (Cursor)
+
+In the CRM WhatsApp popups, ticking Lead AI limits Send from to 971581058719–726, the numbers where the Lead AI templates are approved. Unticking it shows the full list again. A send stays disabled if the chosen number is not one of those eight. Live md5: lead JS `9e388ca9101efd4ad5a3cda10e4bfbe1`, renewals JS `a6a86a1bccd63870b7720b9ca40e3088`. Nothing was sent.
+
+**Shared:** `ops/bitrix-aws/a7_lead_wa.js`, `a7_renewals_wa.js`, `TASKS.md`.
 
 ---
 
@@ -381,6 +776,114 @@ main `065fa49` (leadai-2e merged and pushed). All four app services run one imag
 
 ---
 
+## 2026-10-17 — Rotate list and Load more (Cursor)
+
+All was hiding campaign chats inside each page, so Load more looked stuck and Rotate WhatsApp had nothing from that page. The list now asks the server: normal pages skip those chats, Rotate WhatsApp loads only them. Web was recreated. The campaign worker was left running.
+
+**Shared:** `TASKS.md`, `backend/apps/inbox/views.py`, `bitrix/public/index.html`, `bitrix/public/assets/api/api.js`, `bitrix/public/assets/modules/inbox.js`.
+
+---
+
+## 2026-10-17 — Rotate WhatsApp inbox filter (Cursor)
+
+Inbox chips gained Rotate WhatsApp. All, Unread, Pinned and Transferred hide chats opened only for this campaign. The new chip shows those chats. The running campaign was not restarted: only the web service was recreated, worker kept sending.
+
+**Shared:** `TASKS.md`, `backend/apps/inbox/serializers.py`, `bitrix/public/index.html`, `bitrix/public/assets/modules/inbox.js`, `bitrix/public/assets/core/list-quick-filters.js`.
+
+---
+
+## 2026-10-17 — Rotate upload skip (Cursor)
+
+Start stopped because +447723545003 refused the header picture (`Invalid WhatsApp configuration`). A refused number is now skipped and the rows go to the next number that accepted the picture. Image rebuilt, all four app services up. No campaign was started from here.
+
+**Shared:** `TASKS.md`, `backend/apps/campaigns/rotate.py`, `rotate_views.py`, `bitrix/public/index.html`, `bitrix/public/assets/modules/rotate-campaign.js`.
+
+---
+
+## 2026-10-17 — Rotate history 500 (Cursor)
+
+History returned 500 because `CampaignBatch` was not imported. The import is back, the image was rebuilt, and all four app services are up. No campaign was sent.
+
+**Shared:** `TASKS.md`, `backend/apps/campaigns/rotate_views.py`.
+
+---
+
+## 2026-10-17 — Rotate campaign preview (Cursor)
+
+The Send screen no longer prints "null". It shows the aldardso text, buttons, and the header picture once a file is chosen. Start switches to that campaign in History and keeps polling. Closing the window does not stop a send that has already started.
+
+**Proof:** the new script is served, `GET /app/assets/modules/rotate-campaign.js?v=2` returned 200 and 14814 bytes. The menu was not clicked in a browser after this change.
+
+**Shared:** `TASKS.md`, `bitrix/public/index.html`, `bitrix/public/assets/modules/rotate-campaign.js`, `rotate-campaign.css`.
+
+---
+
+## 2026-10-17 — aldardso status on the eight 971 numbers (Cursor)
+
+Asked Meta again. Seven are APPROVED: 971581058720–726. 971581058719 is still PENDING. Local template rows were updated to match. No send.
+
+**Shared:** `TASKS.md`, `ops/wa.sh`, `ops/catalog/check-aldardso-eight.py`.
+
+---
+
+## 2026-10-17 — Rotate campaign screen (Cursor)
+
+Rotate campaign is live in the menu. It locks `aldardso`, uses the 34-number pool, sends 300 per number, and only from numbers where the template is APPROVED. Pending numbers stay listed and are skipped. New chats from this campaign are hidden from the number's agent (`staff_only`); a chat that already existed is left visible. No campaign was started.
+
+The header picture was going to WhatsApp, but the thread did not keep it: in the last 14 days, 232 outbound templates had a header file id and none of those rows had a picture. A send now stores that file on the message, so the chat shows it. Older rows stay text-only.
+
+**Proof:** `inbox.0014_conversation_staff_only` applied. `web`, `worker`, `worker-leadai` and `beat` came up together; `web` is healthy and the inbox list returned 200. `GET /app/assets/modules/rotate-campaign.js` returned 200 (10743 bytes). The menu was not clicked in a browser. The migrate also applied migrations that were already in the image and not in the database: `accounts.0011`, `leadai.0008`, `leadai.0009`, `leadai.0010`.
+
+**Shared:** `TASKS.md`, `backend/apps/inbox/models.py`, `visibility.py`, `services.py`, `backend/apps/campaigns/services.py`, `urls.py`, `bitrix/public/index.html`, `bitrix/public/assets/api/api.js`, `bitrix/public/assets/core/message-media.js`. New: `rotate.py`, `rotate_views.py`, `0014_conversation_staff_only.py`, `rotate-campaign.js`, `rotate-campaign.css`.
+
+---
+
+## 2026-10-17 — aldardso on the 34-number pool (Cursor)
+
+Checked `aldardso` / `en` on all 34 pool numbers. 26 were already APPROVED. The 8 Coastline numbers 971581058719–726 had no copy. The same template (image header, body, three quick replies) was submitted to those eight business accounts through the gateway. Meta returned PENDING on all eight. No campaign was sent.
+
+**Proof:** live `ops/wa.sh submit-aldardso-missing` printed `submitted PENDING` for each of the eight. Not re-listed from Meta after the create.
+
+**Shared:** `TASKS.md`, `ops/wa.sh` (new verb `submit-aldardso-missing`), `ops/catalog/submit-aldardso-missing.py`.
+
+---
+
+## 2026-10-17 — aldardso on the 21 senders (Cursor)
+
+Read-only. Template `aldardso` / `en` is APPROVED on all 21 high A7GroupWBX numbers. No send.
+
+**Shared:** `TASKS.md`.
+
+---
+
+## 2026-10-17 — Healthy senders with gateway credit (Cursor)
+
+Read-only. Gateway wallet was not out and not low at 14:23 UTC. High quality on that wallet: 21 sync numbers, all A7GroupWBX. The other 52 High numbers are manual Dubai02–11 accounts; their credit is not in this wallet. 21 × 300 = 6,300, short of 10,000. No send.
+
+**Shared:** `TASKS.md`.
+
+---
+
+## 2026-10-17 — Commission Zone dropdown (Cursor)
+
+`UF_CRM_A7_COMMISSION_ZONE` (2687) is now a list, same field id. International City `2524`, Outside International City `2525`. No lead had a text value in it. Cache cleared.
+
+**Proof:** `b_user_field` type is enumeration and both enum rows are on 2687. The lead card was not opened in a browser.
+
+**Shared:** `TASKS.md`, `ops/bitrix-aws/a7_booking_fields_setup.php`.
+
+---
+
+## 2026-10-17 — Booking-stage commission fields (Cursor)
+
+Five lead fields show only while the stage is Booking (`CONVERTED`). On every other stage Bitrix marks them hidden, and the lead card script hides the same five names. A lead that later moves into Booking gets the fields. Webhook names: `UF_CRM_A7_BOOKING_RENT_SALE` (2686, Rent 2519, Sale 2520), `UF_CRM_A7_COMMISSION_ZONE` (2687), `UF_CRM_A7_COMMISSION_DOC` (2688), `UF_CRM_A7_COMMISSION_STATUS` (2689, Pending 2521, Approved 2522, Paid 2523), `UF_CRM_A7_COMMISSION_VOUCHER` (2690).
+
+**Proof:** live create, 0 hide-rules covering Booking, phase check hides New / Agent / Junk / Lead Bank and not Booking, common lead form and kanban list contain the names, init loads the script, `GET /bitrix/js/a7_booking_stage_fields.js` returned 200. The kanban page was not clicked in a browser.
+
+**Shared:** `TASKS.md`. New files `ops/bitrix-aws/a7_booking_stage_fields.php`, `a7_booking_stage_fields.js`, `a7_booking_fields_setup.php`. Server `init.php` gained the load line.
+
+---
+
 ## 2026-10-17 — 2e test leads for Matloob (Cursor)
 
 Three Bitrix leads for the live 2e test. Nothing was sent. The phone is not written here. Delete the leads after Matloob's test, when Claude says so.
@@ -412,27 +915,6 @@ While `C41_MIXED_LIVE` is false, that template is left out of the template list 
 - **Logs after up:** no error in web, beat or worker-leadai. worker shows two older warnings unrelated to 2d: an inbound media filelink answering 401 (retried) and the Alots panel session keepalive failing (session expired?).
 - **Known follow-ups** (fail every repeat in the eval): shops-gate-half-hour, shops-invitation-cut-88, review-why-did-you-call. Carried into 2e.
 - **Shared files:** `SHOPS-BOT-BOARD.md` (2d is live, lock released), `TASKS.md`.
-
----
-
-## 2026-10-17 — T73 weekly funnel, WhatsApp half: `ops/wa.sh probe-leadai-funnel` (Claude Code)
-
-New read-only probe `ops/catalog/probe-leadai-funnel.py` and the verb `probe-leadai-funnel [--weeks N]` (1-26, default 8) in `ops/wa.sh`, next to `probe-leadai-turn`. It runs in the `web` container inside one transaction set READ ONLY and rolled back. Output is counts only: no phone numbers, names or message text.
-
-Rows are per ISO week (Asia/Dubai) of the campaign message, for ic_shops, general and total. Columns: sent, delivered, read, failed, replied, booked, handovers, opt_outs, median_answer_min, answered. Each chat event is counted on the campaign message it follows, until the next Lead AI campaign message to that chat. The definitions are in the file header.
-
-**Live (2026-10-17 11:40 Dubai, `--weeks 6`):** everything falls in 2026-W42 (campaigns 395, 448, 449).
-- Total: 112 sent, 103 delivered, 76 read, 11 failed (2 refused by the gateway, 9 failed by Meta), 35 replied, 0 booked (5 tentative visits, none confirmed), 6 handovers (5 by the assistant, 1 from Bitrix), 2 opt-outs, median answer 0.3 min (18 s) over 34 chats.
-- ic_shops: 96 / 89 / 64 / 8, replied 33.
-- general (campaign 395): 16 / 14 / 12 / 3, replied 2 (1 of them an auto-reply).
-
-**Proof:**
-- An independent SQL query on live gave the same replied, answered, median, handovers, opt-outs and booked figures, and the recipient/message breakdown gives the same sent/delivered/read/failed.
-- A synthetic local check (scratchpad `funnel/check_funnel.py`, Django 5.2.5 on SQLite) covers 4 campaigns, multi-send chats and every exclusion; all hand-worked lines matched. It caught all 10 broken copies of the probe (`funnel/mutants.py`).
-
-**Not tested on live data:** a chat getting a second Lead AI campaign message (no live chat has had one) and a confirmed visit (none exist yet). Only the synthetic check exercises those two paths.
-
-**Shared:** `ops/wa.sh` (one usage line and the verb only), `TASKS.md`. Nothing under `backend/`, no commit.
 
 ---
 
@@ -656,6 +1138,43 @@ Worktree `a7-2e-wt-fu`, branch `leadai-2e-fu`, on slice A (d9155bc). Committed t
 
 ---
 
+## 2026-10-17 — T73 weekly funnel, WhatsApp half: `ops/wa.sh probe-leadai-funnel` (Claude Code)
+
+New read-only probe `ops/catalog/probe-leadai-funnel.py` and the verb `probe-leadai-funnel [--weeks N]` (1-26, default 8) in `ops/wa.sh`, next to `probe-leadai-turn`. It runs in the `web` container inside one transaction set READ ONLY and rolled back. Output is counts only: no phone numbers, names or message text.
+
+Rows are per ISO week (Asia/Dubai) of the campaign message, for ic_shops, general and total. Columns: sent, delivered, read, failed, replied, booked, handovers, opt_outs, median_answer_min, answered. Each chat event is counted on the campaign message it follows, until the next Lead AI campaign message to that chat. The definitions are in the file header.
+
+**Live (2026-10-17 11:40 Dubai, `--weeks 6`):** everything falls in 2026-W42 (campaigns 395, 448, 449).
+- Total: 112 sent, 103 delivered, 76 read, 11 failed (2 refused by the gateway, 9 failed by Meta), 35 replied, 0 booked (5 tentative visits, none confirmed), 6 handovers (5 by the assistant, 1 from Bitrix), 2 opt-outs, median answer 0.3 min (18 s) over 34 chats.
+- ic_shops: 96 / 89 / 64 / 8, replied 33.
+- general (campaign 395): 16 / 14 / 12 / 3, replied 2 (1 of them an auto-reply).
+
+**Proof:**
+- An independent SQL query on live gave the same replied, answered, median, handovers, opt-outs and booked figures, and the recipient/message breakdown gives the same sent/delivered/read/failed.
+- A synthetic local check (scratchpad `funnel/check_funnel.py`, Django 5.2.5 on SQLite) covers 4 campaigns, multi-send chats and every exclusion; all hand-worked lines matched. It caught all 10 broken copies of the probe (`funnel/mutants.py`).
+
+**Not tested on live data:** a chat getting a second Lead AI campaign message (no live chat has had one) and a confirmed visit (none exist yet). Only the synthetic check exercises those two paths.
+
+**Shared:** `ops/wa.sh` (one usage line and the verb only), `TASKS.md`. Nothing under `backend/`, no commit.
+
+---
+
+## 2026-10-16 — High quality button on template create (Cursor)
+
+Create template dialog has a High quality button beside Select all. It loads the number list again and ticks only quality HIGH or GREEN. Sheet All Active Accounts written onto the live rows: 73 High, 10 Low (stored as YELLOW so the button leaves them off). 64 numbers with no sheet quality stay unselected. Panel published. Not a campaign send.
+
+**Shared:** `TASKS.md`, `ops/wa.sh`, `ops/catalog/set-number-quality.py`, `bitrix/public/assets/modules/template-composer.js`, `bitrix/public/assets/modules/template-composer.css`.
+
+---
+
+## 2026-10-16 — 38 Dubai01–05 numbers added to the Official panel (Cursor)
+
+Sheet numbers that were Connected but missing from the panel are now `catalog_wabanumber` rows: 14 Dubai01WBX, 7 Dubai02WBX, 6 Dubai03WBX, 4 Dubai04WBX, 7 Dubai05WBX. Created 38, skipped 0. Active numbers 109 → 147. Source manual, so the A7 channel sync will not switch them off. Webhooks were not set. The live A7 gateway key still cannot list these accounts (its channel list stays 36).
+
+**Shared:** `TASKS.md`, `ops/wa.sh`, `ops/catalog/add-dubai01-05-numbers.py`.
+
+---
+
 ## 2026-10-16 — Lead AI batch 2d, the review's 26 findings fixed: the pin, must-answer without a pause, shop customers misread, calls, counts, CRM writes (Claude Code)
 
 The batch's review (replay of the 32 launch chats, CRM and regression probes) found 26 issues; all were real and all are fixed in `backend/apps/leadai/**`. Not committed, not deployed.
@@ -676,6 +1195,36 @@ The batch's review (replay of the 32 launch chats, CRM and regression probes) fo
 **Not tested:** the real-model eval gate (SHOPS_SYSTEM is unchanged, so its MUST-ANSWER rule still tells the model to hand over: code takes that handover off when it reads the questions), PostgreSQL, the live server, Bitrix, WhatsApp.
 
 **Shared:** TASKS.md only. A deploy rebuilds all four app services, `worker-leadai` included.
+
+---
+
+## 2026-10-16 — Lead AI media library from A7's portal listings; 2e spec and board revised for Q36, no named agent and the agent desk (Claude Code)
+
+- **Library (D11, Q36):** A7's 36 International City listings collected: 34 from Property Finder (search limited to International City, broker id 8580, all four categories) and 2 Bayut-only (Nimble; all 144 Bayut listings swept). 294 JPEG photos, each listing with its listing.json, in `backend/Types shops/Portal listings/` (gitignored). Every photo was reviewed by eye (4 agents) and every hash pair checked. 7 sets built in `backend/Types shops/Residential sets/` (5 studio, 2 1BR): no person, no third-party mark, no building outside; set.json per set, README.txt for Matloob.
+- **Matloob's 25 photos traced:** France = 1891 studio, Spain = 1722 studio, Morocco = 1713/1727 studios, Greece and Russia = 1618 1BR (Greece K16). The China and England ones are on neither portal.
+- **Coverage:** Bitrix leads carry the listing ref a7group-NNNN in `UF_CRM_1760707563281`. In the last 30 days 81% of International City studio leads have their own listing's set; 1BR leads mostly get the default set (only 1618 is live).
+- **Findings:** A7 reuses photos across listings in different clusters (Q36, decided: same-type photos, never exact). 7 of 9 residential listings say unfurnished while their photos show furniture. Live studio rents are 29,000 and 32,000 against the 30,000-33,000 default (Q41). Greece shops are listed but missing from shops_facts (Q42). 14 shops are for sale with no sale facts (Q43). Only 2311 and four admin accounts can see Lead AI chats today (Q37, T100).
+- **Spec and board:** the 2e spec has its 36 named-agent places changed, a new §2.12 agent desk, §4 media rewritten for the library and a §2.2 live price check. The board has new defaults for Q31, Q32 and Q35, new rows Q37-Q43, rewritten T90-T103 rows, D11-D13 updated, a risk bullet, and a Requests line asking Cursor to fix C40's "Q21". Two agents wrote it, a critic checked it, 16 fixes were applied, and D11/D13 were corrected by hand.
+- **Not done:** nothing imported (slice E: migration 0009, the import, the pick by listing ref, captions, the panel module). No server or code change. Not tested: the bot sending a set, which cannot happen before slice E.
+- **Shared files:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, the 2e spec.
+
+---
+
+## 2026-10-16 — Lead AI layout B, left rail (Cursor)
+
+Chats and Sara leads sit in a left rail. Needs a person, Today, the Shops / Rent / Sale / Other filters, I'll call and Taken by are in the screen and hidden until batch 2e. Same API calls. Published: `screen.js` `e8e5aab9`, `thread.js` `e7c19e01`, `lead-ai.css` `f6282030`.
+
+While looking for the menu, chat **37666** (Hend) was opened. No message was sent. The newest message is inbound and the unread count is now 0, so Hend still needs a reply.
+
+**Shared:** `bitrix/public/assets/modules/lead-ai/screen.js`, `thread.js`, `lead-ai.css`, `TASKS.md`. Official inbox files were not touched.
+
+---
+
+## 2026-10-16 — Lead AI screen liquid glass (Cursor)
+
+The Lead AI screen sits on a blue-hour city photo (`bitrix/public/assets/modules/lead-ai/bg.jpg`). The bar, list and chat are frosted glass. Chat rows keep the campaign name on one line. Published with the panel.
+
+**Shared:** `bitrix/public/assets/modules/lead-ai/lead-ai.css`, `bitrix/public/assets/modules/lead-ai/bg.jpg`, `TASKS.md`.
 
 ---
 
@@ -749,36 +1298,6 @@ Launch review issues 1, 15, 19 (Django side only), 25 and 26, plus the side effe
 - the template's greeting name (the campaign side).
 
 **Shared:** TASKS.md only. Everything else is under `backend/apps/leadai/**`. A deploy rebuilds all four app services, `worker-leadai` included.
-
----
-
-## 2026-10-16 — Lead AI media library from A7's portal listings; 2e spec and board revised for Q36, no named agent and the agent desk (Claude Code)
-
-- **Library (D11, Q36):** A7's 36 International City listings collected: 34 from Property Finder (search limited to International City, broker id 8580, all four categories) and 2 Bayut-only (Nimble; all 144 Bayut listings swept). 294 JPEG photos, each listing with its listing.json, in `backend/Types shops/Portal listings/` (gitignored). Every photo was reviewed by eye (4 agents) and every hash pair checked. 7 sets built in `backend/Types shops/Residential sets/` (5 studio, 2 1BR): no person, no third-party mark, no building outside; set.json per set, README.txt for Matloob.
-- **Matloob's 25 photos traced:** France = 1891 studio, Spain = 1722 studio, Morocco = 1713/1727 studios, Greece and Russia = 1618 1BR (Greece K16). The China and England ones are on neither portal.
-- **Coverage:** Bitrix leads carry the listing ref a7group-NNNN in `UF_CRM_1760707563281`. In the last 30 days 81% of International City studio leads have their own listing's set; 1BR leads mostly get the default set (only 1618 is live).
-- **Findings:** A7 reuses photos across listings in different clusters (Q36, decided: same-type photos, never exact). 7 of 9 residential listings say unfurnished while their photos show furniture. Live studio rents are 29,000 and 32,000 against the 30,000-33,000 default (Q41). Greece shops are listed but missing from shops_facts (Q42). 14 shops are for sale with no sale facts (Q43). Only 2311 and four admin accounts can see Lead AI chats today (Q37, T100).
-- **Spec and board:** the 2e spec has its 36 named-agent places changed, a new §2.12 agent desk, §4 media rewritten for the library and a §2.2 live price check. The board has new defaults for Q31, Q32 and Q35, new rows Q37-Q43, rewritten T90-T103 rows, D11-D13 updated, a risk bullet, and a Requests line asking Cursor to fix C40's "Q21". Two agents wrote it, a critic checked it, 16 fixes were applied, and D11/D13 were corrected by hand.
-- **Not done:** nothing imported (slice E: migration 0009, the import, the pick by listing ref, captions, the panel module). No server or code change. Not tested: the bot sending a set, which cannot happen before slice E.
-- **Shared files:** `SHOPS-BOT-BOARD.md`, `TASKS.md`, the 2e spec.
-
----
-
-## 2026-10-16 — Lead AI layout B, left rail (Cursor)
-
-Chats and Sara leads sit in a left rail. Needs a person, Today, the Shops / Rent / Sale / Other filters, I'll call and Taken by are in the screen and hidden until batch 2e. Same API calls. Published: `screen.js` `e8e5aab9`, `thread.js` `e7c19e01`, `lead-ai.css` `f6282030`.
-
-While looking for the menu, chat **37666** (Hend) was opened. No message was sent. The newest message is inbound and the unread count is now 0, so Hend still needs a reply.
-
-**Shared:** `bitrix/public/assets/modules/lead-ai/screen.js`, `thread.js`, `lead-ai.css`, `TASKS.md`. Official inbox files were not touched.
-
----
-
-## 2026-10-16 — Lead AI screen liquid glass (Cursor)
-
-The Lead AI screen sits on a blue-hour city photo (`bitrix/public/assets/modules/lead-ai/bg.jpg`). The bar, list and chat are frosted glass. Chat rows keep the campaign name on one line. Published with the panel.
-
-**Shared:** `bitrix/public/assets/modules/lead-ai/lead-ai.css`, `bitrix/public/assets/modules/lead-ai/bg.jpg`, `TASKS.md`.
 
 ---
 
