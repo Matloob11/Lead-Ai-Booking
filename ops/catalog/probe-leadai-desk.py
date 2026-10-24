@@ -8,6 +8,7 @@ from django.test import Client
 
 from apps.inbox.models import Conversation
 from apps.leadai import handover_desk
+from apps.leadai.assistant.alerts import HOLD_USERS
 from apps.leadai.models import LeadAiChatState
 
 Agent = get_user_model()
@@ -28,11 +29,18 @@ responsibles = sorted({row for row in on_desk.values_list("responsible_bitrix_us
 by_responsible = {bitrix: list(on_desk.filter(responsible_bitrix_user_id=bitrix).values_list("conversation_id", flat=True)) for bitrix in responsibles}
 rows = []
 admin = Agent.objects.filter(is_active=True, is_wa_admin=True).order_by("pk").first()
+checked = []
 for bitrix in responsibles:
+    if bitrix in HOLD_USERS:
+        # Bitrix users 0 and 1 hold unassigned leads: nobody's desk by design (handover_desk.HOLD_USERS), so their chats stay
+        # on the Lead AI screen for admins (2026-10-24: three such chats made this probe expect a desk for user 1).
+        print(f"SKIP | Bitrix {bitrix}: a hold user (unassigned leads; {len(by_responsible[bitrix])} chats stay on the Lead AI screen for admins)")
+        continue
     agent = Agent.objects.filter(bitrix_user_id=bitrix, is_active=True).first()
     if agent is None:
         print(f"SKIP | Bitrix {bitrix}: no panel account ({len(by_responsible[bitrix])} chats stay on the Lead AI screen for admins)")
         continue
+    checked.append(bitrix)
     client = Client(HTTP_HOST=HOST)
     client.force_login(agent)
     me = client.get("/api/auth/me/", secure=True)
@@ -77,10 +85,10 @@ for bitrix in responsibles:
         f"other404={refused}/{refused_messages} otherdesk403={forbidden} | {sample}"
     )
     client.logout()
-if admin is not None and responsibles:
+if admin is not None and checked:
     client = Client(HTTP_HOST=HOST)
     client.force_login(admin)
-    bitrix = responsibles[0]
+    bitrix = checked[0]  # a real responsible with a panel account (never a hold user)
     view = client.get(f"/api/leadai/desk/mine/?agent={bitrix}", secure=True)
     count = len((view.json() or {}).get("results", [])) if view.status_code == 200 else None
     ok = view.status_code == 200 and count == len(by_responsible[bitrix])
