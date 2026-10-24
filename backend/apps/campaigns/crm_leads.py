@@ -729,18 +729,25 @@ def campaign_playbook(raw) -> str:
     return value if value in PLAYBOOKS else "general"
 
 
-def mark_lead_ai(campaign, playbook: str) -> str:
-    """Mark a Lead AI campaign and pass the script when the lane accepts it.
+def mark_lead_ai(campaign, playbook: str, community: str = "") -> str:
+    """Mark a Lead AI campaign and pass the script (and community) when the lane accepts them.
 
-    T20a adds ``playbook`` to ``mark_campaign``. Until that code is what the
-    process imported, the older function is called with no script so a send
-    still reaches the Lead AI screen.
+    T20a adds ``playbook`` to ``mark_campaign``; round 19 adds ``community``
+    (C44b). Until that code is what the process imported, the older function is
+    called with only the kwargs it knows so a send still reaches the Lead AI
+    screen. Unknown / International City communities are stored as '' by the lane.
     """
     from apps.leadai.lane import mark_campaign
 
     chosen = campaign_playbook(playbook)
-    if "playbook" in inspect.signature(mark_campaign).parameters:
-        mark_campaign(campaign, playbook=chosen)
+    params = inspect.signature(mark_campaign).parameters
+    kwargs = {}
+    if "playbook" in params:
+        kwargs["playbook"] = chosen
+    if "community" in params:
+        kwargs["community"] = str(community or "").strip()
+    if kwargs:
+        mark_campaign(campaign, **kwargs)
     else:
         mark_campaign(campaign)
     return chosen
@@ -759,6 +766,7 @@ def send_from_leads(
     header_media_token: str = "",
     lead_ai: bool = False,
     lead_ai_playbook: str = "",
+    community: str = "",
     field_map: dict | None = None,
 ) -> dict:
     number = number_for_agent(agent, number_id)
@@ -803,7 +811,8 @@ def send_from_leads(
     if lead_ai:
         # The popup's "Lead AI" box: these chats go to the Lead AI screen, not
         # the main inbox. Marked before the send task can pick the campaign up.
-        playbook = mark_lead_ai(campaign, lead_ai_playbook)
+        # C44b: popup community → LeadAiCampaign.community (round 19).
+        playbook = mark_lead_ai(campaign, lead_ai_playbook, community=community)
     run_campaign.delay(campaign.pk)
     return {
         "campaign_id": campaign.pk,

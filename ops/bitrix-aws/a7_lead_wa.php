@@ -197,6 +197,30 @@ function a7_lead_wa_playbook($raw): string
     return in_array($value, ['general', 'ic_shops'], true) ? $value : 'general';
 }
 
+/** C44: allow-list of canonical community names (a7_community_map.md §A). */
+function a7_lead_wa_community($raw): string
+{
+    static $allowed = null;
+    if ($allowed === null) {
+        $allowed = array_fill_keys([
+            'International City', 'Dubai Land', 'Mudon', 'Arabian Ranches 3', 'Serena',
+            'Damac Lagoons', 'Al Warsan', 'Dubai Hills Estate', 'Villanova', 'Nad Al Sheba',
+            'Al Jaddaf', 'Dubai Land Residence Complex', 'Business Bay', 'Dubai Creek Harbour',
+            'Liwan', 'Al Satwa', 'Arjan', 'The Valley', 'Dubailand', 'Dubai Silicon Oasis',
+            'Dubai Sports City', 'City Walk', 'Greens', 'Meydan', 'palm jebel ali',
+            'Jumeirah Golf Estates', 'Dubai Marina', 'Mohammed Bin Rashid City', 'Damac Hills 2',
+            'Downtown Dubai', 'Jebel Ali', 'The Greens', 'Arabian Ranches 2',
+            'Jumeirah Village Triangle', 'Town Square', 'Dubai Science Park', 'Tilal Al Ghaf',
+            'DAMAC Hills', 'Jumeirah', 'Jumeirah Village Circle', 'Mirdif', 'Sobha Hartland',
+            'The Hills', 'Meydan City', 'Rukan', 'Dubai South (Dubai World Central)',
+            'France Cluster', 'Dubai Harbour', 'England Cluster', 'Greece Cluster',
+            'Morocco Cluster', 'Persia Cluster', 'Spain Cluster', 'Zabeel',
+        ], true);
+    }
+    $value = trim((string)$raw);
+    return isset($allowed[$value]) ? $value : '';
+}
+
 function a7_lead_wa_requested_ids(): array
 {
     $raw = $_POST['lead_ids'] ?? $_REQUEST['lead_ids'] ?? [];
@@ -1422,6 +1446,10 @@ if ($action === 'send') {
         'lead_ai' => !empty($input['lead_ai']),
         'lead_ai_playbook' => !empty($input['lead_ai'])
             ? a7_lead_wa_playbook($input['lead_ai_playbook'] ?? '')
+            : '',
+        // C44: community for Lead AI; Django may ignore until Claude stores it.
+        'community' => !empty($input['lead_ai'])
+            ? (a7_lead_wa_community($input['community'] ?? '') ?: 'International City')
             : '',
     ];
     $reply = a7_lead_wa_inbox('/api/campaigns/crm-leads/send/', $payload, $cfg);

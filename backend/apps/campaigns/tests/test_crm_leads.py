@@ -356,6 +356,35 @@ class PlaybookTests(SimpleTestCase):
             self.assertEqual(mark_lead_ai("camp", "ic_shops"), "ic_shops")
         self.assertEqual(seen["playbook"], "ic_shops")
 
+    def test_forwards_community_when_the_lane_accepts_it(self):
+        """C44b: popup community reaches mark_campaign (round 19)."""
+        seen = {}
+
+        def fake(campaign, playbook="general", community=None):
+            seen["playbook"] = playbook
+            seen["community"] = community
+            return campaign
+
+        with self._patch(fake):
+            self.assertEqual(
+                mark_lead_ai("camp", "ic_shops", community="Mudon"),
+                "ic_shops",
+            )
+        self.assertEqual(seen["playbook"], "ic_shops")
+        self.assertEqual(seen["community"], "Mudon")
+
+    def test_blank_community_is_still_forwarded(self):
+        """Lane stores '' for International City / unknown; we pass the string through."""
+        seen = {}
+
+        def fake(campaign, playbook="general", community=None):
+            seen["community"] = community
+            return campaign
+
+        with self._patch(fake):
+            mark_lead_ai("camp", "general", community="")
+        self.assertEqual(seen["community"], "")
+
     def test_older_lane_still_marks_the_campaign(self):
         seen = {}
 
@@ -364,8 +393,9 @@ class PlaybookTests(SimpleTestCase):
             return campaign
 
         with self._patch(fake):
-            self.assertEqual(mark_lead_ai("camp", "nope"), "general")
+            self.assertEqual(mark_lead_ai("camp", "nope", community="Mudon"), "general")
         self.assertEqual(seen["campaign"], "camp")
+        self.assertNotIn("community", seen)
 
     def _patch(self, fake):
         from unittest.mock import patch

@@ -317,6 +317,7 @@ def send_renewals(
     owner_header_media_token="",
     lead_ai=False,
     lead_ai_playbook: str = "",
+    community: str = "",
     tenant_field_map=None,
     owner_field_map=None,
 ) -> dict:
@@ -373,7 +374,8 @@ def send_renewals(
         )
         if lead_ai:
             # The popup's "Lead AI" box: both sides follow the same script.
-            playbook = mark_lead_ai(campaign, lead_ai_playbook)
+            # C44b: popup community → LeadAiCampaign.community (round 19).
+            playbook = mark_lead_ai(campaign, lead_ai_playbook, community=community)
         queued.append({"campaign": campaign, "role": role})
 
     queue(

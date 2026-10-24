@@ -13,12 +13,43 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_LEAD_WA_V18) {
+  if (window.A7_LEAD_WA_V20) {
     return;
   }
-  window.A7_LEAD_WA_V18 = true;
+  window.A7_LEAD_WA_V20 = true;
+  // Lead AI campaigns go out only from these eight numbers. The mixed and
+  // shops templates are approved on them.
+  var LEAD_AI_NUMBERS = {
+    "971581058719": true,
+    "971581058720": true,
+    "971581058721": true,
+    "971581058722": true,
+    "971581058723": true,
+    "971581058724": true,
+    "971581058725": true,
+    "971581058726": true
+  };
+  function isLeadAiNumber(n) {
+    var digits = String((n && n.phone_number) || "").replace(/\D/g, "");
+    return !!LEAD_AI_NUMBERS[digits];
+  }
   // C41 mixed popup. 2e is live (2026-10-18).
   var C41_MIXED_LIVE = true;
+  // C44: campaign community (canonical spellings from a7_community_map.md §A).
+  var COMMUNITY_NAMES = [
+    "International City", "Dubai Land", "Mudon", "Arabian Ranches 3", "Serena",
+    "Damac Lagoons", "Al Warsan", "Dubai Hills Estate", "Villanova", "Nad Al Sheba",
+    "Al Jaddaf", "Dubai Land Residence Complex", "Business Bay", "Dubai Creek Harbour",
+    "Liwan", "Al Satwa", "Arjan", "The Valley", "Dubailand", "Dubai Silicon Oasis",
+    "Dubai Sports City", "City Walk", "Greens", "Meydan", "palm jebel ali",
+    "Jumeirah Golf Estates", "Dubai Marina", "Mohammed Bin Rashid City", "Damac Hills 2",
+    "Downtown Dubai", "Jebel Ali", "The Greens", "Arabian Ranches 2",
+    "Jumeirah Village Triangle", "Town Square", "Dubai Science Park", "Tilal Al Ghaf",
+    "DAMAC Hills", "Jumeirah", "Jumeirah Village Circle", "Mirdif", "Sobha Hartland",
+    "The Hills", "Meydan City", "Rukan", "Dubai South (Dubai World Central)",
+    "France Cluster", "Dubai Harbour", "England Cluster", "Greece Cluster",
+    "Morocco Cluster", "Persia Cluster", "Spain Cluster", "Zabeel"
+  ];
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -491,10 +522,10 @@
       ".a7-lwa-leadai:hover{background:#f8fafc;}" +
       ".a7-lwa-leadai.is-on{border-color:#7c3aed;background:#f5f3ff;color:#5b21b6;}" +
       ".a7-lwa-leadai input{margin:0;width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;}" +
-      ".a7-lwa-scriptwrap{display:inline-flex;align-items:center;gap:6px;border:1px solid #ddd6fe;" +
+      ".a7-lwa-scriptwrap,.a7-lwa-communitywrap{display:inline-flex;align-items:center;gap:6px;border:1px solid #ddd6fe;" +
       "border-radius:8px;padding:6px 8px;font-size:13px;font-weight:600;color:#5b21b6;background:#f5f3ff;}" +
-      ".a7-lwa-scriptwrap span{white-space:nowrap;}" +
-      ".a7-lwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;" +
+      ".a7-lwa-scriptwrap span,.a7-lwa-communitywrap span{white-space:nowrap;}" +
+      ".a7-lwa-script,.a7-lwa-community{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;" +
       "color:#1e1b4b;background:#fff;max-width:220px;}" +
       ".a7-lwa-scriptnote{font-size:12px;color:#92400e;max-width:220px;line-height:1.3;}" +
       ".a7-lwa-shopswarn{display:none;margin:6px 0 0;padding:8px 10px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:12px;line-height:1.35;}" +
@@ -755,13 +786,36 @@
     var mediaBar = null;
 
     var numberSelect = el("select", { className: "a7-lwa-select" });
-    numbers.forEach(function (n) {
-      var opt = el("option", { text: numberLabel(n) });
-      opt.value = String(n.id);
-      numberSelect.appendChild(opt);
-    });
-    if (selectedNumber) {
-      numberSelect.value = String(selectedNumber.id);
+    function numbersForSend() {
+      if (!leadAiBox.checked) {
+        return numbers;
+      }
+      return numbers.filter(isLeadAiNumber);
+    }
+    function fillNumberSelect(silent) {
+      var previous = numberSelect.value;
+      while (numberSelect.firstChild) {
+        numberSelect.removeChild(numberSelect.firstChild);
+      }
+      var rows = numbersForSend();
+      rows.forEach(function (n) {
+        var opt = el("option", { text: numberLabel(n) });
+        opt.value = String(n.id);
+        numberSelect.appendChild(opt);
+      });
+      if (!rows.length) {
+        var empty = el("option", { text: "No Lead AI number" });
+        empty.value = "";
+        numberSelect.appendChild(empty);
+        numberSelect.value = "";
+      } else if (rows.some(function (n) { return String(n.id) === previous; })) {
+        numberSelect.value = previous;
+      } else {
+        numberSelect.value = String(rows[0].id);
+      }
+      if (!silent && numberSelect.value !== previous) {
+        numberSelect.dispatchEvent(new Event("change"));
+      }
     }
 
     var search = el("input", {
@@ -804,6 +858,19 @@
       scriptSelect
     ]);
     scriptWrap.style.display = "none";
+    var communitySelect = el("select", {
+      className: "a7-lwa-community",
+      title: "Community for this Lead AI campaign"
+    });
+    COMMUNITY_NAMES.forEach(function (name) {
+      communitySelect.appendChild(el("option", { value: name, text: name }));
+    });
+    communitySelect.value = "International City";
+    var communityWrap = el("label", { className: "a7-lwa-communitywrap" }, [
+      el("span", { text: "Community" }),
+      communitySelect
+    ]);
+    communityWrap.style.display = "none";
     var scriptNote = el("div", {
       className: "a7-lwa-scriptnote",
       text: ""
@@ -976,7 +1043,8 @@
         return;
       }
       setSendLabel(queueLabel());
-      sendBtn.disabled = !canSend || !!(media && media.uploading);
+      var numberOk = !leadAiBox.checked || isLeadAiNumber(currentNumber());
+      sendBtn.disabled = !canSend || !numberOk || !!(media && media.uploading);
     }
     applySendState();
     function refreshLeadAiBusy() {
@@ -1029,9 +1097,14 @@
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.classList.toggle("is-on", leadAiBox.checked);
       scriptWrap.style.display = leadAiBox.checked ? "" : "none";
+      communityWrap.style.display = leadAiBox.checked ? "" : "none";
       if (leadAiBox.checked) {
         scriptSelect.value = "ic_shops";
+        if (!communitySelect.value) {
+          communitySelect.value = "International City";
+        }
       }
+      fillNumberSelect();
       syncScriptNote();
       refreshLeadAiBusy();
     });
@@ -1809,7 +1882,10 @@
         button_variables: buttonVariables,
         header_media_token: kind && media ? media.token : "",
         lead_ai: !!leadAiBox.checked,
-        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : ""
+        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : "",
+        community: leadAiBox.checked
+          ? (communitySelect.value || "International City")
+          : ""
       }));
       fetchJson(ENDPOINT, {
         method: "POST",
@@ -1842,6 +1918,7 @@
         });
     });
 
+    fillNumberSelect(true);
     renderChips();
     renderList();
     renderSelected();
@@ -1894,6 +1971,7 @@
         el("div", { className: "a7-lwa-actions" }, [
           leadAiToggle,
           scriptWrap,
+          communityWrap,
           scriptNote,
           shopsWarn,
           dayWarn,

@@ -9,12 +9,40 @@
  * screen of the WhatsApp panel instead of the main inbox.
  */
 (function () {
-  if (window.A7_RENEWALS_WA_V9) {
+  if (window.A7_RENEWALS_WA_V11) {
     return;
   }
-  window.A7_RENEWALS_WA_V9 = true;
+  window.A7_RENEWALS_WA_V11 = true;
+  var LEAD_AI_NUMBERS = {
+    "971581058719": true,
+    "971581058720": true,
+    "971581058721": true,
+    "971581058722": true,
+    "971581058723": true,
+    "971581058724": true,
+    "971581058725": true,
+    "971581058726": true
+  };
+  function isLeadAiNumber(n) {
+    var digits = String((n && n.phone_number) || "").replace(/\D/g, "");
+    return !!LEAD_AI_NUMBERS[digits];
+  }
   // C41 mixed popup. 2e is live (2026-10-18).
   var C41_MIXED_LIVE = true;
+  var COMMUNITY_NAMES = [
+    "International City", "Dubai Land", "Mudon", "Arabian Ranches 3", "Serena",
+    "Damac Lagoons", "Al Warsan", "Dubai Hills Estate", "Villanova", "Nad Al Sheba",
+    "Al Jaddaf", "Dubai Land Residence Complex", "Business Bay", "Dubai Creek Harbour",
+    "Liwan", "Al Satwa", "Arjan", "The Valley", "Dubailand", "Dubai Silicon Oasis",
+    "Dubai Sports City", "City Walk", "Greens", "Meydan", "palm jebel ali",
+    "Jumeirah Golf Estates", "Dubai Marina", "Mohammed Bin Rashid City", "Damac Hills 2",
+    "Downtown Dubai", "Jebel Ali", "The Greens", "Arabian Ranches 2",
+    "Jumeirah Village Triangle", "Town Square", "Dubai Science Park", "Tilal Al Ghaf",
+    "DAMAC Hills", "Jumeirah", "Jumeirah Village Circle", "Mirdif", "Sobha Hartland",
+    "The Hills", "Meydan City", "Rukan", "Dubai South (Dubai World Central)",
+    "France Cluster", "Dubai Harbour", "England Cluster", "Greece Cluster",
+    "Morocco Cluster", "Persia Cluster", "Spain Cluster", "Zabeel"
+  ];
 
   var DETAIL_FIELDS = [
     ["name", "Name"],
@@ -516,8 +544,9 @@
       ".a7-rwa-leadai:hover{background:#f8fafc;}",
       ".a7-rwa-leadai.is-on{border-color:#7c3aed;background:#f5f3ff;color:#5b21b6;}",
       ".a7-rwa-leadai input{margin:0;width:15px;height:15px;accent-color:#7c3aed;cursor:pointer;}",
-      ".a7-rwa-scriptwrap{display:inline-flex;align-items:center;gap:6px;height:36px;border:1px solid #ddd6fe;border-radius:10px;padding:0 8px;font:700 13px/1 Segoe UI,Arial,sans-serif !important;color:#5b21b6;background:#f5f3ff;}",
-      ".a7-rwa-scriptwrap span{white-space:nowrap;}",
+      ".a7-rwa-scriptwrap,.a7-rwa-communitywrap{display:inline-flex;align-items:center;gap:6px;height:36px;border:1px solid #ddd6fe;border-radius:10px;padding:0 8px;font:700 13px/1 Segoe UI,Arial,sans-serif !important;color:#5b21b6;background:#f5f3ff;}",
+      ".a7-rwa-scriptwrap span,.a7-rwa-communitywrap span{white-space:nowrap;}",
+      ".a7-rwa-community{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font-size:13px;max-width:200px;}",
       ".a7-rwa-script{border:1px solid #c4b5fd;border-radius:6px;padding:4px 6px;font:600 13px/1.2 Segoe UI,Arial,sans-serif !important;color:#1e1b4b;background:#fff;max-width:220px;}",
       ".a7-rwa-scriptnote{font:12px/1.3 Segoe UI,Arial,sans-serif !important;color:#92400e;max-width:220px;}",
       ".a7-rwa-cancel,.a7-rwa-send{height:36px;border-radius:10px;padding:0 14px;cursor:pointer;font:700 13px/1 Segoe UI,Arial,sans-serif !important;}",
@@ -1438,6 +1467,19 @@
       scriptSelect
     ]);
     scriptWrap.style.display = "none";
+    var communitySelect = el("select", {
+      className: "a7-rwa-community",
+      title: "Community for this Lead AI campaign"
+    });
+    COMMUNITY_NAMES.forEach(function (name) {
+      communitySelect.appendChild(el("option", { value: name, text: name }));
+    });
+    communitySelect.value = "International City";
+    var communityWrap = el("label", { className: "a7-rwa-communitywrap" }, [
+      el("span", { text: "Community" }),
+      communitySelect
+    ]);
+    communityWrap.style.display = "none";
     var scriptNote = el("div", {
       className: "a7-rwa-scriptnote",
       text: ""
@@ -1461,9 +1503,25 @@
     leadAiBox.addEventListener("change", function () {
       leadAiToggle.className = "a7-rwa-leadai" + (leadAiBox.checked ? " is-on" : "");
       scriptWrap.style.display = leadAiBox.checked ? "" : "none";
+      communityWrap.style.display = leadAiBox.checked ? "" : "none";
       if (leadAiBox.checked) {
         scriptSelect.value = "ic_shops";
+        if (!communitySelect.value) {
+          communitySelect.value = "International City";
+        }
       }
+      if (leadAiBox.checked && !isLeadAiNumber(currentNumber())) {
+        var leadAiRows = numbers.filter(isLeadAiNumber);
+        if (leadAiRows.length) {
+          selectedNumberId = String(leadAiRows[0].id);
+          pickedName.textContent = numberName(leadAiRows[0]);
+          pickedPhone.textContent = numberPhone(leadAiRows[0]);
+          tenantPicker.refresh();
+          ownerPicker.refresh();
+          renderPreview();
+        }
+      }
+      paintNumbers();
       syncScriptNote();
       if (!busy) {
         sendBtn.textContent = sendLabel();
@@ -1491,6 +1549,9 @@
       var qDigits = q.replace(/\D/g, "");
       var shown = 0;
       numbers.forEach(function (n) {
+        if (leadAiBox.checked && !isLeadAiNumber(n)) {
+          return;
+        }
         var name = numberName(n);
         var phone = String(n.phone_number || "");
         var hay = (
@@ -1606,7 +1667,10 @@
         tenant_header_media_token: tenantPicker.mediaToken(),
         owner_header_media_token: ownerPicker.mediaToken(),
         lead_ai: !!leadAiBox.checked,
-        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : ""
+        lead_ai_playbook: leadAiBox.checked ? (scriptSelect.value || "general") : "",
+        community: leadAiBox.checked
+          ? (communitySelect.value || "International City")
+          : ""
       }));
       fetchJson(ENDPOINT, {
         method: "POST",
@@ -1702,6 +1766,7 @@
         el("div", { className: "a7-rwa-actions" }, [
           leadAiToggle,
           scriptWrap,
+          communityWrap,
           scriptNote,
           el("button", { className: "a7-rwa-cancel", type: "button", text: "Cancel" }),
           sendBtn
