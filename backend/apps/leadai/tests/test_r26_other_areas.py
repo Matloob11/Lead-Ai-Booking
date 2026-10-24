@@ -144,12 +144,25 @@ class FirstNoTests(ShopsBase):
         self.assertFalse(followups.other_areas_pending(followups.read_since(self.conversation)))
 
     def test_a_backstop_turn_with_codes_own_step_keeps_it(self):
-        # The model's none over an area decline (settle marks it: no handover, no visit booked), but the turn proposes a
-        # time (code's own work): plain_turn refuses, so no offer goes over it.
-        proposal = shop_answer("Would 11 AM or 5 PM tomorrow work for you?", action="tentative", place="office", date="2026-10-13")
-        outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [proposal])
+        # Settle marks the model's none over an area decline; a later step of code's own (here a fixed line, which
+        # "converted" marks) lands on the same turn: plain_turn refuses, so code's line goes, never the offer over it.
+        # (A time the model proposed that the customer never named is no step of code's: own_offer clears it, and the offer
+        # rightly replaces a viewing pitch to someone who just said no.)
+        real = engine.settle
+        marked = []
+
+        def settle_then_codes_line(answer, *args, **kwargs):
+            out = real(answer, *args, **kwargs)
+            marked.append(answer.get("backstop"))
+            answer["converted"] = "holding"
+            answer["reply"] = rules.line("holding", "en")
+            return out
+
+        with patch.object(engine, "settle", side_effect=settle_then_codes_line):
+            outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [shop_answer("Noted, thank you.")])
+        self.assertEqual(marked, [engine.AREA_BACKSTOP])  # the turn reached the dispatch's gate marked
         self.assertIsNone(self.state().facts.get("other_areas_offered"))
-        self.assertNotIn("Which area", self.body(outcome))
+        self.assertEqual(self.body(outcome), rules.line("holding", "en"))
 
     def test_plain_turn_refuses_every_step_of_codes(self):
         bare = {"handover": {"needed": False, "reason": None}, "appointment": {"action": "none"}}
