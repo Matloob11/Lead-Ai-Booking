@@ -1,3 +1,113 @@
+## 2026-10-24 — git push origin main (Cursor)
+
+Pushed Cursor commits `aabadd0..7018590` to `origin/main` (plain push, accepted). No force. Round 28 still not live.
+
+**Shared:** none beyond the remote.
+
+---
+
+## 2026-10-24 — Audit probe: missing nudge_1 on 54298 / 54328 / 54474 / 54507 / 54618 (Cursor)
+
+Read-only (`ops/wa.sh probe-audit-nudges` + `logs app worker-leadai` + SQL). Last outbound status was fine (read/delivered) on all five — not a send-status hold.
+
+| Chat | Last out | Status | `bitrix_blocks` (live probe) | worker-leadai (sample) |
+|---|---|---|---|---|
+| 54298 | 225330 | read | meeting (Meeting/Viewing Done) | `nudge_1 … meeting (Meeting/Viewing Done)` / intermittent `lead could not be read` |
+| 54328 | 225400 | read | closed stage (Not Interested) | `nudge_1 … closed stage already (Not Interested)` |
+| 54474 | 226230 | read | closed stage (Not Interested) | same + many `lead could not be read; tried again later` |
+| 54507 | 225955 | read | closed stage (UC_6OJJ01) | same |
+| 54618 | 225833 | delivered | closed stage (3) | `lead could not be read` then closed-stage when readable |
+
+**Cause:** `followups.bitrix_blocks` — closed Bitrix stage / meeting stage (and Bitrix read failures under load, which also hold the nudge). Not the outbound WhatsApp status.
+
+**Proposed fix (Claude / Lead AI):** (1) Under Bitrix 429, do not treat “could not be read” as a permanent hold for quiet what-need chats — retry with backoff or allow nudge_1 when the last local state is still “awaiting need” and Bot Status is empty. (2) Meeting/Viewing Done should not block a check-in when no open appointment exists in Lead AI. (3) Agents: hand check-in while the window is open, else template.
+
+**Shared:** `ops/wa.sh` (`probe-audit-nudges`), `ops/catalog/probe-audit-nudges.py`, TASKS.
+
+---
+
+## 2026-10-24 — Audit probe: chat 54303 slow reply (7 min) (Cursor)
+
+Inbound message **226308** at **2026-10-23 17:11:27 UTC** (“not less 900sqf”). Turn **1690**: `created_at=17:18:25`, `finished_at=17:18:33`, `status=replied`, `calls=1`, `latency_ms=5835`, `prompt_tokens=7825`, `completion_tokens=353`, reply **226310** at 17:18:31. **No model retries** — the ~7 minutes sat **before** the turn row was created (queue / worker lag). worker-leadai logs for that message are no longer in the current container tail.
+
+**Proposed fix (Claude):** surface queue age on Lead AI turns (queued_at vs started); alert when inbound waits >2 min; scale worker-leadai under reconnect bursts.
+
+**Shared:** TASKS.
+
+---
+
+## 2026-10-24 — Audit probe: Network Banned on campaigns 710–725 (Cursor)
+
+**Raw gateway text (live rows):** `Network Banned. Please contact your administrator. This From-number cannot send until the provider unbans it. Pick another number and try again.`
+
+Audit-time count was **31**; **live DB now** still has **6** rows with that error (campaigns 714,715,717,719,724; number_ids **122,123,124,125,129** → 971581058723/724/725/726/720). Per number now: 122:1, 123:2, 124:1, 125:1, 129:1. **None** of those phones show a later `sent` on 710–725 (`sent_elsewhere=0`). Four are already `exhausted` (attempt_count=5); two still `failed`/retrying. Docker log tails no longer retain the morning Ban burst (0 lines in last 50k). Likely the other ~25 succeeded later and cleared `error_detail` on SENT (34 rows in 710–725 have `attempt_count>1` and status sent — any transient cause).
+
+**Proposed fix:** on Network Banned, stop retrying that **number** for the campaign and move remaining recipients to another WABA; page ops when Ban appears.
+
+**Shared:** TASKS.
+
+---
+
+## 2026-10-24 — Audit probe: Bitrix crm.item.add 429 / local rate limit on 710–725 (Cursor)
+
+Audit snapshot (~12:55 UTC): **124** failed on Bitrix rate limits (user brief said ~165). **Live DB now:** **1** `exhausted` (`crm.item.add: HTTP 429, the portal answered with something that is not JSON`, campaign 713 / number 120, attempts=5) and **1** still `failed` (`crm.item.add: local rate limit, no Bitrix request slot within 2.5 s`, campaign 723 / number 123, attempts=4). The rest of the wave almost certainly **sent on retry** (error cleared on success); **34** recipients in 710–725 are `sent` with `attempt_count>1` (upper bound across all transient errors, not 429-only). Worker logs still show heavy Bitrix rate-limit noise on CRM mirrors.
+
+**Proposed fix:** already in send scripts (max 2 campaigns in flight). Campaign runner: longer backoff on `crm.item.add` 429; do not burn all 5 attempts in minutes.
+
+**Shared:** TASKS.
+
+---
+
+## 2026-10-24 — Agents now: open 24h windows still awaiting a person (Cursor)
+
+Read-only SQL (`sent_by_id` = human). As of probe (~13:37 UTC 2026-10-24). Windows already closed for 54183 / 54641 / 54298 / 54328 / 54279 / 54562 before this table.
+
+| Chat | What to send | Window closes (UTC) |
+|---|---|---|
+| 54640 | Answer or close the broker hand-off after “Not now” | 2026-10-24 13:44 |
+| 54507 | Check-in / clarify shop vs studio (they said Rent, “My self”) | 2026-10-24 14:00 |
+| 54545 | Broker reply (sharing for their client) or polite no-agents line | 2026-10-24 14:02 |
+| 54530 | Broker/sales hand-off: client wants already-rented unit | 2026-10-24 14:11 |
+| 54503 | Broker hand-off (“looking for my client”) | 2026-10-24 14:46 |
+| 54474 | Check-in after what-need question (Yes, still looking) | 2026-10-24 16:21 |
+| 54533 | Send shop options (they asked; AI never sent listings) | 2026-10-24 16:26 |
+| 54303 | Shortlist 900+ sq ft / Type 3; confirm Monday; price per sq ft | 2026-10-25 06:50 |
+| 54129 | Parking-side shops >720 sq ft, budget ~55k; send photos/options | 2026-10-25 10:54 |
+| 54240 | Human broker follow-up (window open until tomorrow) | 2026-10-25 11:23 |
+
+**Shared:** TASKS.
+
+---
+
+## 2026-10-24 — Resend-skipped dry-run prepared (681–689, 710–725) (Cursor)
+
+`ops/wa.sh leadai-resend-skipped-dryrun` → `ops/catalog/leadai-resend-skipped-dryrun.py`. Uses `should_resend_recipient`; counts phones with any template from us in the last 24h (round 28 skip); prints two-at-a-time queue order. **Not sent.**
+
+Live dry-run totals: **qualify=2300**, **recent_template_24h=151**, **would_queue_after_24h_skip=2149**. 681–689 still carry most of the Meta-cap skips; 710–717 almost all recent-template blocked; 718–725 large would-queue. Run for real only after TASKS “Lead AI round 28 live” + Matloob go (script refuses SEND without `RESEND_SKIPPED_CONFIRM=YES`).
+
+**Shared:** `ops/wa.sh`, `ops/catalog/leadai-resend-skipped-dryrun.py`, TASKS.
+
+---
+
+## 2026-10-24 — Old6m audience rebuilt (dry-run only) for agency default (Cursor)
+
+Bitrix `STATUS_ID=UC_PVKGEG`: **2275** leads. Already on any Lead AI campaign: **2093**. No phone: **152**. After dedupe: remaining fresh **~30**.
+
+Agency words on raw title: **63** — almost all false positives from title `WAZZUP: … A7 Group Real Estate`. On **name + company** (or title with channel prefixes stripped): **15** real skips (Driven/Forbes Properties, Property Consultant, several LLCs, etc.). Send scripts updated to strip those prefixes before matching; **default still waits Matloob’s go**.
+
+Remaining after filters (approx): **ic≈18**, **other≈11**, split across 719–726. No send; no audience file written to the server.
+
+**Shared:** `ops/catalog/leadai-sept-reconnect.py`, `ops/catalog/leadai-old6m-send.py` (title clean), TASKS.
+
+---
+
+## 2026-10-24 — C53 / C58 / C60 / C62 / agency default: still waiting Matloob (Cursor)
+
+No go received this round. Board ask from earlier stands.
+
+**Shared:** TASKS.
+
+---
 ## 2026-10-24 — Commit live Cursor work (C44, shops cap, property_enquiry, Campaigns history, ops) (Cursor)
 
 One commit per feature; md5 checked against live before each. No `build`/`up`/backend push (waiting Claude "Lead AI round 28 live").

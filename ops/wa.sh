@@ -872,6 +872,26 @@ case "$cmd" in
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
 
+  probe-audit-nudges)
+    # Read-only: why nudge_1 held for the 2026-10-24 reconnect audit quiet chats. Nothing sent.
+    [[ $# -eq 0 ]] || die "probe-audit-nudges takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-audit-nudges.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-audit-nudges.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  leadai-resend-skipped-dryrun)
+    # Read-only dry-run for resend-skipped on 681-689 and 710-725. Nothing queued.
+    [[ $# -eq 0 ]] || die "leadai-resend-skipped-dryrun takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-resend-skipped-dryrun.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-resend-skipped-dryrun.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
   leadai-sept-reconnect)
     # September 2026 CRM leads not yet in any Lead AI campaign → intl_city_property_reconnect
     # on the eight Coastline/Blue Brick numbers (Lead AI, ic_shops). Dry-run by default; --send queues.

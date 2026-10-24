@@ -77,8 +77,24 @@ def canonical_phone(value: str) -> str:
     return digits
 
 
+def _clean_title(title: str) -> str:
+    """Drop our channel / portal prefixes so 'A7 Group Real Estate' in the title is not an agency hit."""
+    text = str(title or "")
+    text = re.sub(r"(?i)WAZZUP:.*$", "", text)
+    text = re.sub(r"(?i)A7\s*Group\s*Real\s*Estate", "", text)
+    text = re.sub(r"(?i)Property Finder WhatsApp\s*\|?\s*", "", text)
+    text = re.sub(r"(?i)Bayut WhatsApp\s*\|?\s*", "", text)
+    return text.strip(" |")
+
+
 def looks_agency(row: dict) -> bool:
-    blob = " ".join(str(row.get(key) or "") for key in ("name", "company", "title"))
+    blob = " ".join(
+        [
+            str(row.get("name") or ""),
+            str(row.get("company") or ""),
+            _clean_title(row.get("title") or ""),
+        ]
+    )
     return bool(blob.strip() and _AGENCY_RE.search(blob))
 
 
