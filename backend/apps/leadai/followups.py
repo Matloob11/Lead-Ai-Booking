@@ -550,6 +550,18 @@ def question_left(conversation, reading: Reading | None = None) -> bool:
     return any(nudges.defers_question(transcript.outbound_text(row)) for row in ours)
 
 
+def other_areas_pending(reading: Reading) -> bool:
+    """Round 26: our newest words are the other-areas offer a first no got (engine.other_areas_offer marks it), and they
+    have not answered it: they turned us down once, so no nudge or template follows it (no follow-up after a decline)."""
+    from .assistant import engine
+
+    row = reading.ours_newest
+    if row is None or transcript.payload(row).get("offer") != engine.OFFER_MARK:
+        return False
+    newest = reading.customer_newest
+    return newest is None or newest.pk < row.pk
+
+
 def holds(conversation, state, now, kind: str, reading: Reading | None = None) -> str:
     """Why this follow-up never goes to this chat, else '' (blocked() still decides the rest: a stop, a
     pause, a handover, "not interested", the registry). ``kind``: the follow-up (the check-back answers
@@ -565,7 +577,7 @@ def holds(conversation, state, now, kind: str, reading: Reading | None = None) -
         return HELD_RENTED
     if kind in (REENGAGE, CHECK_BACK) and wants_no_shop(facts, reading):
         return HELD_NO_SHOP
-    if turned_down(reading, now):
+    if turned_down(reading, now) or other_areas_pending(reading):
         return HELD_DECLINED
     if kind != CHECK_BACK and said_not_now(state, reading, now):
         return HELD_NOT_NOW

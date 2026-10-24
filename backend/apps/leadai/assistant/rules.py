@@ -25,6 +25,9 @@ import unicodedata
 STOP_ALL = "stop_all"
 NOT_INTERESTED = "not_interested"
 WRONG_NUMBER = "wrong_number"
+# Round 26: the other-areas offer a first "not interested" gets instead of the close (engine.offers_other_areas); "{areas}"
+# is filled by code with the other communities that have a live unit (engine.other_areas_text), or nothing.
+OTHER_AREAS = "other_areas"
 # Shops chats only (the model's call): a forwarded chain message, a scam or an advert.
 SPAM = "spam"
 
@@ -564,6 +567,14 @@ LINES = {
         "ur": "کوئی بات نہیں، بتانے کا شکریہ۔ کبھی ضرورت ہو تو یہیں میسج کر دیں۔",
         "hi_latin": "Koi baat nahi, batane ke liye shukriya. Kabhi zaroorat ho to yahin message kar dijiye.",
         "hi": "कोई बात नहीं, बताने के लिए शुक्रिया। कभी ज़रूरत हो तो यहीं मैसेज कर दीजिए।",
+    },
+    "other_areas": {
+        "en": "No problem. We also have options in other areas of Dubai{areas}. Which area are you looking in, and what kind of unit? We can show you there.",
+        "ar": "لا مشكلة. لدينا أيضاً خيارات في مناطق أخرى من دبي{areas}. في أي منطقة تبحث، وأي نوع من الوحدات؟ يمكننا أن نعرض عليك هناك.",
+        "ur_latin": "Koi baat nahi. Dubai ke doosre ilaqon mein bhi hamare paas options hain{areas}. Aap kis ilaqe mein dekh rahe hain, aur kis tarah ka unit? Hum aap ko wahan dikha sakte hain.",
+        "ur": "کوئی بات نہیں۔ دبئی کے دوسرے علاقوں میں بھی ہمارے پاس آپشنز ہیں{areas}۔ آپ کس علاقے میں دیکھ رہے ہیں، اور کس طرح کا یونٹ؟ ہم آپ کو وہاں دکھا سکتے ہیں۔",
+        "hi_latin": "Koi baat nahi. Dubai ke doosre ilaakon mein bhi hamare paas options hain{areas}. Aap kis ilaake mein dekh rahe hain, aur kis tarah ka unit? Hum aapko wahan dikha sakte hain.",
+        "hi": "कोई बात नहीं। दुबई के दूसरे इलाक़ों में भी हमारे पास ऑप्शन हैं{areas}। आप किस इलाक़े में देख रहे हैं, और किस तरह का यूनिट? हम आपको वहाँ दिखा सकते हैं।",
     },
     "holding": {
         "en": "Our specialist has your message and will reply here.",
