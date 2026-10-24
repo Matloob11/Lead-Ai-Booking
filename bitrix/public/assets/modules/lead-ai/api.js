@@ -93,6 +93,11 @@ export const leadAiApi = {
   /** Reports (assistant/digest.py): {today: {day, stats, text}, digests: [{day, stats, text, sent_to}], digest_hour}. */
   digests: ({ days = 14 } = {}) => apiFetch(`/api/leadai/digests/?days=${Number(days) || 14}`),
 
+  /** Tools → Campaigns: Lead AI campaigns only (all creators), with delivered/read. */
+  campaigns: ({ limit = 50, offset = 0 } = {}) =>
+    apiFetch(`/api/leadai/campaigns/?limit=${Number(limit) || 50}&offset=${Number(offset) || 0}`),
+  campaign: (id) => apiFetch(`/api/leadai/campaigns/${Number(id) || 0}/`),
+
   /** The community packs (assistant/communities.py): {communities: [{name, aliases, sub_areas, units, units_live, ...}], can_edit}. */
   communities: () => apiFetch("/api/leadai/communities/"),
 

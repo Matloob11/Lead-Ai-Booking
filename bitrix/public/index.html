@@ -198,7 +198,7 @@
           // Inbox is a large module graph. Load it after SSO so a broken
           // import cannot stall BX24.init — that handshake already ran from
           // bx24-early.js; this only paints the panel.
-          const { mountInbox } = await import("/app/assets/modules/inbox.js?v=rotate2");
+          const { mountInbox } = await import("/app/assets/modules/inbox.js?v=rotate3");
           await mountInbox(root, { me, openRequest });
         } catch (error) {
           fail(step, error);

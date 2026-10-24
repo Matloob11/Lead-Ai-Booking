@@ -1101,7 +1101,7 @@ def assistant_settings(request):
     return Response(serialize_settings(row, request.user))
 
 
-# Reports and communities ------------------------------------------------------------------------
+# Reports, Campaigns history, and communities ----------------------------------------------------
 
 
 DIGEST_DAYS_MAX = 60
@@ -1129,6 +1129,46 @@ def digests(request):
         "digests": [serialize_digest(row) for row in LeadAiDigest.objects.order_by("-day")[:days]],
         "digest_hour": digest.DIGEST_HOUR,
     })
+
+
+@api_view(["GET"])
+def campaign_list(request):
+    """Tools → Campaigns: every Lead AI campaign (all creators), newest first, with queue and delivered/read counts."""
+    from . import campaign_history
+
+    if not campaign_history.can_view(request.user):
+        return Response({"detail": "Lead AI access is required."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        limit = max(1, min(campaign_history.LIST_LIMIT_MAX, int(request.GET.get("limit", campaign_history.LIST_LIMIT_DEFAULT))))
+    except (TypeError, ValueError):
+        limit = campaign_history.LIST_LIMIT_DEFAULT
+    try:
+        offset = max(0, int(request.GET.get("offset", 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    qs = campaign_history.lead_ai_campaigns_qs()
+    total = qs.count()
+    page = list(qs[offset : offset + limit])
+    return Response(
+        {
+            "count": total,
+            "limit": limit,
+            "offset": offset,
+            "results": campaign_history.serialize_many(page),
+        }
+    )
+
+
+@api_view(["GET"])
+def campaign_detail(request, pk):
+    """One Lead AI campaign for the Campaigns dialog detail pane."""
+    from . import campaign_history
+
+    if not campaign_history.can_view(request.user):
+        return Response({"detail": "Lead AI access is required."}, status=status.HTTP_403_FORBIDDEN)
+    campaign = get_object_or_404(campaign_history.lead_ai_campaigns_qs(), pk=pk)
+    delivery = campaign_history.delivery_counts([campaign]).get(campaign.pk) or {"delivered": 0, "read": 0}
+    return Response(campaign_history.serialize(campaign, delivery=delivery))
 
 
 def serialize_community(pack) -> dict:

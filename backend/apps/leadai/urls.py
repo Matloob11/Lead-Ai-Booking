@@ -27,6 +27,9 @@ urlpatterns = [
     path("access/<str:bitrix_id>/", views.access_update, name="access-update"),
     # The daily digests (assistant/digest.py) for the Reports dialog: the stored days and today so far.
     path("digests/", views.digests, name="digests"),
+    # Tools → Campaigns: Lead AI campaign history (queue + delivered/read; all creators).
+    path("campaigns/", views.campaign_list, name="campaign-list"),
+    path("campaigns/<int:pk>/", views.campaign_detail, name="campaign-detail"),
     # The community packs (assistant/communities.py): the list for the panel; edited in Django admin for now.
     path("communities/", views.communities, name="communities"),
     path("communities/new/", views.community_create, name="community-create"),

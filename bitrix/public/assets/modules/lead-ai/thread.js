@@ -117,6 +117,12 @@ export function momentLabel(iso) {
   return dayKey(iso) === dayKey(new Date().toISOString()) ? TIME.format(date) : DAY_TIME.format(date);
 }
 
+/** " since 3:40 pm" for pill titles; "" when there is no moment. Used by modeView and the co-pilot draft. */
+function sinceLabel(iso) {
+  const when = momentLabel(iso);
+  return when ? ` since ${when}` : "";
+}
+
 /** English day separators (the shared dayLabel says "Aaj"/"Kal"). */
 function dayLabel(iso) {
   const date = new Date(iso);
@@ -243,7 +249,6 @@ export function aiStateView(ai, conversation = null) {
 function modeView(ai, conversation) {
   const mode = String(ai?.mode || "");
   if (!mode) return null;
-  const since = (iso) => (momentLabel(iso) ? ` since ${momentLabel(iso)}` : "");
   if (mode === "on") {
     const closed =
       conversation && conversation.is_session_open === false
@@ -264,21 +269,21 @@ function modeView(ai, conversation) {
         label: "AI paused: broker",
         tone: "paused",
         title:
-          `The customer is a broker or asks for a client, so the AI handed the chat to the team${since(ai.paused_at)}. ` +
+          `The customer is a broker or asks for a client, so the AI handed the chat to the team${sinceLabel(ai.paused_at)}. ` +
           "It does not answer until someone presses Resume AI.",
       };
     }
     return {
       label: ai.paused_by ? `AI paused by ${ai.paused_by}` : "AI paused",
       tone: "paused",
-      title: `Paused${since(ai.paused_at)}. The AI does not answer until someone presses Resume AI. Meeting reminders still go out.`,
+      title: `Paused${sinceLabel(ai.paused_at)}. The AI does not answer until someone presses Resume AI. Meeting reminders still go out.`,
     };
   }
   if (mode === "stopped") {
     return {
       label: ai.stop_reason ? `AI stopped: ${ai.stop_reason}` : "AI stopped",
       tone: "stopped",
-      title: `Stopped${since(ai.stopped_at)}. The AI does not answer until someone presses Resume AI.`,
+      title: `Stopped${sinceLabel(ai.stopped_at)}. The AI does not answer until someone presses Resume AI.`,
     };
   }
   if (mode === "handed_over") {
@@ -349,6 +354,15 @@ function fallbackLabel(message) {
 
 function crmWord(entity) {
   return { lead: "Lead", deal: "Deal", owner_data: "Owner Data" }[entity] || "CRM";
+}
+
+/** Bitrix detail path for a Lead AI chat's CRM link (lead_ai_info). */
+function crmPath(entity, id) {
+  const n = Number(id) || 0;
+  if (!n) return "";
+  if (entity === "lead") return `/crm/lead/details/${n}/`;
+  if (entity === "deal") return `/crm/deal/details/${n}/`;
+  return "";
 }
 
 /** The reply buttons our meeting reminder carried: shown, never pressable here. */
@@ -576,7 +590,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
     const head = el("div.lai-draft__head", {}, [
       icon("zap", { size: 13 }),
       el("span.lai-draft__title", { title: kindTitle }, [asked ? "AI answer to your question" : "AI draft reply"]),
-      el("span.lai-draft__meta", {}, [since(draft.at).replace(/^ /, "") || "just now"]),
+      el("span.lai-draft__meta", {}, [sinceLabel(draft.at).replace(/^ /, "") || "just now"]),
     ]);
     const body = el("div.lai-draft__body", {}, [
       asked ? el("div.lai-draft__question", {}, [`You asked: ${asked}`]) : null,
@@ -737,15 +751,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
             onclick: confirmDone,
           }, [icon("check", { size: 14 }), "Done"]),
         ]
-      : [
-          ...aiControls(conversation),
-          windowPill,
-          el("button.lai-btn.lai-btn--ghost.lai-move", {
-            type: "button",
-            title: "Put this chat back in the main inbox",
-            onclick: confirmMove,
-          }, [icon("reply", { size: 15 }), "Move to inbox"]),
-        ];
+      : [windowPill, aiStatusPill(conversation), openLeadButton(conversation), actionsMenu(conversation)].filter(Boolean);
 
     clear(header).append(
       el("div.lai-avatar", {}, [initials(name)]),
@@ -771,6 +777,108 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       ]),
       el("div.lai-thread__tools", {}, tools)
     );
+  }
+
+  /** The AI on/paused pill only (Pause / Resume live in the Actions menu). */
+  function aiStatusPill(conversation) {
+    const ai = conversation.lead_ai_ai;
+    const view = aiStateView(ai, conversation);
+    if (!view) return null;
+    return el("span.lai-ai", { class: `lai-ai--${view.tone}`, title: view.title }, [
+      icon("zap", { size: 12 }),
+      el("span.lai-ai__label", {}, [view.label]),
+    ]);
+  }
+
+  /** Opens this chat's Bitrix lead (or deal) in the CRM slider. Hidden when the chat has no CRM id. */
+  function openLeadButton(conversation) {
+    const info = conversation?.lead_ai_info || {};
+    const entity = String(info.crm_entity || "").toLowerCase();
+    const path = crmPath(entity, info.crm_id);
+    if (!path) return null;
+    const label = entity === "lead" ? "Open Lead" : `Open ${crmWord(entity)}`;
+    return el(
+      "button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-open-lead",
+      {
+        type: "button",
+        title: `Open ${crmWord(entity).toLowerCase()} #${info.crm_id} in Bitrix`,
+        onclick: () => {
+          if (typeof window.BX24?.openPath === "function") {
+            window.BX24.openPath(path);
+            return;
+          }
+          window.open(path, "_blank", "noopener");
+        },
+      },
+      [icon("user", { size: 14 }), label]
+    );
+  }
+
+  /** Pause / Resume AI and Move to inbox behind one overflow control. */
+  function actionsMenu(conversation) {
+    const ai = conversation.lead_ai_ai;
+    const items = [];
+    if (ai && ["paused", "stopped", "handed_over"].includes(ai.mode)) {
+      items.push(aiButton("resume"));
+    }
+    if (ai && ["on", "handed_over"].includes(ai.mode)) {
+      items.push(aiButton("pause"));
+    }
+    items.push(
+      el("button.lai-btn.lai-btn--ghost.lai-move", {
+        type: "button",
+        title: "Put this chat back in the main inbox",
+        onclick: () => {
+          closeActionsMenu();
+          confirmMove();
+        },
+      }, [icon("reply", { size: 15 }), "Move to inbox"])
+    );
+    const panel = el("div.lai-menu__panel", { hidden: true, role: "menu", "aria-label": "Chat actions" }, items);
+    const trigger = el(
+      "button.lai-btn.lai-btn--ghost.lai-btn--sm.lai-menu__trigger",
+      {
+        type: "button",
+        "aria-expanded": "false",
+        "aria-haspopup": "true",
+        title: "Pause AI, resume AI, or move to inbox",
+      },
+      [icon("moreVertical", { size: 16 }), "Actions"]
+    );
+    const root = el("div.lai-menu.lai-thread__menu", {}, [trigger, panel]);
+    let docBound = false;
+
+    function closeActionsMenu() {
+      root.classList.remove("is-open");
+      panel.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      if (docBound) {
+        document.removeEventListener("click", onDocClick);
+        docBound = false;
+      }
+    }
+    function openActionsMenu() {
+      root.classList.add("is-open");
+      panel.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+      if (!docBound) {
+        setTimeout(() => {
+          document.addEventListener("click", onDocClick);
+          docBound = true;
+        }, 0);
+      }
+    }
+    function onDocClick(event) {
+      if (!root.contains(event.target)) closeActionsMenu();
+    }
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (root.classList.contains("is-open")) closeActionsMenu();
+      else openActionsMenu();
+    });
+    panel.addEventListener("click", (event) => event.stopPropagation());
+
+    return root;
   }
 
   /** The handover desk's Done (scoped): the chat leaves the agent's list; the assistant carries on alone. */
@@ -799,22 +907,6 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       el("p", {}, ["It leaves your list. The AI answers the customer on its own from here; a new handover brings the chat back to you."]),
       actions,
     ]));
-  }
-
-  /** The assistant's pill, and Pause / Resume where they apply. */
-  function aiControls(conversation) {
-    const ai = conversation.lead_ai_ai;
-    const view = aiStateView(ai, conversation);
-    if (!view) return [];
-    const nodes = [
-      el("span.lai-ai", { class: `lai-ai--${view.tone}`, title: view.title }, [
-        icon("zap", { size: 12 }),
-        el("span.lai-ai__label", {}, [view.label]),
-      ]),
-    ];
-    if (["paused", "stopped", "handed_over"].includes(ai.mode)) nodes.push(aiButton("resume"));
-    if (["on", "handed_over"].includes(ai.mode)) nodes.push(aiButton("pause"));
-    return nodes;
   }
 
   function aiButton(action) {
@@ -1120,6 +1212,7 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
       !scoped && outbound && message.sent_by?.display_name && String(message.sent_by.id) !== String(me?.id)
         ? message.sent_by.display_name
         : "";
+    const fromAgent = outbound && !fromAi && !reminder && !followUp;
     const badge = fromAi
       ? el("span.lai-msg__badge.lai-msg__badge--ai", {
           title: source === "leadai_tap" ? "The Lead AI's answer to a reminder button" : "Written by the Lead AI assistant",
@@ -1134,11 +1227,15 @@ export function mountThread(host, conversationId, { me, onConversation, onMoved,
               icon("clock", { size: 10 }),
               "Follow-up",
             ])
-          : null;
+          : fromAgent
+            ? el("span.lai-msg__badge.lai-msg__badge--agent", { title: "Written by an agent" }, ["Agent"])
+            : null;
     const classes = [
       outbound ? "lai-msg--out" : "lai-msg--in",
       fromAi ? "lai-msg--ai" : "",
+      fromAgent ? "lai-msg--agent" : "",
       reminder ? "lai-msg--reminder" : "",
+      followUp ? "lai-msg--followup" : "",
     ].filter(Boolean).join(" ");
 
     return el("div.lai-msg", { class: classes, "data-id": message.id ?? "" }, [

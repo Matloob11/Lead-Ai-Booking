@@ -32,6 +32,7 @@ import { deskEmptyText, deskLine, deskParams, deskRail, isDeskTab, trackFilters 
 import { closeShopMediaDialog, openShopMediaDialog } from "./shop-media.js";
 import { closeUnitMediaDialog, unitMediaButton } from "./unit-media.js";
 import { reportsButton } from "./reports.js";
+import { campaignsButton, closeCampaignsDialog } from "./campaigns.js";
 import { communitiesButton } from "./communities.js";
 import { shopsForm, shopsValues } from "./shops.js";
 import { residentialForm, residentialValues } from "./residential.js";
@@ -45,6 +46,49 @@ function isGreetedChat(conversation) {
   return (Array.isArray(conversation?.labels) ? conversation.labels : []).some(
     (label) => String(label?.name || "").trim().toLowerCase() === wanted
   );
+}
+
+/** Open/close a click-outside dropdown; returns { open, close, isOpen, destroy }. */
+function bindDropdown(root, trigger, panel, { onOpen } = {}) {
+  function close() {
+    root.classList.remove("is-open");
+    panel.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+  }
+  function open() {
+    onOpen?.();
+    root.classList.add("is-open");
+    panel.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+  }
+  function isOpen() {
+    return root.classList.contains("is-open");
+  }
+  function onTrigger(event) {
+    event.stopPropagation();
+    if (isOpen()) close();
+    else open();
+  }
+  function onPanel(event) {
+    event.stopPropagation();
+  }
+  function onDocClick() {
+    if (isOpen()) close();
+  }
+  trigger.addEventListener("click", onTrigger);
+  panel.addEventListener("click", onPanel);
+  document.addEventListener("click", onDocClick);
+  return {
+    open,
+    close,
+    isOpen,
+    destroy() {
+      trigger.removeEventListener("click", onTrigger);
+      panel.removeEventListener("click", onPanel);
+      document.removeEventListener("click", onDocClick);
+      close();
+    },
+  };
 }
 
 const PAGE = 40;
@@ -139,12 +183,14 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.unread = !state.unread;
       unreadButton.setAttribute("aria-pressed", String(state.unread));
       unreadButton.classList.toggle("is-on", state.unread);
+      refreshFilterTrigger();
       loadChats();
     },
   }, ["Unread"]);
   function setUnreadChip(count) {
     const n = Math.max(0, Number(count) || 0);
     clear(unreadButton).append(n ? `Unread ${n}` : "Unread");
+    refreshFilterTrigger();
   }
   const tabChats = railButton("chats", "messageSquare", "Chats");
   const tabSara = railButton("sara", "users", "Sara leads");
@@ -164,6 +210,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.greeted = false;
       setLabelChip(brokersButton, state.brokers);
       setLabelChip(greetedButton, false);
+      refreshFilterTrigger();
       loadChats();
     },
   }, ["Brokers"]);
@@ -178,6 +225,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.brokers = false;
       setLabelChip(greetedButton, state.greeted);
       setLabelChip(brokersButton, false);
+      refreshFilterTrigger();
       loadChats();
     },
   }, ["Auto new lead"]);
@@ -190,6 +238,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
       state.hotFirst = !state.hotFirst;
       hotButton.setAttribute("aria-pressed", String(state.hotFirst));
       hotButton.classList.toggle("is-on", state.hotFirst);
+      refreshFilterTrigger();
       loadChats();
     },
   }, ["Hot first"]);
@@ -197,41 +246,124 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   const tracks = trackFilters({
     onChange: (track) => {
       state.track = track;
+      refreshFilterTrigger();
       loadChats();
     },
   });
-  const filters = el("div.lai-filters", {}, [unreadButton, brokersButton, greetedButton, hotButton, ...tracks.buttons]);
+  const filterPanel = el(
+    "div.lai-filter-menu__panel",
+    { hidden: true, role: "group", "aria-label": "Chat filters" },
+    [unreadButton, brokersButton, greetedButton, hotButton, ...tracks.buttons]
+  );
+  const filterTriggerLabel = el("span.lai-filter-menu__label", {}, ["Filter: All"]);
+  const filterTrigger = el(
+    "button.lai-filter-menu__trigger",
+    {
+      type: "button",
+      "aria-expanded": "false",
+      "aria-haspopup": "true",
+      title: "Filter the chat list",
+    },
+    [filterTriggerLabel, el("span.lai-filter-menu__chevron", { "aria-hidden": "true" }, [icon("chevronRight", { size: 14 })])]
+  );
+  const filterMenu = el("div.lai-filter-menu", {}, [filterTrigger, filterPanel]);
+  const filterMenuCtl = bindDropdown(filterMenu, filterTrigger, filterPanel, {
+    onOpen: () => toolsMenuCtl.close(),
+  });
+
+  function filterSummary() {
+    const parts = [];
+    if (state.unread) parts.push("Unread");
+    if (state.brokers) parts.push("Brokers");
+    if (state.greeted) parts.push("Auto new lead");
+    if (state.hotFirst) parts.push("Hot first");
+    if (state.track) {
+      const trackBtn = tracks.buttons.find((button) => button.dataset.track === state.track);
+      const label = trackBtn ? String(trackBtn.textContent || "").trim() : state.track;
+      if (label) parts.push(label);
+    }
+    if (!parts.length) return "Filter: All";
+    if (parts.length === 1) return `Filter: ${parts[0]}`;
+    return `Filter: ${parts.length} on`;
+  }
+
+  function refreshFilterTrigger() {
+    clear(filterTriggerLabel).append(filterSummary());
+  }
+
+  // Thread mounts in the stage; Tools + Close sit on the main panel (not the top title strip).
+  const mainStage = el("div.lai-main__stage");
   const main = el("main.lai-main");
 
+  const shopMediaBtn = el("button.lai-btn.lai-btn--ghost.lai-bar__media", {
+    type: "button",
+    title: "The videos and photos the assistant sends for each shop type",
+    onclick: () => {
+      toolsMenuCtl.close();
+      openShopMediaDialog();
+    },
+  }, [icon("image", { size: 15 }), "Shop media"]);
+  const aptPhotosBtn = unitMediaButton();
+  aptPhotosBtn.addEventListener("click", () => toolsMenuCtl.close());
+  const communitiesBtn = communitiesButton();
+  communitiesBtn.addEventListener("click", () => toolsMenuCtl.close());
+  const reportsBtn = reportsButton();
+  reportsBtn.addEventListener("click", () => toolsMenuCtl.close());
+  const campaignsBtn = campaignsButton();
+  campaignsBtn.addEventListener("click", () => toolsMenuCtl.close());
+  const settingsBtn = el("button.lai-btn.lai-btn--ghost.lai-bar__settings", {
+    type: "button",
+    title: "The Lead AI assistant's status and settings",
+    onclick: () => {
+      toolsMenuCtl.close();
+      openSettingsDialog();
+    },
+  }, [icon("zap", { size: 15 }), "AI settings"]);
+  const toolsPanel = el("div.lai-menu__panel", { hidden: true, role: "menu", "aria-label": "Lead AI tools" }, [
+    shopMediaBtn,
+    aptPhotosBtn,
+    communitiesBtn,
+    reportsBtn,
+    campaignsBtn,
+    settingsBtn,
+  ]);
+  const toolsTrigger = el(
+    "button.lai-btn.lai-btn--ghost.lai-menu__trigger.lai-bar__tools",
+    {
+      type: "button",
+      "aria-expanded": "false",
+      "aria-haspopup": "true",
+      title: "Shop media, apartment photos, communities, reports, campaigns and AI settings",
+    },
+    [icon("menu", { size: 15 }), "Tools"]
+  );
+  const toolsMenu = el("div.lai-menu", {}, [toolsTrigger, toolsPanel]);
+  const toolsMenuCtl = bindDropdown(toolsMenu, toolsTrigger, toolsPanel, {
+    onOpen: () => filterMenuCtl.close(),
+  });
+
+  const closeBtn = el("button.lai-btn.lai-btn--icon.lai-bar__close", {
+    type: "button",
+    title: "Back to the inbox",
+    onclick: () => close(),
+  }, [icon("close", { size: 18 })]);
+
+  main.append(
+    el("div.lai-main__top", {}, [toolsMenu, closeBtn]),
+    mainStage
+  );
+
+  // No full-width chrome row: its edge against the three panels drew the hard horizontal line.
   const root = el("section.lai-screen", { role: "dialog", "aria-label": "Lead AI" }, [
     el("div.lai-screen__glow", { "aria-hidden": "true" }),
-    el("header.lai-bar", {}, [
-      el("div.lai-bar__title", {}, [icon("smartphone", { size: 17 }), "Lead AI"]),
-      el("div.lai-bar__note", {}, [
-        "Chats from CRM campaigns sent with the Lead AI box. The AI assistant answers them; they stay here until you move one back.",
-      ]),
-      el("button.lai-btn.lai-btn--ghost.lai-bar__media", {
-        type: "button",
-        title: "The videos and photos the assistant sends for each shop type",
-        onclick: () => openShopMediaDialog(),
-      }, [icon("image", { size: 15 }), "Shop media"]),
-      unitMediaButton(),
-      communitiesButton(),
-      reportsButton(),
-      el("button.lai-btn.lai-btn--ghost.lai-bar__settings", {
-        type: "button",
-        title: "The Lead AI assistant's status and settings",
-        onclick: () => openSettingsDialog(),
-      }, [icon("zap", { size: 15 }), "AI settings"]),
-      el("button.lai-btn.lai-btn--icon.lai-bar__close", { type: "button", title: "Back to the inbox", onclick: () => close() }, [
-        icon("close", { size: 18 }),
-      ]),
-    ]),
     el("div.lai-body", {}, [
       el("nav.lai-rail", { "aria-label": "Lead AI views" }, [tabChats, ...rail.buttons, tabSara]),
       el("aside.lai-side", {}, [
+        el("div.lai-side__brand", {}, [
+          el("div.lai-bar__title", {}, [icon("smartphone", { size: 17 }), "Lead AI"]),
+        ]),
         search,
-        filters,
+        filterMenu,
         listNode,
         statusNode,
         moreButton,
@@ -281,6 +413,13 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     // A dialog or the image viewer opened from here takes its own Escape
     // (and marks it handled); the screen stays.
     if (event.defaultPrevented || document.querySelector(".modal, .lb")) return;
+    // Open filter / Tools menus close first; Escape again leaves the screen.
+    if (filterMenuCtl.isOpen() || toolsMenuCtl.isOpen()) {
+      filterMenuCtl.close();
+      toolsMenuCtl.close();
+      event.preventDefault();
+      return;
+    }
     // So does a box with text in it: closing would throw away a reply being
     // typed (the search box clears itself instead).
     if (event.target?.matches?.("textarea, input[type='search']") && event.target.value) return;
@@ -303,12 +442,15 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     document.removeEventListener("visibilitychange", onVisible);
     clearInterval(deskTimer);
     rail.destroy();
+    filterMenuCtl.destroy();
+    toolsMenuCtl.destroy();
     for (const timer of rowTimers.values()) clearTimeout(timer);
     rowTimers.clear();
     // Opened from this screen: it would stay over the inbox an alert opened.
     settingsDialog?.close();
     closeShopMediaDialog();
     closeUnitMediaDialog();
+    closeCampaignsDialog();
     state.thread?.destroy();
     state.thread = null;
     root.remove();
@@ -337,7 +479,8 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     tabSara.classList.toggle("is-on", tab === "sara");
     rail.active(tab);
     search.hidden = !isListTab(tab);
-    filters.hidden = !isListTab(tab);
+    filterMenu.hidden = !isListTab(tab);
+    if (!isListTab(tab)) filterMenuCtl.close();
     hotButton.hidden = isDeskTab(tab); // Needs a person and Today keep their own order
     unreadButton.hidden = isDeskTab(tab); // ... and their own lists
     // Another view's rows must not stand in for this one's while it loads.
@@ -348,7 +491,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
   function renderEmptyMain(text = "Select a chat from the left.") {
     state.thread?.destroy();
     state.thread = null;
-    clear(main).append(el("div.lai-main__empty", {}, [icon("smartphone", { size: 28 }), text]));
+    clear(mainStage).append(el("div.lai-main__empty", {}, [icon("smartphone", { size: 28 }), text]));
   }
 
   /* --------------------------------------------------------------- chats */
@@ -498,7 +641,7 @@ export function openLeadAiScreen({ conversationId, highlightMessageId, me, onUnr
     state.touchedInbox = true;
     const highlight = state.pendingHighlight;
     state.pendingHighlight = null;
-    state.thread = mountThread(main, id, {
+    state.thread = mountThread(mainStage, id, {
       me,
       highlightMessageId: highlight,
       onConversation: (conversation) => upsertRow(conversation, { quiet: true }),

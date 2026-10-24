@@ -12,9 +12,6 @@
   z-index: 35;
   display: flex;
   flex-direction: column;
-  background:
-    linear-gradient(180deg, rgb(6 10 20 / 28%), rgb(6 10 20 / 46%)),
-    url("bg.jpg") center / cover no-repeat;
   background-color: #0b1424;
   color: #eef3f9;
   overflow: hidden;
@@ -22,19 +19,34 @@
   font-size: 14px;
 }
 
+/* Blurred city photo behind the glass panels (scale hides the blur edge). */
+.lai-screen::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  background: url("bg.jpg") center / cover no-repeat;
+  filter: blur(16px) saturate(1.15);
+  transform: scale(1.04);
+  z-index: 0;
+  pointer-events: none;
+}
+
 .lai-screen__glow {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
-  background: radial-gradient(90% 80% at 50% 45%, transparent 30%, rgb(4 8 16 / 42%) 100%);
+  background:
+    linear-gradient(180deg, rgb(6 10 20 / 42%), rgb(6 10 20 / 58%)),
+    radial-gradient(90% 80% at 50% 45%, transparent 28%, rgb(4 8 16 / 55%) 100%);
 }
 
 .lai-screen > :not(.lai-screen__glow) {
   position: relative;
+  z-index: 2;
 }
 
-/* ---------------------------------------------------------------- bar */
-
+/* Handovers screen still uses a bordered .lai-bar. */
 .lai-bar {
   display: flex;
   align-items: center;
@@ -43,10 +55,10 @@
   padding: 10px 12px 10px 16px;
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 18px;
-  background: rgb(16 24 40 / 36%);
-  backdrop-filter: blur(22px) saturate(1.35);
-  -webkit-backdrop-filter: blur(22px) saturate(1.35);
-  box-shadow: 0 10px 32px rgb(0 0 0 / 22%);
+  background: rgb(16 24 40 / 52%);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 28%);
 }
 
 .lai-bar__title {
@@ -58,14 +70,41 @@
   flex: 0 0 auto;
 }
 
-.lai-bar__note {
+.lai-side__brand {
+  flex: 0 0 auto;
+  padding: 2px 2px 4px;
+}
+
+.lai-main__top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px 8px;
+}
+
+.lai-main__stage {
   flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: #9fb0c4;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.lai-bar__tools.lai-menu__trigger,
+.lai-main__top .lai-menu__trigger {
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(16 24 40 / 45%);
+  border-radius: 10px;
+  padding: 7px 12px;
+}
+
+.lai-main__top .lai-bar__close {
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(16 24 40 / 45%);
+  border-radius: 10px;
 }
 
 /* --------------------------------------------------------------- body */
@@ -75,6 +114,7 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 84px minmax(220px, 320px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
 }
@@ -85,7 +125,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 6px;
-  border: 1px solid rgb(255 255 255 / 16%);
+  border: 0;
   border-radius: 18px;
   background: rgb(10 16 30 / 34%);
   backdrop-filter: blur(24px) saturate(1.4);
@@ -136,7 +176,8 @@
 .lai-side,
 .lai-main {
   min-height: 0;
-  border: 1px solid rgb(255 255 255 / 16%);
+  /* Shadow only — borders drew the hard lines the mockup cleanup removes. */
+  border: 0;
   border-radius: 18px;
   background: rgb(10 16 30 / 34%);
   backdrop-filter: blur(24px) saturate(1.4);
@@ -216,6 +257,79 @@
   color: #8696aa;
 }
 
+/* List filters live in a dropdown under search (mockup cleanup). */
+.lai-filter-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.lai-filter-menu__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 6%);
+  color: inherit;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.lai-filter-menu__trigger:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.lai-filter-menu__trigger:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+.lai-filter-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lai-filter-menu__chevron {
+  flex: 0 0 auto;
+  opacity: 0.7;
+  display: inline-flex;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.lai-filter-menu.is-open .lai-filter-menu__chevron {
+  transform: rotate(-90deg);
+}
+
+.lai-filter-menu__panel {
+  position: absolute;
+  z-index: 8;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 12px;
+  background: rgb(12 18 32 / 94%);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 40%);
+}
+
+.lai-filter-menu__panel[hidden] {
+  display: none;
+}
+
 /* "Brokers": only the chats the assistant labelled Broker. */
 .lai-filters {
   display: flex;
@@ -225,6 +339,57 @@
 
 .lai-filters[hidden] {
   display: none;
+}
+
+/* Top bar Tools + thread Actions overflow menus. */
+.lai-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.lai-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lai-menu__panel {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 12px;
+  background: rgb(12 18 32 / 96%);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 40%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lai-menu__panel[hidden] {
+  display: none;
+}
+
+.lai-menu__panel > .lai-btn {
+  justify-content: flex-start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.lai-menu__panel > .lai-btn:hover {
+  background: rgb(255 255 255 / 8%);
+}
+
+.lai-thread__menu .lai-menu__panel {
+  min-width: 180px;
 }
 
 .lai-filter {
@@ -917,9 +1082,28 @@
   overflow-wrap: anywhere;
 }
 
-.lai-msg--out .lai-msg__bubble {
-  background: rgb(18 140 126 / 32%);
-  border-color: rgb(167 243 208 / 28%);
+/* Agent / human outbound (not the AI): clear WhatsApp-like green. */
+.lai-msg--out:not(.lai-msg--ai):not(.lai-msg--reminder):not(.lai-msg--followup) .lai-msg__bubble,
+.lai-msg--agent .lai-msg__bubble {
+  background: rgb(37 211 102 / 88%);
+  border-color: rgb(37 211 102 / 55%);
+  color: #0b1419;
+}
+
+.lai-msg--out:not(.lai-msg--ai):not(.lai-msg--reminder):not(.lai-msg--followup) .lai-msg__foot,
+.lai-msg--agent .lai-msg__foot {
+  color: rgb(11 20 25 / 70%);
+}
+
+.lai-msg--out:not(.lai-msg--ai):not(.lai-msg--reminder):not(.lai-msg--followup) .lai-tick--read,
+.lai-msg--agent .lai-tick--read {
+  color: #1d4ed8;
+}
+
+.lai-msg--followup .lai-msg__bubble {
+  background: rgb(56 189 248 / 22%);
+  border-color: rgb(125 211 252 / 40%);
+  color: #eef3f9;
 }
 
 .lai-msg__text {
@@ -980,14 +1164,26 @@
   color: #f87171;
 }
 
-/* What the assistant sent: its own tint and a badge, since it has no sender. */
+/* What the assistant sent: vivid violet, distinct from agent green. */
 .lai-msg--ai .lai-msg__bubble {
-  background: rgb(124 58 237 / 28%);
-  border-color: rgb(196 181 253 / 34%);
+  background: linear-gradient(160deg, rgb(124 92 255 / 92%), rgb(91 33 182 / 88%));
+  border-color: rgb(196 181 253 / 45%);
+  color: #f5f3ff;
+  box-shadow: 0 8px 24px rgb(91 33 182 / 28%);
+}
+
+.lai-msg--ai .lai-msg__foot {
+  color: rgb(245 243 255 / 72%);
+}
+
+.lai-msg--ai .lai-tick--read {
+  color: #c4b5fd;
 }
 
 .lai-msg--reminder .lai-msg__bubble {
-  border-color: rgb(253 230 138 / 32%);
+  background: rgb(234 179 8 / 22%);
+  border-color: rgb(253 230 138 / 40%);
+  color: #eef3f9;
 }
 
 .lai-msg__badge {
@@ -1003,8 +1199,13 @@
 }
 
 .lai-msg__badge--ai {
-  background: rgb(124 58 237 / 55%);
+  background: rgb(255 255 255 / 22%);
   color: #f5f3ff;
+}
+
+.lai-msg__badge--agent {
+  background: rgb(11 20 25 / 18%);
+  color: #0b1419;
 }
 
 .lai-msg__badge--reminder {
@@ -2190,9 +2391,7 @@ a.lai-media__name:hover {
     display: none;
   }
 
-  /* The note is gone; the buttons stay at the right end of the bar. */
-  .lai-bar__settings,
-  .lai-bar__media {
+  .lai-bar__tools {
     margin-left: auto;
   }
 
@@ -2798,5 +2997,248 @@ a.lai-media__name:hover {
   .lai-body--handovers {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(140px, 34%) minmax(0, 1fr);
+  }
+}
+
+/* ----------------------------------------------------- campaigns history (campaigns.js) */
+
+.modal > .modal__box.lai-modal--campaigns {
+  width: min(960px, calc(100vw - 32px));
+  max-height: min(860px, calc(100vh - 48px));
+}
+
+.lai-camp {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 0;
+  min-height: 420px;
+  max-height: min(720px, calc(100vh - 140px));
+  color: #eef3f9;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.lai-camp__list-wrap {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  min-height: 0;
+}
+
+.lai-camp__head {
+  padding: 14px 14px 8px;
+}
+
+.lai-camp__heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #eef3f9;
+}
+
+.lai-camp__blurb {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-camp__list {
+  flex: 1;
+  overflow: auto;
+  padding: 0 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lai-camp__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.lai-camp__row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lai-camp__row.is-on {
+  background: rgba(124, 58, 237, 0.22);
+}
+
+.lai-camp__row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lai-camp__row-name {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.lai-camp__row-meta,
+.lai-camp__row-counts {
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-camp__status {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: lowercase;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c5d0de;
+}
+
+.lai-camp__status.is-done {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.lai-camp__status.is-live {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.lai-camp__status.is-bad {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.lai-camp__detail {
+  overflow: auto;
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.lai-camp__empty {
+  margin: auto;
+  text-align: center;
+  max-width: 280px;
+}
+
+.lai-camp__empty-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.lai-camp__note {
+  margin: 0;
+  color: #9fb0c4;
+}
+
+.lai-camp__note--err {
+  color: #fca5a5;
+}
+
+.lai-camp__progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.lai-camp__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.lai-camp__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  border-radius: 999px;
+}
+
+.lai-camp__progress-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9fb0c4;
+}
+
+.lai-camp__tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lai-camp__tile {
+  padding: 10px 10px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lai-camp__tile--warn {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.lai-camp__tile-n {
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.lai-camp__tile-l {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9fb0c4;
+  margin-top: 2px;
+}
+
+.lai-camp__meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lai-camp__meta-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12px;
+}
+
+.lai-camp__meta-row dt {
+  margin: 0;
+  color: #9fb0c4;
+}
+
+.lai-camp__meta-row dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .lai-camp {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 40%) minmax(0, 1fr);
+  }
+  .lai-camp__list-wrap {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .lai-camp__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
