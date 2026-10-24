@@ -3,7 +3,8 @@
 What went wrong live, and what each test proves with the launch chats' own words (chat_<id>.json of the review) and the
 model's live answers rebuilt from them; each fails without its guard (the patched-out cases show it):
 
-- A. the reply cap (chats 91 and 78): a shops chat may send 12 replies an hour and 30 a day; a capped burst is answered
+- A. the reply cap (chats 91 and 78): a shops chat may send 30 replies an hour and 30 a day; the scenarios below still
+  prove the old 12-an-hour behaviour with SHOPS_PER_HOUR patched to 12. A capped burst is answered
   once the cap frees, by the same turn row, however old it is, unless someone wrote since; the cap alert is high
   priority, reaches the Lead AI alert list and carries their words, the lead and the chat; a general chat keeps 6/20;
 - B. a handover nobody answered (chats 88, 136): one more alert after 30 minutes of office time, once per handover;
@@ -111,15 +112,19 @@ class PeopleBase(ShopsBase):
 
 
 class CapTests(PeopleBase):
-    def test_chat_91_a_shops_chat_may_send_twelve_replies_an_hour(self):
-        # Chat 91 got six replies in 16 minutes live, then "can you show me at least the video" was capped.
-        self.replies(6, 16)
-        video = self.inbound("can you show me at least the video of the sho[?", seconds_ago=20)
-        outcome, calls, _, _ = self.turn(video, [shop_answer("Sure! Our agent can share it. What size do you need?")])
-        self.assertNotEqual(outcome.reason, engine.CAPPED_REASON)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(caps.limits("ic_shops"), (12, 30))
+    def setUp(self):
+        super().setUp()
+        # The live cap is 30 an hour. These chats were written against 12, so the scenarios keep that number.
+        self._hour = patch.object(caps, "SHOPS_PER_HOUR", 12)
+        self._hour.start()
+        self.addCleanup(self._hour.stop)
+
+    def test_chat_91_a_shops_chat_may_send_thirty_replies_an_hour(self):
+        # The live cap. The rest of this class still exercises the hold-and-release path at 12.
+        self._hour.stop()
+        self.assertEqual(caps.limits("ic_shops"), (30, 30))
         self.assertEqual(caps.limits("general"), (engine.CAP_PER_HOUR, engine.CAP_PER_DAY))
+        self._hour.start()
 
     def test_chat_91_with_the_old_cap_it_went_silent(self):
         self.replies(6, 16)

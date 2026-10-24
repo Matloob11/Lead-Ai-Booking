@@ -31,8 +31,8 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-# A shops chat's caps (Matloob's default, launch review decision 5: "raise it, for example to 12").
-SHOPS_PER_HOUR = 12
+# A shops chat's caps (Matloob 2026-10-24: 30 replies an hour; the day stays 30).
+SHOPS_PER_HOUR = 30
 SHOPS_PER_DAY = 30
 # The playbooks whose capped messages are answered once the cap frees; a general chat's stay as they were.
 REQUEUE_PLAYBOOKS = ("ic_shops",)
