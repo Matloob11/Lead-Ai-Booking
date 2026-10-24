@@ -3872,7 +3872,7 @@ def _rule_opt_out(
         answers
         and openai_client.configured()
         and state.paused_at is None
-        and state.stopped_at is None
+        and (state.stopped_at is None or state.stop_reason == LeadAiChatState.StopReason.AUTO_REPLY)
         and _window_open(conversation, timezone.now())
         and not human_after(message, campaign_templates)
     )
@@ -3967,9 +3967,11 @@ def record_opt_out(
     state = LeadAiChatState.for_conversation(conversation)
     no_follow_up = {"followup_asked_at": None, "followup_due_at": None}
     if kind in STOP_KINDS:
-        updated = LeadAiChatState.objects.filter(pk=state.pk, stopped_at__isnull=True).update(
-            stopped_at=now, stop_reason=kind, **no_follow_up
-        )
+        # A person's STOP outranks an automatic-reply stop (round 27): it takes its place, so the STOP's own rules (the
+        # registry, the customer's-own-stop resume, never after delete my data) apply, never the automatic reply's.
+        updated = LeadAiChatState.objects.filter(
+            Q(stopped_at__isnull=True) | Q(stop_reason=LeadAiChatState.StopReason.AUTO_REPLY), pk=state.pk
+        ).update(stopped_at=now, stop_reason=kind, **no_follow_up)
     elif kind == rules.NOT_INTERESTED:
         updated = LeadAiChatState.objects.filter(pk=state.pk, not_interested_at__isnull=True).update(
             not_interested_at=now, **no_follow_up
@@ -5791,16 +5793,67 @@ RESUME_AFTER_STOP = dt.timedelta(minutes=15)
 _HUMAN_KINDS = ("button", "interactive", "audio", "image", "video", "document", "location", "contacts", "sticker")
 
 
+def _asked_to_delete(conversation) -> bool:
+    """The customer asked us to delete their data: a turn of this chat recorded it (_rule_opt_out's deletion), any of their
+    recent words here asks it (residential.asks_deletion: "remove my number" too, which code reads as a STOP first), or
+    the phone's registry row says so (it keeps only the first reason a phone ever had, so it is never the only test)."""
+    from .. import optout
+    from ..models import LeadAiOptOut
+
+    if LeadAiTurn.objects.filter(conversation=conversation, actions__deletion=True).exists():
+        return True
+    phone = optout.canonical(conversation.contact.wa_id)
+    if phone and LeadAiOptOut.objects.filter(phone=phone, reason__icontains="delete").exists():
+        return True
+    texts = Message.objects.filter(conversation=conversation, direction=Message.Direction.INBOUND, kind="text").order_by("-pk").values_list(
+        "body", flat=True
+    )[:60]
+    return any(residential.asks_deletion(str(text or "")) for text in texts)
+
+
+def _set_in_bitrix_stop(conversation) -> bool:
+    """A person set "Opted out" or WhatsApp Opt-out Yes on the lead in Bitrix (bitrix_status.remember keeps it): their
+    choice, whatever the registry's first row says."""
+    from ..models import LeadAiCrmField
+    from . import crm_fields
+
+    rows = LeadAiCrmField.objects.filter(conversation=conversation, payload__set_in_bitrix=True)
+    return rows.filter(field=crm_fields.FIELD_BOT_STATUS, value=str(crm_fields.STATUS_OPTED_OUT)).exists() or rows.filter(
+        field=crm_fields.FIELD_OPT_OUT
+    ).exists()
+
+
 def _customers_own_stop(conversation) -> bool:
-    """The phone's opt-out registry row is the customer's own STOP (one the assistant read, or their tap on a template's
-    Stop button): never a person's in Bitrix, never "delete my data", and never a stop with no row (nobody can tell)."""
+    """The stop was the customer's own: the phone's opt-out registry row is one the assistant read or their tap on a
+    template's Stop button, no person set Opted out in Bitrix on the lead, and they never asked to delete their data. A
+    stop with no registry row is nobody's we can tell: it stays."""
     from .. import optout
     from ..models import LeadAiOptOut
 
     phone = optout.canonical(conversation.contact.wa_id)
     row = LeadAiOptOut.objects.filter(phone=phone).first() if phone else None
     own = (LeadAiOptOut.Source.LEADAI_STOP, LeadAiOptOut.Source.INBOX_TAP)
-    return row is not None and row.source in own and "delete" not in (row.reason or "").lower()
+    return row is not None and row.source in own and not _set_in_bitrix_stop(conversation) and not _asked_to_delete(conversation)
+
+
+_STOP_ONLY_WORDS = frozenset("stop stopp please pls plz now it i said just enough already ok".split())
+
+
+def _says_stop(item) -> bool:
+    """Their words ask us to stop again, however put: code's own opt-out of a whole message (rules.opt_out_from_text, the
+    shops' Stop button's words), a message of stop words alone ("STOP STOP STOP", "I said stop", "Stop it now"), or a STOP
+    phrase of two words or more anywhere ("please stop messaging me"). A lone "stop" or "block" in other words is none
+    ("Can I stop by tomorrow?", "Which block is the shop in?"). Never a reason to lift a stop."""
+    text = str(getattr(item, "body", "") or "")
+    if item.kind in ("button", "interactive"):
+        text = _tap_label(item) or text
+    if rules.opt_out_from_text(text) or rules.shops_opt_out(text):
+        return True
+    words = rules.normalize_text(text).split()
+    if words and "stop" in words and all(word in _STOP_ONLY_WORDS for word in words):
+        return True
+    joined = f" {' '.join(words)} "
+    return any(f" {phrase} " in joined for phrase in rules.STOP_PHRASE_INDEX if " " in phrase)
 
 
 def resume_reason(conversation, state, burst) -> str:
@@ -5812,6 +5865,8 @@ def resume_reason(conversation, state, burst) -> str:
         return ""
     reason = str(getattr(state, "stop_reason", "") or "")
     if reason == LeadAiChatState.StopReason.AUTO_REPLY:
+        if any(_says_stop(item) for item in after):
+            return ""  # a person who asks us to stop: never a reason to take the chat up (record_opt_out reads a STOP)
         for item in after:
             if item.kind in _HUMAN_KINDS:
                 return "a person tapped or sent something after the automatic reply"
@@ -5819,6 +5874,8 @@ def resume_reason(conversation, state, burst) -> str:
                 return "a person wrote after the automatic reply"
         return ""
     if reason == LeadAiChatState.StopReason.STOP_ALL:
+        if any(_says_stop(item) for item in after):
+            return ""
         late = [item for item in after if item.created_at - state.stopped_at >= RESUME_AFTER_STOP and not _is_ack(item)]
         if late and _customers_own_stop(conversation):
             return "the customer wrote again after their stop"
