@@ -1,3 +1,64 @@
+## 2026-10-24 — Network Banned: customer number, not ours (Cursor)
+
+Read-only on the 6 never-sent rows (710–725). Gateway text: "Network Banned. Please contact your administrator. This From-number cannot send until the provider unbans it. Pick another number and try again."
+
+**Verdict: the ban is on the customer's number (destination), not on our From-number.**
+
+Evidence:
+1. **Same From-numbers sent fine to other phones in the same campaign window** (12:24–13:10 UTC): number 122 → 48 sent, 123 → 52, 124 → 56, 125 → 38, 129 → 35; each of those numbers still has only 1–2 Ban rows.
+2. **None of the 6 phones ever got a successful campaign send** from any of our numbers (`sent_ok=0` for all six).
+3. **Phone 9647503894626 was Network-Banned from two different From-numbers**: +447447184236 (campaign 266, 2026-09-28) and +971581058724 (campaign 715, 2026-10-24). A From-ban would not follow the customer across WABAs.
+
+**Proposed fix (Claude, `campaigns/failures.py`):** treat "Network Banned" as a **permanent** recipient failure (like undeliverable), so resend/retry stops burning attempts. The gateway's "From-number" wording is misleading here.
+
+**Shared:** TASKS only.
+
+---
+
+## 2026-10-24 — Lead AI queue lag (>2 min) last 48h + concurrency proposal (Cursor)
+
+Wait = `LeadAiTurn.created_at − inbound.created_at` (when the worker started the turn).
+
+| Hour (UTC) | turns | >2m | >5m | max wait (s) |
+|---|---:|---:|---:|---:|
+| 2026-10-23 05 | 17 | 1 | 0 | 123 |
+| 2026-10-23 17 | 3 | 1 | 1 | 419 (turn 1690 / chat 54303) |
+| 2026-10-24 08 | 10 | 1 | 0 | 197 |
+| 2026-10-24 12 | 45 | 1 | 1 | 354 (turn 1801 / chat 54668, the capped requeue) |
+| other hours | — | 0 | 0 | ≤29 |
+
+**48h totals:** 445 turns with inbound; **4** waited >2m; **2** >5m; **0** >7m. Rare spikes, not a steady backlog.
+
+**worker-leadai now:** `deploy/docker-compose.yml` command `--concurrency 6` on queue `leadai` (comment cites the 2026-10-19 mixed campaign). Live container ~0.1% CPU, ~647 MiB / 31 GiB.
+
+**Host (`ops/wa.sh load`):** 8 CPUs, load average ~2.2 / 2.1 / 1.6; ~19 GiB RAM available; disk 47%. Plenty of headroom.
+
+**Proposal for Matloob / Claude (do not change compose here):** raise `worker-leadai` concurrency **6 → 8** with the round-28 `up` (matches host CPUs; RAM fine). Re-check after the next reconnect wave: if >2m waits cluster in one hour again, consider 10 or splitting nudges off the reply queue. The 7-minute case was an isolated spike with only 3 turns that hour — concurrency alone may not explain it (worker stuck / broker delay); still worth +2 slots before the next bulk send.
+
+**Shared:** TASKS only (compose untouched).
+
+---
+
+## 2026-10-24 — Nudges held for Bitrix "could not be read" (Cursor)
+
+`followups.bitrix_blocks` returns "the Bitrix lead could not be read; tried again later" on Bitrix errors (log: `Lead AI nudge_1 for conversation N: …`). Read-only via `ops/wa.sh logs app worker-leadai` (tail ~50k; **only ~16:24–17:41 local container time on 2026-10-24 retained — not a full 48h**).
+
+In that window: **455** `could not be read` lines across **11** chats (54507 69×, 54566 67×, 54474 59×, 54618 55×, 54325 53×, …). **10/11** of those chats also logged a later **real** hold (closed stage / meeting) once Bitrix answered. **0** successful nudge sends in the tail. Cadence ~1/minute → the sweep **retries**; holds are not dropped as "lost".
+
+**Proposed fix (Claude, `followups.py`):** under Bitrix 429, backoff without counting as a quiet-chat abandonment; optional short-circuit when local state still needs what-need and Bot Status is empty. Do not treat unread Bitrix as a closed-stage hold.
+
+**Shared:** TASKS only.
+
+---
+
+## 2026-10-24 — Still waiting: round 28 live + Matloob go (Cursor)
+
+Not run: resend of the 2,149 would-queue rows; old6m send to remaining leads; C53 / C58 / C60 / C62; agency-filter default. TASKS has no "Lead AI round 28 live" yet (~13:46 UTC check).
+
+**Shared:** TASKS only.
+
+---
+
 ## 2026-10-24 — git push origin main (Cursor)
 
 Pushed Cursor commits `aabadd0..7018590` to `origin/main` (plain push, accepted). No force. Round 28 still not live.
