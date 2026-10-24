@@ -66,20 +66,43 @@ class ResumeTests(ShopsBase):
         # Only this chat answers them again: the registry still keeps every campaign away, as the panel's Resume does.
         self.assertTrue(LeadAiOptOut.objects.filter(phone=self.conversation.contact.wa_id).exists())
 
+    def own_stop(self, reason="Stop messages", source="leadai_stop"):
+        LeadAiOptOut.objects.create(phone=self.conversation.contact.wa_id, reason=reason, source=source, conversation=self.conversation)
+
+    def test_a_tap_on_a_templates_stop_is_their_own_too(self):
+        self.stop("stop_all", minutes_ago=60)
+        self.own_stop(source="inbox_tap")
+        outcome, _, _, _ = self.turn(self.inbound("Hi, any shops in China cluster?"), [shop_answer()])
+        self.assertEqual(outcome.status, LeadAiTurn.Status.REPLIED, outcome.reason)
+        self.assertIsNone(self.state_now().stopped_at)
+
+    def test_a_persons_opted_out_in_bitrix_never_lifts(self):
+        self.stop("stop_all", minutes_ago=60)
+        self.own_stop(reason="Set in Bitrix on lead 555", source="bitrix")
+        outcome, calls, _, _ = self.turn(self.inbound("Hello, do you have shops?"), [shop_answer()])
+        self.assertEqual((calls, outcome.reason), ([], "stopped: stop_all"))
+
+    def test_a_stop_with_no_registry_row_never_lifts(self):
+        self.stop("stop_all", minutes_ago=60)
+        outcome, calls, _, _ = self.turn(self.inbound("Hello, do you have shops?"), [shop_answer()])
+        self.assertEqual((calls, outcome.reason), ([], "stopped: stop_all"))
+
     def test_a_message_right_after_their_stop_keeps_it(self):
+        self.own_stop()
         self.stop("stop_all", minutes_ago=5)
         outcome, calls, _, _ = self.turn(self.inbound("Salam"), [shop_answer()])
         self.assertEqual((calls, outcome.reason), ([], "stopped: stop_all"))
         self.assertIsNotNone(self.state_now().stopped_at)
 
     def test_an_acknowledgement_after_their_stop_keeps_it(self):
+        self.own_stop()
         self.stop("stop_all", minutes_ago=60)
         outcome, calls, _, _ = self.turn(self.inbound("ok thanks"), [shop_answer()])
         self.assertEqual((calls, outcome.reason), ([], "stopped: stop_all"))
 
     def test_after_delete_my_data_it_never_lifts(self):
         self.stop("stop_all", minutes_ago=60)
-        LeadAiOptOut.objects.create(phone=self.conversation.contact.wa_id, reason="asked to delete their data", source="leadai_stop", conversation=self.conversation)
+        self.own_stop(reason="asked to delete their data")
         outcome, calls, _, _ = self.turn(self.inbound("Hello, do you have shops?"), [shop_answer()])
         self.assertEqual((calls, outcome.reason), ([], "stopped: stop_all"))
 
@@ -101,6 +124,7 @@ class ResumeTests(ShopsBase):
         state = LeadAiChatState.for_conversation(self.conversation)
         self.assertEqual(engine.resume_reason(self.conversation, state, []), "")  # not stopped
         state.stopped_at, state.stop_reason = NOW - dt.timedelta(hours=1), "stop_all"
+        self.own_stop()
         before = self.inbound("old words", seconds_ago=7200)
         self.assertEqual(engine.resume_reason(self.conversation, state, [before]), "")  # nothing said after the stop
         self.assertTrue(engine.resume_reason(self.conversation, state, [self.inbound("I want a shop")]))

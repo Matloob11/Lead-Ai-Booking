@@ -5783,19 +5783,24 @@ def _run_claimed(
 # or file after it, or a text that is no automatic reply (lead 74029's "Yes, still looking" tap, four minutes after their
 # WhatsApp Business greeting, waited 19 hours for a person). The customer's own STOP: a message of theirs at least
 # RESUME_AFTER_STOP after it that is no acknowledgement (a new conversation they start; another STOP is code's opt-out
-# before this is ever read), never after "delete my data". A wrong number or spam is code's reading of someone who is no
-# customer: a person resumes those. An agent's Pause is a person's choice and never lifts by itself.
+# before this is ever read), and only when the stop was the customer's own: the phone's opt-out registry row says so
+# (leadai_stop, inbox_tap), never a person's "Opted out" in Bitrix (bitrix: bitrix_status writes the same stop_all on the
+# chat) and never "delete my data". A wrong number or spam is code's reading of someone who is no customer: a person
+# resumes those. An agent's Pause is a person's choice and never lifts by itself.
 RESUME_AFTER_STOP = dt.timedelta(minutes=15)
 _HUMAN_KINDS = ("button", "interactive", "audio", "image", "video", "document", "location", "contacts", "sticker")
 
 
-def _asked_to_delete(conversation) -> bool:
-    """The customer asked us to delete their data (PDPL): their opt-out registry row says so."""
+def _customers_own_stop(conversation) -> bool:
+    """The phone's opt-out registry row is the customer's own STOP (one the assistant read, or their tap on a template's
+    Stop button): never a person's in Bitrix, never "delete my data", and never a stop with no row (nobody can tell)."""
     from .. import optout
     from ..models import LeadAiOptOut
 
     phone = optout.canonical(conversation.contact.wa_id)
-    return bool(phone) and LeadAiOptOut.objects.filter(phone=phone, reason__icontains="delete").exists()
+    row = LeadAiOptOut.objects.filter(phone=phone).first() if phone else None
+    own = (LeadAiOptOut.Source.LEADAI_STOP, LeadAiOptOut.Source.INBOX_TAP)
+    return row is not None and row.source in own and "delete" not in (row.reason or "").lower()
 
 
 def resume_reason(conversation, state, burst) -> str:
@@ -5815,7 +5820,7 @@ def resume_reason(conversation, state, burst) -> str:
         return ""
     if reason == LeadAiChatState.StopReason.STOP_ALL:
         late = [item for item in after if item.created_at - state.stopped_at >= RESUME_AFTER_STOP and not _is_ack(item)]
-        if late and not _asked_to_delete(conversation):
+        if late and _customers_own_stop(conversation):
             return "the customer wrote again after their stop"
         return ""
     return ""
