@@ -620,6 +620,33 @@ def _from_tag(tag: str, known: dict, lead, *, stored: str, template_kind: str) -
     return None
 
 
+# Round 27: the words of a short answer about shops that name no other property and no letting, selling or buying.
+_OTHER_PROPERTY = re.compile(
+    r"\b(?:apartment|apartments|flat|flats|villa|villas|townhouse|room|rooms|bed\s*space|studio|studios|bedroom|bedrooms|bhk|"
+    r"office|offices|warehouse|warehouses|land|plot|building|penthouse|duplex|labou?r\s+camp|staff\s+accommodation|home|house)\b"
+    r"|\b\d\s*(?:br|bed)\b",
+    re.IGNORECASE,
+)
+_LETTING = re.compile(r"\b(?:rent(?:ing)?\s+(?:it|them|my|our|out)|let(?:ting)?\s+(?:it|them|out)|sell|selling|sale|buy|buying|purchase)\b", re.IGNORECASE)
+SHOP_WORDS_MAX = 8
+
+
+def shop_words_only(texts) -> bool:
+    """Their burst is a short answer about shops (needs.about_a_shop: a shop spoken of, none turned down) that names no
+    other property (_OTHER_PROPERTY, and needs' own home nouns read without the about_a_shop shortcut) and no letting,
+    selling or buying (_LETTING): "Yes I have ma shops" (chat 54240), never "Thanks for the shop offer, but I'm looking for a
+    2 bedroom apartment" nor "I have 2 shops, want to rent them out"."""
+    said = [str(text or "") for text in texts or () if str(text or "").strip()]
+    if not said or not needs.about_a_shop(said):
+        return False
+    if sum(len(text.split()) for text in said) > SHOP_WORDS_MAX:
+        return False
+    for text in said:
+        if _OTHER_PROPERTY.search(text) or _LETTING.search(text) or needs._home_noun(needs._flat(text)):
+            return False
+    return True
+
+
 def _from_lead(context: dict) -> Decision | None:
     """The lead context alone (the first answer to the mixed template): a shop lead is a shop, a studio, a one-bedroom or
     an apartment a home to rent or buy, a bigger home or a villa other; None when it says nothing."""
@@ -804,6 +831,12 @@ def decide(
         # got the "options across Dubai" line instead of the one-bedroom; chat 49953: "any units in cbd" the same).
         if tagged is not None and tagged.track == OTHER and stored in (RENT, SALE):
             tagged = None
+        # Round 27 (Matloob 2026-10-24, chat 54240): "Yes I have ma shops", the answer to "Is the shop for yourself, or are
+        # you checking for a client?", was tagged other_need, and the customer got the "many other options across Dubai,
+        # not only shops" line instead of the shop types list. Words that speak of shops and turn none down
+        # (needs.about_a_shop) and want nothing else (needs.detect) are no other need: the shop track.
+        if tagged is not None and tagged.track == OTHER and model_tag == "other_need" and shop_words_only(texts):
+            tagged = Decision(SHOP)
         if tagged is not None and tagged.track != UNKNOWN:
             decision = dataclasses.replace(tagged, reason=tagged.reason if tagged.reason == LEAD else TAG)
 

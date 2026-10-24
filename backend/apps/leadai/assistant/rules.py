@@ -114,6 +114,8 @@ def _phrase_index():
 
 PHRASE_INDEX = _phrase_index()
 WRONG_NUMBER_INDEX = tuple(normalize_text(p) for p in PHRASES[WRONG_NUMBER])
+# The STOP phrases, each as whole words anywhere in a message (engine._says_stop, round 27: never a reason to lift a stop).
+STOP_PHRASE_INDEX = tuple(p for p in (normalize_text(phrase) for phrase in PHRASES[STOP_ALL]) if p)
 NOT_INTERESTED_INDEX = tuple(normalize_text(p) for p in PHRASES[NOT_INTERESTED])
 # The reason they are done, after a no: they rented, found, got or took a place already (declines).
 _LOST_REASON = re.compile(

@@ -503,6 +503,23 @@ the viewing. Campaign-first, so the 24-hour window never blocks the first messag
   `shops-area-decline-again`), mirrored in `leadai_eval` (`code_first`, `run_once`, `outgoing`). The prompt is
   untouched.
 
+## 6k. Round 27 (2026-10-24): a stopped chat takes itself up again; shop words stay on the shop track
+
+- **Matloob's order (chats 54240 and 54325):** after an automatic message the AI stopped and stayed stopped however much
+  the client wrote, until a person pressed Resume; after a manual Resume, "Yes I have ma shops" got the "many other
+  options across Dubai, not only shops" line instead of the shop options.
+- **The resume (`engine.resume_reason`, at `run_turn`'s stopped check):** an automatic-reply stop lifts on any tap, voice
+  note, photo or file after it, or a text that is no automatic reply; the customer's own STOP lifts on a message of
+  theirs at least 15 minutes later that is no acknowledgement, only when it was their own (the registry row
+  `leadai_stop` / `inbox_tap`, no Opted out set by a person in Bitrix, never a deletion request in the chat's record).
+  Never on words that ask to stop again; never after a wrong number or spam; an agent's Pause never lifts. The stop
+  clears as the panel's Resume clears it; a STOP stays on the opt-out registry. A person's STOP replaces an
+  automatic-reply stop (`record_opt_out`) and gets the confirmation line.
+- **The shop words (`tracks.shop_words_only`):** a short answer about shops naming no other property and no letting,
+  selling or buying is no other need under the model's `other_need` tag: the shop track.
+- **Not changed:** a message skipped while stopped is not answered later by itself (the sweep never re-runs it); the
+  lead's Bitrix Bot Status stays "Opted out" after a lift, as after the panel's Resume.
+
 ## 7. Risks
 - PF API scopes may be listings-write only (publishing), not read: then the inventory reads Bitrix Availability alone
   and PF photos come from the listing link (M1 decides on day 1).
