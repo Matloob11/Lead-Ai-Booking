@@ -6,6 +6,10 @@ Everyone else → property_enquiry_reconnect, playbook general.
 Audience JSON at OLD6_PATH ({"ic": [...], "other": [...]} or a .b64 file of that).
 OLD6_SEND=1 queues. Otherwise dry-run counts only.
 
+Dedupes by lead id and canonical phone across both groups before round-robin.
+Queues at most OLD6_MAX_IN_FLIGHT (default 2) campaigns at a time. Skips
+agency-looking names before send.
+
 Refuses to send unless property_enquiry_reconnect is a mixed template in this image.
 """
 
@@ -14,11 +18,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+import time
 from collections import Counter
+from typing import Optional
 
 from django.contrib.auth import get_user_model
 
 from apps.campaigns.crm_leads import CrmLeadSendError, send_from_leads
+from apps.campaigns.models import Campaign
 from apps.catalog.models import WabaNumber, WaTemplate
 from apps.leadai import ic_templates
 
@@ -27,6 +35,7 @@ if ic_templates.kind(ic_templates.ENQUIRY_NAME) != ic_templates.MIXED:
 
 SEND = os.environ.get("OLD6_SEND", "").strip() == "1"
 CHUNK = 250
+MAX_IN_FLIGHT = max(1, int(os.environ.get("OLD6_MAX_IN_FLIGHT", "2") or "2"))
 PHONES = [
     "971581058719",
     "971581058720",
@@ -43,6 +52,97 @@ GROUPS = (
     ("ic", "intl_city_property_reconnect", "ic_shops"),
     ("other", "property_enquiry_reconnect", "general"),
 )
+
+AGENCY_WORDS = (
+    "properties",
+    "real estate",
+    "realty",
+    "brokers",
+    "property consultant",
+    "specialist",
+    "llc",
+    "group",
+)
+_AGENCY_RE = re.compile(
+    r"(?i)(?:^|[^a-z0-9])(?:"
+    + "|".join(re.escape(w) for w in AGENCY_WORDS)
+    + r")(?:[^a-z0-9]|$)"
+)
+
+
+def canonical_phone(value: str) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if digits.startswith("00"):
+        digits = digits[2:]
+    return digits
+
+
+def looks_agency(row: dict) -> bool:
+    blob = " ".join(str(row.get(key) or "") for key in ("name", "company", "title"))
+    return bool(blob.strip() and _AGENCY_RE.search(blob))
+
+
+def mask_phone(phone: str) -> str:
+    digits = canonical_phone(phone)
+    if len(digits) <= 4:
+        return "****"
+    return digits[:3] + ("*" * max(0, len(digits) - 6)) + digits[-3:]
+
+
+def normalize_row(row: dict) -> Optional[dict]:
+    if not isinstance(row, dict):
+        return None
+    try:
+        lead_id = int(row.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+    phone = canonical_phone(row.get("phone") or "")
+    return {
+        "id": lead_id,
+        "phone": phone,
+        "name": str(row.get("name") or "").strip(),
+        "company": str(row.get("company") or "").strip(),
+        "title": str(row.get("title") or ""),
+    }
+
+
+def dedupe_audience(rows: list[dict]) -> tuple[list[dict], dict]:
+    """Keep first sighting of each lead id and each canonical phone. Before round-robin."""
+    seen_ids: set[int] = set()
+    seen_phones: set[str] = set()
+    kept: list[dict] = []
+    stats = {"dup_lead_id": 0, "dup_phone": 0, "no_phone": 0, "no_id": 0}
+    for raw in rows:
+        row = normalize_row(raw)
+        if row is None:
+            stats["no_id"] += 1
+            continue
+        if row["id"] <= 0:
+            stats["no_id"] += 1
+            continue
+        if row["id"] in seen_ids:
+            stats["dup_lead_id"] += 1
+            continue
+        if len(row["phone"]) < 8:
+            stats["no_phone"] += 1
+            continue
+        if row["phone"] in seen_phones:
+            stats["dup_phone"] += 1
+            continue
+        seen_ids.add(row["id"])
+        seen_phones.add(row["phone"])
+        kept.append(row)
+    return kept, stats
+
+
+def filter_agency(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    kept, skipped = [], []
+    for row in rows:
+        if looks_agency(row):
+            skipped.append(row)
+        else:
+            kept.append(row)
+    return kept, skipped
 
 
 def load() -> dict:
@@ -83,12 +183,25 @@ def jobs_for(rows: list, template_name: str) -> list:
     for index, row in enumerate(rows):
         buckets[index % len(targets)].append(row)
     jobs = []
+    print(f"  split_per_number ({template_name}):")
     for (number, template), bucket in zip(targets, buckets):
+        print(f"    +{number.phone_number} n={len(bucket)}")
         for start in range(0, len(bucket), CHUNK):
             piece = bucket[start : start + CHUNK]
             if piece:
                 jobs.append((number, template, piece))
     return jobs
+
+
+def wait_for_capacity() -> None:
+    while True:
+        inflight = Campaign.objects.filter(
+            status__in=[Campaign.Status.QUEUED, Campaign.Status.RUNNING],
+        ).count()
+        if inflight < MAX_IN_FLIGHT:
+            return
+        print(f"wait inflight={inflight} max={MAX_IN_FLIGHT}")
+        time.sleep(5)
 
 
 Agent = get_user_model()
@@ -97,13 +210,51 @@ if agent is None:
     raise SystemExit(f"no agent for Bitrix {AGENT_BITRIX}")
 
 audience = load()
-print(f"mode={'SEND' if SEND else 'DRY'} agent={agent.username} mixed={ic_templates.kind(ic_templates.ENQUIRY_NAME)}")
+print(
+    f"mode={'SEND' if SEND else 'DRY'} agent={agent.username} "
+    f"mixed={ic_templates.kind(ic_templates.ENQUIRY_NAME)} max_in_flight={MAX_IN_FLIGHT}"
+)
 
-all_jobs = []
-for key, template_name, playbook in GROUPS:
+# Dedupe across both groups first so the same phone cannot land in IC and other.
+combined: list[dict] = []
+raw_counts: dict[str, int] = {}
+for key, _template_name, _playbook in GROUPS:
     rows = audience.get(key) or []
     if not isinstance(rows, list):
         raise SystemExit(f"{key} is not a list")
+    raw_counts[key] = len(rows)
+    for row in rows:
+        normalized = normalize_row(row)
+        if normalized is not None:
+            normalized["_group"] = key
+            combined.append(normalized)
+
+print(f"audience ic={raw_counts.get('ic', 0)} other={raw_counts.get('other', 0)} combined={len(combined)}")
+
+deduped, dedupe_stats = dedupe_audience(combined)
+after_agency, agency_skipped = filter_agency(deduped)
+print(
+    f"duplicates_removed dup_lead_id={dedupe_stats['dup_lead_id']} "
+    f"dup_phone={dedupe_stats['dup_phone']} no_phone={dedupe_stats['no_phone']} "
+    f"no_id={dedupe_stats['no_id']} agency={len(agency_skipped)} fresh={len(after_agency)}"
+)
+
+if agency_skipped:
+    print(f"agency_examples (up to 20 of {len(agency_skipped)}):")
+    for row in agency_skipped[:20]:
+        label = (row.get("name") or row.get("company") or row.get("title") or "")[:80]
+        print(
+            f"  group={row.get('_group')} lead={row.get('id')} "
+            f"phone={mask_phone(row.get('phone'))} {label!r}"
+        )
+
+by_group: dict[str, list] = {"ic": [], "other": []}
+for row in after_agency:
+    by_group.setdefault(row.get("_group") or "other", []).append(row)
+
+all_jobs = []
+for key, template_name, playbook in GROUPS:
+    rows = by_group.get(key) or []
     jobs = jobs_for(rows, template_name)
     print(f"{key} leads={len(rows)} template={template_name} playbook={playbook} jobs={len(jobs)} sizes={[len(j[2]) for j in jobs]}")
     all_jobs.append((playbook, jobs))
@@ -116,6 +267,7 @@ results = []
 skip_reasons: Counter = Counter()
 for playbook, jobs in all_jobs:
     for number, template, batch in jobs:
+        wait_for_capacity()
         try:
             out = send_from_leads(
                 agent=agent,
