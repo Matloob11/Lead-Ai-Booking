@@ -171,6 +171,35 @@ if ($colId > 0) {
     \CFile::Delete($colId);
 }
 
+// C65: AI score fields (2696 / 2697) — tool write, then Factory clear (tool rejects empty).
+$scoreWrite = json_encode([
+    'lead_id' => $leadId,
+    'fields' => [
+        'UF_CRM_A7_AI_SCORE' => 1,
+        'UF_CRM_A7_AI_SCORE_WHY' => 'probe',
+    ],
+]);
+[$code, $raw] = signed($scoreWrite, $secret);
+say('C65_SCORE_WRITE ' . $code . ' ' . $raw);
+$scored = $factory->getItem($leadId);
+say('C65_SCORE ' . var_export($scored->get('UF_CRM_A7_AI_SCORE'), true));
+say('C65_WHY ' . var_export($scored->get('UF_CRM_A7_AI_SCORE_WHY'), true));
+$scored->set('UF_CRM_A7_AI_SCORE', null);
+$scored->set('UF_CRM_A7_AI_SCORE_WHY', '');
+$clearOp = $factory->getUpdateOperation($scored, $context);
+$clearOp->disableCheckAccess();
+$clearOp->disableBizProc();
+$clearOp->disableAutomation();
+$clearOp->launch();
+$cleared = $factory->getItem($leadId);
+$scoreNow = $cleared->get('UF_CRM_A7_AI_SCORE');
+$whyNow = $cleared->get('UF_CRM_A7_AI_SCORE_WHY');
+say('C65_CLEARED ' . (
+    ($scoreNow === null || $scoreNow === '' || $scoreNow === 0 || $scoreNow === '0')
+    && ($whyNow === null || $whyNow === '')
+    ? 'yes' : 'no'
+));
+
 $delItem = $factory->getItem($leadId);
 $del = $factory->getDeleteOperation($delItem, $context);
 $del->disableCheckAccess();

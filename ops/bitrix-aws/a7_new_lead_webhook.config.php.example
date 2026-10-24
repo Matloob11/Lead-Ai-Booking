@@ -1,0 +1,9 @@
+<?php
+/**
+ * C67 new-lead → Lead AI greet webhook.
+ * Copy to a7_new_lead_webhook.config.php on the box and set enabled => true
+ * AFTER Claude's board note "round 22 is live" (endpoint answers 200).
+ */
+return [
+	'enabled' => false,
+];

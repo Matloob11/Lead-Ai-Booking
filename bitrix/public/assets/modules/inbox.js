@@ -997,6 +997,13 @@ export function mountInbox(root, { me, openRequest = null }) {
     clear(ui.list);
     renderTagFilterMenu();
     const conversationsToDraw = applyListFilter(state.conversations).sort((a, b) => {
+      // Rotate WhatsApp only: unread replies sit above older quiet threads.
+      // Official / Lead AI lists keep pinned-then-recency (unchanged).
+      if (state.listFilter === "rotate") {
+        const ua = Number(a.unread_count || 0) > 0 ? 1 : 0;
+        const ub = Number(b.unread_count || 0) > 0 ? 1 : 0;
+        if (ua !== ub) return ub - ua;
+      }
       const pa = a.is_pinned ? 1 : 0;
       const pb = b.is_pinned ? 1 : 0;
       if (pa !== pb) return pb - pa;

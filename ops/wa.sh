@@ -79,10 +79,13 @@
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
 #   ops/wa.sh submit-portal-enquiry-template [--dry-run] [--category UTILITY|MARKETING]  C68 portal_enquiry_reply to the 8 sending WABAs
+#   ops/wa.sh submit-property-enquiry-template [--dry-run]  property_enquiry_reconnect to the 8 sending WABAs
 #   ops/wa.sh crm-mirror-backfill [--since 2026-10-14T07:40:00Z] [--leadai] [--dry-run] [--limit N] [--every S]  re-queue the CRM timeline mirror (counts only)
 #   ops/wa.sh load                        host load, RAM, disk, top containers
 #   ops/wa.sh leadai-greet-settings on|off [number] [bitrix id] [template] [hours]  the new-lead greet's settings
 #   ops/wa.sh leadai-health                 Lead AI health: sweep, queue, last hour, who waits, inventory, keys
+#   ops/wa.sh leadai-answer-capped          queue shops chats the reply cap held back (the sweep's own path)
+#   ops/wa.sh leadai-old6m [--send]         Old Leads Before 6 Month: IC template vs property_enquiry_reconnect
 
 set -euo pipefail
 
@@ -484,6 +487,16 @@ case "$cmd" in
     sync_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/sync-all-templates.py"
     [[ -f "$sync_script" ]] || die "missing ops/catalog/sync-all-templates.py"
     encoded=$(base64 -w0 < "$sync_script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  refresh-property-enquiry-template)
+    # Pull the eight sending WABAs from Alots and print property_enquiry_reconnect's status.
+    [[ $# -eq 0 ]] || die "refresh-property-enquiry-template takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/refresh-property-enquiry-template.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/refresh-property-enquiry-template.py"
+    encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR && \
       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
@@ -1291,6 +1304,23 @@ case "$cmd" in
     remote "cd $APP_DIR && docker compose exec -T web python manage.py submit_portal_enquiry_template $flag $category"
     ;;
 
+  submit-property-enquiry-template)
+    # property_enquiry_reconnect (MARKETING, en, {{1}} name, {{2}} who writes) to the eight sending
+    # numbers' WABAs. For leads with no community. A WABA that already has it is left alone.
+    # --dry-run submits nothing.
+    dry=0
+    if [[ $# -eq 1 && "$1" == "--dry-run" ]]; then
+      dry=1
+    elif [[ $# -ne 0 ]]; then
+      die "submit-property-enquiry-template takes no arguments, or --dry-run"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/submit-property-enquiry-reconnect.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/submit-property-enquiry-reconnect.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e SUBMIT_DRY=$dry web python manage.py shell"
+    ;;
+
   submit-reconnect-again-template)
     # Reconnect again (apps/leadai/reconnect.py; Matloob 2026-10-22): intl_city_property_reconnect_again (MARKETING,
     # {{1}} the first name, the mixed template's three quick replies) to the eight sending numbers' WABAs. A WABA that
@@ -1504,6 +1534,33 @@ case "$cmd" in
     # Read only; exit 1 when something is red.
     [[ $# -eq 0 ]] || die "leadai-health takes no arguments"
     remote "cd $APP_DIR && docker compose exec -T web python manage.py leadai_health"
+    ;;
+
+  leadai-answer-capped)
+    # Queue the shops chats a reply cap held back (caps.to_answer, the sweep's path). Sends nothing itself.
+    [[ $# -eq 0 ]] || die "leadai-answer-capped takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-answer-capped.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-answer-capped.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  leadai-old6m)
+    # Old Leads Before 6 Month. Audience file must already be at /opt/a7-wa/media/_old6m_send.b64.
+    # Dry-run unless --send. Deletes nothing.
+    send=0
+    if [[ $# -eq 1 && "$1" == "--send" ]]; then
+      send=1
+    elif [[ $# -ne 0 ]]; then
+      die "leadai-old6m takes no arguments, or --send"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-old6m-send.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-old6m-send.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e OLD6_SEND=$send \
+      -e OLD6_PATH=/app/media/_old6m_send.b64 web python manage.py shell"
     ;;
 
   leadai-sync-inventory)

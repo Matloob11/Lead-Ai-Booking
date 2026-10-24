@@ -1,0 +1,65 @@
+/* A7 Owner Data Fields — admin password modal */
+.a7-odf-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 100000;
+	background: rgba(0, 0, 0, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.a7-odf-box {
+	background: #fff;
+	color: #333;
+	min-width: 320px;
+	max-width: 440px;
+	padding: 20px 22px;
+	border-radius: 8px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+	font-family: Arial, sans-serif;
+}
+
+.a7-odf-title {
+	font-size: 16px;
+	font-weight: 700;
+	margin-bottom: 8px;
+}
+
+.a7-odf-text {
+	font-size: 13px;
+	margin-bottom: 12px;
+	line-height: 1.4;
+}
+
+.a7-odf-input {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 8px 10px;
+	font-size: 14px;
+	border: 1px solid #c6c6c6;
+	border-radius: 4px;
+}
+
+.a7-odf-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 14px;
+}
+
+.a7-odf-btn {
+	padding: 6px 12px;
+	cursor: pointer;
+	border: 1px solid #c6c6c6;
+	border-radius: 4px;
+	background: #f5f5f5;
+}
+
+.a7-odf-btn-ok {
+	background: #2fc6f6;
+	border: 0;
+	color: #fff;
+	font-weight: 600;
+	padding: 6px 14px;
+}

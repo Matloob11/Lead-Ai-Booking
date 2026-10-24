@@ -1,0 +1,9 @@
+<?php
+/**
+ * C46 Availability → Lead AI inventory webhook.
+ * Copy to a7_inventory_webhook.config.php on the box and set enabled => true
+ * AFTER Claude's board note "round 20 is live" (endpoint answers 200).
+ */
+return [
+	'enabled' => false,
+];
