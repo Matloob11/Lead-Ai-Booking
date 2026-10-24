@@ -24,7 +24,9 @@ class KindTests(SimpleTestCase):
     def test_the_reconnect_again_template_reads_as_the_mixed_one(self):
         self.assertEqual(ic_templates.kind(ic_templates.AGAIN_NAME), ic_templates.MIXED)
         self.assertEqual(ic_templates.kind(ic_templates.MIXED_NAME), ic_templates.MIXED)
+        self.assertEqual(ic_templates.kind(ic_templates.ENQUIRY_NAME), ic_templates.MIXED)
         self.assertIn(ic_templates.AGAIN_NAME, ic_templates.NOT_SHOP_NAMES)
+        self.assertIn(ic_templates.ENQUIRY_NAME, ic_templates.NOT_SHOP_NAMES)
         form = ic_templates.again_form("AR Properties")
         self.assertEqual((form["name"], form["category"], form["language"]), (ic_templates.AGAIN_NAME, "MARKETING", "en"))
         self.assertIn("this is AR Properties.", form["body_text"])

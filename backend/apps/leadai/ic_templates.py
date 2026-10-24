@@ -22,8 +22,11 @@ MIXED_NAME = "intl_city_property_reconnect"
 # refused (never reached, never answered, or quiet since), read by the engine exactly as the mixed template is (kind MIXED:
 # the lead context's first answer, the same yes / "Not now" / "Stop messages" taps). One variable: the first name.
 AGAIN_NAME = "intl_city_property_reconnect_again"
+# Blank-community old leads (2026-10-24): no area named, so the body says Dubai, not International City.
+# Read as mixed, like the two above: the lead context answers first, and the same three taps.
+ENQUIRY_NAME = "property_enquiry_reconnect"
 NAMES = (MIXED_NAME, AGAIN_NAME)
-MIXED_NAMES = (MIXED_NAME, AGAIN_NAME)
+MIXED_NAMES = (MIXED_NAME, AGAIN_NAME, ENQUIRY_NAME)
 # The new-lead greet's template (assistant/newlead.py, round 22; Cursor's C68): "Hi {{1}}, thank you for your enquiry
 # about {{2}} … Are you still looking?" to a portal lead minutes after it lands. Any template named portal_… is one.
 PORTAL_NAME = "portal_enquiry_reply"
@@ -36,7 +39,7 @@ SHOP = "shop"
 MIXED = "mixed"
 PORTAL = "portal"
 # The template names kind() reads as no shops one: Template B never follows them (followups).
-NOT_SHOP_NAMES = (MIXED_NAME, PORTAL_NAME, AGAIN_NAME)
+NOT_SHOP_NAMES = (MIXED_NAME, PORTAL_NAME, AGAIN_NAME, ENQUIRY_NAME)
 CATEGORY = "MARKETING"
 LANGUAGE = "en"
 MIXED_BUTTONS = ("Yes, still looking", "Not now", "Stop messages")
