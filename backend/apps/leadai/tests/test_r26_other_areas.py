@@ -162,7 +162,9 @@ class FirstNoTests(ShopsBase):
             outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [shop_answer("Noted, thank you.")])
         self.assertEqual(marked, [engine.AREA_BACKSTOP])  # the turn reached the dispatch's gate marked
         self.assertIsNone(self.state().facts.get("other_areas_offered"))
-        self.assertEqual(self.body(outcome), rules.line("holding", "en"))
+        body = self.body(outcome)
+        self.assertIn("has your message and will reply here", body)  # code's holding line (a shops step says "agent")
+        self.assertNotIn("Which area", body)
 
     def test_plain_turn_refuses_every_step_of_codes(self):
         bare = {"handover": {"needed": False, "reason": None}, "appointment": {"action": "none"}}
