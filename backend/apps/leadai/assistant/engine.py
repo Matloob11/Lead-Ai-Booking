@@ -3627,7 +3627,10 @@ def run_turn(message_id: int, *, attempt: int = 0, first_queued_at: str = "", re
     if settings_row.paused_until and settings_row.paused_until > now:
         return _skip("assistant paused after OpenAI errors")
     if state.stopped_at is not None:
-        return _skip(f"stopped: {state.stop_reason}")
+        why = resume_reason(conversation, state, burst)
+        if not why:
+            return _skip(f"stopped: {state.stop_reason}")
+        _resume_after_stop(conversation, state, why)
     if state.paused_at is not None:
         # No agent behind it: the assistant paused itself for a broker (_apply).
         return _skip("paused by an agent" if state.paused_by_id else "paused until an agent presses Resume")
@@ -5773,6 +5776,60 @@ def _run_claimed(
         except Exception as exc:  # noqa: BLE001 - the confirmation already went out
             logger.warning("Lead AI could not send the office pin on conversation %s: %s", conversation.pk, exc)
     return Outcome(LeadAiTurn.Status.REPLIED, "", reply_message_id=sent.pk, actions=done)
+
+
+# Round 27 (Matloob 2026-10-24, chats 54325 and 54240): a chat the assistant stopped takes itself up again when the
+# customer writes to us after the stop, so nobody has to press Resume. An automatic-reply stop: any tap, voice note, photo
+# or file after it, or a text that is no automatic reply (lead 74029's "Yes, still looking" tap, four minutes after their
+# WhatsApp Business greeting, waited 19 hours for a person). The customer's own STOP: a message of theirs at least
+# RESUME_AFTER_STOP after it that is no acknowledgement (a new conversation they start; another STOP is code's opt-out
+# before this is ever read), never after "delete my data". A wrong number or spam is code's reading of someone who is no
+# customer: a person resumes those. An agent's Pause is a person's choice and never lifts by itself.
+RESUME_AFTER_STOP = dt.timedelta(minutes=15)
+_HUMAN_KINDS = ("button", "interactive", "audio", "image", "video", "document", "location", "contacts", "sticker")
+
+
+def _asked_to_delete(conversation) -> bool:
+    """The customer asked us to delete their data (PDPL): their opt-out registry row says so."""
+    from .. import optout
+    from ..models import LeadAiOptOut
+
+    phone = optout.canonical(conversation.contact.wa_id)
+    return bool(phone) and LeadAiOptOut.objects.filter(phone=phone, reason__icontains="delete").exists()
+
+
+def resume_reason(conversation, state, burst) -> str:
+    """Why a chat the assistant stopped takes itself up again on this burst, else "" (the module note above)."""
+    if getattr(state, "stopped_at", None) is None:
+        return ""
+    after = [item for item in burst if item.created_at > state.stopped_at]
+    if not after:
+        return ""
+    reason = str(getattr(state, "stop_reason", "") or "")
+    if reason == LeadAiChatState.StopReason.AUTO_REPLY:
+        for item in after:
+            if item.kind in _HUMAN_KINDS:
+                return "a person tapped or sent something after the automatic reply"
+            if item.kind == "text" and (item.body or "").strip() and not _auto_reply(conversation, item):
+                return "a person wrote after the automatic reply"
+        return ""
+    if reason == LeadAiChatState.StopReason.STOP_ALL:
+        late = [item for item in after if item.created_at - state.stopped_at >= RESUME_AFTER_STOP and not _is_ack(item)]
+        if late and not _asked_to_delete(conversation):
+            return "the customer wrote again after their stop"
+        return ""
+    return ""
+
+
+def _resume_after_stop(conversation, state, why: str) -> None:
+    """The stop lifted, as the panel's Resume AI lifts it (views.chat_resume_ai: a STOP stays on the opt-out registry, so
+    no campaign reaches them; only this chat answers them again); the screens hear the chat changed."""
+    was = state.stop_reason
+    LeadAiChatState.objects.filter(pk=state.pk, stopped_at=state.stopped_at).update(stopped_at=None, stop_reason="")
+    state.stopped_at = None
+    state.stop_reason = ""
+    logger.info("Lead AI resumed conversation %s by itself after a %s stop: %s", conversation.pk, was, why)
+    transaction.on_commit(lambda pk=conversation.pk: live.appointment_changed(pk))
 
 
 def _auto_reply(conversation, newest) -> bool:

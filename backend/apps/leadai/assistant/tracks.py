@@ -804,6 +804,12 @@ def decide(
         # got the "options across Dubai" line instead of the one-bedroom; chat 49953: "any units in cbd" the same).
         if tagged is not None and tagged.track == OTHER and stored in (RENT, SALE):
             tagged = None
+        # Round 27 (Matloob 2026-10-24, chat 54240): "Yes I have ma shops", the answer to "Is the shop for yourself, or are
+        # you checking for a client?", was tagged other_need, and the customer got the "many other options across Dubai,
+        # not only shops" line instead of the shop types list. Words that speak of shops and turn none down
+        # (needs.about_a_shop) and want nothing else (needs.detect) are no other need: the shop track.
+        if tagged is not None and tagged.track == OTHER and model_tag == "other_need" and needs.about_a_shop(texts) and needs.detect(texts) is None:
+            tagged = Decision(SHOP)
         if tagged is not None and tagged.track != UNKNOWN:
             decision = dataclasses.replace(tagged, reason=tagged.reason if tagged.reason == LEAD else TAG)
 
