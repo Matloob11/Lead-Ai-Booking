@@ -37,6 +37,8 @@
 #   ops/wa.sh leadai-tests                Lead AI tests in the new image, throwaway test DB, nothing leaves
 #   ops/wa.sh probe-leadai-turn           3 real assistant turns on live data + key, rolled back, nothing sent
 #   ops/wa.sh probe-leadai-funnel [--weeks N]  weekly Lead AI funnel, WhatsApp side (T73): counts only, read-only
+#   ops/wa.sh probe-leadai-campaigns          Tools → Campaigns API: list/detail + 403, counts only, nothing sent
+#   ops/wa.sh leadai-sept-reconnect [--send]  Sept 2026 leads not yet Lead AI → intl_city_property_reconnect (dry unless --send)
 #   ops/wa.sh leadai-eval [--only ID] [--repeat N] [--show] [--list]  the prompt vs the real model, scripted chats
 #   ops/wa.sh leadai-eval-draft [same]      the same on the pushed build context (beat), before a build
 #   ops/wa.sh django-check                the two checks CLAUDE.md requires
@@ -72,6 +74,7 @@
 #   ops/wa.sh set-leadai-office-address "TEXT"  the office address text Lead AI sends
 #   ops/wa.sh set-leadai-visit-contact "NAME" PHONE ["BACKUP NAME" BACKUP_PHONE]  whom a client on the way is told to call
 #   ops/wa.sh probe-leadai-grants           read-only: the Lead AI access screen's list, backfill and sign-in payloads (round 25)
+#   ops/wa.sh probe-leadai-resume           read-only: which stopped chats lift on the customer's next message (round 27)
 #   ops/wa.sh leadai-media-import DIR [--dry-run]  shop videos/photos from DIR (under /app/media/leadai_import) into Lead AI
 #   ops/wa.sh leadai-optout-import [--dry-run]  past Unsubscribe/Stop/wrong-number messages into the opt-out registry
 #   ops/wa.sh submit-shops-templates [--dry-run]  shops Template B + Template A (video) to the 8 sending WABAs that lack them
@@ -846,6 +849,34 @@ case "$cmd" in
       base64 -d | docker compose exec -T -e LEADAI_FUNNEL_WEEKS='$weeks' web python manage.py shell"
     ;;
 
+  probe-leadai-campaigns)
+    # Read-only: Tools → Campaigns API on live data (list + detail + plain-agent 403). Counts only; nothing sent.
+    [[ $# -eq 0 ]] || die "probe-leadai-campaigns takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-campaigns.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-campaigns.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  leadai-sept-reconnect)
+    # September 2026 CRM leads not yet in any Lead AI campaign → intl_city_property_reconnect
+    # on the eight Coastline/Blue Brick numbers (Lead AI, ic_shops). Dry-run by default; --send queues.
+    # Audience file must already sit at /opt/a7-wa/media/_sept_leads.b64 (pushed separately; phones, delete after).
+    send=0
+    if [[ $# -eq 1 && "$1" == "--send" ]]; then
+      send=1
+    elif [[ $# -ne 0 ]]; then
+      die "leadai-sept-reconnect takes no arguments, or --send"
+    fi
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/leadai-sept-reconnect.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/leadai-sept-reconnect.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR && \
+      base64 -d | docker compose exec -T -e SEPT_SEND=$send \
+      -e SEPT_LEADS_PATH=/app/media/_sept_leads.b64 web python manage.py shell"
+    ;;
+
   credit-status)
     # Read-only (C29): poll the wallet and show out/low/waiting. Never parks,
     # releases or starts a campaign. Never prints the balance figure.
@@ -1415,6 +1446,16 @@ case "$cmd" in
     [[ $# -eq 0 ]] || die "probe-leadai-grants takes no arguments"
     script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-grants.py"
     [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-grants.py"
+    encoded=$(base64 -w0 < "$script")
+    printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
+    ;;
+
+  probe-leadai-resume)
+    # Read-only (round 27): on the live stopped chats, which take themselves up again on the customer's next message and
+    # why the others stay stopped (engine.resume_reason), and the shop words guard (ops/catalog/probe-leadai-resume.py).
+    [[ $# -eq 0 ]] || die "probe-leadai-resume takes no arguments"
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/catalog/probe-leadai-resume.py"
+    [[ -f "$script" ]] || die "missing ops/catalog/probe-leadai-resume.py"
     encoded=$(base64 -w0 < "$script")
     printf '%s' "$encoded" | remote "cd $APP_DIR &&       base64 -d | docker compose exec -T web python manage.py shell"
     ;;
