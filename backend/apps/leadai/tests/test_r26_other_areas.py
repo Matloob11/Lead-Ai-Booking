@@ -144,11 +144,25 @@ class FirstNoTests(ShopsBase):
         self.assertFalse(followups.other_areas_pending(followups.read_since(self.conversation)))
 
     def test_a_backstop_turn_with_codes_own_step_keeps_it(self):
-        # The model's none over an area decline, but code had its own words this turn (a handover): no offer over them.
-        handover = shop_answer("Our specialist will reply here.", handover="customer_asked_human")
-        outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [handover])
+        # The model's none over an area decline (settle marks it: no handover, no visit booked), but the turn proposes a
+        # time (code's own work): plain_turn refuses, so no offer goes over it.
+        proposal = shop_answer("Would 11 AM or 5 PM tomorrow work for you?", action="tentative", place="office", date="2026-10-13")
+        outcome, _, _, _ = self.turn(self.inbound(AREA_NO), [proposal])
         self.assertIsNone(self.state().facts.get("other_areas_offered"))
         self.assertNotIn("Which area", self.body(outcome))
+
+    def test_plain_turn_refuses_every_step_of_codes(self):
+        bare = {"handover": {"needed": False, "reason": None}, "appointment": {"action": "none"}}
+        self.assertTrue(engine.plain_turn(dict(bare)))
+        for key, value in (
+            ("converted", "check_back"), ("res_line", {"kind": "res_open"}), ("shop_step", {"kind": "list"}),
+            ("not_a_shop", {"kind": "home"}), ("slot_taken", True), ("broker", True),
+        ):
+            self.assertFalse(engine.plain_turn({**bare, key: value}), key)
+        self.assertFalse(engine.plain_turn({**bare, "handover": {"needed": True, "reason": "customer_asked_human"}}))
+        self.assertFalse(engine.plain_turn({**bare, "appointment": {"action": "tentative"}}))
+        self.assertFalse(engine.plain_turn(dict(bare), when=leadai_eval.NOW))
+        self.assertFalse(engine.plain_turn(dict(bare), still_invalid=True))
 
     def test_after_the_offer_their_answer_is_never_read_as_a_no(self):
         self.set_state(facts={"other_areas_offered": True})
@@ -287,9 +301,17 @@ class GuardTests(SimpleTestCase):
         self.assertFalse(engine.plain_no("we are sorted in JLT, no longer looking"))
         self.assertFalse(engine.place_found("We are no longer looking, thanks"))
         # The third review: a greeting beside a plain no is still one (the rent flow read it as rented elsewhere).
-        for words in ("Hi, we are not looking anymore", "All good, not looking anymore", "We're fine, no longer looking"):
+        for words in (
+            "Hi, we are not looking anymore", "All good, not looking anymore", "We're fine, no longer looking",
+            "Thanks for reaching out, not looking anymore", "No I'm good thanks " + AREA_NO,
+        ):
             self.assertTrue(engine.plain_no(words), words)
             self.assertTrue(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {"already_rented": True}}, words), words)
+        # The fourth: anything else said beside it keeps the reading of a place found elsewhere (the close).
+        for words in ("No longer looking, I bought property in Dubai Hills", "Not looking anymore, my company arranged a flat for me"):
+            self.assertFalse(engine.plain_no(words), words)
+            self.assertFalse(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {"already_rented": True}}, words), words)
+            self.assertTrue(engine.offers_other_areas(self.state(), rules.NOT_INTERESTED, {"facts": {}}, words), words)
 
     def test_a_stale_handover_is_no_hold_for_the_rule_path(self):
         held = types.SimpleNamespace(facts={}, stopped_at=None, handed_over_at=leadai_eval.NOW)

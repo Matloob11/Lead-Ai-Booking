@@ -4171,11 +4171,29 @@ def place_found(words: str) -> bool:
     return residential.rented_elsewhere([rest])
 
 
+# The small talk a plain no may carry beside "not looking anymore" (plain_no): greetings, thanks, the polite words people
+# wrap a no in. Any other word ("bought", "company", "arranged", a place's name) is something said, and the reading of a
+# place found elsewhere (the model's or the rent flow's facts.already_rented) is kept.
+_PLAIN_FILLER = frozenset(
+    """we are i am im i'm we're were was is be been it its it's this that these those there here
+    thanks thank thankyou thx tks ty you u your so very much sorry hi hello hey dear sir madam mam bro brother sis sister
+    team guys salam salaam assalam assalamualaikum alaikum walaikum good all fine great ok okay okk sure well nice
+    now anymore any more longer not no nope nah yet moment time right currently present for properties property a an the
+    in at on of to and or but really actually just anything else area location place side city international looking
+    searching interested please pls kindly regards best appreciate appreciated reaching out contacting message messaging
+    update updating offer help will let know if later maybe future again contact""".split()
+)
+
+
 def plain_no(words: str) -> bool:
-    """The no is "not looking anymore" / "not in that area anymore" (_PLAIN_NO, AREA_DECLINE) and names no place
-    (place_found): "Hi, we are no longer looking, thanks"; never "we're settled in JLT now, not looking anymore"."""
+    """The no is "not looking anymore" / "not in that area anymore" (_PLAIN_NO, AREA_DECLINE) with nothing beside it but
+    small talk (_PLAIN_FILLER), and no place named (place_found): "Hi, we are no longer looking, thanks" is one; never
+    "we're settled in JLT now, not looking anymore", nor "No longer looking, I bought property in Dubai Hills"."""
     said = str(words or "")
-    return bool(_PLAIN_NO.search(said) or AREA_DECLINE.search(said)) and not place_found(said)
+    if not (_PLAIN_NO.search(said) or AREA_DECLINE.search(said)) or place_found(said):
+        return False
+    rest = _PLAIN_NO.sub(" ", AREA_DECLINE.sub(" ", said)).lower()
+    return all(word in _PLAIN_FILLER for word in re.findall(r"[a-z']+", rest))
 
 
 def area_decline(text: str) -> bool:
